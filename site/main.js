@@ -32,3 +32,47 @@ detect().then((key) => {
 	button.href = row.querySelector('a').href
 	button.textContent = LABELS[key]
 })
+
+// Motion: everything below is skipped when the visitor asks for reduced motion.
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+	document.documentElement.classList.add('motion')
+
+	// Feature tiles slide in, one after another, as they come into view.
+	const tiles = [...document.querySelectorAll('.reveal')]
+	tiles.forEach((el, i) => el.style.setProperty('--d', `${(i % 3) * 90}ms`))
+	const seen = new IntersectionObserver(
+		(entries) => {
+			for (const e of entries) {
+				if (!e.isIntersecting) continue
+				e.target.classList.add('is-in')
+				seen.unobserve(e.target)
+			}
+		},
+		{ rootMargin: '0px 0px -12% 0px' },
+	)
+	tiles.forEach((el) => seen.observe(el))
+
+	// The hero capture starts tilted back and flattens as the page scrolls.
+	const shot = document.querySelector('.hero__shot')
+	let queued = false
+	const tilt = () => {
+		queued = false
+		const p = Math.min(window.scrollY / (window.innerHeight * 0.6), 1)
+		shot.style.setProperty('--tilt', `${(1 - p) * 16}deg`)
+		shot.style.setProperty('--lift', `${0.94 + p * 0.06}`)
+	}
+	if (shot) {
+		tilt()
+		addEventListener('scroll', () => queued || ((queued = true), requestAnimationFrame(tilt)), { passive: true })
+	}
+
+	// A spotlight follows the cursor across the tiles' borders.
+	const grid = document.querySelector('.grid')
+	grid?.addEventListener('pointermove', (e) => {
+		for (const tile of grid.children) {
+			const r = tile.getBoundingClientRect()
+			tile.style.setProperty('--mx', `${e.clientX - r.left}px`)
+			tile.style.setProperty('--my', `${e.clientY - r.top}px`)
+		}
+	})
+}

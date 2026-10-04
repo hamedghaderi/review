@@ -531,19 +531,206 @@ kbd {
 	}
 }
 
+/* Works-with strip */
+.marquee {
+	display: grid;
+	justify-items: center;
+	gap: var(--space-md);
+	padding: var(--space-3xl) 0 var(--space-xl);
+}
+.marquee__label {
+	color: var(--color-muted);
+	font: 400 var(--text-xs) / 1 var(--font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+.marquee__viewport {
+	width: 100%;
+	max-width: 1180px;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+	mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+.marquee__track {
+	display: flex;
+	width: max-content;
+}
+.marquee ul {
+	display: flex;
+	gap: var(--space-2xl);
+	margin: 0;
+	padding: 0 var(--space-2xl) 0 0;
+	list-style: none;
+}
+.marquee li {
+	color: var(--color-ink-2);
+	font-size: var(--text-lg);
+	font-weight: 500;
+	letter-spacing: -0.02em;
+	white-space: nowrap;
+}
+.marquee li::before {
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-right: var(--space-sm);
+	border-radius: 50%;
+	background: var(--color-accent);
+	vertical-align: 0.2em;
+}
+
+/* 3D stage for the hero capture — tilt is driven by scroll (main.js sets --tilt and --lift) */
+.stage {
+	perspective: 1400px;
+	perspective-origin: 50% 0%;
+}
+.hero__shot {
+	transform: rotateX(var(--tilt, 0deg)) scale(var(--lift, 1));
+	transform-origin: 50% 0%;
+	will-change: transform;
+}
+
+/* Spotlight that follows the cursor across the feature tiles */
+.tile::before,
+.tile::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity var(--dur-base) var(--ease-out);
+}
+.tile::before {
+	z-index: 2;
+	padding: 1px;
+	background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 0%), var(--color-accent), transparent 70%);
+	-webkit-mask:
+		linear-gradient(black 0 0) content-box,
+		linear-gradient(black 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+}
+.tile::after {
+	z-index: 0;
+	background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), var(--color-glow), transparent 70%);
+}
+.grid:hover .tile::before,
+.grid:hover .tile::after {
+	opacity: 1;
+}
+.tile > * {
+	position: relative;
+	z-index: 1;
+}
+.tile__img {
+	transition: transform var(--dur-slow) var(--ease-out);
+}
+.tile:hover .tile__img {
+	transform: translateY(-6px);
+}
+
+/* Primary button sheen */
+.btn--primary {
+	position: relative;
+	overflow: hidden;
+	isolation: isolate;
+}
+.btn--primary::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	background: linear-gradient(100deg, transparent 30%, var(--color-sheen) 50%, transparent 70%);
+	transform: translateX(-120%);
+	pointer-events: none;
+}
+
 @media (prefers-reduced-motion: no-preference) {
-	.hero__text,
-	.hero__shot {
+	.hero__text > :not(h1) {
 		animation: rise var(--dur-slow) var(--ease-out) both;
+		animation-delay: 450ms;
 	}
-	.hero__shot {
-		animation-delay: 120ms;
+	.split .w {
+		display: inline-block;
+		animation: word 900ms var(--ease-out) both;
+		animation-delay: calc(var(--i) * 80ms);
+	}
+	.stage {
+		animation: rise 1000ms var(--ease-out) 600ms both;
+	}
+	.hero::before {
+		animation: drift 14s var(--ease-in-out) infinite alternate;
+	}
+	.marquee__track {
+		animation: scroll 42s linear infinite;
+	}
+	.marquee:hover .marquee__track {
+		animation-play-state: paused;
+	}
+	.btn--primary::after {
+		animation: sheen 5s var(--ease-in-out) 1.6s infinite;
+	}
+	html.motion .reveal {
+		opacity: 0;
+		transform: translateY(28px);
+		transition:
+			opacity 800ms var(--ease-out),
+			transform 800ms var(--ease-out),
+			border-color var(--dur-base) var(--ease-out);
+		transition-delay: var(--d, 0ms);
+	}
+	html.motion .reveal.is-in {
+		opacity: 1;
+		transform: none;
+	}
+	html.motion .tile--palette.is-in kbd {
+		animation: press 700ms var(--ease-out) 700ms both;
 	}
 }
 @keyframes rise {
 	from {
 		opacity: 0;
-		transform: translateY(12px);
+		transform: translateY(16px);
+	}
+}
+@keyframes word {
+	from {
+		opacity: 0;
+		transform: translateY(0.35em);
+		filter: blur(10px);
+	}
+}
+@keyframes drift {
+	to {
+		transform: translate3d(4%, -3%, 0) scale(1.08);
+	}
+}
+@keyframes scroll {
+	to {
+		transform: translateX(-50%);
+	}
+}
+@keyframes sheen {
+	0% {
+		transform: translateX(-120%);
+	}
+	30%,
+	100% {
+		transform: translateX(120%);
+	}
+}
+@keyframes press {
+	0%,
+	100% {
+		transform: none;
+	}
+	40% {
+		transform: translateY(2px);
+		border-bottom-width: 1px;
+		background: var(--color-accent-soft);
+		color: var(--color-accent);
 	}
 }
 @media (prefers-reduced-motion: reduce) {
@@ -554,5 +741,21 @@ kbd {
 	*::before,
 	*::after {
 		transition-duration: 0.01ms !important;
+	}
+	.hero__shot {
+		transform: none;
+	}
+	.marquee ul[aria-hidden='true'] {
+		display: none;
+	}
+	.marquee ul {
+		flex-wrap: wrap;
+		justify-content: center;
+		row-gap: var(--space-sm);
+		padding: 0 var(--space-md);
+	}
+	.marquee__viewport {
+		-webkit-mask-image: none;
+		mask-image: none;
 	}
 }

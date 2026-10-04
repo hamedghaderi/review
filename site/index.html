@@ -37,7 +37,11 @@
 		<main id="main">
 			<header class="hero">
 				<div class="hero__text">
-					<h1>Code review on your own machine.</h1>
+					<h1 class="split">
+						<span class="w" style="--i: 0">Code</span> <span class="w" style="--i: 1">review</span> <span class="w" style="--i: 2">on</span>
+						<span class="w" style="--i: 3">your</span> <span class="w" style="--i: 4">own</span>
+						<span class="w" style="--i: 5">machine.</span>
+					</h1>
 					<p class="lede">
 						A desktop app for Git branches and GitHub pull requests. Comment on any line, publish when you're ready, and add an AI reviewer
 						with your own model, or none.
@@ -48,22 +52,56 @@
 					</div>
 					<p class="meta">Free · Open source (MIT) · macOS, Windows, Linux</p>
 				</div>
-				<figure class="hero__shot">
-					<img
-						src="img/review.webp"
-						width="2400"
-						height="1447"
-						fetchpriority="high"
-						alt="Review's diff view: a file tree of 21 changed files on the left, the diff of lookup.ts in the middle with a comment on line 14, and the comments list on the right."
-					/>
-				</figure>
+				<div class="stage">
+					<figure class="hero__shot">
+						<img
+							src="img/review.webp"
+							width="2400"
+							height="1447"
+							fetchpriority="high"
+							alt="Review's diff view: a file tree of 21 changed files on the left, the diff of lookup.ts in the middle with a comment on line 14, and the comments list on the right."
+						/>
+					</figure>
+				</div>
 			</header>
+
+			<section class="marquee" aria-label="Works with">
+				<p class="marquee__label">Works with</p>
+				<div class="marquee__viewport">
+					<div class="marquee__track">
+						<ul>
+							<li>OpenAI</li>
+							<li>Anthropic</li>
+							<li>Google Gemini</li>
+							<li>OpenRouter</li>
+							<li>Ollama</li>
+							<li>LM Studio</li>
+							<li>OmniRoute</li>
+							<li>OpenAI-compatible endpoints</li>
+							<li>MCP servers</li>
+							<li>GitHub</li>
+						</ul>
+						<ul aria-hidden="true">
+							<li>OpenAI</li>
+							<li>Anthropic</li>
+							<li>Google Gemini</li>
+							<li>OpenRouter</li>
+							<li>Ollama</li>
+							<li>LM Studio</li>
+							<li>OmniRoute</li>
+							<li>OpenAI-compatible endpoints</li>
+							<li>MCP servers</li>
+							<li>GitHub</li>
+						</ul>
+					</div>
+				</div>
+			</section>
 
 			<section class="features" aria-labelledby="features-title">
 				<h2 id="features-title">Everything a review needs. Nothing it doesn't.</h2>
 
 				<div class="grid">
-					<article class="tile tile--comment">
+					<article class="tile reveal tile--comment">
 						<div class="tile__text">
 							<h3>Comment on any line</h3>
 							<p>Click a line number, write, done. Comments save as you type and stay on your computer.</p>
@@ -78,7 +116,7 @@
 						/>
 					</article>
 
-					<article class="tile tile--providers">
+					<article class="tile reveal tile--providers">
 						<div class="tile__text">
 							<h3>Bring your own model</h3>
 							<p>
@@ -96,7 +134,7 @@
 						/>
 					</article>
 
-					<article class="tile tile--palette">
+					<article class="tile reveal tile--palette">
 						<div class="tile__text">
 							<h3>Press <kbd>⌘P</kbd>, go anywhere</h3>
 							<p>Pull requests waiting on you, recent reviews and branches, all a few keystrokes away.</p>
@@ -111,7 +149,7 @@
 						/>
 					</article>
 
-					<article class="tile tile--compare">
+					<article class="tile reveal tile--compare">
 						<div class="tile__text">
 							<h3>Pinned to exact commits</h3>
 							<p>Reviews compare from the merge base, so the diff doesn't move when someone pushes.</p>
@@ -126,7 +164,7 @@
 						/>
 					</article>
 
-					<article class="tile tile--plain">
+					<article class="tile reveal tile--plain">
 						<h3>Nothing posts by itself</h3>
 						<p>Comments go to your pending review on GitHub only when you publish. You choose when to submit.</p>
 					</article>
