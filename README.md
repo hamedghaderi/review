@@ -9,6 +9,7 @@
     <a href="https://github.com/hamedghaderi/review/releases"><img src="https://img.shields.io/github/downloads/hamedghaderi/review/total?color=6d4aff" alt="Downloads" /></a>
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platforms: macOS, Windows, Linux" />
     <a href="LICENSE"><img src="https://img.shields.io/github/license/hamedghaderi/review" alt="MIT license" /></a>
+    <a href="https://github.com/sponsors/hamedghaderi"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" /></a>
   </p>
   <p>
     <a href="https://review-code.dev/"><strong>Website</strong></a> ·
@@ -57,6 +58,10 @@ npm run dev
 - [User guide](docs/guide.md): browsing, pull requests, publishing, AI review, MCP servers
 - [Architecture](docs/architecture.md): how AI review works, code layout, how reviews are stored
 - [Releasing](docs/releasing.md): building installers and publishing a release
+
+## Support
+
+Review is free and MIT licensed. If it saves you time, you can [sponsor it on GitHub](https://github.com/sponsors/hamedghaderi), one-time or monthly.
 
 ## Contributing
 

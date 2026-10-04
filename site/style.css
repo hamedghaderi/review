@@ -418,6 +418,38 @@ kbd {
 	font-weight: 500;
 }
 
+.support {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-lg);
+	margin-top: var(--space-2xl);
+	padding: var(--space-xl);
+	border: var(--rule-w) solid var(--color-rule);
+	border-radius: var(--radius-lg);
+	background: radial-gradient(80% 140% at 0% 0%, var(--color-heart-soft), transparent 60%), var(--color-paper-2);
+}
+.support h3 {
+	font-size: var(--text-xl);
+	letter-spacing: -0.025em;
+}
+.support p {
+	margin-top: var(--space-2xs);
+	color: var(--color-muted);
+	font-size: var(--text-sm);
+}
+.btn--heart::before {
+	content: '♥';
+	display: inline-block;
+	margin-right: var(--space-xs);
+	color: var(--color-heart);
+	transition: transform var(--dur-base) var(--ease-out);
+}
+.btn--heart:hover::before {
+	transform: scale(1.25);
+}
+
 .source {
 	display: grid;
 	gap: var(--space-sm);
