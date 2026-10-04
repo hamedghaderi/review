@@ -11,7 +11,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/hamedghaderi/review" alt="MIT license" /></a>
   </p>
   <p>
-    <a href="https://hamedghaderi.github.io/review/"><strong>Website</strong></a> ·
+    <a href="https://review-code.dev/"><strong>Website</strong></a> ·
     <a href="https://github.com/hamedghaderi/review/releases/latest"><strong>Download</strong></a> ·
     <a href="docs/guide.md"><strong>User guide</strong></a>
   </p>
