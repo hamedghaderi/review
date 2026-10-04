@@ -31,5 +31,4 @@ detect().then((key) => {
 	row.classList.add('is-yours')
 	button.href = row.querySelector('a').href
 	button.textContent = LABELS[key]
-	document.getElementById('other-platforms').textContent = 'Other platforms'
 })

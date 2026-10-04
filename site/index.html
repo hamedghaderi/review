@@ -3,23 +3,20 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Review — local code review</title>
+		<title>Review — code review on your own machine</title>
 		<meta
 			name="description"
 			content="A desktop app for reviewing Git branches and GitHub pull requests on your own machine, with optional AI review using your own model."
 		/>
-		<meta property="og:title" content="Review — local code review" />
-		<meta
-			property="og:description"
-			content="Review Git branches and GitHub pull requests on your own machine. Bring your own AI model, or none."
-		/>
+		<meta property="og:title" content="Review — code review on your own machine" />
+		<meta property="og:description" content="Review Git branches and GitHub pull requests locally. Bring your own AI model, or none." />
 		<meta property="og:image" content="https://hamedghaderi.github.io/review/img/review.webp" />
-		<meta name="color-scheme" content="light dark" />
+		<meta name="theme-color" content="#0d0c14" />
 		<link rel="icon" type="image/png" href="img/favicon.png" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 		<link
-			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap"
+			href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
 			rel="stylesheet"
 		/>
 		<link rel="stylesheet" href="tokens.css" />
@@ -27,207 +24,170 @@
 	</head>
 	<body>
 		<a class="skip" href="#main">Skip to content</a>
-		<header class="nav">
-			<div class="wrap nav__row">
-				<a class="brand" href="./" aria-label="Review home">
-					<img src="img/icon.png" alt="" width="28" height="28" />
-					<span>Review</span>
-				</a>
-				<nav class="nav__links" aria-label="Main">
-					<a class="link" href="https://github.com/hamedghaderi/review">GitHub</a>
-					<a class="btn btn--primary btn--sm" href="#download">Download</a>
-				</nav>
-			</div>
-		</header>
+
+		<nav class="pill" aria-label="Main">
+			<a class="pill__brand" href="./">
+				<img src="img/icon.png" alt="" width="22" height="22" />
+				<span>Review</span>
+			</a>
+			<a class="pill__link" href="https://github.com/hamedghaderi/review">GitHub</a>
+			<a class="btn btn--primary btn--sm" href="#download">Download</a>
+		</nav>
 
 		<main id="main">
-			<section class="hero wrap">
-				<h1 class="hero__title">Code review that stays on your machine.</h1>
-				<div class="hero__side">
+			<header class="hero">
+				<div class="hero__text">
+					<h1>Code review on your own machine.</h1>
 					<p class="lede">
-						Review is a desktop app for reading Git branches and GitHub pull requests, leaving comments, and publishing them when you're
-						ready. Add an AI reviewer with your own key, or run a local model. Or skip AI entirely.
+						A desktop app for Git branches and GitHub pull requests. Comment on any line, publish when you're ready, and add an AI reviewer
+						with your own model, or none.
 					</p>
 					<div class="cta">
 						<a class="btn btn--primary" id="primary-download" href="#download">Download Review</a>
-						<a class="link" id="other-platforms" href="#download">All platforms</a>
+						<a class="btn btn--ghost" href="https://github.com/hamedghaderi/review">View on GitHub</a>
 					</div>
-					<p class="meta">Free and open source · MIT · macOS, Windows, Linux</p>
+					<p class="meta">Free · Open source (MIT) · macOS, Windows, Linux</p>
+				</div>
+				<figure class="hero__shot">
+					<img
+						src="img/review.webp"
+						width="2400"
+						height="1447"
+						fetchpriority="high"
+						alt="Review's diff view: a file tree of 21 changed files on the left, the diff of lookup.ts in the middle with a comment on line 14, and the comments list on the right."
+					/>
+				</figure>
+			</header>
+
+			<section class="features" aria-labelledby="features-title">
+				<h2 id="features-title">Everything a review needs. Nothing it doesn't.</h2>
+
+				<div class="grid">
+					<article class="tile tile--comment">
+						<div class="tile__text">
+							<h3>Comment on any line</h3>
+							<p>Click a line number, write, done. Comments save as you type and stay on your computer.</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-comment.webp"
+							width="1649"
+							height="475"
+							loading="lazy"
+							alt="A comment under line 14 of a diff."
+						/>
+					</article>
+
+					<article class="tile tile--providers">
+						<div class="tile__text">
+							<h3>Bring your own model</h3>
+							<p>
+								OpenAI, Anthropic, Gemini, OpenRouter, or a local model in Ollama or LM Studio. Reviewers can pull extra context from your
+								MCP servers. Or skip AI entirely.
+							</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-providers.webp"
+							width="500"
+							height="1000"
+							loading="lazy"
+							alt="The list of AI providers you can connect, review teams, and MCP servers."
+						/>
+					</article>
+
+					<article class="tile tile--palette">
+						<div class="tile__text">
+							<h3>Press <kbd>⌘P</kbd>, go anywhere</h3>
+							<p>Pull requests waiting on you, recent reviews and branches, all a few keystrokes away.</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-quickopen.webp"
+							width="1518"
+							height="514"
+							loading="lazy"
+							alt="The quick open palette searching for “mcp”."
+						/>
+					</article>
+
+					<article class="tile tile--compare">
+						<div class="tile__text">
+							<h3>Pinned to exact commits</h3>
+							<p>Reviews compare from the merge base, so the diff doesn't move when someone pushes.</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-compare.webp"
+							width="1300"
+							height="216"
+							loading="lazy"
+							alt="A branch preview showing the merge base and head commit the review compares."
+						/>
+					</article>
+
+					<article class="tile tile--plain">
+						<h3>Nothing posts by itself</h3>
+						<p>Comments go to your pending review on GitHub only when you publish. You choose when to submit.</p>
+					</article>
 				</div>
 			</section>
 
-			<figure class="shot shot--hero wrap">
-				<img
-					src="img/review.webp"
-					width="2400"
-					height="1447"
-					alt="Review's diff view: a file tree of 21 changed files on the left, the diff of lookup.ts in the middle with a comment on line 14, and the comments list on the right."
-				/>
-				<figcaption>A branch review in progress: changed files, the diff, and a comment on line 14.</figcaption>
-			</figure>
-
-			<section class="tour wrap" aria-label="Tour">
-				<article class="step">
-					<div class="step__text">
-						<h2>Browse branches and pull requests</h2>
-						<p>
-							Local branches, remotes and GitHub pull requests in one list. Pick a branch and a base, and Review compares it from the merge
-							base. Each review is pinned to exact commits, so the diff doesn't move under you when someone pushes.
-						</p>
-					</div>
-					<figure class="shot">
-						<img
-							src="img/browse.webp"
-							width="2400"
-							height="1447"
-							loading="lazy"
-							alt="The Browse workspace: a sidebar with pull requests, pinned and local branches, a branch list, and a preview showing the merge base the review will compare."
-						/>
-					</figure>
-				</article>
-
-				<article class="step step--flip">
-					<div class="step__text">
-						<h2>Press <kbd>⌘P</kbd> to go anywhere</h2>
-						<p>
-							Quick open lists the pull requests waiting on you, your recent reviews and your branches. Type to search,
-							<kbd>Enter</kbd> to open the review, <kbd>⌘K</kbd> for more actions. Every list in the app works from the keyboard.
-						</p>
-					</div>
-					<figure class="shot">
-						<img
-							src="img/quickopen.webp"
-							width="2400"
-							height="1447"
-							loading="lazy"
-							alt="The quick open palette over a review, searching for “mcp” and showing a recent review and a branch."
-						/>
-					</figure>
-				</article>
-
-				<article class="step">
-					<div class="step__text">
-						<h2>Bring your own model, or none</h2>
-						<p>
-							Manual review works without any AI set up. When you want a second reader, connect OpenAI, Anthropic, Google Gemini,
-							OpenRouter, any OpenAI-compatible endpoint, or a local model in Ollama or LM Studio. Keys are encrypted with your system
-							keychain.
-						</p>
-						<p>
-							AI reviewers can call tools from MCP servers for context the repository can't give, like the ticket behind a change. Their
-							findings become draft comments you keep, edit or dismiss.
-						</p>
-					</div>
-					<figure class="shot">
-						<img
-							src="img/providers.webp"
-							width="2400"
-							height="1447"
-							loading="lazy"
-							alt="Settings, AI providers: a list of providers to connect, review teams, and MCP servers."
-						/>
-					</figure>
-				</article>
-			</section>
-
-			<section class="facts wrap" aria-labelledby="facts-title">
-				<h2 id="facts-title">The details</h2>
-				<dl class="spec">
-					<div>
-						<dt>Publishing</dt>
-						<dd>Nothing goes to GitHub until you publish. Comments land in your pending review, and you submit it.</dd>
-					</div>
-					<div>
-						<dt>Your data</dt>
-						<dd>Reviews are saved on your computer. Your code is only sent anywhere when you run an AI review with a cloud provider.</dd>
-					</div>
-					<div>
-						<dt>Requirements</dt>
-						<dd>Git on your <code>PATH</code>. The GitHub CLI is optional; a token works too.</dd>
-					</div>
-					<div>
-						<dt>Platforms</dt>
-						<dd>macOS (Apple silicon and Intel), Windows 10 and 11, Linux (AppImage).</dd>
-					</div>
-					<div>
-						<dt>License</dt>
-						<dd>MIT. Read it, fork it, change it.</dd>
-					</div>
-				</dl>
-			</section>
-
-			<section class="band" aria-labelledby="source-title">
-				<div class="wrap band__row">
-					<div>
-						<h2 id="source-title">Run it from source</h2>
-						<p>Needs Node 22.12 or later and Git. <code>npm test</code> runs the suite against temporary repositories.</p>
-						<a class="link link--band" href="https://github.com/hamedghaderi/review#readme">Read the README</a>
-					</div>
-					<pre class="code" aria-label="Commands"><code><span class="prompt">$</span> git clone https://github.com/hamedghaderi/review.git
-<span class="prompt">$</span> cd review
-<span class="prompt">$</span> npm install
-<span class="prompt">$</span> npm run dev</code></pre>
-				</div>
-			</section>
-
-			<section class="download wrap" id="download" aria-labelledby="download-title">
+			<section class="download" id="download" aria-labelledby="download-title">
 				<h2 id="download-title">Download</h2>
-				<p class="download__note">Installers from the latest GitHub release.</p>
+				<p class="download__sub">Free. Needs Git installed.</p>
 				<ul class="files">
 					<li data-platform="mac-arm64">
-						<span class="files__os">macOS · Apple silicon</span>
-						<span class="files__name">Review-mac-arm64.dmg</span>
-						<a class="btn btn--outline" href="https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-arm64.dmg"
-							>Download</a
-						>
+						<a href="https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-arm64.dmg">
+							<span class="files__os">macOS</span>
+							<span class="files__detail">Apple silicon · .dmg</span>
+						</a>
 					</li>
 					<li data-platform="mac-x64">
-						<span class="files__os">macOS · Intel</span>
-						<span class="files__name">Review-mac-x64.dmg</span>
-						<a class="btn btn--outline" href="https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-x64.dmg"
-							>Download</a
-						>
+						<a href="https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-x64.dmg">
+							<span class="files__os">macOS</span>
+							<span class="files__detail">Intel · .dmg</span>
+						</a>
 					</li>
 					<li data-platform="windows">
-						<span class="files__os">Windows 10 and 11</span>
-						<span class="files__name">Review-windows-setup.exe</span>
-						<a class="btn btn--outline" href="https://github.com/hamedghaderi/review/releases/latest/download/Review-windows-setup.exe"
-							>Download</a
-						>
+						<a href="https://github.com/hamedghaderi/review/releases/latest/download/Review-windows-setup.exe">
+							<span class="files__os">Windows</span>
+							<span class="files__detail">10 and 11 · .exe</span>
+						</a>
 					</li>
 					<li data-platform="linux">
-						<span class="files__os">Linux · x64</span>
-						<span class="files__name">Review-linux-x86_64.AppImage</span>
-						<a class="btn btn--outline" href="https://github.com/hamedghaderi/review/releases/latest/download/Review-linux-x86_64.AppImage"
-							>Download</a
-						>
+						<a href="https://github.com/hamedghaderi/review/releases/latest/download/Review-linux-x86_64.AppImage">
+							<span class="files__os">Linux</span>
+							<span class="files__detail">x64 · .AppImage</span>
+						</a>
 					</li>
 				</ul>
 
-				<div class="first-open">
-					<h3>Opening it the first time</h3>
+				<details class="first-open">
+					<summary>Your system warns on first open. Here's why.</summary>
 					<p>The installers aren't signed with an Apple or Microsoft certificate yet, so your system asks once:</p>
 					<ul>
-						<li>
-							<strong>macOS:</strong> open Review, then go to System Settings → Privacy &amp; Security and click <em>Open Anyway</em>.
-						</li>
-						<li><strong>Windows:</strong> on the SmartScreen warning, click <em>More info</em>, then <em>Run anyway</em>.</li>
-						<li><strong>Linux:</strong> make the file executable with <code>chmod +x Review-*.AppImage</code> and run it.</li>
+						<li><strong>macOS:</strong> open Review, then go to System Settings → Privacy &amp; Security and click Open Anyway.</li>
+						<li><strong>Windows:</strong> on the SmartScreen warning, click More info, then Run anyway.</li>
+						<li><strong>Linux:</strong> run <code>chmod +x Review-*.AppImage</code>, then open the file.</li>
 					</ul>
-					<p>
-						Older versions and release notes are on the
-						<a class="link" href="https://github.com/hamedghaderi/review/releases">releases page</a>.
-					</p>
+				</details>
+
+				<div class="source">
+					<p>Prefer to build it yourself? Node 22.12+ and Git.</p>
+					<pre><code>git clone https://github.com/hamedghaderi/review.git
+cd review &amp;&amp; npm install &amp;&amp; npm run dev</code></pre>
 				</div>
 			</section>
 		</main>
 
 		<footer class="footer">
-			<div class="wrap footer__row">
-				<span class="footer__brand">Review</span>
-				<span>MIT licensed</span>
-				<a class="link" href="https://github.com/hamedghaderi/review">Source on GitHub</a>
-				<a class="link" href="https://github.com/hamedghaderi/review/issues">Report an issue</a>
+			<p class="footer__line">Your code, your machine, your call.</p>
+			<div class="footer__meta">
+				<span>Review · MIT licensed</span>
+				<a href="https://github.com/hamedghaderi/review">Source</a>
+				<a href="https://github.com/hamedghaderi/review/releases">Releases</a>
+				<a href="https://github.com/hamedghaderi/review/issues">Issues</a>
 				<span>Made by Hamed Ghaderi</span>
 			</div>
 		</footer>
