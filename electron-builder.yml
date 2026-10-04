@@ -1,0 +1,47 @@
+# Installers: `npm run dist` builds macOS (both chips); dist:win and dist:linux build Windows and Linux (on an Apple-silicon
+# Mac they need Rosetta 2, since the installer tools are Intel-only). Output goes to dist/.
+appId: com.hamedghaderi.review
+productName: Review
+directories:
+  buildResources: build # icon.icns, icon.ico, icons/
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+# Nothing is updated automatically: installers are shared by hand.
+publish: null
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  # Ad hoc signature (no Apple Developer ID): the whole bundle is signed, so macOS allows notifications and the
+  # keychain. Downloaded copies are not notarized, so the first open needs right-click → Open (see README).
+  identity: '-'
+  hardenedRuntime: false
+  extendInfo:
+    NSUserNotificationAlertStyle: alert
+dmg:
+  writeUpdateInfo: false # block maps are only for auto-update
+  artifactName: ${productName}-mac-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-windows-setup.${ext}
+nsis:
+  differentialPackage: false
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  icon: build/icons
+  artifactName: ${productName}-linux-${arch}.${ext}
