@@ -1,10 +1,23 @@
-# Review
-
-Code review on your own machine. A desktop app for Git branches and GitHub pull requests: comment on any line, publish when you're ready, and add an AI reviewer with your own model, or none.
-
-**[Website](https://hamedghaderi.github.io/review/)** · **[Download](https://github.com/hamedghaderi/review/releases/latest)** · **[User guide](docs/guide.md)**
-
-![Review showing a branch diff with a comment on line 14](site/img/review.webp)
+<div align="center">
+  <img src="build/icons/256x256.png" alt="Review app icon" width="112" height="112" />
+  <h1>Review</h1>
+  <p><strong>Code review on your own machine.</strong></p>
+  <p>A desktop app for Git branches and GitHub pull requests: comment on any line, publish when you're ready,<br />and add an AI reviewer with your own model, or none.</p>
+  <p>
+    <a href="https://github.com/hamedghaderi/review/actions/workflows/ci.yml"><img src="https://github.com/hamedghaderi/review/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/hamedghaderi/review/releases/latest"><img src="https://img.shields.io/github/v/release/hamedghaderi/review?color=6d4aff" alt="Latest release" /></a>
+    <a href="https://github.com/hamedghaderi/review/releases"><img src="https://img.shields.io/github/downloads/hamedghaderi/review/total?color=6d4aff" alt="Downloads" /></a>
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platforms: macOS, Windows, Linux" />
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/hamedghaderi/review" alt="MIT license" /></a>
+  </p>
+  <p>
+    <a href="https://hamedghaderi.github.io/review/"><strong>Website</strong></a> ·
+    <a href="https://github.com/hamedghaderi/review/releases/latest"><strong>Download</strong></a> ·
+    <a href="docs/guide.md"><strong>User guide</strong></a>
+  </p>
+  <br />
+  <img src="site/img/review.webp" alt="Review showing a branch diff with a comment on line 14" />
+</div>
 
 ## Features
 
