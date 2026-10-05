@@ -38,6 +38,8 @@ interface Props {
 	askFocus: { findingId: string; nonce: number } | null // "Ask AI" on a comment: open this finding's question box
 	/** Null while any AI run is going (only one runs at a time). */
 	onRetryRules: ((run: AiRun, rules: Array<ReviewRule>) => void) | null
+	/** Stops a running run; the answers it already got are kept, and Resume asks the rest. */
+	onStop(run: AiRun): void
 	onOpen(finding: Finding): void
 	onAccept(finding: Finding): void
 	onDismiss(finding: Finding, reason: DismissReason): void
@@ -77,6 +79,7 @@ export function FindingsPanel({
 	selectedFindingId,
 	askFocus,
 	onRetryRules,
+	onStop,
 	onOpen,
 	onAccept,
 	onDismiss,
@@ -180,6 +183,7 @@ export function FindingsPanel({
 				showDetails={showDetails}
 				onToggleDetails={() => setShowDetails((x) => !x)}
 				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
+				onStop={() => onStop(run)}
 			/>
 			{runs.length > 1 && (
 				<div className="run-picker">
@@ -319,11 +323,13 @@ function RunSummary({
 	showDetails,
 	onToggleDetails,
 	onRetryRules,
+	onStop,
 }: {
 	run: AiRun
 	showDetails: boolean
 	onToggleDetails(): void
 	onRetryRules: ((rules: Array<ReviewRule>) => void) | null
+	onStop(): void
 }) {
 	const files = run.coverage.files
 	const reviewed = files.filter((f) => f.state === 'reviewed').length
@@ -348,6 +354,15 @@ function RunSummary({
 						: `${run.connectionLabel ?? run.providerLabel} · ${run.model}`}
 				</span>
 				<span className="spacer" />
+				{run.status === 'running' && (
+					<button
+						className="btn small ghost run-stop"
+						title="Stop this run. Answers that already arrived are kept; Resume asks the rest."
+						onClick={onStop}
+					>
+						Stop
+					</button>
+				)}
 				<button className="link" onClick={onToggleDetails}>
 					{showDetails ? 'Hide details' : 'Details'}
 				</button>
@@ -617,6 +632,8 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 	// Only current rules with requests to repeat can be retried; residue-7 of older runs is now part of test-value.
 	const canRetry = (rule: StoredRule): boolean => requestsFor(run, byRule.get(rule)!.checkedBy) > 0
 	const retryable = REVIEW_RULES.filter((r) => missing.includes(r) && canRetry(r))
+	// A stopped run resumes by asking every rule it did not finish, even a single one.
+	const stopped = run.status === 'cancelled'
 	return (
 		<div className="checklist small" aria-live="polite">
 			<div className="checklist-head">
@@ -629,13 +646,17 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 						? ` · ${run.coverage.batchesDone} of ${run.coverage.batchesTotal} requests answered`
 						: ''}
 				</span>
-				{retryable.length > 1 && onRetry && (
+				{retryable.length > (stopped ? 0 : 1) && onRetry && (
 					<button
 						className="btn small ghost check-retry checklist-retry-all"
-						title="Ask each reviewer again about all its rules that were not fully checked, on the requests that did not cover them"
+						title={
+							stopped
+								? 'Continue this run: send the requests it did not get answers for, keeping the answers it already has'
+								: 'Ask each reviewer again about all its rules that were not fully checked, on the requests that did not cover them'
+						}
 						onClick={() => onRetry(retryable)}
 					>
-						Retry all
+						{stopped ? 'Resume' : 'Retry all'}
 					</button>
 				)}
 				{!running && notable.length < ev.length && (

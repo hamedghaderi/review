@@ -2643,6 +2643,10 @@ h3.small-h {
 	flex-shrink: 0;
 	padding: 0 6px;
 }
+.run-stop {
+	flex-shrink: 0;
+	padding: 0 6px;
+}
 .check-detail {
 	padding: 2px 0 4px 20px;
 }
