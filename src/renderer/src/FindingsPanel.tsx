@@ -640,6 +640,17 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 							const n = found.get(rule) ?? 0
 							const need = requestsFor(run, e.checkedBy)
 							const state = stateOf(rule)
+							const status =
+								(state === 'found'
+									? `${n} finding${n === 1 ? '' : 's'}`
+									: state === 'clear'
+										? 'nothing found'
+										: state === 'pending'
+											? need > 1
+												? `${e.requests} of ${need}`
+												: 'checking…'
+											: `checked in ${e.requests} of ${need} requests`) +
+								(e.nearMisses.length ? ` · ${e.nearMisses.length} near miss${e.nearMisses.length === 1 ? '' : 'es'}` : '')
 							return (
 								<details key={rule} className={`check-row ${state}`}>
 									<summary>
@@ -653,17 +664,8 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 										<span className="check-label">{RULE_LABEL[rule]}</span>
 										{memberName(run, e.checkedBy) && <span className="check-by muted">{memberName(run, e.checkedBy)}</span>}
 										<span className="spacer" />
-										<span className="muted nowrap">
-											{state === 'found'
-												? `${n} finding${n === 1 ? '' : 's'}`
-												: state === 'clear'
-													? 'nothing found'
-													: state === 'pending'
-														? need > 1
-															? `${e.requests} of ${need}`
-															: 'checking…'
-														: `checked in ${e.requests} of ${requestsFor(run, e.checkedBy)} requests`}
-											{e.nearMisses.length ? ` · ${e.nearMisses.length} near miss${e.nearMisses.length === 1 ? '' : 'es'}` : ''}
+										<span className="muted nowrap check-status" title={status}>
+											{status}
 										</span>
 										{state === 'missing' && onRetry && (
 											<button

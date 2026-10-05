@@ -2578,7 +2578,8 @@ h3.small-h {
 }
 .checklist-head {
 	display: flex;
-	gap: 8px;
+	flex-wrap: wrap;
+	gap: 0 8px;
 	align-items: baseline;
 }
 .checklist-title {
@@ -2602,7 +2603,7 @@ h3.small-h {
 	display: none;
 }
 .check-label {
-	min-width: 0;
+	min-width: 3em; /* a short rule name such as "Bug" stays whole */
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -2642,6 +2643,13 @@ h3.small-h {
 .check-retry {
 	flex-shrink: 0;
 	padding: 0 6px;
+}
+/* In a narrow panel the status gives way first (full text on hover), then the reviewer, so the rule and Retry stay in view. */
+.check-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex-shrink: 10;
 }
 .check-detail {
 	padding: 2px 0 4px 20px;
@@ -2759,7 +2767,10 @@ input.member-role {
 .check-by {
 	font-size: 10px;
 	white-space: nowrap;
-	flex-shrink: 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex-shrink: 5;
 }
 
 /* Existing discussion on GitHub (read-only) */
