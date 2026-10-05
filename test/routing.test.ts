@@ -171,7 +171,7 @@ test('a failed member is retried on its own requests, rebuilt the same way', asy
 	const again: Seen = new Map()
 	const security = team(again).find((m) => m.id === 'security')!
 	const run = await startRun(
-		input({ run: first, rule: 'security' }),
+		input({ run: first, rules: ['security'], providers: new Map([['security', security.provider]]) }),
 		{ ...options([security]), provider: security.provider, team: undefined },
 		() => {},
 	).done

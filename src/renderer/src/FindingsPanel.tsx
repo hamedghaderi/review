@@ -8,7 +8,7 @@ import {
 	TEST_PATTERN_LABEL,
 	type FindingState,
 } from '../../shared/findings.ts'
-import { DISMISS_REASONS } from '../../shared/types.ts'
+import { DISMISS_REASONS, REVIEW_RULES } from '../../shared/types.ts'
 import type {
 	AiRun,
 	ChangedFile,
@@ -37,7 +37,7 @@ interface Props {
 	selectedFindingId: string | null
 	askFocus: { findingId: string; nonce: number } | null // "Ask AI" on a comment: open this finding's question box
 	/** Null while any AI run is going (only one runs at a time). */
-	onRetryRule: ((run: AiRun, rule: ReviewRule) => void) | null
+	onRetryRules: ((run: AiRun, rules: Array<ReviewRule>) => void) | null
 	onOpen(finding: Finding): void
 	onAccept(finding: Finding): void
 	onDismiss(finding: Finding, reason: DismissReason): void
@@ -76,7 +76,7 @@ export function FindingsPanel({
 	threads,
 	selectedFindingId,
 	askFocus,
-	onRetryRule,
+	onRetryRules,
 	onOpen,
 	onAccept,
 	onDismiss,
@@ -179,7 +179,7 @@ export function FindingsPanel({
 				run={run}
 				showDetails={showDetails}
 				onToggleDetails={() => setShowDetails((x) => !x)}
-				onRetryRule={onRetryRule && ((rule) => onRetryRule(run, rule))}
+				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
 			/>
 			{runs.length > 1 && (
 				<div className="run-picker">
@@ -318,12 +318,12 @@ function RunSummary({
 	run,
 	showDetails,
 	onToggleDetails,
-	onRetryRule,
+	onRetryRules,
 }: {
 	run: AiRun
 	showDetails: boolean
 	onToggleDetails(): void
-	onRetryRule: ((rule: ReviewRule) => void) | null
+	onRetryRules: ((rules: Array<ReviewRule>) => void) | null
 }) {
 	const files = run.coverage.files
 	const reviewed = files.filter((f) => f.state === 'reviewed').length
@@ -368,7 +368,7 @@ function RunSummary({
 				{run.rejected.length ? ` · ${run.rejected.length} rejected by validation` : ''}
 			</div>
 			<TeamStatus run={run} />
-			<Checked run={run} onRetry={onRetryRule} />
+			<Checked run={run} onRetry={onRetryRules} />
 			{(run.ciUncovered ?? []).length > 0 && (
 				<div className="small unexplained">
 					<b>
@@ -579,7 +579,7 @@ const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
  * Every rule with its state, so "no findings" visibly means "checked, nothing qualified". A rule is ticked once every
  * request of the run has reported on it; each request answers all rules at once, so ticks advance request by request.
  */
-function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) => void) | null }) {
+function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewRule>) => void) | null }) {
 	const [all, setAll] = useState(false)
 	const ev = run.evaluation
 	if (!ev) {
@@ -597,20 +597,26 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 		found.set(key, (found.get(key) ?? 0) + 1)
 	}
 	const byRule = new Map(ev.map((e) => [e.rule, e]))
-	const doneCount = ev.filter((e) => requestsFor(run, e.checkedBy) > 0 && e.requests >= requestsFor(run, e.checkedBy)).length
+	// A team member given no files has nothing to check; a run that sent no request at all checked nothing.
+	const complete = (e: (typeof ev)[number]): boolean => {
+		const need = requestsFor(run, e.checkedBy)
+		return need > 0 ? e.requests >= need : run.coverage.batchesTotal > 0
+	}
+	const doneCount = ev.filter(complete).length
 	const stateOf = (rule: StoredRule): 'found' | 'clear' | 'pending' | 'missing' => {
 		const e = byRule.get(rule)!
-		const need = requestsFor(run, e.checkedBy)
-		const complete = need > 0 && e.requests >= need
-		// A retry runs one rule; the others it leaves incomplete stay missing rather than looking checked again.
-		const checking = running && (!run.retrying || run.retrying === rule)
-		return complete ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
+		// A retry runs only its rules; the others it leaves incomplete stay missing rather than looking checked again.
+		const checking = running && (!run.retrying || run.retrying.includes(rule as ReviewRule))
+		return complete(e) ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
 	}
 	// A finished run lists only the rules that need a look (findings, or not checked everywhere); the rest on request.
 	const notable = ev.filter((e) => stateOf(e.rule) !== 'clear')
 	const showAll = all || (running && !run.retrying)
 	const withFindings = ev.filter((e) => stateOf(e.rule) === 'found').length
-	const missing = ev.filter((e) => stateOf(e.rule) === 'missing').length
+	const missing = ev.filter((e) => stateOf(e.rule) === 'missing').map((e) => e.rule)
+	// Only current rules with requests to repeat can be retried; residue-7 of older runs is now part of test-value.
+	const canRetry = (rule: StoredRule): boolean => requestsFor(run, byRule.get(rule)!.checkedBy) > 0
+	const retryable = REVIEW_RULES.filter((r) => missing.includes(r) && canRetry(r))
 	return (
 		<div className="checklist small" aria-live="polite">
 			<div className="checklist-head">
@@ -618,11 +624,20 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 				<span className="muted">
 					{doneCount} of {ev.length}
 					{!running && withFindings ? ` · ${withFindings} with findings` : ''}
-					{!running && missing ? ` · ${missing} not fully checked` : ''}
+					{!running && missing.length ? ` · ${missing.length} not fully checked` : ''}
 					{running && run.coverage.batchesTotal > 1
 						? ` · ${run.coverage.batchesDone} of ${run.coverage.batchesTotal} requests answered`
 						: ''}
 				</span>
+				{retryable.length > 1 && onRetry && (
+					<button
+						className="btn small ghost check-retry checklist-retry-all"
+						title="Ask each reviewer again about all its rules that were not fully checked, on the requests that did not cover them"
+						onClick={() => onRetry(retryable)}
+					>
+						Retry all
+					</button>
+				)}
 				{!running && notable.length < ev.length && (
 					<button className="link checklist-toggle" onClick={() => setAll(!all)}>
 						{all ? (notable.length ? 'Only rules to look at' : 'Hide rules') : `Show all ${ev.length}`}
@@ -644,7 +659,9 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 								(state === 'found'
 									? `${n} finding${n === 1 ? '' : 's'}`
 									: state === 'clear'
-										? 'nothing found'
+										? need === 0
+											? 'no files for this rule'
+											: 'nothing found'
 										: state === 'pending'
 											? need > 1
 												? `${e.requests} of ${need}`
@@ -667,13 +684,13 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 										<span className="muted nowrap check-status" title={status}>
 											{status}
 										</span>
-										{state === 'missing' && onRetry && (
+										{state === 'missing' && onRetry && canRetry(rule) && (
 											<button
 												className="btn small ghost check-retry"
 												title={`Ask ${memberName(run, e.checkedBy) ?? 'the model'} again about this rule only, on the requests that did not cover it`}
 												onClick={(ev) => {
 													ev.preventDefault()
-													onRetry(rule)
+													onRetry([rule])
 												}}
 											>
 												Retry

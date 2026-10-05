@@ -3362,6 +3362,13 @@ input.member-role {
 .checklist-toggle {
 	margin-left: auto;
 }
+.checklist-retry-all {
+	margin-left: auto;
+	white-space: nowrap;
+}
+.checklist-retry-all + .checklist-toggle {
+	margin-left: 0;
+}
 
 /* Comment text: the label chips and inline forms GitHub renders, shown the same way in the app. */
 .rich kbd {

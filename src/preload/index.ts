@@ -93,7 +93,7 @@ const api: ReviewApi = {
 	mcpImportClaude: (repoId, keys) => ipcRenderer.invoke(IPC.mcpImportClaude, repoId, keys),
 	startAiReview: (reviewId, scope, reviewer) => ipcRenderer.invoke(IPC.aiStart, reviewId, scope, reviewer),
 	cancelAiReview: (runId) => ipcRenderer.invoke(IPC.aiCancel, runId),
-	retryAiRule: (reviewId, runId, rule) => ipcRenderer.invoke(IPC.aiRetryRule, reviewId, runId, rule),
+	retryAiRules: (reviewId, runId, rules) => ipcRenderer.invoke(IPC.aiRetryRules, reviewId, runId, rules),
 	onAiRunUpdate: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, run: AiRun): void => handler(run)
 		ipcRenderer.on(IPC.aiRunUpdate, listener)

@@ -50,7 +50,7 @@ import {
 	mcpToolNames,
 	reviewerChoice,
 	reviewLimits,
-	reviewRule,
+	reviewRules,
 	reviewTeam,
 	str,
 } from './validate.ts'
@@ -193,8 +193,8 @@ function registerIpc(): void {
 	handle(IPC.aiAsk, (reviewId: unknown, findingId: unknown, question: unknown) =>
 		service.askFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), str(question, 'question', 4000)),
 	)
-	handle(IPC.aiRetryRule, (reviewId: unknown, runId: unknown, rule: unknown) =>
-		service.retryAiRule(comparisonId(reviewId), str(runId, 'run id', 64), reviewRule(rule)),
+	handle(IPC.aiRetryRules, (reviewId: unknown, runId: unknown, rules: unknown) =>
+		service.retryAiRules(comparisonId(reviewId), str(runId, 'run id', 64), reviewRules(rules)),
 	)
 
 	// Provider settings. Every handler returns the refreshed, secret-free settings view.
