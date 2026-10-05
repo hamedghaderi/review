@@ -792,6 +792,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (w.member) w.member.status = w.member.requestsDone === 0 && w.member.requestsTotal > 0 ? 'failed' : 'completed'
 		// A retry that could not rebuild the requests leaves the run's status as it was.
 		run.status = pkg ? overallStatus(run.coverage.files, pkg, run.errors) : retry!.run.status
+		run.retrying = null
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		run.finishedAt = now()
 		settled = true
@@ -824,6 +825,7 @@ function retryLabel(rule: ReviewRule): string {
 function reopen(previous: AiRun, rule: ReviewRule): AiRun {
 	const run = structuredClone(previous)
 	run.status = 'running'
+	run.retrying = rule
 	run.finishedAt = null
 	run.errors = run.errors.filter((e) => !e.startsWith(retryLabel(rule)))
 	for (const e of run.evaluation ?? []) e.answered ??= answeredRequests(previous, e) ?? undefined

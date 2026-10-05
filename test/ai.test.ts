@@ -1132,6 +1132,8 @@ test('retrying a failed rule asks only its reviewer about only that rule and com
 		(r) => updates.push(r),
 	).done
 	assert.equal(updates[0].status, 'running', 'the run shows as running while the rule is retried')
+	assert.equal(updates[0].retrying, 'security', 'the run names the one rule being retried, so other rules do not show as checking')
+	assert.equal(run.retrying, null)
 	assert.equal(run.id, failed.id, 'answers merge into the same run')
 	assert.equal(asked.length, 1)
 	assert.match(asked[0], /ONLY under: "security"\./)

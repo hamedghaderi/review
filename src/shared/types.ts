@@ -836,6 +836,7 @@ export interface AiRun {
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
+	retrying?: ReviewRule | null // the one rule a running retry asks about; the run's other rules are not being checked
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
