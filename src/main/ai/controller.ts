@@ -177,24 +177,36 @@ export class AiController {
 		if (run.status === 'running') throw new AppFail('ai-busy', 'That AI review is still running.')
 		if (run.baseSha !== comparison.baseSha || run.headSha !== comparison.headSha)
 			throw new AppFail('invalid-input', 'That run reviewed different commits. Run the review again.')
-		const wanted = [...new Set(rules)]
-		if (!wanted.length) throw new AppFail('invalid-input', 'Choose a rule to retry.')
+		const asked = [...new Set(rules)]
+		if (!asked.length) throw new AppFail('invalid-input', 'Choose a rule to retry.')
 		if (!run.limitsUsed)
 			throw new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
 		// Each owning reviewer's connection and model, by member id (null for a single-model run).
 		const owners = new Map<string | null, { connectionId: string; modelId: string }>()
-		for (const rule of wanted) {
+		const wanted: Array<ReviewRule> = []
+		// Several rules at once (Retry all) skip the ones with nothing left to ask; one rule says why it cannot be retried.
+		let skipped: AppFail | null = null
+		for (const rule of asked) {
 			const ev = run.evaluation?.find((e) => e.rule === rule)
 			const answered = ev && answeredRequests(run, ev)
-			if (!ev || !answered)
-				throw new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
-			const member = ev.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
-			if (answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal))
-				throw new AppFail('invalid-input', `${rule} was already checked in every request.`)
+			const member = ev?.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
 			const connectionId = member?.connectionId ?? run.connectionId
-			if (!connectionId) throw new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
-			owners.set(member?.id ?? null, { connectionId, modelId: member?.model ?? run.model })
+			const why =
+				!ev || !answered
+					? new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
+					: answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal)
+						? new AppFail('invalid-input', `${rule} was already checked in every request.`)
+						: !connectionId
+							? new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
+							: null
+			if (why) {
+				skipped ??= why
+				continue
+			}
+			wanted.push(rule)
+			owners.set(member?.id ?? null, { connectionId: connectionId!, modelId: member?.model ?? run.model })
 		}
+		if (!wanted.length) throw skipped!
 		this.starting = true
 		const configs = new Map<string | null, RunConfig>()
 		try {

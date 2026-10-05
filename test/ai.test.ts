@@ -1284,6 +1284,45 @@ test('retrying all missing rules of a team asks each reviewer with its own model
 	)
 })
 
+test('Retry all skips rules with nothing left to ask; a single such rule says why', async () => {
+	const { s, handle } = teamWithFailingSecurity()
+	const failed = await handle.done
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'review-ai-')))
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: { [s.comp.id]: [failed] },
+		}
+	})
+	const security = createFakeProvider({
+		script: () => ({
+			findings: [],
+			evaluation: emptyEvaluation().filter((e) => e.rule === 'security'),
+			unexplained_files: [],
+			limitations: [],
+		}),
+	})
+	const controller = new AiController(store, fixedConfig(security), () => {})
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => s.srcs.find((x) => x.file.key === k)!.patch,
+		loadFileLines: async (k: string) => s.srcs.find((x) => x.file.key === k)!.fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	await assert.rejects(controller.retryRules(access, s.comp.id, failed.id, ['bug']), /bug was already checked in every request/)
+	const started = await controller.retryRules(access, s.comp.id, failed.id, ['bug', 'security'])
+	assert.deepEqual(started.retrying, ['security'], 'the complete rule is left out instead of failing the retry')
+	for (let i = 0; i < 100 && controller.runsFor('/repo', s.comp.id)[0].status === 'running'; i++)
+		await new Promise((r) => setTimeout(r, 10))
+	const run = controller.runsFor('/repo', s.comp.id)[0]
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.deepEqual(run.errors, [])
+})
+
 test('runs recorded before per-rule request indexes are reconstructed from their request errors', async () => {
 	const { handle } = teamWithFailingSecurity()
 	const run = await handle.done

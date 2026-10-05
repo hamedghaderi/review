@@ -597,22 +597,26 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 		found.set(key, (found.get(key) ?? 0) + 1)
 	}
 	const byRule = new Map(ev.map((e) => [e.rule, e]))
-	const doneCount = ev.filter((e) => requestsFor(run, e.checkedBy) > 0 && e.requests >= requestsFor(run, e.checkedBy)).length
+	// A team member given no files has nothing to check; a run that sent no request at all checked nothing.
+	const complete = (e: (typeof ev)[number]): boolean => {
+		const need = requestsFor(run, e.checkedBy)
+		return need > 0 ? e.requests >= need : run.coverage.batchesTotal > 0
+	}
+	const doneCount = ev.filter(complete).length
 	const stateOf = (rule: StoredRule): 'found' | 'clear' | 'pending' | 'missing' => {
 		const e = byRule.get(rule)!
-		const need = requestsFor(run, e.checkedBy)
-		const complete = need > 0 && e.requests >= need
 		// A retry runs only its rules; the others it leaves incomplete stay missing rather than looking checked again.
 		const checking = running && (!run.retrying || run.retrying.includes(rule as ReviewRule))
-		return complete ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
+		return complete(e) ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
 	}
 	// A finished run lists only the rules that need a look (findings, or not checked everywhere); the rest on request.
 	const notable = ev.filter((e) => stateOf(e.rule) !== 'clear')
 	const showAll = all || (running && !run.retrying)
 	const withFindings = ev.filter((e) => stateOf(e.rule) === 'found').length
 	const missing = ev.filter((e) => stateOf(e.rule) === 'missing').map((e) => e.rule)
-	// Only current rules can be retried; residue-7 of older runs is now part of test-value.
-	const retryable = REVIEW_RULES.filter((r) => missing.includes(r))
+	// Only current rules with requests to repeat can be retried; residue-7 of older runs is now part of test-value.
+	const canRetry = (rule: StoredRule): boolean => requestsFor(run, byRule.get(rule)!.checkedBy) > 0
+	const retryable = REVIEW_RULES.filter((r) => missing.includes(r) && canRetry(r))
 	return (
 		<div className="checklist small" aria-live="polite">
 			<div className="checklist-head">
@@ -655,7 +659,9 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 								(state === 'found'
 									? `${n} finding${n === 1 ? '' : 's'}`
 									: state === 'clear'
-										? 'nothing found'
+										? need === 0
+											? 'no files for this rule'
+											: 'nothing found'
 										: state === 'pending'
 											? need > 1
 												? `${e.requests} of ${need}`
@@ -678,7 +684,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 										<span className="muted nowrap check-status" title={status}>
 											{status}
 										</span>
-										{state === 'missing' && onRetry && (
+										{state === 'missing' && onRetry && canRetry(rule) && (
 											<button
 												className="btn small ghost check-retry"
 												title={`Ask ${memberName(run, e.checkedBy) ?? 'the model'} again about this rule only, on the requests that did not cover it`}
