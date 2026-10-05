@@ -1126,13 +1126,13 @@ test('retrying a failed rule asks only its reviewer about only that rule and com
 			scope: failed.scope,
 			loadSources: async () => s.srcs,
 			previousFindings: [],
-			retry: { run: failed, rule: 'security' },
+			retry: { run: failed, rules: ['security'], providers: new Map([['b', security]]) },
 		},
 		options(security),
 		(r) => updates.push(r),
 	).done
 	assert.equal(updates[0].status, 'running', 'the run shows as running while the rule is retried')
-	assert.equal(updates[0].retrying, 'security', 'the run names the one rule being retried, so other rules do not show as checking')
+	assert.deepEqual(updates[0].retrying, ['security'], 'the run names the rules being retried, so other rules do not show as checking')
 	assert.equal(run.retrying, null)
 	assert.equal(run.id, failed.id, 'answers merge into the same run')
 	assert.equal(asked.length, 1)
@@ -1159,6 +1159,14 @@ test('a retry of one rule leaves the request failed while other rules of the sam
 		() => {},
 	).done
 	assert.equal(first.status, 'failed')
+	const bug = createFakeProvider({
+		script: () => ({
+			findings: [finding()],
+			evaluation: emptyEvaluation().filter((e) => e.rule === 'bug'),
+			unexplained_files: [],
+			limitations: [],
+		}),
+	})
 	const retried = await startRun(
 		{
 			reviewId: s.comp.id,
@@ -1166,18 +1174,9 @@ test('a retry of one rule leaves the request failed while other rules of the sam
 			scope: first.scope,
 			loadSources: async () => s.srcs,
 			previousFindings: [],
-			retry: { run: first, rule: 'bug' },
+			retry: { run: first, rules: ['bug'], providers: new Map([[null, bug]]) },
 		},
-		options(
-			createFakeProvider({
-				script: () => ({
-					findings: [finding()],
-					evaluation: emptyEvaluation().filter((e) => e.rule === 'bug'),
-					unexplained_files: [],
-					limitations: [],
-				}),
-			}),
-		),
+		options(bug),
 		() => {},
 	).done
 	assert.equal(retried.findings.length, 1)
@@ -1186,6 +1185,103 @@ test('a retry of one rule leaves the request failed while other rules of the sam
 	assert.deepEqual(retried.errors, ['Request 1: server error (529)'])
 	assert.equal(retried.status, 'partial')
 	assert.ok(retried.coverage.files.filter((f) => f.state !== 'not-reviewable').every((f) => f.state === 'partial'))
+})
+
+test('retrying all missing rules sends each missed request once, asking only the rules it did not answer', async () => {
+	const s = sources()
+	const failing = createFakeProvider({ script: () => new ProviderError('server', 'server error (529)') })
+	const first = await startRun(
+		{ reviewId: s.comp.id, comparison: s.comp, scope: { kind: 'all' }, loadSources: async () => s.srcs, previousFindings: [] },
+		options(failing, { maxAttempts: 1 }),
+		() => {},
+	).done
+	const input = { reviewId: s.comp.id, comparison: s.comp, scope: first.scope, loadSources: async () => s.srcs, previousFindings: [] }
+	const answer = (rules: Array<string>) =>
+		createFakeProvider({
+			script: (req) => {
+				asked.push(req.instructions)
+				return { findings: [], evaluation: emptyEvaluation().filter((e) => rules.includes(e.rule)), unexplained_files: [], limitations: [] }
+			},
+		})
+	const asked: Array<string> = []
+	const bugOnly = answer(['bug'])
+	const partly = await startRun(
+		{ ...input, retry: { run: first, rules: ['bug'], providers: new Map([[null, bugOnly]]) } },
+		options(bugOnly),
+		() => {},
+	).done
+	const rest = partly.evaluation!.filter((e) => e.rule !== 'bug').map((e) => e.rule as ReviewRule)
+	asked.length = 0
+	const all = answer(rest)
+	const run = await startRun(
+		{ ...input, retry: { run: partly, rules: ['bug', ...rest], providers: new Map([[null, all]]) } },
+		options(all),
+		() => {},
+	).done
+	assert.equal(asked.length, 1, 'one request, not one per rule')
+	const only = /ONLY under: (.+)\./.exec(asked[0])![1]
+	assert.doesNotMatch(only, /"bug"/, 'bug was already answered for that request')
+	assert.match(only, /"security"/)
+	assert.ok(
+		run.evaluation!.every((e) => e.requests === 1),
+		'no rule is counted twice for the same request',
+	)
+	assert.deepEqual(run.errors, [])
+	assert.equal(run.status, 'completed')
+	assert.equal(run.retrying, null)
+})
+
+test('retrying all missing rules of a team asks each reviewer with its own model', async () => {
+	const s = sources()
+	const broken = createFakeProvider({ script: () => new ProviderError('server', 'server error (529)') })
+	const members = [
+		{ id: 'a', role: 'Bugs', provider: broken, rules: ['bug' as const] },
+		{ id: 'b', role: 'Security', provider: broken, rules: ['security' as const] },
+	].map((m) => ({ ...m, provenance: { connectionId: `c-${m.id}`, connectionLabel: m.role, endpoint: '' } }))
+	const first = await startRun(
+		{ reviewId: s.comp.id, comparison: s.comp, scope: { kind: 'all' }, loadSources: async () => s.srcs, previousFindings: [] },
+		{ ...options(broken, { maxAttempts: 1 }), team: { id: 't', name: 'T', members } },
+		() => {},
+	).done
+	assert.equal(first.status, 'failed')
+	const asked: Array<string> = []
+	const reviewer = (model: string, rule: ReviewRule) =>
+		createFakeProvider({
+			model,
+			script: () => {
+				asked.push(model)
+				return { findings: [], evaluation: emptyEvaluation().filter((e) => e.rule === rule), unexplained_files: [], limitations: [] }
+			},
+		})
+	const run = await startRun(
+		{
+			reviewId: s.comp.id,
+			comparison: s.comp,
+			scope: first.scope,
+			loadSources: async () => s.srcs,
+			previousFindings: [],
+			retry: {
+				run: first,
+				rules: ['bug', 'security'],
+				providers: new Map([
+					['a', reviewer('bugs-model', 'bug')],
+					['b', reviewer('security-model', 'security')],
+				]),
+			},
+		},
+		options(broken),
+		() => {},
+	).done
+	assert.deepEqual(asked.sort(), ['bugs-model', 'security-model'])
+	assert.deepEqual(run.errors, [])
+	assert.equal(run.status, 'completed')
+	assert.deepEqual(
+		run.team!.members.map((m) => [m.id, m.status, m.requestsDone, m.requestsFailed]),
+		[
+			['a', 'completed', 1, 0],
+			['b', 'completed', 1, 0],
+		],
+	)
 })
 
 test('runs recorded before per-rule request indexes are reconstructed from their request errors', async () => {

@@ -164,10 +164,10 @@ export class AiController {
 	}
 
 	/**
-	 * Asks a finished run's rule again, only on the requests that did not cover it, with the reviewer that owned the
-	 * rule (same connection and model). The answers merge into the same run.
+	 * Asks a finished run's rules again, only on the requests that did not cover them, each with the reviewer that owned
+	 * it (same connection and model). The answers merge into the same run.
 	 */
-	async retryRule(access: ComparisonAccess, reviewId: string, runId: string, rule: ReviewRule): Promise<AiRun> {
+	async retryRules(access: ComparisonAccess, reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<AiRun> {
 		if (this.active || this.starting) throw new AppFail('ai-busy', 'An AI review is already running.')
 		const { comparison } = access
 		const runs = this.runsFor(comparison.repoId, reviewId)
@@ -177,31 +177,51 @@ export class AiController {
 		if (run.status === 'running') throw new AppFail('ai-busy', 'That AI review is still running.')
 		if (run.baseSha !== comparison.baseSha || run.headSha !== comparison.headSha)
 			throw new AppFail('invalid-input', 'That run reviewed different commits. Run the review again.')
-		const ev = run.evaluation?.find((e) => e.rule === rule)
-		const answered = ev && answeredRequests(run, ev)
-		if (!ev || !answered || !run.limitsUsed)
+		const wanted = [...new Set(rules)]
+		if (!wanted.length) throw new AppFail('invalid-input', 'Choose a rule to retry.')
+		if (!run.limitsUsed)
 			throw new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
-		const member = ev.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
-		if (answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal))
-			throw new AppFail('invalid-input', 'That rule was already checked in every request.')
-		const connectionId = member?.connectionId ?? run.connectionId
-		const modelId = member?.model ?? run.model
-		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
+		// Each owning reviewer's connection and model, by member id (null for a single-model run).
+		const owners = new Map<string | null, { connectionId: string; modelId: string }>()
+		for (const rule of wanted) {
+			const ev = run.evaluation?.find((e) => e.rule === rule)
+			const answered = ev && answeredRequests(run, ev)
+			if (!ev || !answered)
+				throw new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
+			const member = ev.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
+			if (answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal))
+				throw new AppFail('invalid-input', `${rule} was already checked in every request.`)
+			const connectionId = member?.connectionId ?? run.connectionId
+			if (!connectionId) throw new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
+			owners.set(member?.id ?? null, { connectionId, modelId: member?.model ?? run.model })
+		}
 		this.starting = true
-		let config: RunConfig
+		const configs = new Map<string | null, RunConfig>()
 		try {
-			config = await this.resolveRun({ connectionId, modelId })
+			for (const [id, selection] of owners) {
+				try {
+					configs.set(id, await this.resolveRun(selection))
+				} catch (e) {
+					const role = id ? run.team?.members.find((m) => m.id === id)?.role : null
+					const message = e instanceof Error ? e.message : String(e)
+					throw e instanceof AppFail && !role ? e : new AppFail('ai-unavailable', role ? `${role}: ${message}` : message)
+				}
+			}
 		} catch (e) {
 			this.starting = false
-			if (e instanceof AppFail) throw e
-			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+			throw e
 		}
+		const first = configs.values().next().value!
 		return this.launch(
 			access,
 			reviewId,
-			{ scope: run.scope, previousFindings: runs.slice(0, at).flatMap((r) => r.findings), retry: { run, rule } },
-			this.runOptions(config),
-			[connectionId],
+			{
+				scope: run.scope,
+				previousFindings: runs.slice(0, at).flatMap((r) => r.findings),
+				retry: { run, rules: wanted, providers: new Map([...configs].map(([id, c]) => [id, c.provider])) },
+			},
+			this.runOptions(first),
+			[...new Set([...configs.values()].map((c) => c.connectionId))],
 		)
 	}
 
