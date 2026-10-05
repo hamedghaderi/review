@@ -1098,6 +1098,7 @@ export function App() {
 										selectedFindingId={selectedFinding?.id ?? null}
 										askFocus={askFocus}
 										onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
+										onStop={(run) => void window.review.cancelAiReview(run.id)}
 										onOpen={openFinding}
 										onAccept={acceptFinding}
 										onAsk={askFinding}

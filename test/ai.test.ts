@@ -1284,6 +1284,63 @@ test('retrying all missing rules of a team asks each reviewer with its own model
 	)
 })
 
+test('a stopped run keeps its answers and resumes with only the requests that were not answered', async () => {
+	const s = sources()
+	const answer = (rules: Array<string>, delayMs = 0) =>
+		createFakeProvider({
+			delayMs,
+			script: () => ({
+				findings: [],
+				evaluation: emptyEvaluation().filter((e) => rules.includes(e.rule)),
+				unexplained_files: [],
+				limitations: [],
+			}),
+		})
+	const allRules = emptyEvaluation().map((e) => e.rule)
+	const members = [
+		{ id: 'a', role: 'Most', provider: answer(allRules.filter((r) => r !== 'security')), rules: allRules.filter((r) => r !== 'security') },
+		{ id: 'b', role: 'Security', provider: answer(['security'], 5_000), rules: ['security' as const] },
+	].map((m) => ({ ...m, provenance: { connectionId: `c-${m.id}`, connectionLabel: m.role, endpoint: '' } }))
+	const handle = startRun(
+		{ reviewId: s.comp.id, comparison: s.comp, scope: { kind: 'all' }, loadSources: async () => s.srcs, previousFindings: [] },
+		{ ...options(members[0].provider), team: { id: 't', name: 'T', members } },
+		() => {},
+	)
+	await new Promise((r) => setTimeout(r, 100))
+	handle.cancel()
+	const stopped = await handle.done
+	assert.equal(stopped.status, 'cancelled')
+	assert.ok(
+		stopped.evaluation!.filter((e) => e.rule !== 'security').every((e) => e.requests === 1),
+		'answers that arrived are kept',
+	)
+	assert.equal(stopped.evaluation!.find((e) => e.rule === 'security')!.requests, 0)
+
+	const asked: Array<string> = []
+	const security = createFakeProvider({
+		script: (req) => {
+			asked.push(/ONLY under: (.+)\./.exec(req.instructions)![1])
+			return { findings: [], evaluation: emptyEvaluation().filter((e) => e.rule === 'security'), unexplained_files: [], limitations: [] }
+		},
+	})
+	const resumed = await startRun(
+		{
+			reviewId: s.comp.id,
+			comparison: s.comp,
+			scope: stopped.scope,
+			loadSources: async () => s.srcs,
+			previousFindings: [],
+			retry: { run: stopped, rules: ['security'], providers: new Map([['b', security]]) },
+		},
+		options(security),
+		() => {},
+	).done
+	assert.deepEqual(asked, ['"security"'], 'only the unanswered request, only its rule')
+	assert.equal(resumed.status, 'completed', resumed.errors.join('; '))
+	assert.ok(resumed.evaluation!.every((e) => e.requests === 1))
+	assert.ok(resumed.coverage.files.filter((f) => f.state !== 'not-reviewable').every((f) => f.state === 'reviewed'))
+})
+
 test('Retry all skips rules with nothing left to ask; a single such rule says why', async () => {
 	const { s, handle } = teamWithFailingSecurity()
 	const failed = await handle.done
