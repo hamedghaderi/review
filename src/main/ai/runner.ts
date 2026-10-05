@@ -69,6 +69,7 @@ interface Worker {
 	member: RunMember | null
 	stopped: boolean
 	pkg?: ContextPackage // this reviewer's own requests, once built
+	retryBatches?: Array<number> // a retry's requests to send: the ones that missed exactly this worker's rules
 }
 
 export interface RunInput {
@@ -88,10 +89,10 @@ export interface RunInput {
 	/** Findings the reviewer dismissed on earlier runs of the same pull request or branch, told to this run. */
 	decisions?: Array<PastDecision>
 	/**
-	 * Re-asks one rule of a finished run, on the requests that did not cover it, and merges the answers into that run.
-	 * `options.provider` is the rule's reviewer; `options.team` is ignored.
+	 * Re-asks rules of a finished run, on the requests that did not cover them, and merges the answers into that run.
+	 * `providers` holds each owning reviewer's provider, by member id (null for a single-model run); `options.team` is ignored.
 	 */
-	retry?: { run: AiRun; rule: ReviewRule }
+	retry?: { run: AiRun; rules: Array<ReviewRule>; providers: ReadonlyMap<string | null, ReviewProvider> }
 }
 
 export interface RunHandle {
@@ -120,7 +121,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const controller = new AbortController()
 	const now = (): string => new Date().toISOString()
 	const run: AiRun = retry
-		? reopen(retry.run, retry.rule)
+		? reopen(retry.run, retry.rules)
 		: {
 				id: randomUUID(),
 				reviewId: input.reviewId,
@@ -155,7 +156,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 	const description = input.comparison.pr?.body?.trim() || null
 	const workers: Array<Worker> = retry
-		? [retryWorker(run, retry.rule, provider, lookups)]
+		? retryWorkers(run, retry.rules, retry.providers, lookups)
 		: options.team
 			? options.team.members.map((m) => ({
 					id: m.id,
@@ -217,7 +218,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		try {
 			const sources = await input.loadSources()
 			if (controller.signal.aborted) return finish(null)
-			if (retry) return await rerun(sources, retry.rule)
+			if (retry) return await rerun(sources)
 			// Excerpts are cut once, to fit the smallest member; each member then packs its own requests to fit its model.
 			const fits = workers.map((w) => {
 				const l = w.provider.limits
@@ -347,13 +348,16 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			return finish(pkg)
 		} catch (error) {
 			const message = redactSecrets(error instanceof Error ? error.message : String(error))
-			run.errors.push(retry ? `${retryLabel(retry.rule)}${message}` : message)
+			run.errors.push(retry ? `${retryLabel(retry.rules)}${message}` : message)
 			return finish(null)
 		}
 	})()
 
-	/** Rebuilds the run's requests from the same commits and limits, and sends the ones that did not cover `rule`. */
-	async function rerun(sources: Array<FileSource>, rule: ReviewRule): Promise<AiRun> {
+	/**
+	 * Rebuilds the run's requests from the same commits and limits, and sends each one that missed a retried rule, once,
+	 * asking only about the rules it missed. Reviewers run side by side; one reviewer's groups of requests run in turn.
+	 */
+	async function rerun(sources: Array<FileSource>): Promise<AiRun> {
 		const limits = run.limitsUsed
 		if (!limits)
 			throw new Error('This run was recorded before its limits were saved, so its requests cannot be rebuilt. Run the review again.')
@@ -361,35 +365,47 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (limits.relatedCode !== false && input.loadRelated) related = await input.loadRelated(sources, controller.signal)
 		const facts = input.loadFacts ? await input.loadFacts(sources, controller.signal) : null
 		if (controller.signal.aborted) return finish(null)
-		const w = workers[0]
-		const member = w.member
 		const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...decisionFacts(input.decisions ?? [], sources)]
 		const risk = classifyRisk(sources, related)
 		evidence = buildEvidence(sources, facts?.annotations ?? [], related ? related.importers : null)
 		// Team runs recorded before members got their own requests shared one set, sized for the smallest member.
 		const shared = !run.team || legacySupplied(run)
-		const files = shared || !member ? null : routeFiles(member.rules, sources, risk, related?.importers ?? [])
-		const pkg = packContext(
-			input.comparison,
-			sources,
-			prepareChange(sources, limits, allFacts),
-			{ ...limits, maxBatchChars: shared ? limits.maxBatchChars : (member?.maxBatchChars ?? limits.maxBatchChars) },
-			related?.snippets ?? [],
-			allFacts,
-			risk,
-			files && { fileKeys: files, label: w.role },
-		)
-		const before = shared ? run.coverage.supplied : run.coverage.supplied.filter((x) => (x.memberId ?? null) === w.id)
-		const strip = (xs: Array<SuppliedExcerpt>): string => JSON.stringify(xs.map(({ memberId: _m, ...x }) => x))
-		if (strip(pkg.supplied) !== strip(before))
-			throw new Error('The excerpts no longer match the ones this run sent, so the requests cannot be repeated. Run the review again.')
-		w.pkg = pkg
-		const answered = evaluationOf(rule).answered ?? []
+		const owners = [...new Set(workers.map((w) => w.id))].map((id) => workers.filter((w) => w.id === id))
+		// Every reviewer's requests are rebuilt and checked before any is sent, so a mismatch sends nothing.
+		let pkg: ContextPackage | null = null
+		for (const group of owners) {
+			const w = group[0]
+			const member = w.member
+			const files = shared || !member ? null : routeFiles(member.rules, sources, risk, related?.importers ?? [])
+			pkg = packContext(
+				input.comparison,
+				sources,
+				prepareChange(sources, limits, allFacts),
+				{ ...limits, maxBatchChars: shared ? limits.maxBatchChars : (member?.maxBatchChars ?? limits.maxBatchChars) },
+				related?.snippets ?? [],
+				allFacts,
+				risk,
+				files && { fileKeys: files, label: w.role },
+			)
+			const before = shared ? run.coverage.supplied : run.coverage.supplied.filter((x) => (x.memberId ?? null) === w.id)
+			const strip = (xs: Array<SuppliedExcerpt>): string => JSON.stringify(xs.map(({ memberId: _m, ...x }) => x))
+			if (strip(pkg.supplied) !== strip(before))
+				throw new Error('The excerpts no longer match the ones this run sent, so the requests cannot be repeated. Run the review again.')
+			for (const x of group) x.pkg = pkg
+		}
 		emit()
-		await runBatches(
-			pkg,
-			w,
-			pkg.batches.filter((b) => !answered.includes(b.index)),
+		await Promise.all(
+			owners.map(async (group) => {
+				for (const w of group) {
+					// A fatal error (a revoked key, say) stops the reviewer's other groups too.
+					if (group.some((x) => x.stopped)) break
+					await runBatches(
+						w.pkg!,
+						w,
+						w.pkg!.batches.filter((b) => w.retryBatches!.includes(b.index)),
+					)
+				}
+			}),
 		)
 		await verifyBlocking()
 		return finish(pkg)
@@ -617,7 +633,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 */
 	function checkerFor(w: Worker): Worker {
 		const modelOf = (x: Worker): string => `${x.member?.connectionId ?? ''}\u0000${x.provider.model}`
-		const others = workers.filter((x) => x !== w && !x.stopped && x.member?.status !== 'failed')
+		const others = workers.filter((x) => x.id !== w.id && !x.stopped && x.member?.status !== 'failed')
 		const byWindow = (a: Worker, b: Worker): number => b.provider.limits.contextWindow - a.provider.limits.contextWindow
 		return others.filter((x) => modelOf(x) !== modelOf(w)).sort(byWindow)[0] ?? others.sort(byWindow)[0] ?? w
 	}
@@ -771,7 +787,6 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 
 	/** File coverage follows the rules: a file is reviewed once every rule was answered for every request carrying it. */
 	function finishRetry(pkg: ContextPackage | null): AiRun {
-		const w = workers[0]
 		if (pkg) {
 			for (const f of run.coverage.files) {
 				// Each rule is answered in its own reviewer's requests; a rule whose reviewer was not given the file has no slot.
@@ -789,7 +804,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				} else if (slots.some(Boolean)) f.state = 'partial'
 			}
 		}
-		if (w.member) w.member.status = w.member.requestsDone === 0 && w.member.requestsTotal > 0 ? 'failed' : 'completed'
+		for (const m of new Set(workers.flatMap((w) => (w.member ? [w.member] : []))))
+			m.status = m.requestsDone === 0 && m.requestsTotal > 0 ? 'failed' : 'completed'
 		// A retry that could not rebuild the requests leaves the run's status as it was.
 		run.status = pkg ? overallStatus(run.coverage.files, pkg, run.errors) : retry!.run.status
 		run.retrying = null
@@ -817,34 +833,65 @@ function asProviderError(error: unknown): ProviderError {
 			: new ProviderError('network', redactSecrets(error instanceof Error ? error.message : String(error)))
 }
 
-function retryLabel(rule: ReviewRule): string {
-	return `Retry of ${rule}: `
+function retryLabel(rules: Array<ReviewRule>): string {
+	return `Retry of ${rules.join(', ')}: `
 }
 
-/** The run, running again: per-rule request indexes are filled in for older runs, and the rule's last retry error is dropped. */
-function reopen(previous: AiRun, rule: ReviewRule): AiRun {
+/** The rules a retry error was about, from its label. */
+function retryLabelRules(error: string): Array<string> {
+	return /^Retry of ([^:]+): /.exec(error)?.[1].split(', ') ?? []
+}
+
+/** The run, running again: per-rule request indexes are filled in for older runs, and the rules' last retry errors are dropped. */
+function reopen(previous: AiRun, rules: Array<ReviewRule>): AiRun {
 	const run = structuredClone(previous)
 	run.status = 'running'
-	run.retrying = rule
+	run.retrying = rules
 	run.finishedAt = null
-	run.errors = run.errors.filter((e) => !e.startsWith(retryLabel(rule)))
+	run.errors = run.errors.filter((e) => !retryLabelRules(e).some((r) => rules.includes(r as ReviewRule)))
 	for (const e of run.evaluation ?? []) e.answered ??= answeredRequests(previous, e) ?? undefined
 	return run
 }
 
-function retryWorker(run: AiRun, rule: ReviewRule, provider: ReviewProvider, lookups: boolean): Worker {
-	const owner = run.evaluation?.find((e) => e.rule === rule)?.checkedBy ?? null
-	const member = owner ? (run.team?.members.find((m) => m.id === owner) ?? null) : null
-	if (member) member.status = 'running'
-	return {
-		id: member?.id ?? null,
-		role: member?.role ?? null,
-		provider,
-		rules: [rule],
-		instructions: instructionsFor([rule], member?.role ?? null, levelsOf(run), lookups),
-		member,
-		stopped: false,
+/**
+ * One worker per owning reviewer and set of missed rules: a request is sent once, asking only about the retried rules
+ * it did not answer, so a rule it did answer is not counted twice.
+ */
+function retryWorkers(
+	run: AiRun,
+	rules: Array<ReviewRule>,
+	providers: ReadonlyMap<string | null, ReviewProvider>,
+	lookups: boolean,
+): Array<Worker> {
+	const evaluations = REVIEW_RULES.filter((r) => rules.includes(r)).map((r) => run.evaluation!.find((e) => e.rule === r)!)
+	const workers: Array<Worker> = []
+	for (const owner of [...new Set(evaluations.map((e) => e.checkedBy ?? null))]) {
+		const member = owner ? (run.team?.members.find((m) => m.id === owner) ?? null) : null
+		const provider = providers.get(owner)
+		if (!provider) throw new Error(`No reviewer was given for ${member?.role ?? 'this run'}.`)
+		if (member) member.status = 'running'
+		const mine = evaluations.filter((e) => (e.checkedBy ?? null) === owner)
+		const groups = new Map<string, { rules: Array<ReviewRule>; batches: Array<number> }>()
+		for (let i = 0; i < (member ? member.requestsTotal : run.coverage.batchesTotal); i++) {
+			const missed = mine.filter((e) => !e.answered?.includes(i)).map((e) => e.rule as ReviewRule)
+			if (!missed.length) continue
+			const group = groups.get(missed.join()) ?? { rules: missed, batches: [] }
+			group.batches.push(i)
+			groups.set(missed.join(), group)
+		}
+		for (const g of groups.values())
+			workers.push({
+				id: member?.id ?? null,
+				role: member?.role ?? null,
+				provider,
+				rules: g.rules,
+				instructions: instructionsFor(g.rules, member?.role ?? null, levelsOf(run), lookups),
+				member,
+				stopped: false,
+				retryBatches: g.batches,
+			})
 	}
+	return workers
 }
 
 /**

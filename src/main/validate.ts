@@ -410,6 +410,10 @@ export function reviewRule(v: unknown): ReviewRule {
 	return oneOf(v, REVIEW_RULES, 'rule')
 }
 
+export function reviewRules(v: unknown): Array<ReviewRule> {
+	return arr(v, 'rules').map(reviewRule)
+}
+
 export function modelSelection(v: unknown): ModelSelection {
 	const o = obj(v, 'model selection')
 	return { connectionId: connectionId(o.connectionId), modelId: modelId(o.modelId) }

@@ -592,10 +592,10 @@ export function App() {
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
 	}
 
-	const retryRule = async (run: AiRun, rule: ReviewRule): Promise<void> => {
+	const retryRules = async (run: AiRun, rules: Array<ReviewRule>): Promise<void> => {
 		if (!comparison) return
 		setAiError(null)
-		const r = await window.review.retryAiRule(comparison.id, run.id, rule)
+		const r = await window.review.retryAiRules(comparison.id, run.id, rules)
 		if (!r.ok) setAiError(r.error.message)
 		else if (comparisonIdRef.current === r.value.reviewId) setAiRuns((runs) => runs.map((x) => (x.id === r.value.id ? r.value : x)))
 	}
@@ -1097,7 +1097,7 @@ export function App() {
 										threads={threads}
 										selectedFindingId={selectedFinding?.id ?? null}
 										askFocus={askFocus}
-										onRetryRule={activeRun ? null : (run, rule) => void retryRule(run, rule)}
+										onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
 										onOpen={openFinding}
 										onAccept={acceptFinding}
 										onAsk={askFinding}

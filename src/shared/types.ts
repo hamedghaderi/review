@@ -836,7 +836,7 @@ export interface AiRun {
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
-	retrying?: ReviewRule | null // the one rule a running retry asks about; the run's other rules are not being checked
+	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
@@ -1078,7 +1078,7 @@ export const IPC = {
 	aiSelectTeam: 'ai:team-select',
 	aiStart: 'ai:start',
 	aiCancel: 'ai:cancel',
-	aiRetryRule: 'ai:retry-rule',
+	aiRetryRules: 'ai:retry-rules',
 	aiRunUpdate: 'ai:run-update',
 	mcpSettings: 'mcp:settings',
 	mcpSettingsChanged: 'mcp:settings-changed',
@@ -1169,8 +1169,8 @@ export interface ReviewApi {
 	mcpImportClaude(repoId: string | null, keys: Array<string>): Promise<Result<McpSettingsView>>
 	startAiReview(reviewId: string, scope: AiScope, reviewer: ReviewerChoice): Promise<Result<AiRun>>
 	cancelAiReview(runId: string): Promise<Result<boolean>>
-	/** Asks the rule's reviewer again, for that rule only, on the requests of a finished run that did not cover it. */
-	retryAiRule(reviewId: string, runId: string, rule: ReviewRule): Promise<Result<AiRun>>
+	/** Asks each rule's reviewer again, for those rules only, on the requests of a finished run that did not cover them. */
+	retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<Result<AiRun>>
 	onAiRunUpdate(handler: (run: AiRun) => void): () => void
 	/** Asks the model that raised a finding a question about it. The answer is added to the finding's thread. */
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
