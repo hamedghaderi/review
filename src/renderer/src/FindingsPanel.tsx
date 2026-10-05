@@ -602,11 +602,13 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rule: ReviewRule) =>
 		const e = byRule.get(rule)!
 		const need = requestsFor(run, e.checkedBy)
 		const complete = need > 0 && e.requests >= need
-		return complete ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : running ? 'pending' : 'missing'
+		// A retry runs one rule; the others it leaves incomplete stay missing rather than looking checked again.
+		const checking = running && (!run.retrying || run.retrying === rule)
+		return complete ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
 	}
 	// A finished run lists only the rules that need a look (findings, or not checked everywhere); the rest on request.
 	const notable = ev.filter((e) => stateOf(e.rule) !== 'clear')
-	const showAll = all || running
+	const showAll = all || (running && !run.retrying)
 	const withFindings = ev.filter((e) => stateOf(e.rule) === 'found').length
 	const missing = ev.filter((e) => stateOf(e.rule) === 'missing').length
 	return (
