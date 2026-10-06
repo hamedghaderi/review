@@ -14,7 +14,6 @@ import type {
 	Finding,
 	FindingLevel,
 	GitHubStatus,
-	PrGraph,
 	PrReviewState,
 	LoadedComparison,
 	ModelSelection,
@@ -36,8 +35,9 @@ import { PublishDialog } from './PublishDialog.tsx'
 import { QuickOpen } from './QuickOpen.tsx'
 import { ReviewBadge } from './PrReview.tsx'
 import { PanelBoundary } from './PanelBoundary.tsx'
-import { usePrGraph } from './prGraph.ts'
-import { stackOf } from '../../shared/prStack.ts'
+import { useMyReviews, usePrGraph } from './prGraph.ts'
+import { stackGuide } from '../../shared/prStack.ts'
+import { StackControl } from './Stack.tsx'
 import { CommentsPanel } from './CommentsPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
 import { discussedAt } from './discussed.ts'
@@ -671,6 +671,8 @@ export function App() {
 	// Where the open pull request sits in its stack, from the mapped repository's open PRs.
 	const stackRepo = view === 'review' && comparison?.pr && session?.github.selected?.toLowerCase() === comparison.pr.repo.toLowerCase()
 	const prGraph = usePrGraph(session?.repo.id ?? null, !!stackRepo && github?.state === 'connected', comparison?.id)
+	const myReviews = useMyReviews(session?.repo.id ?? null, !!stackRepo && github?.state === 'connected', comparison?.id)
+	const guide = stackRepo && prGraph && comparison?.pr ? stackGuide(prGraph, comparison.pr.number, myReviews) : null
 
 	const openFinding = (f: Finding): void => {
 		selectFile(f.anchor.fileKey)
@@ -905,7 +907,15 @@ export function App() {
 						author={comparison.pr?.author ?? (prReview?.id === comparison.id ? prReview.author : null)}
 					/>
 					{comparison.pr && prReview?.id === comparison.id && <ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />}
-					{stackRepo && prGraph && comparison.pr && <StackBadge graph={prGraph} number={comparison.pr.number} />}
+					{guide && comparison.pr && session && (
+						<StackControl
+							guide={guide}
+							number={comparison.pr.number}
+							onOpen={(n) =>
+								void openReview(session.repo.id, { kind: 'target', target: { kind: 'pr', repo: comparison.pr!.repo, number: n } })
+							}
+						/>
+					)}
 					{snapshotsForTarget.length > 1 && (
 						<label className="hfield shrink snapshot-pick" title="Earlier snapshots of this target stay pinned to their original commits">
 							<span className="muted">Snapshot</span>
@@ -1279,27 +1289,6 @@ export function App() {
 }
 
 /** "Stacked on #123" for a PR whose base branch is another open PR's branch, with the whole stack in the tooltip. */
-function StackBadge({ graph, number }: { graph: PrGraph; number: number }) {
-	const self = graph.nodes.find((n) => n.number === number)
-	const s = self && stackOf(graph, self)
-	if (!s) return null
-	const parent = s.parents[s.parents.length - 1]
-	const onTop = s.children.reduce((n, c) => n + 1 + c.above, 0)
-	const title = [
-		`Stack: ${[s.base, ...s.parents.map((n) => `#${n.number} ${n.title}`), `#${number} (this PR)`].filter(Boolean).join('\n  › ')}`,
-		...(s.children.length
-			? [`Stacked on it: ${s.children.map((c) => `#${c.node.number}${c.above ? ` (+${c.above})` : ''}`).join(', ')}`]
-			: []),
-		'The diff shows only this PR’s changes, against the branch it is stacked on.',
-	].join('\n')
-	return (
-		<span className="pill small-pill stack-badge nowrap" title={title}>
-			{parent ? `Stacked on #${parent.number}` : 'Bottom of a stack'}
-			{onTop ? ` · ${onTop} above` : ''}
-		</span>
-	)
-}
-
 /** One tab per open repository. Same-named clones are told apart by their parent folder. */
 function RepoTabs(props: {
 	tabs: Array<RepoTab>

@@ -4,6 +4,9 @@ import { parsePrQuery } from '../../shared/prQuery.ts'
 import type { AppError, BranchRef, InboxStatus, PrFilter, PrSummary, RepoInfo, ReviewSummary, ReviewTarget } from '../../shared/types.ts'
 import { ago, defaultBaseFor, matchBranches } from './branches.ts'
 import { ReviewBadge } from './PrReview.tsx'
+import { useMyReviews, usePrGraph } from './prGraph.ts'
+import { isStackStart, stackPosition } from './Stack.tsx'
+import { stackGuide, type StackGuide } from '../../shared/prStack.ts'
 
 interface Props {
 	repo: RepoInfo
@@ -90,6 +93,10 @@ export function QuickOpen(props: Props) {
 	const [cursor, setCursor] = useState(0)
 	const [actionsOpen, setActionsOpen] = useState(false)
 	const [actionCursor, setActionCursor] = useState(0)
+	// Stacked PRs show where they sit and offer the stack's next PR to review; both are cached in the main process.
+	const graph = usePrGraph(repo.id, signedIn && !!githubRepo)
+	const mine = useMyReviews(repo.id, signedIn && !!githubRepo)
+	const guideOf = (n: number): StackGuide | null => (graph ? stackGuide(graph, n, mine) : null)
 	const [prs, setPrs] = useState<{ key: string; items: Array<PrSummary>; total: number; error: AppError | null } | null>(null)
 	const [loading, setLoading] = useState(false)
 	const input = useRef<HTMLInputElement>(null)
@@ -218,6 +225,12 @@ export function QuickOpen(props: Props) {
 					label: 'Open review',
 					keys: '↵',
 					run: close(() => props.onOpenReview({ kind: 'pr', repo: githubRepo, number: pr.number })),
+				})
+			const next = guideOf(pr.number)?.next
+			if (githubRepo && next && next.node.number !== pr.number)
+				out.push({
+					label: `Start the stack at #${next.node.number}`,
+					run: close(() => props.onOpenReview({ kind: 'pr', repo: githubRepo, number: next.node.number })),
 				})
 			out.push({ label: 'Show in Browse', keys: '⌘↵', run: close(() => props.onPickPr(pr)) })
 			out.push({ label: 'Open on GitHub', run: close(() => window.open(pr.url, '_blank')) })
@@ -418,7 +431,7 @@ export function QuickOpen(props: Props) {
 											actionsFor(it)[0]?.run()
 										}}
 									>
-										<Row it={it} words={words} viewer={viewer} />
+										<Row it={it} words={words} viewer={viewer} guide={it.t === 'pr' ? guideOf(it.pr.number) : null} />
 									</div>
 								)
 							})}
@@ -479,7 +492,7 @@ export function QuickOpen(props: Props) {
 	)
 }
 
-function Row({ it, words, viewer }: { it: Item; words: Array<string>; viewer: string | null }) {
+function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; viewer: string | null; guide: StackGuide | null }) {
 	if (it.t === 'pr') {
 		const pr = it.pr
 		const inbox = pr.inbox && pr.inbox !== 'reviewed' ? pr.inbox : null
@@ -502,6 +515,18 @@ function Row({ it, words, viewer }: { it: Item; words: Array<string>; viewer: st
 					)}
 				</span>
 				<span className="spacer" />
+				{guide && (
+					<span
+						className={`pill small-pill ${isStackStart(guide, pr.number) ? 'stack-start' : 'stack-badge'}`}
+						title={
+							guide.next && !isStackStart(guide, pr.number)
+								? `Part ${stackPosition(guide)} of a stack. Start at #${guide.next.node.number} (⌘K for actions).`
+								: `Part ${stackPosition(guide)} of a stack, counted from the bottom`
+						}
+					>
+						{isStackStart(guide, pr.number) ? `Start here · ${stackPosition(guide)}` : `Stack ${stackPosition(guide)}`}
+					</span>
+				)}
 				{pr.state === 'draft' && <span className="pill small-pill">Draft</span>}
 				{requested ? (
 					<span className={`pill small-pill inbox-pill ${inbox ?? ''}`} title={inbox ? INBOX_LABEL[inbox] : undefined}>

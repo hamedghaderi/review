@@ -50,6 +50,7 @@ const api: ReviewApi = {
 	searchPrs: (repoId, q, slot) => ipcRenderer.invoke(IPC.searchPrs, repoId, q, slot),
 	prDetail: (repoId, n) => ipcRenderer.invoke(IPC.prDetail, repoId, n),
 	prGraph: (repoId) => ipcRenderer.invoke(IPC.prGraph, repoId),
+	myReviews: (repoId) => ipcRenderer.invoke(IPC.myReviews, repoId),
 	branchPr: (repoId, head) => ipcRenderer.invoke(IPC.branchPr, repoId, head),
 	publishPlan: (repoId, reviewId) => ipcRenderer.invoke(IPC.publishPlan, repoId, reviewId),
 	publishComment: (repoId, reviewId, commentId, outside) => ipcRenderer.invoke(IPC.publishComment, repoId, reviewId, commentId, outside),

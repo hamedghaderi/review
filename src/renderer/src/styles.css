@@ -2918,16 +2918,103 @@ input.member-role {
 	color: var(--text-2);
 	flex-shrink: 0;
 }
-.stack-line {
-	display: flex;
-	gap: 4px;
-	align-items: center;
-	flex-wrap: wrap;
+.pill.stack-start {
+	background: var(--accent);
+	color: var(--accent-text);
+	border-color: transparent;
 }
-.stack-step {
-	display: inline-flex;
+/* The whole stack in review order: the PR preview, and the review header's popover. */
+.stack-list {
+	display: flex;
+	flex-direction: column;
 	gap: 4px;
+	min-width: 0;
+}
+.stack-list ol {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.stack-row {
+	display: flex;
 	align-items: center;
+	gap: 6px;
+	width: 100%;
+	min-width: 0;
+	height: 26px;
+	padding: 0 6px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	color: inherit;
+}
+button.stack-row {
+	cursor: pointer;
+}
+button.stack-row:hover {
+	background: var(--hover);
+}
+.stack-item.current .stack-row {
+	background: var(--accent-soft);
+}
+.stack-n {
+	width: 14px;
+	flex-shrink: 0;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.stack-num {
+	flex-shrink: 0;
+	color: var(--text-2);
+}
+.stack-title {
+	flex: 1;
+}
+.stack-row .pill {
+	flex-shrink: 0;
+}
+.stack-status {
+	flex-shrink: 0;
+	width: 14px;
+	text-align: center;
+}
+.stack-status.needs-you {
+	color: var(--accent);
+}
+.stack-status.reviewed {
+	color: var(--ok);
+}
+.stack-control {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+.stack-control > .stack-badge {
+	cursor: pointer;
+	border: 0;
+	font: inherit;
+	font-size: 10px;
+}
+.btn.stack-first {
+	border-color: var(--accent-line);
+	color: var(--accent);
+}
+/* Placed under its button from script (fixed, so no panel clips it); a long stack scrolls inside it. */
+.stack-popover {
+	position: fixed;
+	z-index: 30;
+	overflow: auto;
+	padding: 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: 8px;
+	background: var(--bg);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
 }
 
 /* Inbox */
