@@ -84,6 +84,9 @@ function targetKey(t: ReviewTarget): string {
 	return t.kind === 'pr' ? `pr:${t.repo.toLowerCase()}#${t.number}` : `branch:${t.headRef}|${t.baseRef}`
 }
 
+/** How shortcuts are written on this platform: "⌘" on macOS, "Ctrl+" elsewhere. */
+const MOD_KEY = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
+
 function isTyping(el: Element | null): boolean {
 	if (!(el instanceof HTMLElement)) return false
 	return (
@@ -522,10 +525,18 @@ export function App() {
 		}
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Global shortcuts: Cmd/Ctrl+P quick open, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible search unless typing somewhere.
+	// Global shortcuts: Cmd/Ctrl+, settings, Cmd/Ctrl+P quick open, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible
+	// search unless typing somewhere.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
-			if (!sessionRef.current || document.querySelector('.modal')) return
+			if (document.querySelector('.modal')) return
+			// Settings opens from anywhere, even before a repository is open (the usual ⌘, on macOS, Ctrl+, elsewhere).
+			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ',') {
+				e.preventDefault()
+				setSettingsOpen({ team: null })
+				return
+			}
+			if (!sessionRef.current) return
 			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
 				e.preventDefault()
 				setPaletteOpen(true)
@@ -880,7 +891,7 @@ export function App() {
 					<button
 						className="btn ghost icon settings-btn"
 						onClick={() => setSettingsOpen({ team: null })}
-						title="Settings · AI providers"
+						title={`Settings · AI providers (${MOD_KEY},)`}
 						aria-label="Settings"
 					>
 						<svg
@@ -1300,7 +1311,7 @@ function RepoTabs(props: {
 	onDismissError(): void
 }) {
 	const { tabs, activeId, error } = props
-	const mod = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
+	const mod = MOD_KEY
 	// When focus is in the tab row, it follows the selected tab, so a shortcut never leaves the ring on the old one.
 	const nav = useRef<HTMLElement>(null)
 	useEffect(() => {
