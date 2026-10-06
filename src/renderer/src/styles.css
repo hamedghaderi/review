@@ -8,6 +8,9 @@
 	--border: #e4e4ec;
 	--border-strong: #d2d2de;
 	--hover: #efeff5;
+	--track: #ebebf1; /* segmented-control track; the selected segment sits on it in --track-on */
+	--track-on: #ffffff;
+	--track-shadow: 0 1px 2px rgb(30 30 50 / 0.1), 0 1px 1px rgb(30 30 50 / 0.06);
 	--accent: #6d4aff;
 	--accent-text: #ffffff;
 	--accent-soft: #efeaff;
@@ -40,6 +43,9 @@
 		--border: #2e2f38;
 		--border-strong: #3b3c47;
 		--hover: #272832;
+		--track: #141519;
+		--track-on: #2c2d37;
+		--track-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
 		--accent: #9b80ff;
 		--accent-text: #16161c;
 		--accent-soft: #2c2748;
@@ -3482,14 +3488,14 @@ input.member-role {
 	min-width: 0;
 }
 
-/* Repository tabs: one per open repository, above the header. The selected one is filled. */
+/* Repository tabs: a segmented control, one segment per open repository; the selected one is raised. */
 .repo-tabs {
 	display: flex;
 	align-items: center;
-	gap: 4px;
-	min-height: 36px;
+	gap: 6px;
+	min-height: 40px;
 	padding: 4px 8px;
-	background: var(--panel);
+	background: var(--chrome);
 	border-bottom: 1px solid var(--border);
 	flex-shrink: 0;
 	min-width: 0;
@@ -3499,25 +3505,29 @@ input.member-role {
 	align-items: center;
 	gap: 2px;
 	min-width: 0;
+	padding: 3px;
+	border-radius: 8px;
+	background: var(--track);
 	overflow-x: auto;
 	scrollbar-width: none;
 }
 .repo-tab {
 	display: flex;
 	align-items: center;
-	flex: 0 1 200px;
-	min-width: 90px;
-	height: 28px;
+	flex: 0 1 auto;
+	min-width: 72px;
+	max-width: 220px;
+	height: 26px;
 	border-radius: 6px;
 	color: var(--text-2);
 }
 .repo-tab:not(.on):hover {
-	background: var(--hover);
 	color: var(--text);
 }
 .repo-tab.on {
-	background: var(--sel-bg);
-	color: var(--accent);
+	background: var(--track-on);
+	box-shadow: var(--track-shadow);
+	color: var(--text);
 }
 .repo-tab-name {
 	flex: 1;
@@ -3528,7 +3538,7 @@ input.member-role {
 	color: inherit;
 	font: inherit;
 	font-size: 12px;
-	text-align: left;
+	text-align: center;
 	cursor: pointer;
 }
 .repo-tab.on .repo-tab-name {
@@ -3574,7 +3584,7 @@ input.member-role {
 }
 .repo-tab-close:hover,
 .repo-tab-add:hover {
-	background: var(--border);
+	background: color-mix(in srgb, var(--text) 10%, transparent);
 	color: var(--text);
 }
 .repo-tab-add {
@@ -3597,10 +3607,4 @@ input.member-role {
 }
 .repo-tab-name:focus-visible {
 	border-radius: 6px 0 0 6px;
-}
-.repo-tab.on .repo-tab-close {
-	color: var(--accent);
-}
-.repo-tab.on .repo-tab-close:hover {
-	background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
