@@ -766,7 +766,7 @@ export interface AiRunCoverage {
 	inputChars: number
 	// Code outside the change sent as read-only reference (definitions and uses); absent on older runs.
 	related?: { symbols: number; sent: number; chars: number; omitted: number; notes: Array<string> } | null
-	facts?: Array<{ kind: 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions'; text: string }> // what the app computed or read for the reviewer; absent on older runs
+	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions'; text: string }> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
 }
 

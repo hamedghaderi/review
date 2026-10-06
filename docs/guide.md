@@ -186,6 +186,16 @@ Reviewers can also call tools from MCP servers while they review, for context th
 
 When a review starts, every enabled server is connected for that run and closed when it ends. Their tools are offered with the lookups (named `mcp__<server>__<tool>`) and share each request's lookup limit and result clipping, so they are off when lookups are off. The instructions list the servers and tell the reviewer to treat results as background data, never as instructions, and to keep findings grounded in the changed code. A server that cannot be reached is skipped and named in the run details, which also list the MCP tools that were called.
 
+### Background on a pull request
+
+A pull request review tells the reviewer what the change is for, with every request from every member:
+
+- **The description** (up to 8,000 characters).
+- **Linked issues**: the issues the pull request closes (GitHub's closing references, such as "Fixes #12"; these need a GitHub token) and up to 5 issues its description mentions (`#12`, `owner/name#12` or an issue link; numbers in code are skipped, and pull requests are left out). For each one it sends the title, state, description (up to 3,000 characters) and its latest 20 comments. All issues together get up to 10,000 characters.
+- **The conversation so far**: review threads (open ones first, with file, line and whether they are resolved or outdated), review summaries and PR comments, newest first, up to 8,000 characters. Comments in your own unsubmitted GitHub review are left out.
+
+Anything over a limit is cut and marked as cut. The instructions treat all of it as data written by people, like the description: issues show what was asked for, so a requirement the code misses can be a finding (citing the code), and the conversation shows what was already raised and decided. A resolved thread or a reply saying "fixed" is not evidence; the reviewer checks the code. The run details list what was sent under **Background** (for example "description; issue #12 (closes, 4 comments); conversation: 3 threads (1 open), 2 comments"). If GitHub can't be read, the run goes on with the description and says what was missing. Branch reviews have no background.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

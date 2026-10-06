@@ -33,6 +33,8 @@ export interface ComparisonAccess {
 	loadFileLines(fileKey: string): Promise<FileLinesResult>
 	findRelated?(sources: Array<FileSource>, signal: AbortSignal): Promise<RelatedResult>
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
+	/** Linked issues and the PR conversation; absent for branch reviews. */
+	loadBackground?: RunInput['loadBackground']
 	/** Findings the reviewer dismissed on earlier runs of this pull request or branch, newest first. */
 	pastDecisions?(): Array<PastDecision>
 	/** Read-only lookups in the comparison's two commits, for one review request, plus the run's MCP tools if any. */
@@ -354,6 +356,7 @@ export class AiController {
 				loadSources: () => loadSources(access, keys),
 				loadRelated: access.findRelated?.bind(access),
 				loadFacts: access.loadFacts?.bind(access),
+				loadBackground: access.loadBackground?.bind(access),
 				tools: tools ? (budget) => tools.call(access, budget, external) : undefined,
 				external,
 				decisions: access.pastDecisions?.() ?? [],
