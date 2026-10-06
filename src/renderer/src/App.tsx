@@ -39,6 +39,7 @@ import { PanelBoundary } from './PanelBoundary.tsx'
 import { usePrGraph } from './prGraph.ts'
 import { stackOf } from '../../shared/prStack.ts'
 import { CommentsPanel } from './CommentsPanel.tsx'
+import { ContextPanel } from './ContextPanel.tsx'
 import { discussedAt } from './discussed.ts'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
@@ -120,7 +121,7 @@ export function App() {
 	const [settingsOpen, setSettingsOpen] = useState<false | { team: 'new' | string | null }>(false)
 	const [aiRuns, setAiRuns] = useState<Array<AiRun>>([])
 	const [aiError, setAiError] = useState<string | null>(null)
-	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'github'>('comments')
+	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'github' | 'context'>('comments')
 	const [discussion, setDiscussion] = useState<{ reviewId: string; value: Discussion | null; loading: boolean } | null>(null)
 	const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null)
 	const left = usePanelWidth('panel.left', 280, 180, 600)
@@ -658,6 +659,7 @@ export function App() {
 
 	const retryRules = async (run: AiRun, rules: Array<ReviewRule>): Promise<void> => {
 		if (!comparison) return
+		await persist()
 		setAiError(null)
 		const r = await window.review.retryAiRules(comparison.id, run.id, rules)
 		if (!r.ok) setAiError(r.error.message)
@@ -1136,6 +1138,20 @@ export function App() {
 										{current?.loading && <span className="spinner small" aria-label="loading" />}
 									</button>
 								)}
+								<button
+									role="tab"
+									aria-selected={rightTab === 'context'}
+									className={rightTab === 'context' ? 'on' : ''}
+									onClick={() => setRightTab('context')}
+									title="Notes and files you give the AI reviewer"
+								>
+									Context
+									{!!review.context && (
+										<span className="count">
+											{review.context.files.length + (review.context.images?.length ?? 0) + (review.context.notes.trim() ? 1 : 0)}
+										</span>
+									)}
+								</button>
 							</div>
 							{aiError && (
 								<button className="notice" onClick={() => setAiError(null)} title="Dismiss">
@@ -1143,7 +1159,17 @@ export function App() {
 								</button>
 							)}
 							<PanelBoundary resetKey={`${comparison?.id ?? ''}|${rightTab}`}>
-								{rightTab === 'github' && isPrReview ? (
+								{rightTab === 'context' ? (
+									<ContextPanel
+										context={review.context ?? null}
+										isPr={isPrReview}
+										onNotes={(notes) => change((r) => ops.setContextNotes(r, notes))}
+										onAddFiles={(f) => change((r) => ops.addContextFiles(r, f))}
+										onRemoveFile={(id) => change((r) => ops.removeContextFile(r, id))}
+										onAddImages={(i) => change((r) => ops.addContextImages(r, i))}
+										onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
+									/>
+								) : rightTab === 'github' && isPrReview ? (
 									<DiscussionPanel
 										discussion={current?.value ?? null}
 										loading={!!current?.loading}

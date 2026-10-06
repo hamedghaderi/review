@@ -955,3 +955,60 @@ test('review teams: saved with settings, validated, selected, run through the co
 	await connections.removeTeam(team.id)
 	assert.equal(connections.view().teams.length, 0)
 })
+
+test('images: every adapter sends them after the text in its own API shape; requests without images are unchanged', async () => {
+	const mock = await mockServer()
+	try {
+		const { connections } = await services(tmp(), redirectTo(mock.base))
+		const keys = {
+			openai: 'sk-openai-aaaa',
+			anthropic: 'sk-ant-bbbbbbbb',
+			gemini: 'AIzaCCCCCCCCCCCC',
+			openrouter: 'sk-or-dddddddd',
+		} as const
+		const models = { openai: 'local-a', anthropic: 'claude-a', gemini: 'gem-a', openrouter: 'vendor/model-a' }
+		const batch = { index: 0, excerpts: [], fileKeys: [], overview: '', chars: 0 }
+		const images = [{ name: 'shot.png', mediaType: 'image/png' as const, data: 'iVBORw0KGgo=' }]
+		for (const kind of Object.keys(keys) as Array<keyof typeof keys>) {
+			const c = await connections.create({ kind })
+			await connections.setCredential(c.id, keys[kind], true)
+			await connections.test(c.id)
+			const cfg = await connections.runConfig({ connectionId: c.id, modelId: models[kind] })
+			mock.seen.length = 0
+			await cfg.provider.review({ instructions: 'SYS', input: 'IN', batch, images }, new AbortController().signal)
+			const body = mock.seen[0].body as Record<string, any>
+			if (kind === 'openai') {
+				assert.deepEqual(body.input[0].content, [
+					{ type: 'input_text', text: 'IN' },
+					{ type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo=', detail: 'auto' },
+				])
+			} else if (kind === 'openrouter') {
+				assert.deepEqual(body.messages[1].content, [
+					{ type: 'text', text: 'IN' },
+					{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+				])
+			} else if (kind === 'anthropic') {
+				assert.deepEqual(body.messages[0].content, [
+					{ type: 'text', text: 'IN' },
+					{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+				])
+			} else {
+				assert.deepEqual(body.contents[0].parts, [{ text: 'IN' }, { inlineData: { mimeType: 'image/png', data: 'iVBORw0KGgo=' } }])
+			}
+			mock.seen.length = 0
+			await cfg.provider.review({ instructions: 'SYS', input: 'IN', batch }, new AbortController().signal)
+			const plain = mock.seen[0].body as Record<string, any>
+			const text =
+				kind === 'openai'
+					? plain.input[0].content
+					: kind === 'openrouter'
+						? plain.messages[1].content
+						: kind === 'anthropic'
+							? plain.messages[0].content
+							: plain.contents[0].parts
+			assert.deepEqual(text, kind === 'gemini' ? [{ text: 'IN' }] : 'IN', kind)
+		}
+	} finally {
+		await mock.close()
+	}
+})

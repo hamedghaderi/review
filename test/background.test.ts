@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildBackground, CONVERSATION_MAX, issueRefs, ISSUES_MAX } from '../src/main/ai/background.ts'
+import { buildBackground, CONVERSATION_MAX, issueRefs, ISSUES_MAX, NOTES_MAX } from '../src/main/ai/background.ts'
 import type { LinkedIssue } from '../src/main/github.ts'
 import type { Discussion, DiscussionComment, DiscussionThread } from '../src/shared/types.ts'
 
@@ -144,4 +144,36 @@ test('background: an unreadable discussion and an empty one add nothing; only th
 		assert.equal(b.summary, 'description')
 	}
 	assert.deepEqual(buildBackground({ description: null, issues: [], discussion: null }), { sections: [], chars: 0, summary: null })
+})
+
+test('background: your notes and files come right after the description; files share what the notes leave', () => {
+	const file = (id: string, name: string, n: number) => ({ id, name, text: name[0].repeat(n), addedAt: '' })
+	const b = buildBackground({
+		description: 'd',
+		context: {
+			notes: 'Focus on rounding.',
+			files: [file('1', 'log.txt', 30_000), file('2', 'spec.md', 500), file('3', 'trace.json', 30_000)],
+		},
+		issues: [issue()],
+		discussion: null,
+	})
+	assert.deepEqual(
+		b.sections.map((s) => s.tag),
+		['DESCRIPTION', 'NOTES', 'ISSUES'],
+	)
+	const notes = b.sections[1].text
+	assert.ok(notes.startsWith('Focus on rounding.\n\n--- File: log.txt ---\n'))
+	assert.ok(notes.includes(`--- File: spec.md ---\n${'s'.repeat(500)}\n`), 'a short file is sent whole')
+	assert.ok(notes.length <= NOTES_MAX + 200, `notes ${notes.length}`)
+	assert.equal(notes.split('[cut]').length, 3, 'the two long files are cut, evenly')
+	assert.equal(b.summary, 'description; your notes, 3 files (log.txt, spec.md, trace.json); issue #12 (closes)')
+
+	const onlyFile = buildBackground({
+		description: null,
+		context: { notes: ' ', files: [file('1', 'a.md', 10)] },
+		issues: [],
+		discussion: null,
+	})
+	assert.equal(onlyFile.summary, '1 file (a.md)')
+	assert.equal(buildBackground({ description: null, context: { notes: '  ', files: [] }, issues: [], discussion: null }).summary, null)
 })

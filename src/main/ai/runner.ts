@@ -15,8 +15,10 @@ import {
 	type SuppliedExcerpt,
 	type FindingVerification,
 	type PastDecision,
+	type ReviewContext,
 } from '../../shared/types.ts'
 import type { LinkedIssue } from '../github.ts'
+import type { RequestImage } from './provider.ts'
 import type { ContextBatch, ContextLimits, ContextPackage, FileSource } from './context.ts'
 import { capacityChars, CHARS_PER_TOKEN, fitToModel, packContext, prepareChange, settleFiles } from './context.ts'
 import { applyBudget, findingKey, InvalidOutputError, isDuplicate, sameProblem, validateBatchOutput } from './findings.ts'
@@ -63,6 +65,9 @@ export interface TeamRunMember {
 	provenance: { connectionId: string; connectionLabel: string; endpoint: string }
 }
 
+/** Tokens one image is reserved, scaled to at most 1568px on its longest side (Anthropic counts up to ~3,300; OpenAI less). */
+const IMAGE_TOKENS = 2500
+
 interface Worker {
 	id: string | null
 	role: string | null
@@ -71,6 +76,7 @@ interface Worker {
 	instructions: string
 	member: RunMember | null
 	stopped: boolean
+	imagesRejected?: boolean // the model refused a request with images; its later requests go without them
 	pkg?: ContextPackage // this reviewer's own requests, once built
 	retryBatches?: Array<number> // a retry's requests to send: the ones that missed exactly this worker's rules
 }
@@ -84,6 +90,10 @@ export interface RunInput {
 	loadRelated?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<RelatedResult>
 	/** Linked issues and the conversation so far, for pull requests; the description is always included without it. */
 	loadBackground?: (signal: AbortSignal) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }>
+	/** Notes and text files you gave the reviewer for this review. */
+	context?: ReviewContext | null
+	/** The images of that context, sent with every request to models that accept them. */
+	images?: Array<RequestImage>
 	/** Dependency range checks and CI results, computed or read by the app. */
 	loadFacts?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<FactsResult>
 	/** Read-only lookups in the reviewed commits, offered to the reviewer when the limits allow; one set per request. */
@@ -160,7 +170,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				levels,
 			}
 	const description = input.comparison.pr?.body?.trim() || null
-	let background = buildBackground({ description, issues: [], discussion: null })
+	const images = input.images ?? []
+	// Images count against the context window as tokens, not characters; reserve their likely size as characters.
+	const imageChars = images.length * IMAGE_TOKENS * CHARS_PER_TOKEN
+	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null })
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups)
 		: options.team
@@ -228,7 +241,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				try {
 					const b = await input.loadBackground(controller.signal)
 					for (const n of b.notes) notice(n)
-					background = buildBackground({ description, issues: b.issues, discussion: b.discussion })
+					background = buildBackground({ description, context: input.context ?? null, issues: b.issues, discussion: b.discussion })
 				} catch (e) {
 					if (controller.signal.aborted) return finish(null)
 					notice(
@@ -245,7 +258,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					options.limits,
 					l,
 					outputTokens,
-					w.instructions.length + toolChars + background.chars,
+					w.instructions.length + toolChars + background.chars + imageChars,
 					lookups ? LOOKUP_RESERVE : 0,
 				)
 				if (!fitted) {
@@ -508,9 +521,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		for (let attempt = 0; ; attempt++) {
 			const budget = lookups ? lookupBudget(batch, w) : null
 			const tools = budget && input.tools ? input.tools(budget) : undefined
+			const sendImages = images.length > 0 && !w.imagesRejected
 			try {
 				const response = await w.provider.review(
-					{ instructions: w.instructions, input: buildInput(batch, background.sections), batch, tools },
+					{ instructions: w.instructions, input: buildInput(batch, background.sections), batch, tools, ...(sendImages ? { images } : {}) },
 					controller.signal,
 				)
 				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
@@ -529,6 +543,13 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return { ok: false, error: e }
+				// Many models and gateways refuse images outright; the request is sent again without them, once per reviewer.
+				if (sendImages && (e.kind === 'bad-request' || e.kind === 'model-unavailable' || e.kind === 'unsupported')) {
+					w.imagesRejected = true
+					notice(`${w.role ? `${w.role}: the` : 'The'} model did not accept images, so its requests were sent without them: ${e.message}`)
+					attempt--
+					continue
+				}
 				if (!e.retryable || attempt + 1 >= options.maxAttempts) return { ok: false, error: e }
 				await sleep(options.backoffMs(attempt, e), controller.signal)
 				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
@@ -545,7 +566,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 */
 	function lookupBudget(batch: ContextBatch, w: Worker): LookupBudget | null {
 		const l = w.provider.limits
-		const room = capacityChars(l.contextWindow, outputBudget(l), w.instructions.length + toolChars + background.chars) - batch.chars
+		const room =
+			capacityChars(l.contextWindow, outputBudget(l), w.instructions.length + toolChars + background.chars + imageChars) - batch.chars
 		const levels = batch.fileKeys.map((k) => run.coverage.files.find((f) => f.fileKey === k)?.risk?.level)
 		// Files without a rating (older runs) count as high, the full budget they had before.
 		const level = levels.some((x) => x === 'high' || x === undefined) ? 'high' : levels.includes('medium') ? 'medium' : 'low'
@@ -737,7 +759,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 */
 	function checkTruncation(batch: ContextPackage['batches'][number], reportedInput: number | null, w: Worker): void {
 		if (reportedInput === null || reportedInput <= 0) return
-		const sentChars = batch.chars + w.instructions.length + background.chars
+		const sentChars = batch.chars + w.instructions.length + background.chars + (w.imagesRejected ? 0 : imageChars)
 		const minExpected = Math.floor(sentChars / (CHARS_PER_TOKEN * 3)) // generous: 9 chars/token is already implausible
 		if (sentChars > 4000 && reportedInput < minExpected) {
 			throw new ProviderError(

@@ -20,9 +20,18 @@ import type {
 	ReviewLimits,
 	ReviewRule,
 } from '../shared/types.ts'
+import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
-import { DISMISS_REASONS, FINDING_LEVELS, REVIEW_RULES, type FindingLevel, type FindingLevelSettings } from '../shared/types.ts'
+import {
+	CONTEXT_LIMITS,
+	DISMISS_REASONS,
+	FINDING_LEVELS,
+	REVIEW_RULES,
+	type FindingLevel,
+	type FindingLevelSettings,
+	type ReviewContext,
+} from '../shared/types.ts'
 
 const LIMITS = { id: 128, path: 4096, body: 100_000, excerpt: 4000, items: 10_000 }
 
@@ -229,7 +238,7 @@ export function reviewUpdate(
 	v: unknown,
 	stored: Review,
 	knownFindings: ReadonlyMap<string, string>,
-): Pick<Review, 'comments' | 'drafts' | 'viewed' | 'findingDecisions'> {
+): Pick<Review, 'comments' | 'drafts' | 'viewed' | 'findingDecisions' | 'context'> {
 	const o = obj(v, 'review')
 	if (o.id !== stored.id || o.repoId !== stored.repoId) bad('review identity')
 	const viewed = arr(o.viewed, 'viewed files').map((f) => str(f, 'viewed file'))
@@ -242,7 +251,46 @@ export function reviewUpdate(
 	const drafts = arr(o.drafts, 'drafts').map((d) => draft(d, stored))
 	const findingDecisions = decisions(o.findingDecisions ?? {}, knownFindings)
 	checkFindingLinks(comments, drafts, knownFindings)
-	return { comments, drafts, viewed: [...new Set(viewed)], findingDecisions }
+	return { comments, drafts, viewed: [...new Set(viewed)], findingDecisions, context: reviewContext(o.context) }
+}
+
+/** Notes and text files for the AI reviewer; empty context is stored as none. */
+function reviewContext(v: unknown): ReviewContext | undefined {
+	if (v === undefined || v === null) return undefined
+	const o = obj(v, 'review context')
+	const notes = o.notes === undefined ? '' : text(o.notes, 'context notes', CONTEXT_LIMITS.notes)
+	const list = arr(o.files ?? [], 'context files')
+	if (list.length > CONTEXT_LIMITS.files) bad('context files (too many)')
+	const files = list.map((f) => {
+		const x = obj(f, 'context file')
+		const body = text(x.text, 'context file text', CONTEXT_LIMITS.fileChars)
+		if (body.includes('\u0000')) bad('context file (not text)')
+		return {
+			id: str(x.id, 'context file id', LIMITS.id),
+			name: str(x.name, 'context file name', 255),
+			text: body,
+			addedAt: iso(x.addedAt, 'context file date'),
+		}
+	})
+	if (new Set(files.map((f) => f.id)).size !== files.length) bad('context files (repeated id)')
+	const shots = arr(o.images ?? [], 'context images')
+	if (shots.length > CONTEXT_LIMITS.images) bad('context images (too many)')
+	const images = shots.map((v) => {
+		const x = obj(v, 'context image')
+		if (typeof x.id !== 'string' || !/^[0-9a-f]{64}$/.test(x.id)) bad('context image id')
+		if (!isImageType(x.mediaType)) bad('context image type')
+		if (!Number.isSafeInteger(x.bytes) || (x.bytes as number) <= 0 || (x.bytes as number) > CONTEXT_LIMITS.imageBytes)
+			bad('context image size')
+		return {
+			id: x.id,
+			name: str(x.name, 'context image name', 255),
+			mediaType: x.mediaType,
+			bytes: x.bytes as number,
+			addedAt: iso(x.addedAt, 'context image date'),
+		}
+	})
+	if (new Set(images.map((i) => i.id)).size !== images.length) bad('context images (repeated image)')
+	return notes.trim() || files.length || images.length ? { notes, files, ...(images.length ? { images } : {}) } : undefined
 }
 
 function decisions(v: unknown, known: ReadonlyMap<string, string>): Record<string, FindingDecision> {

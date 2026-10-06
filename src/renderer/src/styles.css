@@ -1066,10 +1066,16 @@ input[type='checkbox'] {
 .panel-title.tabs {
 	gap: 0;
 	padding: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
 }
+/* Tab labels stay on one line; a panel too narrow for all of them scrolls sideways. */
 .panel-title.tabs button {
-	flex: 1;
+	flex: 1 0 auto;
 	height: 100%;
+	padding: 0 7px;
+	white-space: nowrap;
+	font-size: 12px;
 	border: 0;
 	border-bottom: 2px solid transparent;
 	background: transparent;
@@ -1078,7 +1084,7 @@ input[type='checkbox'] {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 6px;
+	gap: 4px;
 	color: var(--text-2);
 }
 .panel-title.tabs button.on {
@@ -3607,4 +3613,122 @@ input.member-role {
 }
 .repo-tab-name:focus-visible {
 	border-radius: 6px 0 0 6px;
+}
+
+/* Context tab: notes and text files for the AI reviewer. */
+.context-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 10px;
+	border: 2px dashed transparent;
+}
+.context-panel.dragging {
+	border-color: var(--accent-line);
+	background: var(--accent-soft);
+}
+.context-panel p {
+	margin: 0;
+}
+.context-label {
+	font-size: 12px;
+	font-weight: 600;
+}
+.context-notes {
+	min-height: 140px;
+	resize: vertical;
+	padding: 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	font-size: 12px;
+	line-height: 1.5;
+}
+.context-files-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 4px;
+}
+.context-files-head .btn {
+	margin-left: auto;
+}
+.context-files {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.context-files li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	padding: 4px 4px 4px 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+	font-size: 12px;
+}
+.context-files li .ellipsis {
+	flex: 1;
+}
+.context-file-remove {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+}
+.context-file-remove:hover {
+	background: color-mix(in srgb, var(--text) 10%, transparent);
+	color: var(--text);
+}
+.context-drop {
+	padding: 14px 10px;
+	border: 1px dashed var(--border-strong);
+	border-radius: 6px;
+	text-align: center;
+}
+.context-images {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+	gap: 6px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.context-images li {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	aspect-ratio: 4 / 3;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+}
+.context-images img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.context-images .context-file-remove {
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	background: color-mix(in srgb, var(--bg) 85%, transparent);
+	box-shadow: 0 0 0 1px var(--border);
 }

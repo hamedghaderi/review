@@ -100,8 +100,11 @@ export class JsonStore<T> {
 
 /** Reviews, comments, drafts, viewed state and AI runs. */
 export class ReviewStore extends JsonStore<StoreData> {
+	readonly dir: string // the folder the store lives in; context images are kept next to it
+
 	constructor(file: string) {
 		super(file, empty, migrate)
+		this.dir = dirname(file)
 	}
 
 	static in(dir: string): ReviewStore {

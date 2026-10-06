@@ -72,7 +72,12 @@ export function createGeminiProvider(o: GeminiOptions & { model: string; limits:
 		limits: o.limits,
 		async review(request: ProviderRequest, signal: AbortSignal): Promise<ProviderResponse> {
 			const tools = request.tools
-			const contents: Array<Content> = [{ role: 'user', parts: [{ text: request.input }] }]
+			const contents: Array<Content> = [
+				{
+					role: 'user',
+					parts: [{ text: request.input }, ...(request.images ?? []).map((i) => ({ inlineData: { mimeType: i.mediaType, data: i.data } }))],
+				},
+			]
 			let usage: AiUsage | null = null
 			for (let round = 0; ; round++) {
 				const offer = tools && !toolsRejected

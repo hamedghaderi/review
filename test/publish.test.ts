@@ -540,7 +540,8 @@ test('the renderer cannot overwrite publication records through saveReview', () 
 		findingDecisions: {},
 	} as unknown as Review
 	const next = reviewUpdate({ ...stored, publication: { comments: { evil: {} } } }, stored, new Map())
-	assert.deepEqual(Object.keys(next).sort(), ['comments', 'drafts', 'findingDecisions', 'viewed'])
+	assert.deepEqual(Object.keys(next).sort(), ['comments', 'context', 'drafts', 'findingDecisions', 'viewed'])
+	assert.equal(next.context, undefined)
 })
 
 test('carried comments: one published from an earlier snapshot is not posted again; an outdated one is outside the diff', async () => {

@@ -34,6 +34,8 @@ const api: ReviewApi = {
 	openKnownRepo: (repoId) => ipcRenderer.invoke(IPC.openKnownRepo, repoId),
 	closeRepoTab: (repoId) => ipcRenderer.invoke(IPC.closeRepoTab, repoId),
 	repoTabs: () => ipcRenderer.invoke(IPC.repoTabs),
+	addContextImage: (name, bytes) => ipcRenderer.invoke(IPC.addContextImage, name, bytes),
+	contextImage: (id, mediaType) => ipcRenderer.invoke(IPC.contextImage, id, mediaType),
 	onInboxOpen: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, target: InboxOpen): void => handler(target)
 		ipcRenderer.on(IPC.inboxOpen, listener)

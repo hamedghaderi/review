@@ -17,6 +17,7 @@ import type { ReviewTools } from './lookup.ts'
 import {
 	addUsage,
 	clip,
+	dataUrl,
 	maxRounds,
 	ProviderError,
 	rejectsTools,
@@ -131,7 +132,17 @@ export function createOpenAIResponsesProvider(o: OpenAIModelOptions): ReviewProv
 		limits: o.limits,
 		async review(request: ProviderRequest, signal: AbortSignal): Promise<ProviderResponse> {
 			const tools = request.tools
-			const input: Array<ResponseInputItem> = [{ role: 'user', content: request.input }]
+			const input: Array<ResponseInputItem> = [
+				{
+					role: 'user',
+					content: request.images?.length
+						? [
+								{ type: 'input_text', text: request.input },
+								...request.images.map((i) => ({ type: 'input_image' as const, image_url: dataUrl(i), detail: 'auto' as const })),
+							]
+						: request.input,
+				},
+			]
 			let usage: AiUsage | null = null
 			for (let round = 0; ; round++) {
 				const offer = tools && !toolsRejected
@@ -258,7 +269,15 @@ export function createOpenAIChatProvider(o: OpenAIModelOptions): ReviewProvider 
 						? `${request.instructions}\n\nRespond with a single JSON object that matches this JSON Schema exactly, and nothing else:\n${JSON.stringify(request.schema?.json ?? REVIEW_JSON_SCHEMA)}`
 						: request.instructions,
 				},
-				{ role: 'user', content: request.input },
+				{
+					role: 'user',
+					content: request.images?.length
+						? [
+								{ type: 'text', text: request.input },
+								...request.images.map((i) => ({ type: 'image_url' as const, image_url: { url: dataUrl(i) } })),
+							]
+						: request.input,
+				},
 			]
 			const turns: Array<ChatCompletionMessageParam> = [] // assistant tool calls and their results, in order
 			const send = async (useJsonMode: boolean, offer: ReviewTools | undefined, last: boolean): Promise<ChatCompletion> =>

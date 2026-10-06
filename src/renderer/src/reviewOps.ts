@@ -1,5 +1,16 @@
 import { findingLink, findingState, levelLine } from '../../shared/findings.ts'
-import type { AiRun, Anchor, CommentDraft, DismissReason, Finding, FindingLevel, Review, ReviewComment } from '../../shared/types.ts'
+import type {
+	AiRun,
+	Anchor,
+	CommentDraft,
+	DismissReason,
+	Finding,
+	FindingLevel,
+	Review,
+	ReviewComment,
+	ReviewContext,
+	ContextImage,
+} from '../../shared/types.ts'
 
 function now(): string {
 	return new Date().toISOString()
@@ -162,4 +173,38 @@ export function setDismissNote(r: Review, findingId: string, note: string): Revi
 	const d = r.findingDecisions[findingId]
 	if (d?.status !== 'dismissed') return r
 	return { ...r, findingDecisions: { ...r.findingDecisions, [findingId]: { ...d, note: note.trim() || null } } }
+}
+
+/** Context with nothing in it is stored as none, so an emptied box doesn't count as context. */
+function withContext(r: Review, patch: Partial<ReviewContext>): Review {
+	const { context: old, ...rest } = r
+	const c = { notes: old?.notes ?? '', files: old?.files ?? [], images: old?.images ?? [], ...patch }
+	if (!c.notes.trim() && !c.files.length && !c.images.length) return rest
+	const { images, ...base } = c
+	return { ...rest, context: images.length ? c : base }
+}
+
+export function setContextNotes(r: Review, notes: string): Review {
+	return withContext(r, { notes })
+}
+
+export function addContextFiles(r: Review, files: Array<{ name: string; text: string }>): Review {
+	const t = now()
+	const added = files.map((f) => ({ id: crypto.randomUUID(), name: f.name, text: f.text, addedAt: t }))
+	return withContext(r, { files: [...(r.context?.files ?? []), ...added] })
+}
+
+export function removeContextFile(r: Review, id: string): Review {
+	return withContext(r, { files: (r.context?.files ?? []).filter((f) => f.id !== id) })
+}
+
+/** The same image (same bytes, so the same id) is kept once. */
+export function addContextImages(r: Review, images: Array<ContextImage>): Review {
+	const have = r.context?.images ?? []
+	const fresh = images.filter((i, n) => !have.some((x) => x.id === i.id) && images.findIndex((x) => x.id === i.id) === n)
+	return withContext(r, { images: [...have, ...fresh] })
+}
+
+export function removeContextImage(r: Review, id: string): Review {
+	return withContext(r, { images: (r.context?.images ?? []).filter((i) => i.id !== id) })
 }
