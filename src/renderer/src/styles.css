@@ -8,7 +8,6 @@
 	--border: #e4e4ec;
 	--border-strong: #d2d2de;
 	--hover: #efeff5;
-	--tabbar: #e8e8ef; /* the repository tab row, a step darker than the header it sits on */
 	--accent: #6d4aff;
 	--accent-text: #ffffff;
 	--accent-soft: #efeaff;
@@ -41,7 +40,6 @@
 		--border: #2e2f38;
 		--border-strong: #3b3c47;
 		--hover: #272832;
-		--tabbar: #141519;
 		--accent: #9b80ff;
 		--accent-text: #16161c;
 		--accent-soft: #2c2748;
@@ -3484,64 +3482,42 @@ input.member-role {
 	min-width: 0;
 }
 
-/* Repository tabs: one per open repository, above the header. */
+/* Repository tabs: one per open repository, above the header. The selected one is filled. */
 .repo-tabs {
 	display: flex;
-	align-items: flex-end;
+	align-items: center;
 	gap: 4px;
 	min-height: 36px;
-	padding: 6px 8px 0;
-	background: var(--tabbar);
-	/* The line under the row; the active tab paints over it to join the header. */
-	box-shadow: inset 0 -1px var(--border);
+	padding: 4px 8px;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
 	flex-shrink: 0;
 	min-width: 0;
 }
 .repo-tab-list {
 	display: flex;
-	align-items: flex-end;
+	align-items: center;
+	gap: 2px;
 	min-width: 0;
 	overflow-x: auto;
 	scrollbar-width: none;
 }
 .repo-tab {
-	position: relative;
 	display: flex;
 	align-items: center;
 	flex: 0 1 200px;
 	min-width: 90px;
-	height: 30px;
-	border: 1px solid transparent;
-	border-bottom: 0;
-	border-radius: 7px 7px 0 0;
+	height: 28px;
+	border-radius: 6px;
 	color: var(--text-2);
 }
-/* Dividers between inactive tabs, hidden next to the active or hovered one. */
-.repo-tab + .repo-tab::before {
-	content: '';
-	position: absolute;
-	left: -1px;
-	top: 8px;
-	bottom: 8px;
-	width: 1px;
-	background: var(--border-strong);
-}
-.repo-tab.on::before,
-.repo-tab.on + .repo-tab::before,
-.repo-tab:hover::before,
-.repo-tab:hover + .repo-tab::before {
-	display: none;
-}
 .repo-tab:not(.on):hover {
-	background: color-mix(in srgb, var(--chrome) 60%, transparent);
+	background: var(--hover);
 	color: var(--text);
 }
 .repo-tab.on {
-	background: var(--chrome);
-	border-color: var(--border);
-	color: var(--text);
-	box-shadow: inset 0 2px var(--accent);
-	z-index: 1;
+	background: var(--sel-bg);
+	color: var(--accent);
 }
 .repo-tab-name {
 	flex: 1;
@@ -3620,5 +3596,11 @@ input.member-role {
 	outline-offset: -2px;
 }
 .repo-tab-name:focus-visible {
-	border-radius: 6px 0 0 0;
+	border-radius: 6px 0 0 6px;
+}
+.repo-tab.on .repo-tab-close {
+	color: var(--accent);
+}
+.repo-tab.on .repo-tab-close:hover {
+	background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
