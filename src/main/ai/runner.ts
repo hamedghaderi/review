@@ -5,6 +5,7 @@ import {
 	type AiScope,
 	type AiUsage,
 	type Comparison,
+	type Discussion,
 	type FileCoverage,
 	type Finding,
 	type FindingLevel,
@@ -15,9 +16,11 @@ import {
 	type FindingVerification,
 	type PastDecision,
 } from '../../shared/types.ts'
+import type { LinkedIssue } from '../github.ts'
 import type { ContextBatch, ContextLimits, ContextPackage, FileSource } from './context.ts'
 import { capacityChars, CHARS_PER_TOKEN, fitToModel, packContext, prepareChange, settleFiles } from './context.ts'
 import { applyBudget, findingKey, InvalidOutputError, isDuplicate, sameProblem, validateBatchOutput } from './findings.ts'
+import { buildBackground } from './background.ts'
 import { buildInput, DEFAULT_LEVELS, instructionsFor, withExternalTools, PROMPT_VERSION } from './prompt.ts'
 import type { RelatedResult } from './related.ts'
 import { classifyRisk } from './risk.ts'
@@ -79,6 +82,8 @@ export interface RunInput {
 	loadSources: () => Promise<Array<FileSource>>
 	/** Definitions and uses of the change's names elsewhere in the repository (skipped when the limits turn it off). */
 	loadRelated?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<RelatedResult>
+	/** Linked issues and the conversation so far, for pull requests; the description is always included without it. */
+	loadBackground?: (signal: AbortSignal) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }>
 	/** Dependency range checks and CI results, computed or read by the app. */
 	loadFacts?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<FactsResult>
 	/** Read-only lookups in the reviewed commits, offered to the reviewer when the limits allow; one set per request. */
@@ -155,6 +160,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				levels,
 			}
 	const description = input.comparison.pr?.body?.trim() || null
+	let background = buildBackground({ description, issues: [], discussion: null })
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups)
 		: options.team
@@ -218,6 +224,18 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		try {
 			const sources = await input.loadSources()
 			if (controller.signal.aborted) return finish(null)
+			if (input.loadBackground) {
+				try {
+					const b = await input.loadBackground(controller.signal)
+					for (const n of b.notes) notice(n)
+					background = buildBackground({ description, issues: b.issues, discussion: b.discussion })
+				} catch (e) {
+					if (controller.signal.aborted) return finish(null)
+					notice(
+						`Linked issues and the PR conversation could not be read, so only the description was sent: ${e instanceof Error ? e.message : String(e)}`,
+					)
+				}
+			}
 			if (retry) return await rerun(sources)
 			// Excerpts are cut once, to fit the smallest member; each member then packs its own requests to fit its model.
 			const fits = workers.map((w) => {
@@ -227,7 +245,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					options.limits,
 					l,
 					outputTokens,
-					w.instructions.length + toolChars + (description?.length ?? 0),
+					w.instructions.length + toolChars + background.chars,
 					lookups ? LOOKUP_RESERVE : 0,
 				)
 				if (!fitted) {
@@ -314,6 +332,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					notes: related.notes,
 				},
 				facts: [
+					...(background.summary ? [{ kind: 'background' as const, text: background.summary }] : []),
 					...(facts?.summary ?? []),
 					...(related?.importers.length ? [{ kind: 'structure' as const, text: importSummary(related.importers) }] : []),
 					...(told.length
@@ -491,7 +510,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const tools = budget && input.tools ? input.tools(budget) : undefined
 			try {
 				const response = await w.provider.review(
-					{ instructions: w.instructions, input: buildInput(batch, description), batch, tools },
+					{ instructions: w.instructions, input: buildInput(batch, background.sections), batch, tools },
 					controller.signal,
 				)
 				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
@@ -526,8 +545,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 */
 	function lookupBudget(batch: ContextBatch, w: Worker): LookupBudget | null {
 		const l = w.provider.limits
-		const room =
-			capacityChars(l.contextWindow, outputBudget(l), w.instructions.length + toolChars + (description?.length ?? 0)) - batch.chars
+		const room = capacityChars(l.contextWindow, outputBudget(l), w.instructions.length + toolChars + background.chars) - batch.chars
 		const levels = batch.fileKeys.map((k) => run.coverage.files.find((f) => f.fileKey === k)?.risk?.level)
 		// Files without a rating (older runs) count as high, the full budget they had before.
 		const level = levels.some((x) => x === 'high' || x === undefined) ? 'high' : levels.includes('medium') ? 'medium' : 'low'
@@ -719,7 +737,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 */
 	function checkTruncation(batch: ContextPackage['batches'][number], reportedInput: number | null, w: Worker): void {
 		if (reportedInput === null || reportedInput <= 0) return
-		const sentChars = batch.chars + w.instructions.length + (description?.length ?? 0)
+		const sentChars = batch.chars + w.instructions.length + background.chars
 		const minExpected = Math.floor(sentChars / (CHARS_PER_TOKEN * 3)) // generous: 9 chars/token is already implausible
 		if (sentChars > 4000 && reportedInput < minExpected) {
 			throw new ProviderError(

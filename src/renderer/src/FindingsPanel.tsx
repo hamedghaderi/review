@@ -569,6 +569,7 @@ function errorText(run: AiRun, error: string): string {
 }
 
 const FACT_LABEL = {
+	background: 'Background',
 	project: 'Project context',
 	ci: 'CI',
 	dependencies: 'Dependencies',

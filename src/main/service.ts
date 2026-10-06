@@ -47,12 +47,13 @@ import {
 	shortRef,
 	type ComparisonData,
 } from './git.ts'
-import { errorOf, type GitHubService } from './github.ts'
+import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
 import { parsePatch, pickSection } from './patch.ts'
 import { Publisher } from './publish.ts'
 import { carryComments } from './carry.ts'
 import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
+import { issueRefs } from './ai/background.ts'
 import { loadFacts } from './ai/facts.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
@@ -155,6 +156,32 @@ export class ReviewService {
 				omitted: empty,
 			}
 		}
+	}
+
+	/**
+	 * What a PR review's reviewer is told besides the description: the issues the PR closes or its description mentions,
+	 * and the conversation so far. Either part failing becomes a note; the run goes on with what could be read.
+	 */
+	private async prBackground(
+		repoId: string,
+		reviewId: string,
+		signal: AbortSignal,
+	): Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }> {
+		const pr = this.comparisons.get(reviewId)?.comparison.pr
+		const gh = this.github
+		if (!pr || !gh) return { issues: [], discussion: null, notes: [] }
+		const notes: Array<string> = []
+		const [issues, discussion] = await Promise.all([
+			gh.linkedIssues(pr.repo, pr.number, issueRefs(pr.body ?? '', pr.repo, pr.number), signal).catch((e) => {
+				if (signal.aborted) throw e
+				notes.push(`Linked issues could not be read from GitHub, so the reviewer did not see them: ${errorOf(e).message}`)
+				return []
+			}),
+			this.prDiscussion(repoId, reviewId),
+		])
+		if (discussion.status === 'unavailable')
+			notes.push(`The PR conversation was not sent to the reviewer. ${discussion.reason ?? ''}`.trim())
+		return { issues, discussion, notes }
 	}
 
 	attachAi(ai: AiController): void {
@@ -707,6 +734,7 @@ export class ReviewService {
 				tools: (budget, external) =>
 					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
+				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
 				loadFacts: (sources, signal) => {
 					const c = data.comparison
 					const gh = this.github

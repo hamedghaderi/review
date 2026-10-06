@@ -723,6 +723,97 @@ export class GitHubService {
 	}
 
 	/**
+	 * Issues behind a pull request: the ones it closes (GitHub's closing references, which need a token) and the ones
+	 * `mentioned` in its description, with their latest comments. Read-only. A mentioned number that is a pull request,
+	 * or that the token can't see, is left out; the closing references are skipped without a token.
+	 */
+	async linkedIssues(
+		repo: string,
+		number: number,
+		mentioned: Array<{ repo: string; number: number }>,
+		signal?: AbortSignal,
+	): Promise<Array<LinkedIssue>> {
+		checkRepo(repo)
+		const refs = mentioned.filter((r) => REPO_RE.test(r.repo) && Number.isInteger(r.number) && r.number > 0).slice(0, MAX_MENTIONED)
+		if (!(await this.token())) {
+			const out: Array<LinkedIssue> = []
+			for (const r of refs) {
+				try {
+					const i = await this.get<RestIssueDetail>(`/repos/${r.repo}/issues/${r.number}`, signal)
+					if (i.pull_request) continue
+					const comments = i.comments
+						? await this.get<Array<RestIssueComment>>(`/repos/${r.repo}/issues/${r.number}/comments?per_page=100`, signal)
+						: []
+					out.push({
+						repo: r.repo,
+						number: r.number,
+						title: i.title,
+						url: i.html_url,
+						state: i.state.toUpperCase(),
+						body: i.body ?? '',
+						closes: false,
+						commentsTotal: i.comments,
+						comments: comments
+							.slice(-ISSUE_COMMENTS)
+							.map((c) => ({ author: c.user?.login ?? null, body: c.body ?? '', createdAt: c.created_at })),
+					})
+				} catch (e) {
+					if (signal?.aborted) throw e
+				}
+			}
+			return out
+		}
+		const [owner, name] = repo.split('/')
+		// Mentioned references are aliased into the same query; one that is missing or a pull request comes back null.
+		const aliases = refs
+			.map((r, i) => {
+				const [o, n] = r.repo.split('/')
+				return `m${i}: repository(owner: ${JSON.stringify(o)}, name: ${JSON.stringify(n)}) { issueOrPullRequest(number: ${r.number}) { ... on Issue { ...LinkedIssue } } }`
+			})
+			.join('\n')
+		type Node = GqlLinkedIssue | Record<string, never> | null
+		const d = await this.graphql<
+			{ repository: { pullRequest: { closingIssuesReferences: { nodes: Array<GqlLinkedIssue | null> } } | null } | null } & Record<
+				string,
+				{ issueOrPullRequest: Node } | null | unknown
+			>
+		>(
+			`query($owner: String!, $name: String!, $number: Int!) {
+	repository(owner: $owner, name: $name) { pullRequest(number: $number) { closingIssuesReferences(first: ${MAX_CLOSING}) { nodes { ...LinkedIssue } } } }
+	${aliases}
+}
+fragment LinkedIssue on Issue {
+	number title url state body
+	repository { nameWithOwner }
+	comments(last: ${ISSUE_COMMENTS}) { totalCount nodes { author { login } body createdAt } }
+}`,
+			{ owner, name, number },
+			signal,
+			{ ignore: (path) => typeof path[0] === 'string' && /^m\d+$/.test(path[0]) },
+		)
+		const toIssue = (n: GqlLinkedIssue, closes: boolean): LinkedIssue => ({
+			repo: n.repository.nameWithOwner,
+			number: n.number,
+			title: n.title,
+			url: n.url,
+			state: n.state,
+			body: n.body ?? '',
+			closes,
+			commentsTotal: n.comments.totalCount,
+			comments: n.comments.nodes.map((c) => ({ author: c.author?.login ?? null, body: c.body ?? '', createdAt: c.createdAt })),
+		})
+		const out = (d.repository?.pullRequest?.closingIssuesReferences.nodes ?? [])
+			.filter((n): n is GqlLinkedIssue => !!n)
+			.map((n) => toIssue(n, true))
+		refs.forEach((_, i) => {
+			const n = (d[`m${i}`] as { issueOrPullRequest: Node } | null | undefined)?.issueOrPullRequest
+			if (isIssue(n) && !out.some((x) => x.repo.toLowerCase() === n.repository.nameWithOwner.toLowerCase() && x.number === n.number))
+				out.push(toIssue(n, false))
+		})
+		return out
+	}
+
+	/**
 	 * The PR's existing review threads, reviews and conversation. Read-only. With a token this is GraphQL, the only
 	 * API that reports resolved and outdated threads; without one it falls back to REST and says resolved state is
 	 * unknown.
@@ -806,6 +897,46 @@ export class GitHubService {
 }
 
 const WRITE_SPACING_MS = 800
+
+/** An issue behind a pull request, as the reviewer is told about it. */
+export interface LinkedIssue {
+	repo: string // "owner/name"
+	number: number
+	title: string
+	url: string
+	state: string // OPEN, CLOSED
+	body: string
+	closes: boolean // a closing reference ("Fixes #12"); false: only mentioned in the description
+	commentsTotal: number
+	comments: Array<{ author: string | null; body: string; createdAt: string | null }> // the latest ones, oldest first
+}
+
+const MAX_CLOSING = 5
+const MAX_MENTIONED = 5
+const ISSUE_COMMENTS = 20
+
+function isIssue(n: unknown): n is GqlLinkedIssue {
+	return !!n && typeof (n as GqlLinkedIssue).number === 'number'
+}
+
+interface GqlLinkedIssue {
+	number: number
+	title: string
+	url: string
+	state: string
+	body: string | null
+	repository: { nameWithOwner: string }
+	comments: { totalCount: number; nodes: Array<{ author: { login: string } | null; body: string | null; createdAt: string | null }> }
+}
+
+interface RestIssueDetail {
+	title: string
+	html_url: string
+	state: string
+	body: string | null
+	comments: number
+	pull_request?: unknown
+}
 
 export interface CommitChecks {
 	sha: string
