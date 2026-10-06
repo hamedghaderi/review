@@ -124,3 +124,56 @@ export function stackOf(
 	if (!parents.length && !children.length) return null
 	return { base, parents, children }
 }
+
+/** Where you stand on a PR: your review is wanted (requested, or new commits since you reviewed), or you're up to date. */
+export type MyReview = 'needs-you' | 'reviewed'
+
+export interface StackMember {
+	node: PrGraphNode
+	depth: number // 0 for the bottom; PRs stacked side by side on the same parent share a depth
+	parent: number | null // the PR it is stacked on; null for the bottom
+	mine: MyReview | null // null: you're not involved, or it isn't known
+}
+
+export interface StackGuide {
+	base: string | null // the branch the bottom of the stack targets
+	members: Array<StackMember> // the whole stack, bottom first: depth-first, PRs on the same parent in number order
+	index: number // where the PR asked about sits in `members`
+	next: StackMember | null // the lowest PR that needs you, drafts only when no ready PR does: where to start, or go next
+}
+
+/**
+ * The whole stack a pull request belongs to, in the order to review it (bottom up, since each PR's diff builds on the
+ * one below), and the PR to review next. One rule for every place that shows stacks, so they always agree. Null when
+ * the PR isn't in the graph or isn't stacked.
+ */
+export function stackGuide(graph: PrGraph, number: number, mine: ReadonlyMap<number, MyReview> | null): StackGuide | null {
+	const self = graph.nodes.find((n) => n.number === number)
+	if (!self) return null
+	const byHead = headIndex(graph)
+	let root = self
+	const seen = new Set([self.number])
+	for (let up = byHead.get(root.baseRef); up && !seen.has(up.number); up = byHead.get(up.baseRef)) {
+		seen.add(up.number)
+		root = up
+	}
+	const members: Array<StackMember> = []
+	const visited = new Set<number>()
+	const walk = (n: PrGraphNode, depth: number, parent: number | null): void => {
+		if (visited.has(n.number)) return
+		visited.add(n.number)
+		members.push({ node: n, depth, parent, mine: mine?.get(n.number) ?? null })
+		if (n.crossRepo) return
+		for (const c of graph.nodes.filter((x) => x.baseRef === n.headRef && x.number !== n.number).sort((a, b) => a.number - b.number))
+			walk(c, depth + 1, n.number)
+	}
+	walk(root, 0, null)
+	if (members.length < 2) return null
+	return {
+		base: root.baseRef,
+		members,
+		index: members.findIndex((m) => m.node.number === number),
+		// Drafts wait for ready PRs; a stack that is all drafts still has a place to start.
+		next: members.find((m) => m.mine === 'needs-you' && !m.node.draft) ?? members.find((m) => m.mine === 'needs-you') ?? null,
+	}
+}

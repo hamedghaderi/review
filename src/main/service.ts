@@ -62,7 +62,8 @@ import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { findingRoots } from '../shared/findings.ts'
-import { inboxStatus, requestCount, sortInbox } from '../shared/inbox.ts'
+import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
+import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiScope, reviewUpdate } from './validate.ts'
 
@@ -94,6 +95,7 @@ export class ReviewService {
 	private comparisons = new Map<string, ComparisonData>()
 	private store: ReviewStore
 	private images: ContextImages
+	private watched: { at: number; prs: Array<WatchedPr> } | null = null
 	private ai: AiController | null = null
 	private mcp: McpService | null = null
 	private github: GitHubService | null
@@ -658,6 +660,28 @@ export class ReviewService {
 		return this.requireGitHub().openPrGraph(this.githubRepoFor(repoId))
 	}
 
+	/**
+	 * Where you stand on each open PR of this repository that involves you, by number: your review is wanted (requested,
+	 * or new commits since you reviewed) or you're up to date. From the same two searches the notification check runs,
+	 * shared across repositories and cached briefly. Null without a GitHub token.
+	 */
+	/** Review requests changed (seen by the background check): the next myReviews asks GitHub again. */
+	forgetMyReviews(): void {
+		this.watched = null
+	}
+
+	async myReviews(repoId: string): Promise<Record<number, MyReview> | null> {
+		const gh = this.github
+		const repo = mapping(this.repo(repoId), this.store.read().repos[repoId]?.githubRepo ?? null).selected
+		if (!gh || !repo) return null
+		if (!this.watched || Date.now() - this.watched.at > MY_REVIEWS_TTL_MS) {
+			const r = await gh.watchRequests()
+			if (!r) return null
+			this.watched = { at: Date.now(), prs: r.prs }
+		}
+		return myReviewsIn(this.watched.prs, repo)
+	}
+
 	async setGitHubRepo(repoId: string, repo: string): Promise<GitHubMapping> {
 		const info = this.repo(repoId)
 		if (!mapping(info, null).candidates.some((c) => c.repo === repo))
@@ -937,4 +961,17 @@ function historicalError(d: PrDetail, detail: string): AppFail {
 
 function mb(n: number): string {
 	return `${Math.round(n / 1024 / 1024)} MB`
+}
+
+const MY_REVIEWS_TTL_MS = 120_000
+
+/** Your status per PR number in one repository, from the requested and reviewed searches. */
+export function myReviewsIn(prs: ReadonlyArray<WatchedPr>, repo: string): Record<number, MyReview> {
+	const out: Record<number, MyReview> = {}
+	for (const p of prs) {
+		if (p.repo.toLowerCase() !== repo.toLowerCase()) continue
+		if (p.requested !== false || p.stale) out[p.number] = 'needs-you'
+		else if (p.reviewed) out[p.number] = 'reviewed'
+	}
+	return out
 }

@@ -162,6 +162,7 @@ function registerIpc(): void {
 	)
 	handle(IPC.prDetail, (repoId: unknown, n: unknown) => service.prDetail(str(repoId, 'repository'), prNumber(n)))
 	handle(IPC.prGraph, (repoId: unknown) => service.prGraph(str(repoId, 'repository')))
+	handle(IPC.myReviews, (repoId: unknown) => service.myReviews(str(repoId, 'repository')))
 
 	handle(IPC.branchPr, (repoId: unknown, head: unknown) => service.branchPr(str(repoId, 'repository'), branchRef(head)))
 
@@ -329,6 +330,7 @@ app.whenReady().then(async () => {
 		notify: showNotifications,
 		badge: (n) => app.setBadgeCount(n),
 		changed: () => {
+			service.forgetMyReviews()
 			if (win && !win.isDestroyed()) win.webContents.send(IPC.inboxChanged)
 		},
 	})

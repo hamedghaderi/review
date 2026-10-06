@@ -9,8 +9,6 @@ import type {
 	GitHubStatus,
 	PrDetail,
 	PrFilter,
-	PrGraph,
-	PrGraphNode,
 	PrPage,
 	PrState,
 	PrSummary,
@@ -21,8 +19,9 @@ import type {
 import { ago, baseOptions, branchRows, defaultBaseFor, matchBranches, revealBranch, treeScope, type BranchRow } from './branches.ts'
 import { BranchPrHint, useBranchPr } from './BranchPrHint.tsx'
 import { ReviewBadge, ReviewList } from './PrReview.tsx'
-import { usePrGraph } from './prGraph.ts'
-import { graphSummary, stackOf, stackRows, type StackRow } from '../../shared/prStack.ts'
+import { useMyReviews, usePrGraph } from './prGraph.ts'
+import { isStackStart, StackList, stackPosition } from './Stack.tsx'
+import { graphSummary, stackGuide, stackRows, type StackGuide, type StackRow } from '../../shared/prStack.ts'
 import { INBOX_LABEL } from '../../shared/inbox.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { VirtualList } from './VirtualList.tsx'
@@ -169,6 +168,17 @@ export const Browser = forwardRef<BrowserHandle, Props>(function Browser(p, ref)
 	}, [])
 	// Open PRs and their branches connect stacks in the list (when grouped) and in the preview (always).
 	const graph = usePrGraph(repo.id, isPrs && ghReady && p.github?.state === 'connected', prs.page?.fetchedAt)
+	const mine = useMyReviews(repo.id, isPrs && ghReady && p.github?.state === 'connected', prs.page?.fetchedAt)
+	// Each listed PR's stack, so rows can say where it sits and which PR of the stack to start with.
+	const guides = useMemo(() => {
+		const out = new Map<number, StackGuide>()
+		if (!graph) return out
+		for (const pr of prs.items) {
+			const g = stackGuide(graph, pr.number, mine)
+			if (g) for (const m of g.members) out.set(m.node.number, { ...g, index: g.members.indexOf(m) })
+		}
+		return out
+	}, [graph, mine, prs.items])
 	const prRows: Array<StackRow> = useMemo(
 		() => (state.prStacks ? stackRows(prs.items, graph) : prs.items.map((pr) => ({ pr, depth: 0, context: false }))),
 		[state.prStacks, prs.items, graph],
@@ -538,7 +548,7 @@ export const Browser = forwardRef<BrowserHandle, Props>(function Browser(p, ref)
 							onEndReached={isPrs ? loadMore : undefined}
 							renderRow={(i) =>
 								isPrs ? (
-									<PrRow row={prRows[i]} viewer={p.github?.login ?? null} seen={seen} />
+									<PrRow row={prRows[i]} viewer={p.github?.login ?? null} seen={seen} guide={guides.get(prRows[i].pr.number) ?? null} />
 								) : (
 									<BranchRowView row={branchList[i]} pinned={pinned} onPin={togglePin} searching={!!state.branchQuery.trim()} />
 								)
@@ -589,7 +599,7 @@ export const Browser = forwardRef<BrowserHandle, Props>(function Browser(p, ref)
 								reviews={p.reviews}
 								viewer={p.github?.login ?? null}
 								onOpenSnapshot={p.onOpenSnapshot}
-								graph={graph}
+								guide={guides.get(selectedPr.number) ?? (graph ? stackGuide(graph, selectedPr.number, mine) : null)}
 								onSelectPr={selectPr}
 							/>
 						) : (
@@ -736,7 +746,17 @@ function StateBadge({ state }: { state: PrState }) {
 	return <span className={`pr-state ${state}`}>{STATE_LABEL[state]}</span>
 }
 
-function PrRow({ row, viewer, seen }: { row: StackRow; viewer: string | null; seen: ReadonlySet<number> }) {
+function PrRow({
+	row,
+	viewer,
+	seen,
+	guide,
+}: {
+	row: StackRow
+	viewer: string | null
+	seen: ReadonlySet<number>
+	guide: StackGuide | null
+}) {
 	const { pr, depth } = row
 	const inbox = pr.inbox === 'new' && seen.has(pr.number) ? 'waiting' : pr.inbox
 	return (
@@ -756,6 +776,16 @@ function PrRow({ row, viewer, seen }: { row: StackRow; viewer: string | null; se
 					{pr.title}
 				</span>
 				<span className="muted mono small">#{pr.number}</span>
+				{guide && (
+					<span className="pill small-pill stack-badge" title={`Part ${stackPosition(guide)} of a stack, counted from the bottom`}>
+						Stack {stackPosition(guide)}
+					</span>
+				)}
+				{guide && isStackStart(guide, pr.number) && (
+					<span className="pill small-pill stack-start" title="The lowest PR in this stack that needs your review">
+						Start here
+					</span>
+				)}
 				{inbox ? (
 					<span className={`pill small-pill inbox-pill ${inbox}`}>{INBOX_LABEL[inbox]}</span>
 				) : (
@@ -869,7 +899,7 @@ function PrPreview(props: {
 	viewer: string | null
 	onOpen(t: ReviewTarget): void
 	onOpenSnapshot(id: string): void
-	graph: PrGraph | null
+	guide: StackGuide | null
 	onSelectPr(pr: PrSummary): void
 }) {
 	const { pr } = props
@@ -913,6 +943,16 @@ function PrPreview(props: {
 				<a className="btn" href={pr.url} target="_blank" rel="noreferrer">
 					Open on GitHub ↗
 				</a>
+				{props.guide?.next && props.guide.next.node.number !== pr.number && (
+					<button
+						className="btn"
+						disabled={props.opening}
+						title={`${props.guide.next.node.title}\nThe lowest PR in this stack that needs your review`}
+						onClick={() => props.onOpen({ kind: 'pr', repo: props.repo, number: props.guide!.next!.node.number })}
+					>
+						Start at #{props.guide.next.node.number}
+					</button>
+				)}
 				<button className="btn primary" disabled={props.opening} onClick={() => props.onOpen(target)}>
 					{props.opening ? 'Opening…' : 'Open review'}
 				</button>
@@ -953,7 +993,7 @@ function PrPreview(props: {
 					</span>
 				)}
 			</div>
-			{props.graph && <StackLine graph={props.graph} pr={d ?? pr} onSelect={props.onSelectPr} />}
+			{props.guide && <StackList guide={props.guide} current={pr.number} onPick={(n) => props.onSelectPr(graphSummary(n))} />}
 			{earlier.length > 0 && (
 				<div className="small preview-earlier">
 					<span className="muted">Earlier reviews:</span>
@@ -1206,48 +1246,3 @@ export function BasePicker(props: { options: Array<BranchRef>; value: string | n
 }
 
 /** Where the PR sits in its stack: the PRs below it down to the base branch, and the ones stacked directly on it. */
-function StackLine(props: {
-	graph: PrGraph
-	pr: { number: number; headRef: string | null; baseRef: string | null; crossRepo: boolean | null }
-	onSelect(pr: PrSummary): void
-}) {
-	const s = stackOf(props.graph, props.pr)
-	if (!s) return null
-	const link = (n: PrGraphNode) => (
-		<button key={n.number} className="link mono" title={n.title} onClick={() => props.onSelect(graphSummary(n))}>
-			#{n.number}
-		</button>
-	)
-	return (
-		<div className="small stack-line">
-			<span className="muted">Stack:</span>
-			{s.base && <span className="mono muted">{s.base}</span>}
-			{s.parents.map((n) => (
-				<span key={n.number} className="stack-step">
-					<span className="muted" aria-hidden>
-						›
-					</span>
-					{link(n)}
-				</span>
-			))}
-			<span className="stack-step">
-				<span className="muted" aria-hidden>
-					›
-				</span>
-				<b className="mono">#{props.pr.number}</b>
-			</span>
-			{s.children.length > 0 && (
-				<span className="stack-step">
-					<span className="muted">· stacked on it:</span>
-					{s.children.map(({ node, above }) => (
-						<span key={node.number} className="stack-step">
-							{link(node)}
-							{above > 0 && <span className="muted">(+{above} above)</span>}
-						</span>
-					))}
-				</span>
-			)}
-			{props.graph.truncated && <span className="muted">· only the 1,000 most recently updated open PRs were read</span>}
-		</div>
-	)
-}
