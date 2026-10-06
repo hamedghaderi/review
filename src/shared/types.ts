@@ -87,6 +87,7 @@ export interface PrSnapshot {
 	baseSha: string
 	headSha: string
 	body?: string // the author's description, given to the AI reviewer as background (not evidence)
+	author?: string | null // GitHub login of who opened it; absent on snapshots stored before it was recorded
 }
 
 export type SearchSlot = 'list' | 'palette'

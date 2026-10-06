@@ -53,20 +53,24 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 		const v = activeRun.verification
 		const checking = v && v.done + v.failed < v.total ? v : null
 		return (
-			<span className="ai-progress" role="status" aria-live="polite">
+			<span
+				className="ai-progress"
+				role="status"
+				aria-live="polite"
+				title={`${activeRun.team ? activeRun.team.name : 'AI review'} running. The Findings tab shows each reviewer's progress.`}
+			>
 				{/* Before the first request the app gathers related code and CI results; then the model reviews. */}
-				<AiOrb activity={c.batchesTotal ? 'reasoning' : 'searching'} size={18} />
+				<AiOrb activity={c.batchesTotal ? 'reasoning' : 'searching'} size={16} />
 				<span className="small nowrap">
-					{activeRun.team ? `${activeRun.team.name}: ` : 'AI review '}
 					{checking
-						? `double-checking ${checking.done + checking.failed + 1}/${checking.total} blocking`
+						? `Checking ${checking.done + checking.failed + 1}/${checking.total}`
 						: c.batchesTotal
-							? `${finished}/${c.batchesTotal} requests`
-							: 'preparing…'}
+							? `${finished}/${c.batchesTotal}`
+							: 'Preparing…'}
 					{activeRun.findings.length ? ` · ${activeRun.findings.length} found` : ''}
 				</span>
-				<button className="btn small" onClick={onCancel}>
-					Cancel
+				<button className="btn small ghost" onClick={onCancel} title="Stop this run. Answers that already arrived are kept.">
+					Stop
 				</button>
 			</span>
 		)

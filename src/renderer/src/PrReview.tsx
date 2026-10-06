@@ -1,13 +1,16 @@
 import type { PrReviewer, PrReviewState } from '../../shared/types.ts'
 import { reviewSummary } from './reviewState.ts'
 
-/** A compact badge for rows and headers. Renders nothing when nobody has reviewed and no review is required. */
-export function ReviewBadge({ review, viewer }: { review: PrReviewState | null; viewer: string | null }) {
+/**
+ * A compact badge for rows and headers. Renders nothing when nobody has reviewed and no review is required. `short`
+ * leaves what you did yourself to the tooltip, for the crowded review header.
+ */
+export function ReviewBadge({ review, viewer, short = false }: { review: PrReviewState | null; viewer: string | null; short?: boolean }) {
 	const s = review && reviewSummary(review, viewer)
 	if (!s) return null
 	return (
-		<span className={`rv-badge ${s.tone}`} title={s.title}>
-			{s.label}
+		<span className={`rv-badge ${s.tone}`} title={short && s.mine ? `${s.mine}.\n\n${s.title}` : s.title}>
+			{short ? s.short : s.label}
 		</span>
 	)
 }

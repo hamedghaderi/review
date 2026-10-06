@@ -145,6 +145,17 @@ export function FileTree({ files, selected, viewed, commented, onSelect, onToggl
 						</button>
 					))}
 				</div>
+				<div
+					className="tree-viewed"
+					role="progressbar"
+					aria-label="Files marked as viewed"
+					aria-valuemin={0}
+					aria-valuemax={counts.all}
+					aria-valuenow={counts.all - counts.unreviewed}
+					title={`${counts.all - counts.unreviewed} of ${counts.all} files marked as viewed`}
+				>
+					<span style={{ width: `${counts.all ? (100 * (counts.all - counts.unreviewed)) / counts.all : 0}%` }} />
+				</div>
 				<div className="tree-actions">
 					<button className="btn small" onClick={onNextUnreviewed} disabled={counts.unreviewed === 0}>
 						Next unreviewed

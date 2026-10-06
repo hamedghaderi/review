@@ -6,7 +6,19 @@ type Tone = 'ok' | 'bad' | 'info' | 'muted'
  * One line for where a pull request stands: GitHub's decision when it reports one, otherwise what the latest reviews
  * say. Approvals given on an older commit are labelled as such. `viewer`: the connected GitHub login.
  */
-export function reviewSummary(r: PrReviewState, viewer: string | null): { label: string; tone: Tone; title: string } | null {
+/** `short` is the label without what you did yourself, for tight spots; `mine` says that part in words. */
+export function reviewSummary(
+	r: PrReviewState,
+	viewer: string | null,
+): { label: string; short: string; mine: string | null; tone: Tone; title: string } | null {
+	const s = summary(r, viewer)
+	if (!s) return null
+	const mine = viewer ? r.reviewers.find((x) => x.login.toLowerCase() === viewer.toLowerCase()) : undefined
+	const you = mine ? ` · you ${VERB[mine.verdict]}${mine.stale ? ' (older commit)' : ''}` : ''
+	return { ...s, short: you && s.label.endsWith(you) ? s.label.slice(0, -you.length) : s.label, mine: you ? `You ${you.slice(7)}` : null }
+}
+
+function summary(r: PrReviewState, viewer: string | null): { label: string; tone: Tone; title: string } | null {
 	const current = (v: PrReviewer['verdict']) => r.reviewers.filter((x) => x.verdict === v && !x.stale)
 	const all = (v: PrReviewer['verdict']) => r.reviewers.filter((x) => x.verdict === v)
 	const mine = viewer ? r.reviewers.find((x) => x.login.toLowerCase() === viewer.toLowerCase()) : undefined

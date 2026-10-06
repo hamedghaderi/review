@@ -545,6 +545,8 @@ test('fork PR opens at merge-base(base, head)..head without touching the checkou
 		assert.equal(c.baseSha, w.base, 'merge base kept separately')
 		assert.notEqual(c.baseSha, c.pr!.baseSha)
 		assert.equal(c.headRef, 'alice:feat/login')
+		assert.equal(c.pr!.author, 'alice', 'who opened it is kept with the snapshot')
+		assert.equal(r.review.pr!.author, 'alice')
 		assert.deepEqual(
 			c.files.map((f) => f.key),
 			['login.txt'],
