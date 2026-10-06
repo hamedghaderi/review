@@ -3592,3 +3592,12 @@ input.member-role {
 	border-radius: 6px;
 	cursor: pointer;
 }
+/* The tab row clips anything outside it, so focus rings on tabs are drawn inside. */
+.repo-tab-name:focus-visible,
+.repo-tab-close:focus-visible,
+.repo-tab-add:focus-visible {
+	outline-offset: -2px;
+}
+.repo-tab-name:focus-visible {
+	border-radius: 6px 0 0 0;
+}
