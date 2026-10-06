@@ -978,3 +978,42 @@ test('GitHub CLI login: used only when enabled, never stored, re-read after reje
 		await new Promise<void>((r) => server.close(() => r()))
 	}
 })
+
+test('repository tabs: opening adds a tab once, closing keeps the repository known, closing the last forgets the restore', async () => {
+	const w = world()
+	const gh = new GitHubService(memoryTokens(), { base: 'http://127.0.0.1:9' })
+	const { svc, store } = await service(gh)
+	const a = await svc.open(w.clone)
+	const b = await svc.open(w.seed)
+	assert.deepEqual(
+		b.tabs.map((t) => [t.id, t.name]),
+		[
+			[a.repo.id, 'clone'],
+			[b.repo.id, 'seed'],
+		],
+	)
+	// Reopening (switching tabs, a notification) keeps the order and adds nothing.
+	const again = await svc.openKnown(a.repo.id)
+	assert.deepEqual(
+		again.tabs.map((t) => t.id),
+		[a.repo.id, b.repo.id],
+	)
+
+	assert.deepEqual(
+		(await svc.closeTab(a.repo.id)).map((t) => t.id),
+		[b.repo.id],
+	)
+	assert.ok(store.read().repos[a.repo.id], 'a closed tab keeps its reviews and notifications')
+	assert.ok(svc.knownGitHubRepos().size > 0)
+
+	// Without a connected GitHub the stored check is stale, so tabs show no count rather than an old one.
+	await store.update((d) => void (d.inboxWatch = { login: 'me', state: { 'x/y#1': { draft: false, reviewed: false } }, at: '' }))
+	assert.deepEqual(
+		svc.tabs().map((t) => t.requests),
+		[null],
+	)
+
+	assert.deepEqual(await svc.closeTab(b.repo.id), [])
+	assert.equal(store.read().lastRepoId, null)
+	assert.equal(await svc.restoreLast(), null)
+})

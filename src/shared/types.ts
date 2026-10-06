@@ -996,8 +996,17 @@ export interface ReviewSummary {
 	drafts: number
 }
 
+/** A repository tab: one per repository open in the app, in the order they were opened. */
+export interface RepoTab {
+	id: string
+	name: string
+	root: string
+	requests: number | null // open review requests from the background check; null when it isn't running or the repository isn't on GitHub
+}
+
 export interface RepoSession {
 	repo: RepoInfo
+	tabs: Array<RepoTab>
 	activeReviewId: string | null
 	reviews: Array<ReviewSummary>
 	browser: BrowserState
@@ -1040,6 +1049,8 @@ export const IPC = {
 	githubTestNotification: 'gh:notification-test',
 	markPrSeen: 'gh:seen',
 	openKnownRepo: 'repo:open-known',
+	closeRepoTab: 'repo:close-tab',
+	repoTabs: 'repo:tabs',
 	inboxOpen: 'inbox:open',
 	inboxChanged: 'inbox:changed',
 	githubSetRepo: 'gh:repo-set',
@@ -1117,6 +1128,10 @@ export interface ReviewApi {
 	markPrSeen(repoId: string, number: number): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */
 	openKnownRepo(repoId: string): Promise<Result<RepoSession>>
+	/** Closes a repository's tab. Its reviews stay stored and its review requests keep notifying. Returns the tabs left. */
+	closeRepoTab(repoId: string): Promise<Result<Array<RepoTab>>>
+	/** The repository tabs, re-read when review requests change. */
+	repoTabs(): Promise<Result<Array<RepoTab>>>
 	onInboxOpen(handler: (target: InboxOpen) => void): () => void
 	/** Your review requests or reviewed pull requests changed on GitHub (seen by the background check). */
 	onInboxChanged(handler: () => void): () => void

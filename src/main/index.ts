@@ -149,6 +149,8 @@ function registerIpc(): void {
 	})
 	handle(IPC.markPrSeen, (repoId: unknown, n: unknown) => service.markPrSeen(str(repoId, 'repository'), prNumber(n)))
 	handle(IPC.openKnownRepo, (repoId: unknown) => service.openKnown(str(repoId, 'repository')))
+	handle(IPC.closeRepoTab, (repoId: unknown) => service.closeTab(str(repoId, 'repository')))
+	handle(IPC.repoTabs, async () => service.tabs())
 	handle(IPC.githubSetRepo, (repoId: unknown, repo: unknown) => service.setGitHubRepo(str(repoId, 'repository'), githubRepo(repo)))
 	handle(IPC.searchPrs, (repoId: unknown, q: unknown, slot: unknown) =>
 		service.searchPrs(str(repoId, 'repository'), prQuery(q), slot === 'palette' ? 'palette' : 'list'),

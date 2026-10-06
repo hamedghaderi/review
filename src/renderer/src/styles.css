@@ -3481,3 +3481,114 @@ input.member-role {
 	flex-basis: 100%;
 	min-width: 0;
 }
+
+/* Repository tabs: one per open repository, above the header. */
+.repo-tabs {
+	display: flex;
+	align-items: flex-end;
+	gap: 4px;
+	min-height: 32px;
+	padding: 4px 8px 0;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+	min-width: 0;
+}
+.repo-tab-list {
+	display: flex;
+	align-items: flex-end;
+	gap: 2px;
+	min-width: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.repo-tab {
+	display: flex;
+	align-items: center;
+	flex: 0 1 200px;
+	min-width: 90px;
+	height: 28px;
+	margin-bottom: -1px;
+	border: 1px solid transparent;
+	border-bottom: 0;
+	border-radius: 6px 6px 0 0;
+	color: var(--text-2);
+}
+.repo-tab:hover {
+	background: var(--hover);
+}
+.repo-tab.on {
+	background: var(--chrome);
+	border-color: var(--border);
+	color: var(--text);
+}
+.repo-tab-name {
+	flex: 1;
+	height: 100%;
+	padding: 0 4px 0 10px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+.repo-tab.on .repo-tab-name {
+	font-weight: 600;
+}
+.repo-tab-count {
+	flex-shrink: 0;
+	min-width: 16px;
+	height: 16px;
+	margin-right: 2px;
+	padding: 0 5px;
+	border-radius: 8px;
+	background: var(--accent);
+	color: var(--accent-text);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 16px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.repo-tab-close,
+.repo-tab-add {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	margin-right: 4px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+}
+.repo-tab-close {
+	visibility: hidden;
+}
+.repo-tab.on .repo-tab-close,
+.repo-tab:hover .repo-tab-close,
+.repo-tab-close:focus-visible {
+	visibility: visible;
+}
+.repo-tab-close:hover,
+.repo-tab-add:hover {
+	background: var(--border);
+	color: var(--text);
+}
+.repo-tab-add {
+	align-self: center;
+	font-size: 16px;
+}
+.repo-tab-error {
+	align-self: center;
+	margin-left: auto;
+	max-width: 50%;
+	border: 0;
+	border-radius: 6px;
+	cursor: pointer;
+}

@@ -57,6 +57,12 @@ export interface InboxEvent {
 
 export const watchKey = (pr: { repo: string; number: number }): string => `${pr.repo.toLowerCase()}#${pr.number}`
 
+/** Open, non-draft pull requests in a GitHub repository ("owner/name") that request your review, as the dock badge counts them. */
+export function requestCount(state: WatchState, repo: string): number {
+	const prefix = `${repo.toLowerCase()}#`
+	return Object.entries(state).filter(([key, s]) => key.startsWith(prefix) && s.requested !== false && !s.draft).length
+}
+
 /**
  * What changed since the last look at your review requests and reviewed pull requests. Without an earlier look (first
  * run, or another account) nothing is reported, so connecting does not announce every existing request. Drafts are not
