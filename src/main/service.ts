@@ -529,6 +529,7 @@ export class ReviewService {
 				baseSha: d.baseSha,
 				headSha: d.headSha,
 				body: d.body.slice(0, 8000),
+				author: d.author,
 			},
 		})
 		const notice = changed

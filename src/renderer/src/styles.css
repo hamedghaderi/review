@@ -252,7 +252,7 @@ input[type='checkbox'] {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	flex: 1 1 240px;
+	flex: 1 1 auto;
 	min-width: 0;
 	overflow: hidden;
 }
@@ -1724,7 +1724,6 @@ input[type='checkbox'] {
 	max-width: 220px;
 }
 @media (max-width: 1600px) {
-	.hfield.compare .mono,
 	.progress .bar {
 		display: none;
 	}
@@ -3731,4 +3730,81 @@ input.member-role {
 	right: 3px;
 	background: color-mix(in srgb, var(--bg) 85%, transparent);
 	box-shadow: 0 0 0 1px var(--border);
+}
+/* A pull request's number in the review header opens it on GitHub. */
+.pr-link {
+	text-decoration: none;
+}
+.pr-link:hover {
+	text-decoration: underline;
+}
+.pr-author {
+	flex-shrink: 0;
+	color: var(--text-2);
+	font-size: 12px;
+}
+
+/* Review view: what is under review gets its own row below the header, so the actions never squeeze the title away. */
+.target-bar {
+	display: flex;
+	align-items: center;
+	gap: 6px 12px;
+	min-width: 0;
+	min-height: 34px;
+	padding: 4px 12px;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+}
+.target-bar > * {
+	flex-shrink: 0;
+}
+.target-bar > .hfield.compare {
+	flex: 0 1 auto;
+	min-width: 120px;
+}
+.target-bar .hfield.compare .ellipsis {
+	max-width: none;
+}
+.target-bar .target-title {
+	font-weight: 600;
+}
+/* On narrow windows the commit range goes first, then the base branch; the title keeps the room. */
+@media (max-width: 1100px) {
+	.target-bar .hfield.compare .mono.small {
+		display: none;
+	}
+}
+@media (max-width: 800px) {
+	.target-bar .hfield.compare .mono {
+		display: none;
+	}
+}
+/* How many changed files are marked as viewed, under the file filters. */
+.tree-viewed {
+	height: 3px;
+	border-radius: 2px;
+	background: var(--border);
+	overflow: hidden;
+}
+.tree-viewed > span {
+	display: block;
+	height: 100%;
+	background: var(--ok);
+	transition: width 0.2s;
+}
+.target-bar .base-ref {
+	flex: 0 1 auto;
+	max-width: 220px;
+	color: var(--text-2);
+}
+.target-bar .snapshot-pick {
+	margin-left: auto;
+	flex: 0 1 auto;
+	min-width: 0;
+}
+.target-bar .snapshot-pick select {
+	max-width: 190px;
+	height: 24px;
+	font-size: 12px;
 }

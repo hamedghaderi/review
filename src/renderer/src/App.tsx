@@ -503,14 +503,16 @@ export function App() {
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Who approved or reviewed the open pull request, re-read as often as the PR is checked for new commits.
-	const [prReview, setPrReview] = useState<{ id: string; value: PrReviewState | null } | null>(null)
+	const [prReview, setPrReview] = useState<{ id: string; value: PrReviewState | null; author: string | null } | null>(null)
 	useEffect(() => {
 		if (!session || !comparison?.pr || view !== 'review') return
 		const id = comparison.id
 		const n = comparison.pr.number
 		let live = true
 		const read = (): void => {
-			void window.review.prDetail(session.repo.id, n).then((r) => live && r.ok && setPrReview({ id, value: r.value.review }))
+			void window.review
+				.prDetail(session.repo.id, n)
+				.then((r) => live && r.ok && setPrReview({ id, value: r.value.review, author: r.value.author }))
 		}
 		read()
 		const t = window.setInterval(read, 120_000)
@@ -708,18 +710,14 @@ export function App() {
 	const fileComments = useMemo(() => review?.comments.filter((c) => c.anchor.fileKey === selected) ?? [], [review?.comments, selected])
 	const fileDrafts = useMemo(() => review?.drafts.filter((d) => d.anchor.fileKey === selected) ?? [], [review?.drafts, selected])
 
+	// Short on screen; when it was saved, or why it failed, is in the tooltip.
 	const saveLabel =
-		save.kind === 'saving'
-			? 'Saving…'
-			: save.kind === 'saved'
-				? `Saved ${new Date(save.at!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-				: save.kind === 'dirty'
-					? 'Unsaved changes'
-					: save.kind === 'error'
-						? `Save failed: ${save.message}`
-						: review
-							? `Saved ${new Date(review.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-							: ''
+		save.kind === 'saving' ? 'Saving…' : save.kind === 'dirty' ? 'Unsaved' : save.kind === 'error' ? 'Save failed' : review ? 'Saved' : ''
+	const savedAt = save.kind === 'saved' ? save.at! : (review?.updatedAt ?? null)
+	const saveTitle =
+		save.kind === 'error'
+			? `Save failed: ${save.message}\nClick to try again.`
+			: `${savedAt && save.kind !== 'dirty' && save.kind !== 'saving' ? `Saved on this computer ${new Date(savedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}.\n` : ''}Edits save automatically; click to save now. Nothing is sent to GitHub until you publish.`
 
 	const snapshotsForTarget: Array<ReviewSummary> = useMemo(() => {
 		if (!comparison || !session) return []
@@ -778,36 +776,30 @@ export function App() {
 									<span className="mono ellipsis">{repo.branch ?? `detached HEAD${repo.headSha ? ` @ ${short(repo.headSha)}` : ''}`}</span>
 								</span>
 							)}
-							{view === 'review' && comparison && <TargetLabel comparison={comparison} />}
-							{view === 'review' && comparison?.pr && prReview?.id === comparison.id && (
-								<ReviewBadge review={prReview.value} viewer={github?.login ?? null} />
-							)}
-							{stackRepo && prGraph && comparison?.pr && <StackBadge graph={prGraph} number={comparison.pr.number} />}
-							{view === 'review' && snapshotsForTarget.length > 1 && comparison && (
-								<label className="hfield shrink" title="Earlier snapshots of this target stay pinned to their original commits">
-									<span className="muted">Snapshot</span>
-									<select value={comparison.id} onChange={(e) => void chooseSnapshot(e.target.value)}>
-										{snapshotsForTarget.map((s) => (
-											<option key={s.id} value={s.id}>
-												{short(s.baseSha)}…{short(s.headSha)} · {s.comments} comment{s.comments === 1 ? '' : 's'} ·{' '}
-												{new Date(s.updatedAt).toLocaleDateString()}
-											</option>
-										))}
-									</select>
-								</label>
-							)}
-							{view === 'review' && repo.uncommitted > 0 && (
-								<span className="pill warn" title="Only committed changes are reviewed. Working-tree and staged changes are not included.">
-									{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'} excluded
-								</span>
-							)}
 						</>
 					)}
 				</div>
 				<div className="hactions">
 					{session && (
-						<button className="btn small ghost" onClick={() => setPaletteOpen(true)} title="Quick open (⌘P / Ctrl+P)">
-							Go to… <kbd>⌘P</kbd>
+						<button
+							className="btn ghost icon"
+							onClick={() => setPaletteOpen(true)}
+							title="Go to a pull request or branch (⌘P / Ctrl+P)"
+							aria-label="Go to"
+						>
+							<svg
+								width="15"
+								height="15"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2"
+								strokeLinecap="round"
+								aria-hidden="true"
+							>
+								<circle cx="11" cy="11" r="7" />
+								<path d="m20 20-3.5-3.5" />
+							</svg>
 						</button>
 					)}
 					{view === 'review' && comparison && review && (
@@ -833,20 +825,6 @@ export function App() {
 							)}
 						</div>
 					)}
-					{view === 'review' && comparison && review && (
-						<>
-							<span className="divider" />
-							<span className="progress" title="Files marked as viewed" style={{ flexShrink: 0 }}>
-								<span className="bar">
-									<span style={{ width: `${files.length ? (100 * files.filter((f) => viewed.has(f.key)).length) / files.length : 0}%` }} />
-								</span>
-								<span className="small">
-									{files.filter((f) => viewed.has(f.key)).length}/{files.length} viewed · {review.comments.length} comment
-									{review.comments.length === 1 ? '' : 's'}
-								</span>
-							</span>
-						</>
-					)}
 					{view === 'review' && review && (
 						<>
 							<button
@@ -856,7 +834,7 @@ export function App() {
 									void persist()
 								}}
 								disabled={save.kind === 'saving'}
-								title="Edits save automatically on this computer. Click to save now. Nothing is sent to GitHub; use Publish for that."
+								title={saveTitle}
 							>
 								<span role="status" aria-live="polite">
 									{saveLabel}
@@ -920,6 +898,34 @@ export function App() {
 					</button>
 				</div>
 			</header>
+			{view === 'review' && comparison && repo && (
+				<div className="target-bar">
+					<TargetLabel
+						comparison={comparison}
+						author={comparison.pr?.author ?? (prReview?.id === comparison.id ? prReview.author : null)}
+					/>
+					{comparison.pr && prReview?.id === comparison.id && <ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />}
+					{stackRepo && prGraph && comparison.pr && <StackBadge graph={prGraph} number={comparison.pr.number} />}
+					{snapshotsForTarget.length > 1 && (
+						<label className="hfield shrink snapshot-pick" title="Earlier snapshots of this target stay pinned to their original commits">
+							<span className="muted">Snapshot</span>
+							<select value={comparison.id} onChange={(e) => void chooseSnapshot(e.target.value)}>
+								{snapshotsForTarget.map((s) => (
+									<option key={s.id} value={s.id}>
+										{short(s.headSha)} · {new Date(s.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+										{s.comments ? ` · ${s.comments} comment${s.comments === 1 ? '' : 's'}` : ''}
+									</option>
+								))}
+							</select>
+						</label>
+					)}
+					{repo.uncommitted > 0 && (
+						<span className="pill warn" title="Only committed changes are reviewed. Working-tree and staged changes are not included.">
+							{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'} excluded
+						</span>
+					)}
+				</div>
+			)}
 
 			{view === 'review' && update && comparison && (
 				<div className="banner" role="status">
@@ -1362,22 +1368,35 @@ function RepoTabs(props: {
 	)
 }
 
-function TargetLabel({ comparison: c }: { comparison: Comparison }) {
-	const title = `Merge base ${c.baseSha}\nHead ${c.headSha}\n${c.pr ? `PR base ${c.pr.baseSha}` : `Base tip ${c.baseTipSha}`}`
+/** What the review compares; for a pull request, its number (linking to GitHub), title and author. */
+function TargetLabel({ comparison: c, author }: { comparison: Comparison; author: string | null }) {
+	const title = `Comparing ${short(c.baseSha)}…${short(c.headSha)}\nMerge base ${c.baseSha}\nHead ${c.headSha}\n${c.pr ? `PR base ${c.pr.baseSha}` : `Base tip ${c.baseTipSha}`}`
 	return (
 		<span className="hfield compare shrink" title={title}>
 			{c.pr ? (
 				<>
-					<span className={`pr-state ${c.pr.state}`}>#{c.pr.number}</span>
-					<span className="ellipsis">{c.pr.title}</span>
+					<a
+						className={`pr-state pr-link ${c.pr.state}`}
+						href={c.pr.url}
+						target="_blank"
+						rel="noreferrer"
+						title={`Open ${c.pr.repo}#${c.pr.number} on GitHub`}
+					>
+						#{c.pr.number} ↗
+					</a>
+					<span className="ellipsis target-title">{c.pr.title}</span>
+					{author && (
+						<span className="pr-author nowrap" title={`Opened by @${author}`}>
+							by @{author}
+						</span>
+					)}
 				</>
 			) : (
 				<span className="mono ellipsis">{c.headRef ?? short(c.headSha)}</span>
 			)}
 			<span className="muted">→</span>
-			<span className="mono">{refName(c.baseRef)}</span>
-			<span className="mono small muted">
-				{short(c.baseSha)}…{short(c.headSha)}
+			<span className="mono small base-ref ellipsis" title={`Into ${refName(c.baseRef)}`}>
+				{refName(c.baseRef)}
 			</span>
 		</span>
 	)

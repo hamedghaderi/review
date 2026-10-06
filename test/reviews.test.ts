@@ -54,4 +54,12 @@ test('badge: GitHub decision first, then the reviews; older-commit approvals, pa
 	assert.equal(label('REVIEW_REQUIRED', []), 'Review required')
 	assert.equal(label(null, []), null, 'nothing to show')
 	assert.match(reviewSummary(st(null, [r('a', 'APPROVED', '2026-01-05', OLD)]), null)!.title, /a: approved on an older commit/)
+
+	// The header's short label leaves your own review to the tooltip.
+	const mine = reviewSummary(st('CHANGES_REQUESTED', [r('a', 'CHANGES_REQUESTED', '1', OLD)]), 'a')!
+	assert.equal(mine.label, 'Changes requested · you requested changes (older commit)')
+	assert.equal(mine.short, 'Changes requested')
+	assert.equal(mine.mine, 'You requested changes (older commit)')
+	const other = reviewSummary(st(null, [r('b', 'APPROVED', '1')]), 'a')!
+	assert.deepEqual([other.short, other.mine], ['Approved', null])
 })
