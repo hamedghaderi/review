@@ -1,4 +1,4 @@
-import type { AiUsage, ProviderKind, ProviderProtocol } from '../../shared/types.ts'
+import type { AiUsage, ContextImageType, ProviderKind, ProviderProtocol } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
 import type { ReviewTools } from './lookup.ts'
 
@@ -10,7 +10,17 @@ export interface ProviderRequest {
 	schema?: { name: string; json: Record<string, unknown> }
 	/** Read-only lookups the model may call before answering; the provider runs the calls and sends the results back. */
 	tools?: ReviewTools
+	/** Images sent after the text, in order; the text names them. */
+	images?: Array<RequestImage>
 }
+
+export interface RequestImage {
+	name: string
+	mediaType: ContextImageType
+	data: string // base64
+}
+
+export const dataUrl = (i: RequestImage): string => `data:${i.mediaType};base64,${i.data}`
 
 export interface ProviderResponse {
 	output: unknown // parsed JSON, validated by the runner against the findings schema

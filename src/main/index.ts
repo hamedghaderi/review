@@ -151,6 +151,11 @@ function registerIpc(): void {
 	handle(IPC.openKnownRepo, (repoId: unknown) => service.openKnown(str(repoId, 'repository')))
 	handle(IPC.closeRepoTab, (repoId: unknown) => service.closeTab(str(repoId, 'repository')))
 	handle(IPC.repoTabs, async () => service.tabs())
+	handle(IPC.addContextImage, (name: unknown, bytes: unknown) => {
+		if (!(bytes instanceof Uint8Array)) throw new AppFail('invalid-input', 'Invalid image.')
+		return service.addContextImage(typeof name === 'string' ? name : 'image', bytes)
+	})
+	handle(IPC.contextImage, (id: unknown, mediaType: unknown) => service.contextImage(str(id, 'image id', 64), mediaType))
 	handle(IPC.githubSetRepo, (repoId: unknown, repo: unknown) => service.setGitHubRepo(str(repoId, 'repository'), githubRepo(repo)))
 	handle(IPC.searchPrs, (repoId: unknown, q: unknown, slot: unknown) =>
 		service.searchPrs(str(repoId, 'repository'), prQuery(q), slot === 'palette' ? 'palette' : 'list'),

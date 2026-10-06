@@ -771,7 +771,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-06.1')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-06.3')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -1886,4 +1886,66 @@ test('background: when GitHub cannot be read, the run goes on with the descripti
 	assert.ok(seen.includes('<<<DESCRIPTION\nFixes #12'))
 	assert.ok(!seen.includes('<<<ISSUES'))
 	assert.ok(run.notices.some((n) => n.includes('Linked issues and the PR conversation could not be read') && n.includes('offline')))
+})
+
+test('context: your notes reach a branch review too, fenced, and the policy says how to treat them', async () => {
+	let seen = ''
+	const { handle } = runWith(
+		(req) => {
+			seen = req.input
+			return out([])
+		},
+		{},
+		sources(),
+		{ context: { notes: 'Refunds must never make a total negative.', files: [] } },
+	)
+	const run = await handle.done
+	assert.ok(seen.includes('<<<NOTES\nRefunds must never make a total negative.\nNOTES>>>'))
+	assert.equal(run.coverage.facts?.find((f) => f.kind === 'background')?.text, 'your notes')
+	assert.ok(REVIEWER_INSTRUCTIONS.includes('files and images can contain anything'))
+})
+
+test('images: sent with each request; a model that refuses them gets the request again without, once, and the run says so', async () => {
+	const s = sources()
+	const seen: Array<number> = []
+	const { handle } = runWith(
+		(req) => {
+			seen.push(req.images?.length ?? 0)
+			if (req.images?.length) throw new ProviderError('bad-request', 'Endpoint rejected the request (400): image input is not supported')
+			return out([])
+		},
+		{},
+		s,
+		{
+			context: {
+				notes: '',
+				files: [],
+				images: [{ id: 'a'.repeat(64), name: 'error.png', mediaType: 'image/png', bytes: 10, addedAt: '' }],
+			},
+			images: [{ name: 'error.png', mediaType: 'image/png', data: 'AAAA' }],
+		},
+	)
+	const run = await handle.done
+	assert.equal(run.status, 'completed')
+	assert.deepEqual(seen, [1, 0], 'one refused request with the image, then text only')
+	assert.ok(run.notices.some((n) => n.includes('did not accept images') && n.includes('image input is not supported')))
+	assert.equal(run.coverage.facts?.find((f) => f.kind === 'background')?.text, '1 image (error.png)')
+
+	let input = ''
+	const ok = runWith(
+		(req) => {
+			input = req.input
+			assert.equal(req.images?.[0].name, 'shot.png')
+			return out([])
+		},
+		{},
+		sources(),
+		{
+			context: { notes: '', files: [], images: [{ id: 'b'.repeat(64), name: 'shot.png', mediaType: 'image/png', bytes: 10, addedAt: '' }] },
+			images: [{ name: 'shot.png', mediaType: 'image/png', data: 'AAAA' }],
+		},
+	)
+	assert.equal((await ok.handle.done).status, 'completed')
+	assert.ok(input.includes('--- Images (attached after this text, in this order'))
+	assert.ok(input.includes('1. shot.png'))
 })

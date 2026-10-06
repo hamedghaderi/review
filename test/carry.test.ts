@@ -176,3 +176,61 @@ test('a comment whose file drops out of the change is outdated but kept', async 
 	assert.equal(c.carried!.outdated?.reason, 'The file is no longer part of the changes.')
 	assert.deepEqual(c.carried!.outdated?.code, ['g2'])
 })
+
+test('the context you gave the reviewer is saved, carried into a newer snapshot, and never shared with the old one', async () => {
+	const w = world()
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(w.dir)
+	const v1 = await svc.loadComparison(s.repo.id, { kind: 'target', target })
+	const context = {
+		notes: 'Must keep the old rounding.',
+		files: [{ id: 'f1', name: 'spec.md', text: '# Spec', addedAt: new Date().toISOString() }],
+	}
+	await svc.saveReview({ ...v1.review, context })
+	assert.deepEqual(store.read().repos[s.repo.id].reviews[v1.review.id].context, context)
+
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'f.txt': lines(10, { 5: 'L5 again' }) }, 'v2')
+	w.run('checkout', '-q', 'main')
+	const v2 = await svc.loadComparison(s.repo.id, { kind: 'target', target, from: v1.review.id })
+	assert.notEqual(v2.review.id, v1.review.id)
+	assert.deepEqual(v2.review.context, context)
+	await svc.saveReview({ ...v2.review, context: { ...context, notes: 'changed' } })
+	assert.equal(store.read().repos[s.repo.id].reviews[v1.review.id].context!.notes, 'Must keep the old rounding.')
+
+	// Clearing it stores none; binary text and too many files are refused.
+	await svc.saveReview({ ...v2.review, context: { notes: '  ', files: [] } })
+	assert.equal(store.read().repos[s.repo.id].reviews[v2.review.id].context, undefined)
+	await assert.rejects(
+		svc.saveReview({ ...v2.review, context: { notes: '', files: [{ ...context.files[0], text: 'a\u0000b' }] } }),
+		/context file \(not text\)/,
+	)
+	const six = Array.from({ length: 6 }, (_, i) => ({ ...context.files[0], id: `f${i}` }))
+	await assert.rejects(svc.saveReview({ ...v2.review, context: { notes: '', files: six } }), /too many/)
+})
+
+test('context images: stored once by content, checked by their bytes, and a review can only reference stored ones', async () => {
+	const w = world()
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(w.dir)
+	const v1 = await svc.loadComparison(s.repo.id, { kind: 'target', target })
+	const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+	const a = await svc.addContextImage('shot.png', png)
+	const b = await svc.addContextImage('again.png', png)
+	assert.equal(a.id, b.id, 'same bytes, same stored image')
+	assert.equal(a.mediaType, 'image/png')
+	assert.match(await svc.contextImage(a.id, 'image/png'), /^data:image\/png;base64,/)
+	// The type comes from the bytes: a "png" that is text is refused, whatever its name says.
+	await assert.rejects(svc.addContextImage('fake.png', new TextEncoder().encode('hello')), /Not a PNG, JPEG, GIF or WebP/)
+	await assert.rejects(svc.addContextImage('big.png', new Uint8Array(5_000_001)), /too large/)
+
+	await svc.saveReview({ ...v1.review, context: { notes: '', files: [], images: [a] } })
+	assert.deepEqual(store.read().repos[s.repo.id].reviews[v1.review.id].context?.images, [a])
+	const unknown = { ...a, id: 'f'.repeat(64) }
+	await assert.rejects(svc.saveReview({ ...v1.review, context: { notes: '', files: [], images: [unknown] } }), /is not stored/)
+	await assert.rejects(svc.contextImage('../../etc/passwd', 'image/png'), /Invalid image id/)
+})

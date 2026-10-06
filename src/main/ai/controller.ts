@@ -12,6 +12,7 @@ import {
 	type ReviewRule,
 	type ReviewTeam,
 	type PastDecision,
+	type ReviewContext,
 } from '../../shared/types.ts'
 import { AppFail } from '../git.ts'
 import type { ReviewStore } from '../store.ts'
@@ -21,6 +22,7 @@ import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
 import { buildAskRequest, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
+import type { RequestImage } from './provider.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
@@ -35,6 +37,10 @@ export interface ComparisonAccess {
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
 	/** Linked issues and the PR conversation; absent for branch reviews. */
 	loadBackground?: RunInput['loadBackground']
+	/** The notes and files you gave the reviewer for this review, as saved when the run starts. */
+	reviewContext?(): ReviewContext | null
+	/** The images in that context, read from disk when the run starts. */
+	contextImages?(): Promise<Array<RequestImage>>
 	/** Findings the reviewer dismissed on earlier runs of this pull request or branch, newest first. */
 	pastDecisions?(): Array<PastDecision>
 	/** Read-only lookups in the comparison's two commits, for one review request, plus the run's MCP tools if any. */
@@ -348,6 +354,11 @@ export class AiController {
 			}
 		}
 		const tools = access.tools
+		// An image that can't be read (removed from disk) leaves the run without images rather than failing it.
+		const images = await (access.contextImages?.() ?? Promise.resolve([])).catch((e: unknown) => {
+			console.warn('Context images could not be read:', e)
+			return []
+		})
 		const handle = startRun(
 			{
 				...input,
@@ -357,6 +368,8 @@ export class AiController {
 				loadRelated: access.findRelated?.bind(access),
 				loadFacts: access.loadFacts?.bind(access),
 				loadBackground: access.loadBackground?.bind(access),
+				context: access.reviewContext?.() ?? null,
+				images,
 				tools: tools ? (budget) => tools.call(access, budget, external) : undefined,
 				external,
 				decisions: access.pastDecisions?.() ?? [],

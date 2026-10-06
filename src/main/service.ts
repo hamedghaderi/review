@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
 import type {
 	AiRun,
 	AiScope,
@@ -24,6 +24,8 @@ import type {
 	RepoTab,
 	Review,
 	ReviewComment,
+	ReviewContext,
+	ContextImage,
 	ReviewEvent,
 	ReviewerChoice,
 	ReviewRule,
@@ -54,6 +56,7 @@ import { carryComments } from './carry.ts'
 import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
 import { issueRefs } from './ai/background.ts'
+import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
@@ -90,6 +93,7 @@ export class ReviewService {
 	private repos = new Map<string, RepoInfo>()
 	private comparisons = new Map<string, ComparisonData>()
 	private store: ReviewStore
+	private images: ContextImages
 	private ai: AiController | null = null
 	private mcp: McpService | null = null
 	private github: GitHubService | null
@@ -101,6 +105,7 @@ export class ReviewService {
 
 	constructor(store: ReviewStore, github: GitHubService | null = null) {
 		this.store = store
+		this.images = new ContextImages(join(store.dir, 'context-images'))
 		this.github = github
 		this.publisher = github && new Publisher(store, github, (reviewId, key) => this.hunksFor(reviewId, key))
 	}
@@ -223,6 +228,17 @@ export class ReviewService {
 		return this.open(s.root)
 	}
 
+	/** Stores an image for a review's context; the bytes are checked here, whatever the renderer claims. */
+	async addContextImage(name: string, bytes: Uint8Array): Promise<ContextImage> {
+		const stored = await this.images.add(bytes)
+		return { ...stored, name: name.trim().slice(0, 255) || 'image', addedAt: new Date().toISOString() }
+	}
+
+	async contextImage(id: string, mediaType: unknown): Promise<string> {
+		if (!isImageType(mediaType)) throw new AppFail('invalid-input', 'Invalid image type.')
+		return `data:${mediaType};base64,${(await this.images.read(id, mediaType)).toString('base64')}`
+	}
+
 	/** Closes a repository's tab; the repository stays known (reviews, notifications). Returns the tabs left. */
 	async closeTab(repoId: string): Promise<Array<RepoTab>> {
 		await this.store.update((d) => {
@@ -313,6 +329,7 @@ export class ReviewService {
 		this.comparisons.set(c.id, data)
 		this.ai?.cancelUnless(c.id)
 		const carry = target.kind === 'target' ? await this.carry(repoId, data, target.from ?? null) : null
+		const context = target.kind === 'target' ? this.carriedContext(repoId, c, target.from ?? null) : null
 		if (gen !== this.loadGen) throw new AppFail('cancelled', 'A newer review was opened.')
 		if (carry?.notice) notice = notice ? `${notice} ${carry.notice}` : carry.notice
 		const now = new Date().toISOString()
@@ -347,6 +364,7 @@ export class ReviewService {
 					viewed: [],
 					findingDecisions: {},
 					...(carry?.comments.length ? { carriedOrigins: carry.comments.map((x) => x.carried!.originId) } : {}),
+					...(context ? { context } : {}),
 				}
 			}
 			s.activeReviewId = c.id
@@ -389,6 +407,14 @@ export class ReviewService {
 		} catch (e) {
 			return { comments: [], notice: `Comments could not be carried over from ${label}: ${errorOf(e).message}` }
 		}
+	}
+
+	/** The context you gave the reviewer, copied into a new snapshot from the one it replaces (as comments are). */
+	private carriedContext(repoId: string, c: Comparison, from: string | null): ReviewContext | null {
+		const reviews = this.store.read().repos[repoId]?.reviews ?? {}
+		if (reviews[c.id]) return null
+		const src = (from && from !== c.id ? reviews[from] : undefined) ?? this.predecessor(repoId, c, Object.values(reviews))
+		return src?.context ? structuredClone(src.context) : null
 	}
 
 	/**
@@ -694,6 +720,8 @@ export class ReviewService {
 		const stored = this.store.read().repos[repoId]?.reviews[id]
 		if (!stored || !this.repos.has(repoId)) throw new AppFail('not-found', 'This review is not open.')
 		const next = reviewUpdate(input, stored, findingRoots(this.ai?.runsFor(repoId, id) ?? []))
+		for (const i of next.context?.images ?? [])
+			if (!this.images.has(i.id, i.mediaType)) throw new AppFail('invalid-input', `The image “${i.name}” is not stored; add it again.`)
 		const savedAt = new Date().toISOString()
 		await this.store.update((d) => {
 			Object.assign(d.repos[repoId].reviews[id], next, { updatedAt: savedAt })
@@ -735,6 +763,17 @@ export class ReviewService {
 					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
+				reviewContext: () => this.store.read().repos[repoId]?.reviews[reviewId]?.context ?? null,
+				contextImages: async () => {
+					const list = this.store.read().repos[repoId]?.reviews[reviewId]?.context?.images ?? []
+					return Promise.all(
+						list.map(async (i) => ({
+							name: i.name,
+							mediaType: i.mediaType,
+							data: (await this.images.read(i.id, i.mediaType)).toString('base64'),
+						})),
+					)
+				},
 				loadFacts: (sources, signal) => {
 					const c = data.comparison
 					const gh = this.github

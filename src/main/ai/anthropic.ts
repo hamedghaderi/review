@@ -79,7 +79,20 @@ export function createAnthropicProvider(
 		limits: o.limits,
 		async review(request: ProviderRequest, signal: AbortSignal): Promise<ProviderResponse> {
 			const tools = request.tools
-			const messages: Array<MessageParam> = [{ role: 'user', content: request.input }]
+			const messages: Array<MessageParam> = [
+				{
+					role: 'user',
+					content: request.images?.length
+						? [
+								{ type: 'text', text: request.input },
+								...request.images.map((i) => ({
+									type: 'image' as const,
+									source: { type: 'base64' as const, media_type: i.mediaType, data: i.data },
+								})),
+							]
+						: request.input,
+				},
+			]
 			let usage: AiUsage | null = null
 			for (let round = 0; ; round++) {
 				const offer = tools && !toolsRejected

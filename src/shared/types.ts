@@ -363,7 +363,49 @@ export interface Review {
 	findingDecisions: Record<string, FindingDecision> // keyed by finding id
 	publication?: Publication // GitHub reviews this snapshot's comments were published to; written by the main process only
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
+	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
 }
+
+/**
+ * Context you give the AI reviewer for one review: notes and text files. Sent with every request of later runs, and
+ * carried into newer snapshots of the same pull request or branch.
+ */
+export interface ReviewContext {
+	notes: string
+	files: Array<ContextFile>
+	images?: Array<ContextImage> // absent on context saved before images were supported
+}
+
+/** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */
+export interface ContextImage {
+	id: string
+	name: string
+	mediaType: ContextImageType
+	bytes: number
+	addedAt: string
+}
+
+export const CONTEXT_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const
+export type ContextImageType = (typeof CONTEXT_IMAGE_TYPES)[number]
+
+export interface ContextFile {
+	id: string
+	name: string
+	text: string
+	addedAt: string
+}
+
+/** How much context a review can hold. What a run sends is capped separately (see the AI background budget). */
+export const CONTEXT_LIMITS = {
+	notes: 10_000,
+	files: 5,
+	fileChars: 100_000,
+	fileBytes: 400_000,
+	sent: 20_000,
+	images: 5,
+	imageBytes: 5_000_000, // the smallest per-image limit among the providers (Anthropic)
+	imageEdge: 1568, // longest side the app scales images down to; larger costs tokens without helping the model
+} as const
 
 /** One GitHub review (pending or submitted) that received comments from this snapshot. */
 export interface PublishedReview {
@@ -1050,6 +1092,8 @@ export const IPC = {
 	markPrSeen: 'gh:seen',
 	openKnownRepo: 'repo:open-known',
 	closeRepoTab: 'repo:close-tab',
+	addContextImage: 'context:image-add',
+	contextImage: 'context:image',
 	repoTabs: 'repo:tabs',
 	inboxOpen: 'inbox:open',
 	inboxChanged: 'inbox:changed',
@@ -1130,6 +1174,10 @@ export interface ReviewApi {
 	openKnownRepo(repoId: string): Promise<Result<RepoSession>>
 	/** Closes a repository's tab. Its reviews stay stored and its review requests keep notifying. Returns the tabs left. */
 	closeRepoTab(repoId: string): Promise<Result<Array<RepoTab>>>
+	/** Stores an image for a review's context (already scaled down by the renderer); the review references it on save. */
+	addContextImage(name: string, bytes: Uint8Array): Promise<Result<ContextImage>>
+	/** A stored context image as a data URL, for its thumbnail. */
+	contextImage(id: string, mediaType: string): Promise<Result<string>>
 	/** The repository tabs, re-read when review requests change. */
 	repoTabs(): Promise<Result<Array<RepoTab>>>
 	onInboxOpen(handler: (target: InboxOpen) => void): () => void
