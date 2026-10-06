@@ -1,4 +1,4 @@
-import type { InboxStatus, PrSummary } from './types.ts'
+import type { InboxStatus, PrSummary, ReviewVerdict } from './types.ts'
 
 /**
  * Your standing on one open pull request. `requested`: your review is requested now (directly or through a team).
@@ -45,6 +45,7 @@ export interface WatchedPr {
 	requested?: boolean // your review is requested now (false: listed only because you reviewed it)
 	head?: string | null // head commit
 	stale?: boolean // your latest review is on an older commit than `head`
+	verdict?: ReviewVerdict | null // what your latest review said; absent on older stored state
 }
 
 // Keyed by "owner/name#number". `head` is absent in state written before new commits were watched.

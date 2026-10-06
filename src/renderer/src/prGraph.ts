@@ -20,7 +20,7 @@ export function usePrGraph(repoId: string | null, enabled: boolean, refresh?: un
 }
 
 /**
- * Where you stand on each open PR that involves you ('needs-you' | 'reviewed'), for marking stacks and picking the PR
+ * Where you stand on each open PR that involves you (needs you, or what your review said), for marking stacks and picking the PR
  * to review next. Cached in the main process like the graph, and re-read when `refresh` changes or review requests do.
  */
 export function useMyReviews(repoId: string | null, enabled: boolean, refresh?: unknown): ReadonlyMap<number, MyReview> | null {

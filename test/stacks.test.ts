@@ -181,7 +181,7 @@ test('the open-PR graph is read page by page, cached, and not read without a tok
 
 test('stack guide: the whole stack bottom up from any member, where it sits, and the lowest PR that needs you', () => {
 	const mine = new Map<number, MyReview>([
-		[1, 'reviewed'],
+		[1, 'approved'],
 		[2, 'needs-you'],
 		[12, 'needs-you'],
 	])
@@ -190,7 +190,7 @@ test('stack guide: the whole stack bottom up from any member, where it sits, and
 	assert.deepEqual(
 		g.members.map((m) => [m.node.number, m.depth, m.mine]),
 		[
-			[1, 0, 'reviewed'],
+			[1, 0, 'approved'],
 			[2, 1, 'needs-you'],
 			[3, 2, null],
 			[10, 3, null],
@@ -213,14 +213,14 @@ test('stack guide: the whole stack bottom up from any member, where it sits, and
 	assert.equal(stackGuide(graph, 1, mine)?.members.length, 8)
 
 	// Once #2 is reviewed, the next one is #12; drafts are skipped; nothing left means no next.
-	mine.set(2, 'reviewed')
+	mine.set(2, 'commented')
 	assert.equal(stackGuide(graph, 3, mine)?.next?.node.number, 12)
 	const drafty = { ...graph, nodes: graph.nodes.map((n) => (n.number === 12 ? { ...n, draft: true } : n)) }
 	assert.equal(stackGuide(drafty, 3, mine)?.next?.node.number, 12, 'a draft when no ready PR needs you')
 	mine.set(13, 'needs-you')
 	assert.equal(stackGuide(drafty, 3, mine)?.next?.node.number, 13, 'a ready PR comes before a lower draft')
 	mine.delete(13)
-	mine.set(12, 'reviewed')
+	mine.set(12, 'changes-requested')
 	assert.equal(stackGuide(graph, 3, mine)?.next, null, 'nothing left for you')
 	assert.equal(stackGuide(graph, 3, null)?.next, null, 'without your status there is no next')
 
@@ -244,12 +244,26 @@ test('your review status per PR, from the requested and reviewed searches, for o
 			[
 				w(1, { requested: true }),
 				w(2, { reviewed: true, requested: false, stale: true }), // new commits since your review
-				w(3, { reviewed: true, requested: false }),
-				w(4, { reviewed: true, requested: true }), // asked again
+				w(3, { reviewed: true, requested: false, verdict: 'approved' }),
+				w(4, { reviewed: true, requested: true, verdict: 'approved' }), // asked again
+				w(6, { reviewed: true, requested: false, verdict: 'changes-requested' }),
+				w(7, { reviewed: true, requested: false, verdict: 'commented' }),
+				w(8, { reviewed: true, requested: false, verdict: 'dismissed' }),
+				w(9, { reviewed: true, requested: false }), // stored before verdicts were kept: never shown as approved
 				{ ...w(5, { requested: true }), repo: 'other/repo' },
 			],
 			'o/r',
 		),
-		{ 1: 'needs-you', 2: 'needs-you', 3: 'reviewed', 4: 'needs-you' },
+		{
+			1: 'needs-you',
+			2: 'needs-you',
+			3: 'approved',
+			4: 'needs-you',
+			6: 'changes-requested',
+			7: 'commented',
+			8: 'commented',
+			9: 'commented',
+		},
+		'your own verdict, never a bare "reviewed" that reads as approved',
 	)
 })

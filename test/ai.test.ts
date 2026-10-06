@@ -31,6 +31,8 @@ import {
 	deleteComment,
 	editComment,
 	forSave,
+	unsentComments,
+	plainPreview,
 	setFindingDecision,
 	submitDraft,
 	updateDraft,
@@ -1948,4 +1950,27 @@ test('images: sent with each request; a model that refuses them gets the request
 	assert.equal((await ok.handle.done).status, 'completed')
 	assert.ok(input.includes('--- Images (attached after this text, in this order'))
 	assert.ok(input.includes('1. shot.png'))
+})
+
+test('publish count: comments never published, or edited since, are the ones still to send', () => {
+	const c = (id: string, body: string) => ({ id, body, anchor: {} as never, createdAt: '', updatedAt: '', findingId: null })
+	const sent = (body: string) => ({ githubId: 'g', reviewId: 'r', url: '', body, at: '' })
+	const r: Review = {
+		...emptyReview(),
+		comments: [c('new', 'a'), c('same', 'b'), c('edited', 'c2')],
+		publication: { repo: 'o/r', number: 1, reviews: [], comments: { same: sent('b'), edited: sent('c1'), gone: sent('x') } },
+	}
+	assert.equal(unsentComments(r), 2)
+	assert.equal(unsentComments({ ...r, comments: [c('same', 'b')] }), 0)
+	assert.equal(unsentComments(emptyReview()), 0)
+})
+
+test('publish preview: an AI finding reads as text, with its level and rule as pills', () => {
+	assert.deepEqual(
+		plainPreview(
+			"🟠 <kbd>SHOULD FIX</kbd> <kbd>bug</kbd> Calling `resolveProfileIds('kypnl', 999)` returns **every** profile.\n\nSee [the docs](https://x).\n<details><summary>Why</summary>long</details>",
+		),
+		{ pills: ['SHOULD FIX', 'bug'], text: "Calling `resolveProfileIds('kypnl', 999)` returns every profile. See the docs." },
+	)
+	assert.deepEqual(plainPreview('Plain comment'), { pills: [], text: 'Plain comment' })
 })

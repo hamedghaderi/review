@@ -125,8 +125,11 @@ export function stackOf(
 	return { base, parents, children }
 }
 
-/** Where you stand on a PR: your review is wanted (requested, or new commits since you reviewed), or you're up to date. */
-export type MyReview = 'needs-you' | 'reviewed'
+/**
+ * Where you stand on a PR: your review is wanted (requested, or new commits since you reviewed), or what your review
+ * said when it is up to date. Never the PR's own approval state: that depends on everyone's reviews.
+ */
+export type MyReview = 'needs-you' | 'approved' | 'changes-requested' | 'commented'
 
 export interface StackMember {
 	node: PrGraphNode

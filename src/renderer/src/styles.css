@@ -2981,14 +2981,19 @@ button.stack-row:hover {
 }
 .stack-status {
 	flex-shrink: 0;
-	width: 14px;
-	text-align: center;
+	font-size: 11px;
+	white-space: nowrap;
+	color: var(--text-2);
 }
 .stack-status.needs-you {
 	color: var(--accent);
+	font-weight: 600;
 }
-.stack-status.reviewed {
+.stack-status.approved {
 	color: var(--ok);
+}
+.stack-status.changes-requested {
+	color: var(--danger);
 }
 .stack-control {
 	display: inline-flex;
@@ -3894,4 +3899,200 @@ button.stack-row:hover {
 	max-width: 190px;
 	height: 24px;
 	font-size: 12px;
+}
+/* The header's GitHub button: the mark, with a dot for the connection (green connected, red failed, none otherwise). */
+.gh-status {
+	position: relative;
+}
+.gh-dot {
+	position: absolute;
+	right: 5px;
+	bottom: 5px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	box-shadow: 0 0 0 2px var(--chrome);
+	display: none;
+}
+.gh-status.connected .gh-dot {
+	display: block;
+	background: var(--ok);
+}
+.gh-status.failed .gh-dot {
+	display: block;
+	background: var(--danger);
+}
+.gh-status.anonymous,
+.gh-status.offline {
+	color: var(--text-2);
+}
+
+/* Publish dialog: two numbered steps, one main action in the footer. */
+.publish-titles {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+.publish-titles a {
+	color: var(--text-2);
+	text-decoration: none;
+}
+.publish-titles a:hover {
+	text-decoration: underline;
+}
+.publish-body {
+	gap: 14px;
+}
+.publish-step {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.publish-step + .publish-step {
+	padding-top: 14px;
+	border-top: 1px solid var(--border);
+}
+.publish-step-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 24px;
+}
+.step-n {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	background: var(--accent-soft);
+	color: var(--accent);
+	font-size: 11px;
+	font-weight: 600;
+	flex-shrink: 0;
+}
+.publish-sent {
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	overflow: hidden;
+}
+.publish-sent-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 8px 10px;
+	border: 0;
+	background: var(--panel);
+	font: inherit;
+	text-align: left;
+	color: inherit;
+	cursor: pointer;
+}
+.publish-sent-row:hover {
+	background: var(--hover);
+}
+.publish-sent .publish-list {
+	border: 0;
+	border-top: 1px solid var(--border);
+	border-radius: 0;
+}
+.publish-item.done {
+	opacity: 1;
+	cursor: default;
+}
+.publish-item-body {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+	flex: 1;
+}
+.publish-text {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+}
+.publish-text .pill {
+	flex-shrink: 0;
+}
+/* The verdict, styled like the repository tabs: a soft track, the chosen one raised. */
+.seg.verdict {
+	align-self: flex-start;
+	gap: 2px;
+	padding: 3px;
+	border: 0;
+	border-radius: 8px;
+	background: var(--track);
+}
+.seg.verdict button {
+	flex: none;
+	height: 26px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 6px;
+	font-size: 12px;
+	font-weight: 500;
+	color: var(--text-2);
+}
+.seg.verdict button + button {
+	border-left: 0;
+}
+.seg.verdict button:hover:not(.on) {
+	color: var(--text);
+}
+.seg.verdict button.on {
+	background: var(--track-on);
+	box-shadow: var(--track-shadow);
+	color: var(--text);
+}
+.seg.verdict button.on.approve {
+	color: var(--add-fg);
+}
+.seg.verdict button.on.request_changes {
+	color: var(--del-fg);
+}
+.summary-box {
+	position: relative;
+}
+.summary-box textarea.summary {
+	padding-bottom: 34px;
+	min-height: 96px;
+}
+.summary-box .summary-tools {
+	position: absolute;
+	right: 6px;
+	bottom: 6px;
+	margin: 0;
+}
+/* The tools sit at the box's right edge, so the emoji panel opens leftwards, inside the dialog. */
+.summary-box .emoji-pop {
+	left: auto;
+	right: 0;
+}
+.publish-footer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-top: 1px solid var(--border);
+	background: var(--chrome);
+	border-radius: 0 0 10px 10px;
+	flex-shrink: 0;
+}
+.publish-footer.confirm {
+	background: var(--accent-soft);
+}
+.publish-footer > .small:first-child {
+	min-width: 0;
+}
+.btn.primary.approve {
+	background: var(--ok);
+	border-color: var(--ok);
+}
+.btn.primary.request_changes {
+	background: var(--danger);
+	border-color: var(--danger);
 }
