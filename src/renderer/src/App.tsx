@@ -1280,13 +1280,20 @@ function RepoTabs(props: {
 }) {
 	const { tabs, activeId, error } = props
 	const mod = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
+	// When focus is in the tab row, it follows the selected tab, so a shortcut never leaves the ring on the old one.
+	const nav = useRef<HTMLElement>(null)
+	useEffect(() => {
+		const el = nav.current
+		if (el && el.contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'tab')
+			el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+	}, [activeId])
 	const label = (t: RepoTab): string => {
 		if (tabs.filter((x) => x.name === t.name).length < 2) return t.name
 		const parent = t.root.split(/[\\/]/).slice(-2, -1)[0]
 		return parent ? `${parent}/${t.name}` : t.name
 	}
 	return (
-		<nav className="repo-tabs" aria-label="Repositories">
+		<nav className="repo-tabs" aria-label="Repositories" ref={nav}>
 			<div className="repo-tab-list" role="tablist">
 				{tabs.map((t, i) => (
 					<div key={t.id} className={`repo-tab${t.id === activeId ? ' on' : ''}`}>
