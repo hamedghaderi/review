@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { diffInbox, inboxStatus, sortInbox, type WatchedPr } from '../src/shared/inbox.ts'
+import { diffInbox, inboxStatus, requestCount, sortInbox, type WatchedPr } from '../src/shared/inbox.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
 import { InboxWatcher, type RepoEvent } from '../src/main/inboxWatch.ts'
 import { ReviewStore } from '../src/main/store.ts'
@@ -271,4 +271,17 @@ test('the watcher reports new commits on a PR you reviewed, and tells open lists
 	)
 	assert.equal(changes, 2)
 	assert.deepEqual(badges, [0, 0, 0], 'the badge counts requests only')
+})
+
+test('tab request count: open, non-draft requests in that repository only, as the dock badge counts them', () => {
+	const state = {
+		'acme/web#1': { draft: false, reviewed: false, requested: true },
+		'acme/web#2': { draft: false, reviewed: true }, // older state without `requested`: a request
+		'acme/web#3': { draft: true, reviewed: false, requested: true },
+		'acme/web#4': { draft: false, reviewed: true, requested: false }, // listed only because you reviewed it
+		'acme/website#5': { draft: false, reviewed: false, requested: true }, // another repository with the same prefix
+	}
+	assert.equal(requestCount(state, 'Acme/Web'), 2)
+	assert.equal(requestCount(state, 'acme/website'), 1)
+	assert.equal(requestCount(state, 'acme/api'), 0)
 })

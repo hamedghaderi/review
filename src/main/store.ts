@@ -9,6 +9,7 @@ export interface StoreData {
 	version: number
 	lastRepoId: string | null
 	repos: Record<string, RepoState>
+	openRepoIds?: Array<string> // the repository tabs, in order; absent in older files
 	// The review requests seen at the last check, so notifications report only what changed (also across restarts).
 	inboxWatch?: { login: string | null; state: WatchState; at: string }
 }
@@ -121,6 +122,7 @@ export function migrate(raw: unknown): StoreData {
 		version: STORE_VERSION,
 		lastRepoId: d.lastRepoId ?? null,
 		repos: d.repos ?? {},
+		...(d.openRepoIds ? { openRepoIds: d.openRepoIds } : {}),
 		...(d.inboxWatch ? { inboxWatch: d.inboxWatch } : {}),
 	}
 }

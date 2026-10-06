@@ -32,6 +32,8 @@ const api: ReviewApi = {
 	githubTestNotification: () => ipcRenderer.invoke(IPC.githubTestNotification),
 	markPrSeen: (repoId, n) => ipcRenderer.invoke(IPC.markPrSeen, repoId, n),
 	openKnownRepo: (repoId) => ipcRenderer.invoke(IPC.openKnownRepo, repoId),
+	closeRepoTab: (repoId) => ipcRenderer.invoke(IPC.closeRepoTab, repoId),
+	repoTabs: () => ipcRenderer.invoke(IPC.repoTabs),
 	onInboxOpen: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, target: InboxOpen): void => handler(target)
 		ipcRenderer.on(IPC.inboxOpen, listener)

@@ -8,6 +8,9 @@
 	--border: #e4e4ec;
 	--border-strong: #d2d2de;
 	--hover: #efeff5;
+	--track: #ebebf1; /* segmented-control track; the selected segment sits on it in --track-on */
+	--track-on: #ffffff;
+	--track-shadow: 0 1px 2px rgb(30 30 50 / 0.1), 0 1px 1px rgb(30 30 50 / 0.06);
 	--accent: #6d4aff;
 	--accent-text: #ffffff;
 	--accent-soft: #efeaff;
@@ -40,6 +43,9 @@
 		--border: #2e2f38;
 		--border-strong: #3b3c47;
 		--hover: #272832;
+		--track: #141519;
+		--track-on: #2c2d37;
+		--track-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
 		--accent: #9b80ff;
 		--accent-text: #16161c;
 		--accent-soft: #2c2748;
@@ -3480,4 +3486,125 @@ input.member-role {
 .mcp-tool-desc {
 	flex-basis: 100%;
 	min-width: 0;
+}
+
+/* Repository tabs: a segmented control, one segment per open repository; the selected one is raised. */
+.repo-tabs {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 40px;
+	padding: 4px 8px;
+	background: var(--chrome);
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+	min-width: 0;
+}
+.repo-tab-list {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	min-width: 0;
+	padding: 3px;
+	border-radius: 8px;
+	background: var(--track);
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.repo-tab {
+	display: flex;
+	align-items: center;
+	flex: 0 1 auto;
+	min-width: 72px;
+	max-width: 220px;
+	height: 26px;
+	border-radius: 6px;
+	color: var(--text-2);
+}
+.repo-tab:not(.on):hover {
+	color: var(--text);
+}
+.repo-tab.on {
+	background: var(--track-on);
+	box-shadow: var(--track-shadow);
+	color: var(--text);
+}
+.repo-tab-name {
+	flex: 1;
+	height: 100%;
+	padding: 0 4px 0 10px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 12px;
+	text-align: center;
+	cursor: pointer;
+}
+.repo-tab.on .repo-tab-name {
+	font-weight: 600;
+}
+.repo-tab-count {
+	flex-shrink: 0;
+	min-width: 16px;
+	height: 16px;
+	margin-right: 2px;
+	padding: 0 5px;
+	border-radius: 8px;
+	background: var(--accent);
+	color: var(--accent-text);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 16px;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.repo-tab-close,
+.repo-tab-add {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	margin-right: 4px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	font-size: 14px;
+	line-height: 1;
+	cursor: pointer;
+}
+.repo-tab-close {
+	visibility: hidden;
+}
+.repo-tab.on .repo-tab-close,
+.repo-tab:hover .repo-tab-close,
+.repo-tab-close:focus-visible {
+	visibility: visible;
+}
+.repo-tab-close:hover,
+.repo-tab-add:hover {
+	background: color-mix(in srgb, var(--text) 10%, transparent);
+	color: var(--text);
+}
+.repo-tab-add {
+	align-self: center;
+	font-size: 16px;
+}
+.repo-tab-error {
+	align-self: center;
+	margin-left: auto;
+	max-width: 50%;
+	border: 0;
+	border-radius: 6px;
+	cursor: pointer;
+}
+/* The tab row clips anything outside it, so focus rings on tabs are drawn inside. */
+.repo-tab-name:focus-visible,
+.repo-tab-close:focus-visible,
+.repo-tab-add:focus-visible {
+	outline-offset: -2px;
+}
+.repo-tab-name:focus-visible {
+	border-radius: 6px 0 0 6px;
 }

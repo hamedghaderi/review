@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises'
+import { basename } from 'node:path'
 import type {
 	AiRun,
 	AiScope,
@@ -20,6 +21,7 @@ import type {
 	PrQuery,
 	RepoInfo,
 	RepoSession,
+	RepoTab,
 	Review,
 	ReviewComment,
 	ReviewEvent,
@@ -56,7 +58,7 @@ import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { findingRoots } from '../shared/findings.ts'
-import { inboxStatus, sortInbox } from '../shared/inbox.ts'
+import { inboxStatus, requestCount, sortInbox } from '../shared/inbox.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiScope, reviewUpdate } from './validate.ts'
 
@@ -179,6 +181,7 @@ export class ReviewService {
 		this.loadGen++
 		await this.store.update((d) => {
 			d.lastRepoId = repo.id
+			if (!d.openRepoIds?.includes(repo.id)) d.openRepoIds = [...(d.openRepoIds ?? []), repo.id]
 			const s = (d.repos[repo.id] ??= { repoId: repo.id, root, selectedBase: null, activeReviewId: null, reviews: {}, aiRuns: {} })
 			s.root = root
 			s.githubResolved = mapping(repo, s.githubRepo ?? null).selected
@@ -191,6 +194,29 @@ export class ReviewService {
 		const s = this.store.read().repos[repoId]
 		if (!s) throw new AppFail('not-found', 'That repository is not known to the app. Open it first.')
 		return this.open(s.root)
+	}
+
+	/** Closes a repository's tab; the repository stays known (reviews, notifications). Returns the tabs left. */
+	async closeTab(repoId: string): Promise<Array<RepoTab>> {
+		await this.store.update((d) => {
+			d.openRepoIds = (d.openRepoIds ?? []).filter((id) => id !== repoId)
+			// A closed repository is never what the next start restores; that is another tab, or the empty state.
+			if (d.lastRepoId === repoId) d.lastRepoId = d.openRepoIds[0] ?? null
+		})
+		return this.tabs()
+	}
+
+	tabs(): Array<RepoTab> {
+		const d = this.store.read()
+		// The background check stores what it last saw; while it is off (disconnected, notifications off) that is stale.
+		const gh = this.github
+		const watch = gh && gh.notifications.enabled && gh.status().state === 'connected' ? d.inboxWatch?.state : undefined
+		return (d.openRepoIds ?? []).flatMap((id) => {
+			const s = d.repos[id]
+			if (!s) return []
+			const repo = s.githubRepo ?? s.githubResolved
+			return [{ id, name: basename(s.root), root: s.root, requests: watch && repo ? requestCount(watch, repo) : null }]
+		})
 	}
 
 	/** GitHub repositories ("owner/name", lower case) of every repository opened in the app, mapped to their ids. */
@@ -729,6 +755,7 @@ export class ReviewService {
 		const s = (this.store.read() as StoreData).repos[repo.id]
 		return {
 			repo,
+			tabs: this.tabs(),
 			activeReviewId: s?.activeReviewId ?? null,
 			browser: s?.browser
 				? { ...defaultBrowserState(), ...s.browser }

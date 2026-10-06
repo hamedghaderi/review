@@ -19,6 +19,7 @@ import type {
 	LoadedComparison,
 	ModelSelection,
 	RepoSession,
+	RepoTab,
 	Result,
 	Review,
 	ReviewerChoice,
@@ -95,6 +96,8 @@ function isTyping(el: Element | null): boolean {
 export function App() {
 	const [session, setSession] = useState<RepoSession | null>(null)
 	const [repoError, setRepoError] = useState<AppError | null>(null)
+	const [tabs, setTabs] = useState<Array<RepoTab>>([])
+	const [tabError, setTabError] = useState<string | null>(null)
 	const [busy, setBusy] = useState<string | null>('Restoring last review…')
 	const [loaded, setLoaded] = useState<LoadedComparison | null>(null)
 	const [compareError, setCompareError] = useState<AppError | null>(null)
@@ -251,8 +254,18 @@ export function App() {
 
 	const refreshSession = useCallback(async (repoId: string) => {
 		const s = await window.review.refreshRepo(repoId)
-		if (s.ok) setSession(s.value)
+		if (s.ok) {
+			setSession(s.value)
+			setTabs(s.value.tabs)
+		}
 	}, [])
+
+	// Review-request counts on the tabs follow the background check, and GitHub connecting or notifications turning off.
+	const reloadTabs = useCallback((): void => {
+		void window.review.repoTabs().then((r) => r.ok && setTabs(r.value))
+	}, [])
+	useEffect(() => window.review.onInboxChanged(reloadTabs), [reloadTabs])
+	useEffect(reloadTabs, [github?.state, github?.notifications.enabled, reloadTabs])
 
 	const setView = useCallback(
 		(view: BrowserState['view']) =>
@@ -313,8 +326,10 @@ export function App() {
 			}
 			await flushBrowser()
 			setRepoError(null)
+			setTabError(null)
 			setOpenError(null)
 			setSession(r.value)
+			setTabs(r.value.tabs)
 			setBrowser(r.value.browser)
 			comparisonIdRef.current = null
 			setLoaded(null)
@@ -336,23 +351,65 @@ export function App() {
 		void window.review.restoreLast().then(openSession)
 	}, [openSession])
 
-	// A clicked review-request notification opens that PR's review, switching to its repository first if needed.
 	const sessionRepoRef = useRef<string | null>(null)
 	sessionRepoRef.current = session?.repo.id ?? null
+
+	/** Switches to a repository opened before, restoring where you were in it. Returns whether it opened. */
+	const switchRepo = useCallback(
+		async (repoId: string): Promise<boolean> => {
+			if (sessionRepoRef.current === repoId) return true
+			await persist()
+			const r = await window.review.openKnownRepo(repoId)
+			if (!r.ok && sessionRepoRef.current) {
+				// Keep the current repository on screen; the tab strip says why the other one did not open.
+				setTabError(r.error.message)
+				return false
+			}
+			await openSession(r)
+			return r.ok
+		},
+		[openSession, persist],
+	)
+
+	// A clicked review-request notification opens that PR's review, switching to its repository first if needed.
 	useEffect(
 		() =>
 			window.review.onInboxOpen(async (t) => {
-				if (sessionRepoRef.current !== t.repoId) {
-					await persist()
-					const r = await window.review.openKnownRepo(t.repoId)
-					await openSession(r)
-					if (!r.ok) return
-				}
+				if (!(await switchRepo(t.repoId))) return
 				void window.review.markPrSeen(t.repoId, t.number)
 				await openReview(t.repoId, { kind: 'target', target: { kind: 'pr', repo: t.repo, number: t.number } })
 			}),
-		[openSession, openReview, persist],
+		[switchRepo, openReview],
 	)
+
+	/** Closes a repository tab. Closing the one on screen moves to its neighbour, or to the empty state if it was the last. */
+	const closeTab = async (repoId: string): Promise<void> => {
+		const active = sessionRepoRef.current === repoId
+		if (active) await Promise.all([persist(), flushBrowser()])
+		const r = await window.review.closeRepoTab(repoId)
+		if (!r.ok) {
+			setTabError(r.error.message)
+			return
+		}
+		const at = tabs.findIndex((t) => t.id === repoId)
+		setTabs(r.value)
+		setTabError(null)
+		if (!active) return
+		const next = r.value[Math.min(Math.max(at, 0), r.value.length - 1)]
+		if (next && (await switchRepo(next.id))) return
+		comparisonIdRef.current = null
+		setSession(null)
+		setBrowser(null)
+		setLoaded(null)
+		setReview(null)
+		setAiRuns([])
+		setCompareError(null)
+		setRepoError(null)
+	}
+	const tabsRef = useRef(tabs)
+	tabsRef.current = tabs
+	const switchRepoRef = useRef(switchRepo)
+	switchRepoRef.current = switchRepo
 
 	const openRepo = async (): Promise<void> => {
 		await persist()
@@ -462,13 +519,20 @@ export function App() {
 		}
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Global shortcuts: Cmd/Ctrl+P quick open, "/" focuses the visible search unless typing somewhere.
+	// Global shortcuts: Cmd/Ctrl+P quick open, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible search unless typing somewhere.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			if (!sessionRef.current || document.querySelector('.modal')) return
 			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
 				e.preventDefault()
 				setPaletteOpen(true)
+			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+				// 9 is the last tab, as in browsers.
+				const list = tabsRef.current
+				const tab = e.key === '9' ? list[list.length - 1] : list[Number(e.key) - 1]
+				if (!tab) return
+				e.preventDefault()
+				void switchRepoRef.current(tab.id)
 			} else if (
 				e.key === '/' &&
 				!e.metaKey &&
@@ -663,23 +727,26 @@ export function App() {
 
 	return (
 		<div className="app">
+			{tabs.length > 0 && (
+				<RepoTabs
+					tabs={tabs}
+					activeId={session?.repo.id ?? null}
+					error={tabError}
+					onSelect={(id) => void switchRepo(id)}
+					onClose={(id) => void closeTab(id)}
+					onOpen={() => void openRepo()}
+					onDismissError={() => setTabError(null)}
+				/>
+			)}
 			<header className="header">
 				<div className="hctx">
-					<button
-						className="btn repo-btn"
-						onClick={() => void openRepo()}
-						title={repo ? `${repo.root}\nClick to open a different repository` : undefined}
-					>
-						<span className="ellipsis">{repo ? repo.name : 'Open repository'}</span>
-						{repo && (
-							<span className="chev-down" aria-hidden>
-								▾
-							</span>
-						)}
-					</button>
+					{!repo && (
+						<button className="btn repo-btn" onClick={() => void openRepo()}>
+							<span className="ellipsis">Open repository</span>
+						</button>
+					)}
 					{repo && session && browser && (
 						<>
-							<span className="divider" />
 							<div className="seg view-switch" role="tablist" aria-label="Workspace">
 								<button
 									role="tab"
@@ -1198,6 +1265,74 @@ function StackBadge({ graph, number }: { graph: PrGraph; number: number }) {
 			{parent ? `Stacked on #${parent.number}` : 'Bottom of a stack'}
 			{onTop ? ` · ${onTop} above` : ''}
 		</span>
+	)
+}
+
+/** One tab per open repository. Same-named clones are told apart by their parent folder. */
+function RepoTabs(props: {
+	tabs: Array<RepoTab>
+	activeId: string | null
+	error: string | null
+	onSelect(id: string): void
+	onClose(id: string): void
+	onOpen(): void
+	onDismissError(): void
+}) {
+	const { tabs, activeId, error } = props
+	const mod = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
+	// When focus is in the tab row, it follows the selected tab, so a shortcut never leaves the ring on the old one.
+	const nav = useRef<HTMLElement>(null)
+	useEffect(() => {
+		const el = nav.current
+		if (el && el.contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'tab')
+			el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
+	}, [activeId])
+	const label = (t: RepoTab): string => {
+		if (tabs.filter((x) => x.name === t.name).length < 2) return t.name
+		const parent = t.root.split(/[\\/]/).slice(-2, -1)[0]
+		return parent ? `${parent}/${t.name}` : t.name
+	}
+	return (
+		<nav className="repo-tabs" aria-label="Repositories" ref={nav}>
+			<div className="repo-tab-list" role="tablist">
+				{tabs.map((t, i) => (
+					<div key={t.id} className={`repo-tab${t.id === activeId ? ' on' : ''}`}>
+						<button
+							role="tab"
+							aria-selected={t.id === activeId}
+							className="repo-tab-name ellipsis"
+							aria-label={t.requests ? `${label(t)}, ${t.requests} open review request${t.requests === 1 ? '' : 's'}` : undefined}
+							title={`${t.root}${i < 8 ? `\n${mod}${i + 1}` : ''}`}
+							onClick={() => props.onSelect(t.id)}
+							onAuxClick={(e) => e.button === 1 && props.onClose(t.id)}
+						>
+							{label(t)}
+						</button>
+						{!!t.requests && (
+							<span className="repo-tab-count" title={`${t.requests} open review request${t.requests === 1 ? '' : 's'}`}>
+								{t.requests}
+							</span>
+						)}
+						<button
+							className="repo-tab-close"
+							aria-label={`Close ${t.name}`}
+							title="Close tab. Its reviews are kept and its review requests still notify."
+							onClick={() => props.onClose(t.id)}
+						>
+							×
+						</button>
+					</div>
+				))}
+			</div>
+			<button className="repo-tab-add" aria-label="Open repository" title="Open repository…" onClick={props.onOpen}>
+				+
+			</button>
+			{error && (
+				<button className="notice repo-tab-error ellipsis" onClick={props.onDismissError} title={`${error}\nDismiss`}>
+					{error} ✕
+				</button>
+			)}
+		</nav>
 	)
 }
 
