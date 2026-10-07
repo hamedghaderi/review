@@ -414,6 +414,7 @@ export class GitHubService {
 				requested: isRequested,
 				head: n.headRefOid ?? null,
 				stale: !!mine?.stale,
+				verdict: mine?.verdict ?? null,
 			}
 		}
 		const prs = new Map<string, WatchedPr>()

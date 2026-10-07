@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PrGraphNode } from '../../shared/types.ts'
-import type { StackGuide, StackMember } from '../../shared/prStack.ts'
+import type { MyReview, StackGuide, StackMember } from '../../shared/prStack.ts'
 
-const MARK = { 'needs-you': '●', reviewed: '✓' } as const
-const MARK_TITLE = { 'needs-you': 'Needs your review', reviewed: 'You reviewed it; no new commits since' } as const
+// Your own review, in words: a bare ✓ reads as "approved" even when you only commented. Nothing when you're not involved.
+const MINE: Record<MyReview, { label: string; title: string }> = {
+	'needs-you': { label: '● Needs you', title: 'Your review is requested, or there are new commits since you reviewed' },
+	approved: { label: '✓ You approved', title: 'You approved it; no new commits since. Others may still need to review.' },
+	'changes-requested': { label: '✕ You requested changes', title: 'You requested changes; no new commits since' },
+	commented: { label: 'You commented', title: 'You reviewed it without approving; no new commits since' },
+}
 
 /** "2/6", for rows and pills: where a PR sits in its stack, counted from the bottom. */
 export function stackPosition(g: StackGuide): string {
@@ -72,8 +77,8 @@ function StackItem({
 			{current && <span className="pill small-pill">This PR</span>}
 			{next && <span className="pill small-pill stack-start">Start here</span>}
 			{m.mine && (
-				<span className={`stack-status ${m.mine}`} title={MARK_TITLE[m.mine]} aria-label={MARK_TITLE[m.mine]}>
-					{MARK[m.mine]}
+				<span className={`stack-status ${m.mine}`} title={MINE[m.mine].title}>
+					{MINE[m.mine].label}
 				</span>
 			)}
 		</>

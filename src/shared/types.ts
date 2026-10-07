@@ -1191,8 +1191,8 @@ export interface ReviewApi {
 	prDetail(repoId: string, number: number): Promise<Result<PrDetail>>
 	/** Every open pull request's head and base branch, to connect stacks. Cached briefly; null without a GitHub token. */
 	prGraph(repoId: string): Promise<Result<PrGraph | null>>
-	/** Your status on this repository's open PRs that involve you ('needs-you' | 'reviewed'), by number; null without a token. */
-	myReviews(repoId: string): Promise<Result<Record<number, 'needs-you' | 'reviewed'> | null>>
+	/** Your status on this repository's open PRs that involve you, by number; null without a token. */
+	myReviews(repoId: string): Promise<Result<Record<number, 'needs-you' | 'approved' | 'changes-requested' | 'commented'> | null>>
 	/** Looks up the pull request for a branch (via its upstream remote's owner). Cached briefly; read-only. */
 	branchPr(repoId: string, headRef: string): Promise<Result<BranchPr>>
 	/** What publishing the open PR review would do. Reconciles with GitHub; never writes to it. */

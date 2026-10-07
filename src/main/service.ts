@@ -971,7 +971,7 @@ export function myReviewsIn(prs: ReadonlyArray<WatchedPr>, repo: string): Record
 	for (const p of prs) {
 		if (p.repo.toLowerCase() !== repo.toLowerCase()) continue
 		if (p.requested !== false || p.stale) out[p.number] = 'needs-you'
-		else if (p.reviewed) out[p.number] = 'reviewed'
+		else if (p.reviewed) out[p.number] = p.verdict === 'approved' || p.verdict === 'changes-requested' ? p.verdict : 'commented'
 	}
 	return out
 }

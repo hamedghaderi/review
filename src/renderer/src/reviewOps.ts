@@ -208,3 +208,31 @@ export function addContextImages(r: Review, images: Array<ContextImage>): Review
 export function removeContextImage(r: Review, id: string): Review {
 	return withContext(r, { images: (r.context?.images ?? []).filter((i) => i.id !== id) })
 }
+
+/** Comments that publishing would send: never published, or edited since they were. */
+export function unsentComments(r: Review): number {
+	const sent = r.publication?.comments ?? {}
+	return r.comments.filter((c) => sent[c.id]?.body !== c.body).length
+}
+
+/**
+ * A comment body as a one-line preview: `<kbd>` labels (the level and rule the app writes for AI findings) become pills,
+ * and other HTML, Markdown marks, level emoji and line breaks are dropped.
+ */
+export function plainPreview(body: string): { pills: Array<string>; text: string } {
+	const pills: Array<string> = []
+	const text = body
+		.replace(/<kbd>([^<]{1,40})<\/kbd>/gi, (_, t: string) => {
+			pills.push(t.trim())
+			return ' '
+		})
+		.replace(/<details>[\s\S]*?<\/details>/gi, ' ')
+		.replace(/<[^>]+>/g, ' ')
+		.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+		.replace(/[*_~#>]+/g, '')
+		.replace(/[🔴🟠🟡🔵🟢⚪🟣]/gu, '')
+		.replace(/\s+/g, ' ')
+		.trim()
+	return { pills, text }
+}
