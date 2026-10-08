@@ -24,6 +24,8 @@
 	--color-nav: oklch(17.5% 0.016 285 / 0.72);
 	--color-glow: oklch(72% 0.17 288 / 0.1);
 	--color-sheen: oklch(100% 0 0 / 0.38);
+	--color-heart: oklch(68% 0.2 350);
+	--color-heart-soft: oklch(30% 0.08 350 / 0.6);
 
 	--font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
 	--font-body: 'Geist', ui-sans-serif, system-ui, sans-serif;
