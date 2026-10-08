@@ -20,7 +20,7 @@ import { ago, baseOptions, branchRows, defaultBaseFor, matchBranches, revealBran
 import { BranchPrHint, useBranchPr } from './BranchPrHint.tsx'
 import { ReviewBadge, ReviewList } from './PrReview.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
-import { isStackStart, StackList, stackPosition } from './Stack.tsx'
+import { isStackBase, isStackStart, mergeFirstTitle, StackList, stackPosition } from './Stack.tsx'
 import { graphSummary, stackGuide, stackRows, type StackGuide, type StackRow } from '../../shared/prStack.ts'
 import { INBOX_LABEL } from '../../shared/inbox.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
@@ -779,6 +779,11 @@ function PrRow({
 				{guide && (
 					<span className="pill small-pill stack-badge" title={`Part ${stackPosition(guide)} of a stack, counted from the bottom`}>
 						Stack {stackPosition(guide)}
+					</span>
+				)}
+				{guide && isStackBase(guide, pr.number) && (
+					<span className="pill small-pill stack-base" title={mergeFirstTitle(guide, pr.number)}>
+						Merge first
 					</span>
 				)}
 				{guide && isStackStart(guide, pr.number) && (
