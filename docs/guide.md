@@ -129,7 +129,7 @@ Connection states:
 - **Connected**: the last test succeeded for the current endpoint and key.
 - **Connection failed**: the last test failed, with the provider's reason shown.
 
-**Test connection** only lists models. It sends no repository content and runs no inference. **Test model** is a separate, explicit action: it sends one small synthetic request (a four-line made-up diff) to confirm that the model answers in the findings schema.
+**Test connection** only lists models. It sends no repository content and runs no inference. Once a connection has tested OK, its model list also refreshes by itself: when the app starts, when you come back to it after five minutes or more, and when you open the model picker. Models you add on the provider's side, such as in OmniRoute's dashboard, show up without testing again. If a background refresh fails, the previous list and status stay as they were. **Test model** is a separate, explicit action: it sends one small synthetic request (a four-line made-up diff) to confirm that the model answers in the findings schema.
 
 Models are labelled by source:
 

@@ -1128,6 +1128,7 @@ export const IPC = {
 	aiRemoveConnection: 'ai:connection-remove',
 	aiSetCredential: 'ai:credential-set',
 	aiTestConnection: 'ai:connection-test',
+	aiRefreshModels: 'ai:models-refresh',
 	aiAddModel: 'ai:model-add',
 	aiRemoveModel: 'ai:model-remove',
 	aiProbeModel: 'ai:model-probe',
@@ -1222,6 +1223,8 @@ export interface ReviewApi {
 	/** Sends a new credential to the main process; it is never readable back. */
 	setCredential(connectionId: string, apiKey: string, persist: boolean): Promise<Result<AiSettingsView>>
 	testConnection(connectionId: string): Promise<Result<AiSettingsView>>
+	/** Re-lists models for connected providers whose list is more than a few seconds old; never runs inference. */
+	refreshModels(): Promise<Result<AiSettingsView>>
 	addModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	removeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	probeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
