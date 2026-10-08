@@ -5,7 +5,7 @@ import type { AppError, BranchRef, InboxStatus, PrFilter, PrSummary, RepoInfo, R
 import { ago, defaultBaseFor, matchBranches } from './branches.ts'
 import { ReviewBadge } from './PrReview.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
-import { isStackStart, stackPosition } from './Stack.tsx'
+import { isStackBase, isStackStart, mergeFirstTitle, stackPosition } from './Stack.tsx'
 import { stackGuide, type StackGuide } from '../../shared/prStack.ts'
 
 interface Props {
@@ -525,6 +525,11 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 						}
 					>
 						{isStackStart(guide, pr.number) ? `Start here · ${stackPosition(guide)}` : `Stack ${stackPosition(guide)}`}
+					</span>
+				)}
+				{guide && isStackBase(guide, pr.number) && (
+					<span className="pill small-pill stack-base" title={mergeFirstTitle(guide, pr.number)}>
+						Merge first
 					</span>
 				)}
 				{pr.state === 'draft' && <span className="pill small-pill">Draft</span>}

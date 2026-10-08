@@ -15,6 +15,19 @@ export function stackPosition(g: StackGuide): string {
 	return `${g.index + 1}/${g.members.length}`
 }
 
+/** Whether `number` is the bottom of its stack: every other PR is built on it, so it merges first. */
+export function isStackBase(g: StackGuide, number: number): boolean {
+	return g.bottom.node.number === number
+}
+
+/** The "Merge first" tooltip, from the bottom PR's side or from a PR built on it. */
+export function mergeFirstTitle(g: StackGuide, number: number): string {
+	const into = g.base ? ` into ${g.base}` : ''
+	return isStackBase(g, number)
+		? `Every other PR in this stack is built on this one: merge it${into} first. You can still review the others in any order.`
+		: `This stack is built on #${g.bottom.node.number}: merge that${into} first, then the rest. You can still review this one now.`
+}
+
 /** Whether `number` is the PR to review next in its stack (and isn't the only one left to review there). */
 export function isStackStart(g: StackGuide, number: number): boolean {
 	return g.next?.node.number === number
@@ -25,10 +38,14 @@ export function isStackStart(g: StackGuide, number: number): boolean {
  * `onPick` opens or selects a PR; the current one is shown, not linked.
  */
 export function StackList({ guide, current, onPick }: { guide: StackGuide; current: number; onPick(n: PrGraphNode): void }) {
+	// Said once when every PR is a draft, rather than on every row.
+	const allDraft = guide.members.every((m) => m.node.draft)
 	return (
 		<div className="stack-list">
 			<div className="stack-list-head muted small">
-				Review bottom up: each PR's changes build on the one below.{guide.base ? ` Merges into ${guide.base}.` : ''}
+				Review bottom up: each PR's changes build on the one below. Merge #{guide.bottom.node.number}
+				{guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.
+				{allDraft ? ' All are drafts.' : ''}
 			</div>
 			<ol>
 				{guide.members.map((m, i) => (
@@ -36,10 +53,10 @@ export function StackList({ guide, current, onPick }: { guide: StackGuide; curre
 						key={m.node.number}
 						m={m}
 						i={i}
-						// Where the stack forks, a PR doesn't sit on the one listed above it; say which it is on.
-						on={m.parent !== null && m.parent !== guide.members[i - 1]?.node.number ? m.parent : null}
+						draft={m.node.draft && !allDraft}
 						current={m.node.number === current}
 						next={guide.next === m}
+						base={guide.bottom === m ? mergeFirstTitle(guide, m.node.number) : null}
 						onPick={onPick}
 					/>
 				))}
@@ -51,29 +68,33 @@ export function StackList({ guide, current, onPick }: { guide: StackGuide; curre
 function StackItem({
 	m,
 	i,
-	on,
+	draft,
 	current,
 	next,
+	base,
 	onPick,
 }: {
 	m: StackMember
 	i: number
-	on: number | null
+	draft: boolean
 	current: boolean
 	next: boolean
+	base: string | null // the "Merge first" tooltip on the bottom PR
 	onPick(n: PrGraphNode): void
 }) {
 	const body = (
 		<>
 			<span className="stack-n muted">{i + 1}</span>
+			{/* Indented by depth: a PR sits on the nearest row above it that is one step less indented. */}
+			<span className="stack-indent" style={{ width: m.depth * 12 }} />
 			<span className="mono stack-num">#{m.node.number}</span>
 			<span className="ellipsis stack-title">{m.node.title}</span>
-			{on !== null && (
-				<span className="muted small nowrap" title={`Stacked on #${on}, not on the PR listed above`}>
-					on #{on}
+			{base && (
+				<span className="pill small-pill stack-base" title={base}>
+					Merge first
 				</span>
 			)}
-			{m.node.draft && <span className="pill small-pill">Draft</span>}
+			{draft && <span className="muted small">draft</span>}
 			{current && <span className="pill small-pill">This PR</span>}
 			{next && <span className="pill small-pill stack-start">Start here</span>}
 			{m.mine && (
@@ -138,10 +159,15 @@ export function StackControl({ guide, number, onOpen }: { guide: StackGuide; num
 				className="pill small-pill stack-badge nowrap"
 				aria-expanded={!!pos}
 				onClick={toggle}
-				title="This PR is part of a stack. Click to see the whole stack in review order."
+				title={`This PR is part of a stack. Click to see the whole stack in review order.\n${mergeFirstTitle(guide, number)}`}
 			>
 				Stack {stackPosition(guide)} ▾
 			</button>
+			{isStackBase(guide, number) && (
+				<span className="pill small-pill stack-base nowrap" title={mergeFirstTitle(guide, number)}>
+					Merge first
+				</span>
+			)}
 			{next && (
 				<button
 					className={`btn small ${below ? 'stack-first' : ''}`}

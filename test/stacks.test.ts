@@ -202,6 +202,7 @@ test('stack guide: the whole stack bottom up from any member, where it sits, and
 		'depth-first, PRs on the same parent in number order; a fork branch named like a parent is not part of it',
 	)
 	assert.equal(g.index, 5, '#12 is 6th from the bottom')
+	assert.equal(g.bottom.node.number, 1, 'everything is built on #1, so it merges first')
 	assert.deepEqual(
 		g.members.map((m) => m.parent),
 		[null, 1, 2, 3, 3, 11, 12, 13],
@@ -211,6 +212,7 @@ test('stack guide: the whole stack bottom up from any member, where it sits, and
 	// Every member of a stack agrees on its next PR; the bottom finds the same stack.
 	assert.equal(stackGuide(graph, 1, mine)?.next?.node.number, 2)
 	assert.equal(stackGuide(graph, 1, mine)?.members.length, 8)
+	assert.equal(stackGuide(graph, 11, mine)?.bottom.node.number, 1, 'past a fork, still the same bottom')
 
 	// Once #2 is reviewed, the next one is #12; drafts are skipped; nothing left means no next.
 	mine.set(2, 'commented')

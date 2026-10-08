@@ -2923,6 +2923,12 @@ input.member-role {
 	color: var(--accent-text);
 	border-color: transparent;
 }
+/* The bottom of a stack: everything else is built on it, so it merges first. Outlined, so it doesn't read as an action. */
+.pill.stack-base {
+	background: transparent;
+	color: var(--ok);
+	border-color: var(--ok);
+}
 /* The whole stack in review order: the PR preview, and the review header's popover. */
 .stack-list {
 	display: flex;
@@ -2975,6 +2981,7 @@ button.stack-row:hover {
 }
 .stack-title {
 	flex: 1;
+	min-width: 60px;
 }
 .stack-row .pill {
 	flex-shrink: 0;
