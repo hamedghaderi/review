@@ -774,6 +774,15 @@ export interface FileCoverage {
 
 export type RiskLevel = 'high' | 'medium' | 'low'
 
+export const RISK_ORDER: Record<RiskLevel, number> = { high: 0, medium: 1, low: 2 }
+
+/** A change is as risky as its riskiest file; null when no file was rated. */
+export function changeRisk(files: Array<{ risk?: FileRisk | null }>): RiskLevel | null {
+	let level: RiskLevel | null = null
+	for (const f of files) if (f.risk && (!level || RISK_ORDER[f.risk.level] < RISK_ORDER[level])) level = f.risk.level
+	return level
+}
+
 /** How risky a changed file is, estimated from its path and the kind of change before any model runs. */
 export interface FileRisk {
 	fileKey: string

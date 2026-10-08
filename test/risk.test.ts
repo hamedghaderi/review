@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { buildContext, type FileSource } from '../src/main/ai/context.ts'
 import type { RelatedResult } from '../src/main/ai/related.ts'
 import { byRisk, classifyRisk } from '../src/main/ai/risk.ts'
-import type { ChangedFile, Comparison, DiffLine, FileStatus } from '../src/shared/types.ts'
+import { changeRisk, type ChangedFile, type Comparison, type DiffLine, type FileStatus } from '../src/shared/types.ts'
 
 function source(
 	path: string,
@@ -145,4 +145,18 @@ test('risk: riskiest files are packed first, so the run limit leaves out low-ris
 	})
 	assert.match(pkg.batches[0].overview, /src\/auth\/login\.ts \(\+1 -1\) \[IN THIS REQUEST\] risk high: security-sensitive area/)
 	assert.match(pkg.batches[0].overview, /README\.md \(\+1 -1\) \[not supplied\] risk low: documentation/)
+})
+
+test('risk: a change is as risky as its riskiest file', () => {
+	const rate = (...paths: Array<string>) =>
+		changeRisk(
+			classifyRisk(
+				paths.map((p) => edit(p)),
+				null,
+			).map((risk) => ({ risk })),
+		)
+	assert.equal(rate('README.md', 'src/auth/login.ts'), 'high')
+	assert.equal(rate('README.md', 'src/app.ts'), 'medium')
+	assert.equal(rate('README.md', 'test/app.test.ts'), 'low')
+	assert.equal(changeRisk([]), null)
 })
