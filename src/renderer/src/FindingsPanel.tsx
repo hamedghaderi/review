@@ -415,6 +415,22 @@ function RunSummary({
 					</ul>
 				</div>
 			)}
+			{(run.outdatedDocs ?? []).length > 0 && (
+				<div className="small unexplained">
+					<b>Project docs this change makes wrong</b> (update them with the change):
+					<ul>
+						{run.outdatedDocs!.map((d, i) => (
+							<li key={i}>
+								<span className="mono">
+									{d.path}
+									{d.line === null ? '' : `:${d.line}`}
+								</span>
+								: {d.why}
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
 			{run.errors.length > 0 && <div className="small error-text">{errorText(run, run.errors[run.errors.length - 1])}</div>}
 			{showDetails && (
 				<div className="run-details small">

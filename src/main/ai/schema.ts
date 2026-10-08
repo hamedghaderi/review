@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { FINDING_LEVELS, REVIEW_RULES, TEST_PATTERNS } from '../../shared/types.ts'
 
 // Runtime validation schema. Length, content and budget limits are enforced afterwards in findings.ts.
+// `default` is stripped from the wire schema (strict modes reject it); it only lets validation accept answers without the field.
 export const modelFindingSchema = z.object({
 	excerpt_id: z.string().describe('Identifier of the supplied excerpt that contains the problem, e.g. "E3".'),
 	file_path: z.string().describe('Path of the file on the chosen side, exactly as shown in the excerpt header.'),
@@ -60,10 +61,14 @@ export const reviewOutputSchema = z.object({
 	limitations: z
 		.array(z.string())
 		.describe('Places where the supplied context was insufficient to decide whether something is a problem. Empty if none.'),
+	outdated_docs: z
+		.array(z.object({ doc_path: z.string(), line: z.int().nullable(), why: z.string() }))
+		.default([])
+		.describe('Project docs (.review/*.md) that this change makes wrong without updating them. Empty if none.'),
 })
 
 export type ModelFinding = z.infer<typeof modelFindingSchema>
-export type ReviewOutput = z.infer<typeof reviewOutputSchema>
+export type ReviewOutput = z.input<typeof reviewOutputSchema> // outdated_docs may be missing from older or partial answers
 
 export const SCHEMA_NAME = 'code_review_findings'
 
@@ -79,7 +84,8 @@ function portable(node: unknown): Record<string, unknown> {
 	if (!node || typeof node !== 'object') return node as Record<string, unknown>
 	const out: Record<string, unknown> = {}
 	for (const [k, v] of Object.entries(node)) {
-		if (k === '$schema' || k === 'minimum' || k === 'maximum' || k === 'exclusiveMinimum' || k === 'exclusiveMaximum') continue
+		if (k === '$schema' || k === 'default' || k === 'minimum' || k === 'maximum' || k === 'exclusiveMinimum' || k === 'exclusiveMaximum')
+			continue
 		out[k] = portable(v)
 	}
 	return out

@@ -509,6 +509,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			if (e.why && !agg.why.includes(e.why) && agg.why.length < 5) agg.why.push(e.why)
 		}
 		for (const u of value.unexplained) if (!run.unexplained!.some((x) => x.fileKey === u.fileKey)) run.unexplained!.push(u)
+		run.outdatedDocs ??= []
+		for (const d of value.outdatedDocs) if (!run.outdatedDocs.some((x) => x.path === d.path && x.line === d.line)) run.outdatedDocs.push(d)
 		for (const l of value.limitations) {
 			const text = w.role ? `${w.role}: ${l}` : l
 			if (!run.limitations.includes(text)) run.limitations.push(text)

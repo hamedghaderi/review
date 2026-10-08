@@ -9,6 +9,7 @@ import { buildContext, type FileSource } from '../src/main/ai/context.ts'
 import { resolveInstalled, dependencyFacts } from '../src/main/ai/deps.ts'
 import { createFakeProvider, emptyEvaluation } from '../src/main/ai/fake.ts'
 import { ciFact, loadFacts, PROJECT_CONTEXT_PATH } from '../src/main/ai/facts.ts'
+import { validateBatchOutput } from '../src/main/ai/findings.ts'
 import { buildInput } from '../src/main/ai/prompt.ts'
 import { startRun } from '../src/main/ai/runner.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
@@ -278,6 +279,80 @@ test('project context comes from the base commit, so the change under review can
 	const long = await facts(commit('x'.repeat(9000)))
 	assert.ok(long.facts[0].text.length < 6100)
 	assert.match(long.notes[0], /only the first 6,000 were sent/)
+})
+
+test('other .review docs are listed by title, and docs naming what the change removes are flagged', async () => {
+	const dir = tmp()
+	const git = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	git('init', '-q', '-b', 'main')
+	mkdirSync(join(dir, '.review'), { recursive: true })
+	mkdirSync(join(dir, 'src'), { recursive: true })
+	writeFileSync(join(dir, PROJECT_CONTEXT_PATH), 'Input is stripped of HTML.\n')
+	writeFileSync(join(dir, '.review/auth.md'), '# Who checks permissions\nEvery route goes through src/guard.ts, which calls checkRole.\n')
+	writeFileSync(join(dir, 'src/guard.ts'), 'export function checkRole(u) {\n\treturn u.admin\n}\n')
+	writeFileSync(join(dir, 'src/other.ts'), 'export function keepMe() {\n\treturn 1\n}\n')
+	git('add', '-A')
+	git('commit', '-qm', 'base')
+	const base = git('rev-parse', 'HEAD')
+	git('checkout', '-qb', 'topic')
+	git('rm', '-q', 'src/guard.ts')
+	writeFileSync(join(dir, 'src/other.ts'), 'export function keepMe() {\n\treturn 2\n}\n')
+	git('add', '-A')
+	git('commit', '-qm', 'head')
+	const head = git('rev-parse', 'HEAD')
+
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(dir)
+	const { comparison } = await svc.loadComparison(s.repo.id, {
+		kind: 'target',
+		target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+	})
+	const sources: Array<FileSource> = []
+	for (const file of comparison.files)
+		sources.push({
+			file,
+			patch: await svc.loadPatch(comparison.id, file.key, false),
+			fullText: await svc.loadFileLines(comparison.id, file.key),
+		})
+
+	const r = await loadFacts({ root: dir, baseSha: base, headSha: head, sources, checks: null })
+	const [project, stale] = r.facts
+	assert.match(project.text, /Input is stripped of HTML/)
+	assert.match(project.text, /- \.review\/auth\.md: Who checks permissions/, 'listed by its heading')
+	assert.doesNotMatch(project.text, /Every route goes through/, 'only the title is sent, not the body')
+	assert.equal(stale.title, 'Project docs that name what this change removes')
+	assert.deepEqual(stale.fileKeys, ['src/guard.ts'])
+	assert.match(stale.text, /\.review\/auth\.md line 2 names `src\/guard\.ts`, which this change deletes/)
+	assert.match(stale.text, /names `checkRole`, which this change removes/)
+	assert.doesNotMatch(stale.text, /keepMe|other\.ts/, 'an edited file is not stale')
+})
+
+test('the reviewer can report project docs the change makes wrong; only .review docs are kept', () => {
+	const batch = { index: 0, excerpts: [], references: [], facts: [], fileKeys: [], overview: '', chars: 0 }
+	const base = { findings: [], evaluation: emptyEvaluation(), unexplained_files: [], limitations: [] }
+	assert.deepEqual(validateBatchOutput(base, batch, {} as never, 'r').outdatedDocs, [], 'older answers without the field still validate')
+	const r = validateBatchOutput(
+		{
+			...base,
+			outdated_docs: [
+				{ doc_path: '.review/auth.md', line: 2, why: 'guard.ts is deleted; permissions are now checked in middleware.ts.' },
+				{ doc_path: 'README.md', line: 1, why: 'not a project doc' },
+				{ doc_path: '.review/../x.md', line: null, why: 'escapes the folder' },
+			],
+		},
+		batch,
+		{} as never,
+		'r',
+	)
+	assert.deepEqual(r.outdatedDocs, [
+		{ path: '.review/auth.md', line: 2, why: 'guard.ts is deleted; permissions are now checked in middleware.ts.' },
+	])
 })
 
 test('facts are cut to fit small requests and go only where their files are', async () => {
