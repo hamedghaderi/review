@@ -1,4 +1,4 @@
-import type { FileRisk, RiskLevel } from '../../shared/types.ts'
+import { RISK_ORDER, type FileRisk, type RiskLevel } from '../../shared/types.ts'
 import type { FileSource } from './context.ts'
 import { wantedNames, type RelatedResult } from './related.ts'
 
@@ -70,7 +70,7 @@ const WIDELY_USED = 5 // importers (tests not counted) that make a module shared
 const LARGE = 300
 const SIZEABLE = 100
 
-export const RISK_ORDER: Record<RiskLevel, number> = { high: 0, medium: 1, low: 2 }
+export { RISK_ORDER }
 
 export function classifyRisk(sources: Array<FileSource>, related: RelatedResult | null): Array<FileRisk> {
 	const names = wantedNames(sources)

@@ -8,7 +8,7 @@ import {
 	TEST_PATTERN_LABEL,
 	type FindingState,
 } from '../../shared/findings.ts'
-import { DISMISS_REASONS, REVIEW_RULES } from '../../shared/types.ts'
+import { changeRisk, DISMISS_REASONS, REVIEW_RULES } from '../../shared/types.ts'
 import type {
 	AiRun,
 	ChangedFile,
@@ -311,7 +311,7 @@ function RiskLine({ files }: { files: AiRun['coverage']['files'] }) {
 	const count = (level: string) => rated.filter((f) => f.risk!.level === level).length
 	return (
 		<div className="muted">
-			Risk (estimated from paths and the kind of change, riskiest reviewed first): {high.length} high
+			Risk (estimated from paths and the kind of change, riskiest reviewed first): {changeRisk(rated)} overall; {high.length} high
 			{high.length ? ` (${high.map((f) => `${f.fileKey}: ${f.risk!.reasons.join(', ')}`).join('; ')})` : ''}, {count('medium')} medium,{' '}
 			{count('low')} low.
 		</div>
