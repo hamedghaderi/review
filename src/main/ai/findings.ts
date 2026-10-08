@@ -7,6 +7,7 @@ import {
 	type Finding,
 	type FindingCategory,
 	type NearMiss,
+	type OutdatedDoc,
 	type RejectedFinding,
 	type ReviewRule,
 	type Side,
@@ -34,6 +35,7 @@ export interface ValidatedBatch {
 	limitations: Array<string>
 	evaluation: Array<{ rule: ReviewRule; nearMisses: Array<NearMiss>; why: string }>
 	unexplained: Array<{ fileKey: string; why: string }>
+	outdatedDocs: Array<OutdatedDoc>
 }
 
 export class InvalidOutputError extends Error {}
@@ -109,7 +111,11 @@ export function validateBatchOutput(
 		.filter((u) => byPath.has(u.file_path))
 		.slice(0, 20)
 		.map((u) => ({ fileKey: byPath.get(u.file_path)!, why: clip(u.why.trim(), TEXT_LIMITS.note) }))
-	return { findings, rejected, limitations, evaluation, unexplained }
+	const outdatedDocs = parsed.data.outdated_docs
+		.filter((d) => /^\.review\/[^\0]+\.md$/.test(d.doc_path) && !d.doc_path.split('/').includes('..') && d.why.trim())
+		.slice(0, 10)
+		.map((d) => ({ path: d.doc_path, line: d.line, why: clip(d.why.trim(), TEXT_LIMITS.note) }))
+	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs }
 }
 
 function reject(f: ModelFinding, reason: string): RejectedFinding {

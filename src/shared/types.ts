@@ -822,6 +822,12 @@ export interface AiRunCoverage {
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
 }
 
+export interface OutdatedDoc {
+	path: string
+	line: number | null
+	why: string
+}
+
 /** What the reviewer looked up in the repository during a run, summed over its requests. */
 export interface AiLookups {
 	requests: number // requests that were offered lookups
@@ -885,6 +891,7 @@ export interface AiRun {
 	team?: { id: string; name: string; members: Array<RunMember> } | null // set when the run used a review team
 	levels?: Array<FindingLevel> // levels the reviewer was allowed to use; absent on older runs (the first three)
 	unexplained?: Array<{ fileKey: string; why: string }> // changed files the reviewer could not connect to the change's purpose
+	outdatedDocs?: Array<OutdatedDoc> // project docs (.review/*.md) the change makes wrong without updating them
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
