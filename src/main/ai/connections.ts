@@ -102,6 +102,7 @@ export class ConnectionService {
 	private credentials: CredentialService
 	private adapters: AdapterFactory
 	private testing = new Set<string>()
+	private refreshing = new Set<string>()
 	private listeners = new Set<(view: AiSettingsView) => void>()
 	private removalListeners = new Set<(connectionId: string) => void>()
 	private showDevelopment: boolean
@@ -274,14 +275,11 @@ export class ConnectionService {
 		const revision = conn.revision
 		let result: { ok: boolean; message: string; models: Array<DiscoveredModel> | null }
 		try {
-			const resolved = await this.resolve(conn, TEST_TIMEOUT_MS)
-			const signal = AbortSignal.timeout(TEST_TIMEOUT_MS + 2000)
-			const models = await this.adapters.account(resolved).listModels(signal)
-			const usable = conn.kind === 'custom' || conn.kind === 'openrouter' ? models : models.filter((m) => m.structuredOutput !== 'no')
+			const { listed, usable } = await this.listModels(conn)
 			result = {
 				ok: true,
-				message: models.length
-					? `Connected. ${models.length} model${models.length === 1 ? '' : 's'} available${usable.length !== models.length ? ` (${models.length - usable.length} without structured output hidden)` : ''}.`
+				message: listed
+					? `Connected. ${listed} model${listed === 1 ? '' : 's'} available${usable.length !== listed ? ` (${listed - usable.length} without structured output hidden)` : ''}.`
 					: 'Connected, but the endpoint reported no models. Add a model ID manually.',
 				models: usable,
 			}
@@ -295,14 +293,53 @@ export class ConnectionService {
 			if (!c || c.revision !== revision) return // endpoint changed while testing; this result is stale
 			const at = new Date().toISOString()
 			c.lastTest = { ok: result.ok, at, message: result.message, revision }
-			if (result.models) {
-				const manual = c.models.filter((m) => m.source === 'manual' && !result.models!.some((d) => d.id === m.id))
-				const probes = new Map(c.models.map((m) => [m.id, m.probe]))
-				c.models = [...result.models.map((m): StoredModel => ({ ...m, source: 'discovered', probe: probes.get(m.id) ?? null })), ...manual]
-				c.modelsFetchedAt = at
-			}
+			if (result.models) storeDiscovered(c, result.models, at)
 		})
 		this.emit()
+	}
+
+	/**
+	 * Quietly re-lists models for connections that last tested OK, when their list is older than `maxAgeMs`, so models
+	 * added on the provider (e.g. in a gateway's dashboard) appear without pressing "Test connection". A failed refresh
+	 * keeps the previous list and status: a gateway that is briefly down must not mark the connection as failed.
+	 */
+	async refreshModels(maxAgeMs: number): Promise<void> {
+		const now = Date.now()
+		const due = this.file
+			.read()
+			.connections.filter(
+				(c) =>
+					c.lastTest?.ok === true &&
+					c.lastTest.revision === c.revision &&
+					!this.testing.has(c.id) &&
+					!this.refreshing.has(c.id) &&
+					(!c.modelsFetchedAt || now - Date.parse(c.modelsFetchedAt) >= maxAgeMs),
+			)
+		await Promise.all(due.map((c) => this.refreshOne(c)))
+	}
+
+	private async refreshOne(conn: StoredConnection): Promise<void> {
+		this.refreshing.add(conn.id)
+		let usable: Array<DiscoveredModel>
+		try {
+			usable = (await this.listModels(conn)).usable
+		} catch {
+			return
+		} finally {
+			this.refreshing.delete(conn.id)
+		}
+		await this.file.update((f) => {
+			const c = f.connections.find((x) => x.id === conn.id)
+			if (c && c.revision === conn.revision && c.lastTest?.ok === true) storeDiscovered(c, usable, new Date().toISOString())
+		})
+		this.emit()
+	}
+
+	private async listModels(conn: StoredConnection): Promise<{ listed: number; usable: Array<DiscoveredModel> }> {
+		const resolved = await this.resolve(conn, TEST_TIMEOUT_MS)
+		const models = await this.adapters.account(resolved).listModels(AbortSignal.timeout(TEST_TIMEOUT_MS + 2000))
+		const usable = conn.kind === 'custom' || conn.kind === 'openrouter' ? models : models.filter((m) => m.structuredOutput !== 'no')
+		return { listed: models.length, usable }
 	}
 
 	async addModel(id: string, modelId: string): Promise<void> {
@@ -630,6 +667,14 @@ export class ConnectionService {
 /** Credentials are bound to the exact endpoint, protocol and auth method they were entered for. */
 function endpointKey(c: StoredConnection): string {
 	return `${c.protocol} ${c.baseUrl}`
+}
+
+/** Replaces the discovered models, keeping manual entries the provider does not list and each model's probe result. */
+function storeDiscovered(c: StoredConnection, discovered: Array<DiscoveredModel>, at: string): void {
+	const manual = c.models.filter((m) => m.source === 'manual' && !discovered.some((d) => d.id === m.id))
+	const probes = new Map(c.models.map((m) => [m.id, m.probe]))
+	c.models = [...discovered.map((m): StoredModel => ({ ...m, source: 'discovered', probe: probes.get(m.id) ?? null })), ...manual]
+	c.modelsFetchedAt = at
 }
 
 export function normaliseUrl(raw: string): string {

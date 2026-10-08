@@ -70,6 +70,7 @@ const api: ReviewApi = {
 	removeConnection: (id) => ipcRenderer.invoke(IPC.aiRemoveConnection, id),
 	setCredential: (id, key, persist) => ipcRenderer.invoke(IPC.aiSetCredential, id, key, persist),
 	testConnection: (id) => ipcRenderer.invoke(IPC.aiTestConnection, id),
+	refreshModels: () => ipcRenderer.invoke(IPC.aiRefreshModels),
 	addModel: (id, model) => ipcRenderer.invoke(IPC.aiAddModel, id, model),
 	removeModel: (id, model) => ipcRenderer.invoke(IPC.aiRemoveModel, id, model),
 	probeModel: (id, model) => ipcRenderer.invoke(IPC.aiProbeModel, id, model),

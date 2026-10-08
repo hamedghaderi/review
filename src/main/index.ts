@@ -66,6 +66,9 @@ let github: GitHubService
 let watcher: InboxWatcher
 let giphy: GiphyService
 let quitting = false
+// How old a connection's model list may be before it is re-listed in the background, and when the model picker opens.
+const MODELS_MAX_AGE_MS = 5 * 60_000
+const PICKER_MODELS_MAX_AGE_MS = 30_000
 
 app.on('before-quit', () => (quitting = true))
 
@@ -218,6 +221,7 @@ function registerIpc(): void {
 		view(() => connections.setCredential(connectionId(id), apiKey(key), bool(persist, 'persist'))),
 	)
 	handle(IPC.aiTestConnection, (id: unknown) => view(() => connections.test(connectionId(id))))
+	handle(IPC.aiRefreshModels, () => view(() => connections.refreshModels(PICKER_MODELS_MAX_AGE_MS)))
 	handle(IPC.aiAddModel, (id: unknown, m: unknown) => view(() => connections.addModel(connectionId(id), modelId(m))))
 	handle(IPC.aiRemoveModel, (id: unknown, m: unknown) => view(() => connections.removeModel(connectionId(id), modelId(m))))
 	handle(IPC.aiProbeModel, (id: unknown, m: unknown) => view(() => connections.probeModel(connectionId(id), modelId(m))))
@@ -353,6 +357,9 @@ app.whenReady().then(async () => {
 	connections.onChange((v) => {
 		if (win && !win.isDestroyed()) win.webContents.send(IPC.aiSettingsChanged, v)
 	})
+	// Pick up models added on the provider since the last "Test connection" (e.g. in a gateway's dashboard).
+	void connections.refreshModels(MODELS_MAX_AGE_MS)
+	app.on('browser-window-focus', () => void connections.refreshModels(MODELS_MAX_AGE_MS))
 	await ai.recoverInterrupted()
 	ai.attachTeams((id) => connections.team(id))
 	service.attachAi(ai)

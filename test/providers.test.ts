@@ -321,6 +321,63 @@ test('local connections need no key and send no Authorization header', async () 
 	}
 })
 
+test('model lists refresh quietly when stale; a failed refresh keeps the list and the connected status', async () => {
+	let ids = ['local-a']
+	let down = false
+	const mock = await mockServer((r) => {
+		if (!r.path.endsWith('/models')) return undefined
+		if (down) return { status: 503, body: { error: { message: 'unavailable' } } }
+		return { body: { object: 'list', data: ids.map((id) => ({ id, object: 'model' })) } }
+	})
+	try {
+		const { connections } = await services()
+		const untested = await connections.create({ kind: 'custom', preset: 'ollama', label: 'Untested', baseUrl: `${mock.base}/v2` })
+		const c = await connections.create({ kind: 'custom', preset: 'omniroute', baseUrl: `${mock.base}/v1`, auth: 'none' })
+		await connections.test(c.id)
+		const listed = () => connections.view().connections.find((x) => x.id === c.id)!
+		const requests = () => mock.seen.filter((r) => r.path.endsWith('/models')).length
+		await connections.addModel(c.id, 'my-manual')
+
+		ids = ['local-a', 'claude-sonnet-5-5']
+		let before = requests()
+		await connections.refreshModels(60_000)
+		assert.equal(requests(), before, 'a fresh list is not re-fetched')
+
+		const fetchedAt = listed().modelsFetchedAt
+		await connections.refreshModels(0)
+		assert.deepEqual(
+			listed().models.map((m) => [m.id, m.source]),
+			[
+				['claude-sonnet-5-5', 'discovered'],
+				['local-a', 'discovered'],
+				['my-manual', 'manual'],
+			],
+		)
+		assert.notEqual(listed().modelsFetchedAt, fetchedAt)
+		assert.ok(
+			mock.seen.every((r) => !r.path.startsWith('/v2')),
+			'connections that never tested OK are not refreshed',
+		)
+		assert.equal(connections.view().connections.find((x) => x.id === untested.id)!.status, 'not-connected')
+
+		down = true
+		before = requests()
+		await connections.refreshModels(0)
+		assert.equal(requests(), before + 1)
+		assert.equal(listed().status, 'connected', 'a gateway that is briefly down does not mark the connection failed')
+		assert.ok(
+			listed().models.some((m) => m.id === 'claude-sonnet-5-5'),
+			'the previous list is kept',
+		)
+		assert.ok(
+			mock.seen.every((r) => !r.path.endsWith('/chat/completions')),
+			'refreshing never runs inference',
+		)
+	} finally {
+		await mock.close()
+	}
+})
+
 test('changing a custom endpoint drops the saved key and requires reconnecting', async () => {
 	const mock = await mockServer()
 	try {

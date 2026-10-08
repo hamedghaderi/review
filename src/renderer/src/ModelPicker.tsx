@@ -77,6 +77,8 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 			),
 		)
 		input.current?.focus()
+		// Updated lists arrive through the settings-changed event while the picker is open.
+		void window.review.refreshModels()
 		function onDown(e: MouseEvent): void {
 			if (!ref.current?.contains(e.target as Node)) setOpen(false)
 		}

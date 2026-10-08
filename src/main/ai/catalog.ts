@@ -5,7 +5,7 @@ import type { EndpointPreset, ProviderDescriptor, ProviderKind } from '../../sha
  * suggestions only: they are labelled "Catalog" in the UI until the provider's model list confirms account access.
  * Update CATALOG_UPDATED when this list changes.
  */
-export const CATALOG_UPDATED = '2026-09-30'
+export const CATALOG_UPDATED = '2026-10-08'
 
 export interface CatalogModel {
 	id: string
@@ -23,7 +23,7 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 	anthropic: [
 		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
 		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
-		{ id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', contextWindow: 200_000, maxOutputTokens: 64_000 },
+		{ id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
 	],
 	gemini: [
 		{ id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
