@@ -182,13 +182,17 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 										onClick={() => choose(i)}
 										title={t.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')}
 									>
-										<span className="ellipsis">{t.name}</span>
-										<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
-										<span className="spacer" />
+										<span className="picker-check" aria-hidden>
+											{selected ? '✓' : ''}
+										</span>
+										<span className="picker-team">
+											<span className="ellipsis">{t.name}</span>
+											<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
+										</span>
 										{t.issues.length ? (
 											<span className="src-tag bad">Needs attention</span>
 										) : (
-											<span className="src-tag ok">{t.members.length} reviewers</span>
+											<span className="src-tag team">Team · {t.members.length}</span>
 										)}
 									</div>
 								)
@@ -200,6 +204,7 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 									onManage('new')
 								}}
 							>
+								<span className="picker-check" aria-hidden />
 								<span className="muted">+ New review team…</span>
 							</div>
 						</div>
@@ -224,6 +229,9 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 											onClick={() => choose(i)}
 											title={sourceTitle(m)}
 										>
+											<span className="picker-check" aria-hidden>
+												{selected ? '✓' : ''}
+											</span>
 											<span className="ellipsis">{m.label}</span>
 											{m.label !== m.id && <span className="muted mono small ellipsis">{m.id}</span>}
 											<span className="spacer" />
@@ -236,11 +244,11 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 							</div>
 						))}
 					</div>
-					<div className="popover-actions">
+					<div className="popover-actions picker-foot">
 						<span className="muted small">↑↓ to move · Enter to select</span>
 						<span className="spacer" />
 						<button
-							className="btn small"
+							className="btn small ghost picker-manage"
 							onClick={() => {
 								setOpen(false)
 								onManage()
