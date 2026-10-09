@@ -177,7 +177,7 @@ export function FindingsPanel({
 	}
 
 	return (
-		<div className="comments">
+		<div className="comments findings-scroll">
 			<RunSummary
 				run={run}
 				showDetails={showDetails}
