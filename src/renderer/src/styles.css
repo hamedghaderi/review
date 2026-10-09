@@ -1194,6 +1194,43 @@ input[type='checkbox'] {
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
+.seg.soft {
+	gap: 2px;
+	padding: 3px;
+	border: 0;
+	border-radius: 8px;
+	background: var(--track);
+}
+.seg.soft button {
+	height: 26px;
+	border: 0;
+	border-radius: 6px;
+	color: var(--text-2);
+}
+.seg.soft button.on {
+	background: var(--track-on);
+	box-shadow: var(--track-shadow);
+	color: var(--text);
+}
+.seg.soft button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.run-info {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.run-info summary {
+	cursor: pointer;
+	color: var(--text-2);
+}
+.run-info[open] summary {
+	margin-bottom: 6px;
+}
+.run-info p {
+	margin-top: 6px;
+}
 .popover-actions {
 	display: flex;
 	justify-content: flex-end;
