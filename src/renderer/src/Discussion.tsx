@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ChangedFile, Discussion, DiscussionComment, DiscussionThread } from '../../shared/types.ts'
+import { ago } from './branches.ts'
 import { rangeLabel } from './diffModel.ts'
 
 function who(ts: Array<DiscussionThread>): string {
@@ -28,6 +29,46 @@ export function AlreadyDiscussed({ threads }: { threads: Array<DiscussionThread>
 			title="Shown so you can read the thread first. It doesn't change or hide anything, and a resolved thread doesn't mean the code changed."
 		>
 			<b>Already discussed on GitHub:</b> {parts.join(' · ')}.
+		</div>
+	)
+}
+
+/** Open / Resolved / Outdated, as short words for a card header. Unknown resolution (no token) shows nothing. */
+export function ThreadState({ t }: { t: DiscussionThread }) {
+	return (
+		<>
+			{t.resolved === true && (
+				<span className="ic-state ok" title={t.resolvedBy ? `Resolved by ${t.resolvedBy}` : undefined}>
+					Resolved
+				</span>
+			)}
+			{t.resolved === false && <span className="ic-state gh">Open</span>}
+			{t.outdated && (
+				<span className="ic-state warn" title="The code it was written on has changed since. It may still be open.">
+					Outdated
+				</span>
+			)}
+		</>
+	)
+}
+
+/** One GitHub comment inside an inline card: author, time, text. Third-party text: plain text only. */
+export function InlineReply({ c }: { c: DiscussionComment }) {
+	return (
+		<div className="ic-reply">
+			<div className="ic-head small">
+				<b className="ic-who gh">{c.author ?? 'unknown user'}</b>
+				{c.pending && <span className="ic-state">Pending · only you</span>}
+				{c.createdAt && (
+					<span className="muted" title={new Date(c.createdAt).toLocaleString()}>
+						{ago(c.createdAt)}
+					</span>
+				)}
+			</div>
+			<div className="ic-body selectable">
+				{c.body}
+				{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
+			</div>
 		</div>
 	)
 }
@@ -77,25 +118,40 @@ function hunkTail(h: string): string {
 	return h.split('\n').slice(-6).join('\n')
 }
 
-/** A GitHub thread, read-only. Resolved threads start collapsed; open ones stay open even when outdated. */
+/** Replies a card leaves out, linked to GitHub. */
+export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
+	if (!t.commentsOmitted) return null
+	return <div className="muted small">{count(t.commentsOmitted, 'more reply', 'more replies')} on GitHub.</div>
+}
+
+/**
+ * Someone else's thread on GitHub, read-only, in the code: who started it, its state, and the replies. Resolved threads
+ * start as one line. Threads started by your own published comments are shown on your comment card instead.
+ */
 export function ThreadCard({ thread: t }: { thread: DiscussionThread }) {
 	const [open, setOpen] = useState(t.resolved !== true)
-	const root = t.comments[0]
-	const replies = t.comments.length - 1 + t.commentsOmitted
+	const [root, ...replies] = t.comments
 	return (
-		<div className={`gh-thread ${t.resolved ? 'is-resolved' : ''}`} data-item={t.id} onMouseUp={(e) => e.stopPropagation()}>
-			<div className="gh-thread-head">
-				<span className="gh-badge">On GitHub</span>
-				<StatusPills t={t} />
-				<button className="link small ellipsis" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
-					{open ? '▾' : '▸'} {root?.author ?? 'unknown user'}
-					{!open && root ? `: ${root.body.split('\n')[0]}` : ''}
-					{replies > 0 ? ` · ${count(replies, 'reply', 'replies')}` : ''}
+		<div className={`ic ic-gh ${t.resolved ? 'is-resolved' : ''}`} data-item={t.id} onMouseUp={(e) => e.stopPropagation()}>
+			<div className="ic-head">
+				<button className="ic-toggle" onClick={() => setOpen((x) => !x)} aria-expanded={open} title={open ? 'Collapse' : 'Expand'}>
+					{open ? '▾' : '▸'}
 				</button>
+				<b className="ic-who gh">{root?.author ?? 'unknown user'}</b>
+				<ThreadState t={t} />
+				{!open && root && <span className="ellipsis muted">{root.body.split('\n')[0]}</span>}
+				{open && root?.createdAt && (
+					<span className="muted small" title={new Date(root.createdAt).toLocaleString()}>
+						{ago(root.createdAt)}
+					</span>
+				)}
 				<span className="spacer" />
+				{!open && replies.length + t.commentsOmitted > 0 && (
+					<span className="muted small nowrap">{count(replies.length + t.commentsOmitted, 'reply', 'replies')}</span>
+				)}
 				{t.url && (
-					<a className="btn small ghost" href={t.url} target="_blank" rel="noreferrer">
-						GitHub ↗
+					<a className="btn small ghost" href={t.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+						↗
 					</a>
 				)}
 			</div>
@@ -108,10 +164,16 @@ export function ThreadCard({ thread: t }: { thread: DiscussionThread }) {
 						</div>
 					)}
 					{t.unplaced && t.diffHunk && <pre className="outdated-code">{hunkTail(t.diffHunk)}</pre>}
-					{t.comments.map((c) => (
-						<CommentView key={c.id} c={c} />
+					{root && (
+						<div className="ic-body selectable">
+							{root.body}
+							{root.bodyTruncated && <span className="muted"> …(truncated)</span>}
+						</div>
+					)}
+					{replies.map((c) => (
+						<InlineReply key={c.id} c={c} />
 					))}
-					{t.commentsOmitted > 0 && <div className="muted small">{count(t.commentsOmitted, 'more comment')} on GitHub.</div>}
+					<MoreOnGitHub t={t} />
 				</>
 			)}
 		</div>
@@ -121,8 +183,8 @@ export function ThreadCard({ thread: t }: { thread: DiscussionThread }) {
 function placeLabel(t: DiscussionThread): string {
 	const p = t.placed
 	if (!p) return t.originalLine !== null ? `was line ${t.originalLine}` : 'not shown at a line'
-	if (p.startLine === null || p.endLine === null) return 'File'
-	return `${t.side === 'old' ? 'Old' : 'New'} · ${rangeLabel({ start: p.startLine, end: p.endLine })}`
+	if (p.startLine === null || p.endLine === null) return 'Whole file'
+	return `${t.side === 'old' ? 'old ' : ''}${rangeLabel({ start: p.startLine, end: p.endLine })}`
 }
 
 interface PanelProps {

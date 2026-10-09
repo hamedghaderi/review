@@ -758,53 +758,109 @@ input[type='checkbox'] {
 	max-width: none;
 }
 
-/* Comments */
-.composer,
-.comment-card,
-.draft-stub {
-	border: 1px solid var(--border-strong);
-	border-radius: 8px;
+/*
+ * Cards in the code. One shape for all of them; the left edge says whose it is: purple for you (comments, drafts,
+ * the composer), blue for someone else's thread on GitHub. The header reads "<who> <state>" in plain words.
+ */
+.ic,
+.composer {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 6px 10px 8px;
+	border: 1px solid var(--border);
+	border-left: 3px solid var(--accent);
+	border-radius: 6px;
 	background: var(--bg);
 	max-width: 760px;
+	user-select: text;
+}
+.ic-gh {
+	border-left-color: var(--gh);
+}
+.ic.is-resolved {
+	border-left-color: var(--border-strong);
+	background: var(--panel);
+}
+.ic-draft {
+	border-style: dashed;
+	border-left-style: solid;
+	padding-bottom: 6px;
 }
 .composer {
-	border-color: var(--accent-line);
+	padding: 0;
+	gap: 0;
 	box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.composer-head,
-.comment-head,
-.draft-stub {
+.ic-head,
+.composer-head {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 6px 8px;
 	min-width: 0;
+	min-height: 24px;
 }
 .composer-head {
+	padding: 6px 10px;
 	border-bottom: 1px solid var(--border);
 }
-.composer-range {
-	font-weight: 600;
+.ic-who {
 	white-space: nowrap;
 }
-.side-pill {
+.ic-who.you {
+	color: var(--accent);
+}
+.ic-who.gh {
+	color: var(--gh);
+}
+/* A state word: "Open", "Resolved", "Not posted", "Draft"… Color carries meaning, the word says it. */
+.ic-state {
 	font-size: 11px;
 	font-weight: 600;
-	padding: 1px 6px;
-	border-radius: 4px;
 	white-space: nowrap;
+	color: var(--text-2);
+	text-decoration: none;
 }
-.side-pill.new {
-	background: var(--add-num);
-	color: var(--add-fg);
+.ic-state.gh {
+	color: var(--gh);
 }
-.side-pill.old {
-	background: var(--del-num);
-	color: var(--del-fg);
+.ic-state.ok {
+	color: var(--ok);
 }
-.side-pill.file {
-	background: var(--accent-soft);
+.ic-state.warn {
+	color: var(--warn-fg);
+}
+.ic-state.accent {
 	color: var(--accent);
+}
+a.ic-state:hover {
+	text-decoration: underline;
+}
+.ic-toggle {
+	border: 0;
+	background: transparent;
+	padding: 0;
+	width: 14px;
+	color: var(--text-2);
+	cursor: pointer;
+}
+.ic-body {
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+}
+/* A reply under a comment or thread: indented, with a thin rule, so a thread reads top to bottom. */
+.ic-reply {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-top: 4px;
+	padding: 4px 0 0 10px;
+	border-left: 2px solid var(--border);
+}
+.ic-reply .ic-head {
+	min-height: 0;
+	gap: 6px;
 }
 .composer textarea {
 	display: block;
@@ -823,15 +879,6 @@ input[type='checkbox'] {
 	gap: 6px;
 	padding: 6px 8px;
 	border-top: 1px solid var(--border);
-}
-.comment-body {
-	padding: 0 10px 8px;
-	white-space: pre-wrap;
-	word-break: break-word;
-	user-select: text;
-}
-.draft-stub {
-	border-style: dashed;
 }
 .comments {
 	display: flex;

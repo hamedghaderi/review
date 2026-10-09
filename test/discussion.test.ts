@@ -9,7 +9,7 @@ import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '.
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
-import { discussedAt } from '../src/renderer/src/discussed.ts'
+import { discussedAt, ownThread } from '../src/renderer/src/discussed.ts'
 import type { Anchor, Comparison, CredentialStorageInfo, DiscussionThread } from '../src/shared/types.ts'
 
 function tmp(): string {
@@ -313,6 +313,14 @@ test('"already discussed" matches placed threads on overlapping lines of the sam
 	assert.deepEqual(ids(discussedAt(threads, a({ side: 'old', startLine: 1, endLine: 10 }))), ['old'])
 	assert.deepEqual(ids(discussedAt(threads, a({ side: null, startLine: null, endLine: null }))), ['file'])
 	assert.deepEqual(ids(discussedAt(threads, a({}), new Set(['https://github.com/x']))), [], 'its own published thread')
+
+	// The thread a comment was published as is found by its first comment, never by a reply.
+	const reply = { ...threads[0].comments[0], id: 'R1', url: 'https://github.com/reply' }
+	const mine = t({ id: 'mine', comments: [{ ...threads[0].comments[0], id: 'G9', url: 'https://github.com/mine' }, reply] })
+	assert.equal(ownThread([...threads, mine], new Set(['G9']))?.id, 'mine', 'by GitHub id')
+	assert.equal(ownThread([...threads, mine], new Set(['https://github.com/mine']))?.id, 'mine', 'by link')
+	assert.equal(ownThread([mine], new Set(['https://github.com/reply'])), null, 'a reply is not the thread’s start')
+	assert.equal(ownThread([mine], new Set()), null, 'not published')
 })
 
 function tokens(token: string | null): TokenStore {

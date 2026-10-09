@@ -10,7 +10,7 @@ import type {
 	ReviewComment,
 	Side,
 } from '../../shared/types.ts'
-import { CommentCard, Composer, DraftStub } from './Comment.tsx'
+import { CommentCard, Composer, DraftStub, type PostedState } from './Comment.tsx'
 import { ThreadCard } from './Discussion.tsx'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
 
@@ -33,6 +33,7 @@ interface Props {
 	reveal: RevealRequest | null
 	highlight: Anchor | null // an AI finding's source range, shown while the finding is selected
 	threads: Array<DiscussionThread> // this file's existing GitHub threads (PR reviews)
+	published: ReadonlyMap<string, PostedState> // comment id → its state on GitHub (PR reviews only)
 	discussed(anchor: Anchor, commentId: string | null): Array<DiscussionThread>
 	onToggleViewed(): void
 	onStartDraft(anchor: Anchor): void
@@ -118,8 +119,11 @@ export function DiffView(p: Props) {
 		const fileLevel: Array<Item> = []
 		const unplaced: Array<Item> = []
 		const elsewhere: Array<Item> = [] // GitHub threads that can't be shown at a line of this snapshot
-		// GitHub threads come first, so a comment sits below the discussion it may be answering.
+		// GitHub threads come first, so a comment sits below the discussion it may be answering. A thread your comment was
+		// published as is shown on that comment instead, not twice.
+		const mine = new Set([...p.published.values()].flatMap((s) => (s.thread ? [s.thread.id] : [])))
 		for (const t of p.threads) {
+			if (mine.has(t.id)) continue
 			const at = t.placed
 			if (!at) elsewhere.push({ kind: 'thread', t })
 			else if (at.startLine === null || at.endLine === null || !t.side) fileLevel.push({ kind: 'thread', t })
@@ -145,7 +149,7 @@ export function DiffView(p: Props) {
 			else byRow.set(i, [...(byRow.get(i) ?? []), it])
 		}
 		return { byRow, fileLevel, unplaced, elsewhere }
-	}, [rows, p.comments, p.drafts, p.activeDraftId, p.threads])
+	}, [rows, p.comments, p.drafts, p.activeDraftId, p.threads, p.published])
 
 	const commentedLines = useMemo(() => {
 		const s = new Set<string>()
@@ -271,6 +275,7 @@ export function DiffView(p: Props) {
 				<CommentCard
 					key={it.c.id}
 					comment={it.c}
+					posted={p.published.get(it.c.id) ?? null}
 					pendingEdit={pending}
 					discussed={p.discussed(it.c.anchor, it.c.id)}
 					onEdit={() => p.onEditComment(it.c.id)}

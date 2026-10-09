@@ -6,6 +6,13 @@ import type { Anchor, DiscussionThread } from '../../shared/types.ts'
  * ids and links of this comment's own published copy, so a comment is not "already discussed" by itself.
  * Derived when shown and stored nowhere, and it never hides or changes a comment or finding.
  */
+/** The thread a comment was published as: its first GitHub comment is one of `own` (ids and links of the published copy). */
+export function ownThread(threads: Array<DiscussionThread>, own: ReadonlySet<string>): DiscussionThread | null {
+	if (!own.size) return null
+	const c = (t: DiscussionThread) => t.comments[0]
+	return threads.find((t) => c(t) && (own.has(c(t).id) || (c(t).url !== null && own.has(c(t).url!)))) ?? null
+}
+
 export function discussedAt(threads: Array<DiscussionThread>, a: Anchor, own: ReadonlySet<string> = new Set()): Array<DiscussionThread> {
 	return threads.filter((t) => {
 		const p = t.placed
