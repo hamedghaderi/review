@@ -142,7 +142,7 @@ After a successful test, catalog entries the account doesn't list are no longer 
 
 ### Choosing a model
 
-The picker next to **Run AI review…** groups models by connected provider. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.
+The picker next to **Run AI review…** groups models by connected provider. Only text models are listed: image, video and embedding models that a gateway such as OmniRoute reports (by `type` or `output_modalities`) are left out, since they can't answer a review. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.
 
 When a review starts, the chosen connection, provider, protocol, model, endpoint and credential are fixed for the whole run. Changing the picker only affects later runs. Disconnecting a provider, replacing its key or changing its endpoint cancels a run that is using it, and any late responses are discarded. After an error the app never switches to another provider or credential. Each run stores its provenance (connection, provider, protocol, model, endpoint, prompt version, the limits actually used), so past reviews stay readable after a provider is disconnected.
 
@@ -213,6 +213,15 @@ The **Context** tab in the right panel holds what the code can't tell the review
 - Images go with every request of the next run, after the text, in each provider's own format; the text lists them by name and order. Each costs roughly 1,000–3,000 tokens per request, and the request sizing reserves room for them. Many local models and some gateway routes don't accept images: when a request with images is refused, it is sent again without them, that reviewer's later requests skip them, and the run details say so.
 - Each request of the next run sends the text fenced as its own section, right after the description: the notes first, then the files share what's left of 20,000 characters (short files whole, long ones cut evenly and marked as cut). The run details list it under **Background** (for example "your notes, 2 files (spec.md, error.log), 1 image (checkout.png)").
 - The instructions let the notes say what the change is for and where to look, but files and images can contain anything (text in a screenshot included), so nothing in them relaxes the rules, removes a finding the code supports or changes the output format.
+
+### Asking about code
+
+Select lines you don't understand (drag across the code, or click a line number and Shift-click another), type a question in the box that opens, and press **Ask AI** (or ⌥↵) instead of **Add comment**.
+
+- Every Ask box (selected code, its follow-ups, and questions about a finding) has a small model picker next to **Ask**. Picking a model there sets it for all of them and is remembered; review runs keep their own model or team. Until you pick one, questions about code go to the model chosen in the header, or, with a review team chosen, the team member that checks callers and structure; questions about a finding go to the model that raised it. A picked model that is no longer offered falls back to those. When another model answers about a finding, it is told the finding was raised by another reviewer.
+- The question gets the selected lines with their numbers, the change around them, up to 60 lines of the file on each side, the pull request's title and description, and your earlier messages about the same lines. With lookups on (**Review input limits**), it can also open up to 6 files or searches in the reviewed commits, to find a caller or a definition.
+- The answer appears in a card at those lines, marked **Private** with a dashed edge. Questions are saved with the review, never posted, and never sent to the AI reviewer. Ask a follow-up in the card; a conversation holds up to 20 messages. **Delete** removes it.
+- On the old side (deleted lines), the model sees the selected lines and the diff, not the whole old file.
 
 ### Input limits and context windows
 

@@ -28,9 +28,14 @@ export interface AskContext {
 	fileLines: Array<string> | null // the file on the finding's side, when available
 }
 
-export function buildAskRequest(c: AskContext): ProviderRequest {
+export function buildAskRequest(c: AskContext, raisedByAnother = false): ProviderRequest {
 	return {
-		instructions: ASK_INSTRUCTIONS,
+		instructions: raisedByAnother
+			? ASK_INSTRUCTIONS.replace(
+					'You reviewed a code change and raised the finding below.',
+					'Another AI reviewer looked at a code change and raised the finding below. Judge it on the code alone.',
+				)
+			: ASK_INSTRUCTIONS,
 		input: askInput(c),
 		batch: EMPTY_BATCH,
 		schema: { name: ANSWER_SCHEMA_NAME, json: ANSWER_JSON_SCHEMA },

@@ -365,6 +365,7 @@ export interface Review {
 	publication?: Publication // GitHub reviews this snapshot's comments were published to; written by the main process only
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
+	questions?: Array<CodeQuestion> // questions you asked the AI about selected code; written by the main process only
 }
 
 /**
@@ -549,6 +550,23 @@ export interface FindingMessage {
 	level?: FindingLevel | null
 	model?: string | null
 	error?: boolean // the question could not be answered; `text` says why
+}
+
+/** One message in a conversation about lines of code you selected. */
+export interface CodeMessage {
+	id: string
+	role: 'you' | 'ai'
+	text: string
+	at: string
+	model?: string | null // AI answers only
+	error?: boolean // the question could not be answered; `text` says why
+}
+
+/** Questions you asked the AI about lines of code. Private to you; never posted. */
+export interface CodeQuestion {
+	id: string
+	anchor: Anchor // the selected lines, or the whole file
+	messages: Array<CodeMessage>
 }
 
 /** The only reasons the reviewer may comment (pr-narrative reviewer policy): four defects, two structural, one residue. */
@@ -1016,6 +1034,7 @@ export interface AiSettingsView {
 	selectionIssue: string | null // why a remembered selection is no longer usable
 	teams: Array<ReviewTeamView>
 	reviewer: ReviewerChoice | null // what the next run uses (a model or a team)
+	questionModel: ModelSelection | null // who answers questions about selected code: the chosen model, or one team member
 	storage: CredentialStorageInfo
 	limits: ReviewLimits
 	levels: FindingLevelSettings
@@ -1140,9 +1159,12 @@ export const IPC = {
 	aiRemoveModel: 'ai:model-remove',
 	aiProbeModel: 'ai:model-probe',
 	aiSelectModel: 'ai:model-select',
+	aiSelectAskModel: 'ai:ask-model-select',
 	aiSetLimits: 'ai:limits-set',
 	aiSetLevels: 'ai:levels-set',
 	aiAsk: 'ai:ask',
+	aiAskCode: 'ai:ask-code',
+	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
 	gifRemoveKey: 'gif:key-remove',
@@ -1236,6 +1258,8 @@ export interface ReviewApi {
 	removeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	probeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
+	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
+	selectAskModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	setReviewLimits(limits: ReviewLimits): Promise<Result<AiSettingsView>>
 	setFindingLevels(levels: FindingLevelSettings): Promise<Result<AiSettingsView>>
 	/** Creates or replaces a review team. */
@@ -1260,6 +1284,13 @@ export interface ReviewApi {
 	onAiRunUpdate(handler: (run: AiRun) => void): () => void
 	/** Asks the model that raised a finding a question about it. The answer is added to the finding's thread. */
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
+	/**
+	 * Asks the selected model a question about lines of code. `questionId` continues an earlier conversation about the
+	 * same lines. Returns the review's updated list of questions.
+	 */
+	askCode(reviewId: string, anchor: Anchor, question: string, questionId: string | null): Promise<Result<Array<CodeQuestion>>>
+	/** Forgets one conversation about selected code. */
+	deleteCodeQuestion(reviewId: string, questionId: string): Promise<Result<Array<CodeQuestion>>>
 	gifStatus(): Promise<Result<GifStatus>>
 	/** Checks the GIPHY key with one request, then stores it; it is never readable back. */
 	gifSetKey(key: string, persist: boolean): Promise<Result<GifStatus>>

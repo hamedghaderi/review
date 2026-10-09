@@ -3,6 +3,9 @@ import {
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
 	type AiScope,
+	type Anchor,
+	type CodeMessage,
+	type CodeQuestion,
 	type Comparison,
 	type FileLinesResult,
 	type FindingMessage,
@@ -22,6 +25,7 @@ import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
 import { buildAskRequest, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
+import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { RequestImage } from './provider.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
@@ -250,7 +254,13 @@ export class AiController {
 	 * about it. The question is saved first, so it shows while the answer is pending; a failed answer is saved as an
 	 * error message instead of being lost.
 	 */
-	async ask(access: ComparisonAccess, reviewId: string, findingId: string, question: string): Promise<AiRun> {
+	async ask(
+		access: ComparisonAccess,
+		reviewId: string,
+		findingId: string,
+		question: string,
+		picked: ModelSelection | null = null,
+	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
 		const text = question.trim()
@@ -262,9 +272,10 @@ export class AiController {
 		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish before asking about its findings.')
 		if ((finding.thread?.length ?? 0) >= MAX_THREAD_MESSAGES)
 			throw new AppFail('invalid-input', 'This conversation is full. Add your conclusion to the comment instead.')
+		// The model you picked for questions; without one, the model that raised the finding.
 		const member = finding.memberId ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
-		const connectionId = member?.connectionId ?? run.connectionId
-		const modelId = member?.model ?? run.model
+		const connectionId = picked?.connectionId ?? member?.connectionId ?? run.connectionId
+		const modelId = picked?.modelId ?? member?.model ?? run.model
 		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
 		let config: RunConfig
 		try {
@@ -272,7 +283,7 @@ export class AiController {
 		} catch (e) {
 			throw new AppFail(
 				'ai-unavailable',
-				`The model that raised this finding (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`,
+				`${picked ? 'The model' : 'The model that raised this finding'} (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`,
 			)
 		}
 		const history = finding.thread ?? []
@@ -284,7 +295,10 @@ export class AiController {
 		let reply: FindingMessage
 		try {
 			const response = await config.provider.review(
-				buildAskRequest({ finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null }),
+				buildAskRequest(
+					{ finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null },
+					modelId !== (member?.model ?? run.model),
+				),
 				AbortSignal.timeout(180_000),
 			)
 			const a = parseAnswer(response.output)
@@ -302,6 +316,92 @@ export class AiController {
 			reply = { id: randomUUID(), role: 'ai', text: `No answer: ${why}`, at: new Date().toISOString(), model: modelId, error: true }
 		}
 		return this.addMessage(repoId, reviewId, run.id, findingId, reply)
+	}
+
+	/**
+	 * Asks `selection`'s model a question about lines of code you selected (or a whole file), with the change around them
+	 * and, when the limits allow, lookups in the reviewed commits. `questionId` continues an earlier conversation about
+	 * the same lines. The question is saved first; a failed answer is saved as an error message instead of being lost.
+	 */
+	async askCode(
+		access: ComparisonAccess,
+		reviewId: string,
+		anchor: Anchor,
+		question: string,
+		questionId: string | null,
+		selection: ModelSelection,
+	): Promise<Array<CodeQuestion>> {
+		const repoId = access.comparison.repoId
+		const text = question.trim()
+		if (!text) throw new AppFail('invalid-input', 'Write a question first.')
+		if (text.length > MAX_CODE_QUESTION_CHARS)
+			throw new AppFail('invalid-input', `Questions are limited to ${MAX_CODE_QUESTION_CHARS} characters.`)
+		if (!access.comparison.files.some((f) => f.key === anchor.fileKey))
+			throw new AppFail('not-found', 'That file is not part of this change.')
+		const earlier = questionId ? this.questionsFor(repoId, reviewId).find((q) => q.id === questionId) : undefined
+		if (questionId && !earlier) throw new AppFail('not-found', 'That conversation no longer exists.')
+		if ((earlier?.messages.length ?? 0) >= MAX_CODE_MESSAGES)
+			throw new AppFail('invalid-input', 'This conversation is full. Select the lines again to start a new one.')
+		let config: RunConfig
+		try {
+			config = await this.resolveRun(selection)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		const id = earlier?.id ?? randomUUID()
+		const at = earlier?.anchor ?? anchor
+		const history = earlier?.messages ?? []
+		await this.addCodeMessage(repoId, reviewId, id, at, { id: randomUUID(), role: 'you', text, at: new Date().toISOString() })
+		const patch = await access.loadPatch(at.fileKey).catch(() => null)
+		const lines = await access.loadFileLines(at.fileKey).catch(() => null)
+		// The full file is only one side; the old side's lines come from the excerpt and the diff.
+		const fileLines = lines?.kind === 'text' && at.side !== 'old' ? lines.lines : null
+		const tools = config.limits.lookups !== false && access.tools ? access.tools(EXPLAIN_LOOKUPS) : undefined
+		const pr = access.comparison.pr ? { title: access.comparison.pr.title, body: access.comparison.pr.body } : null
+		let reply: CodeMessage
+		try {
+			const response = await config.provider.review(
+				buildExplainRequest({ anchor: at, question: text, history, patch, fileLines, pr, tools }),
+				AbortSignal.timeout(180_000),
+			)
+			reply = { id: randomUUID(), role: 'ai', text: parseExplain(response.output), at: new Date().toISOString(), model: selection.modelId }
+		} catch (e) {
+			const why = e instanceof Error ? e.message : String(e)
+			reply = {
+				id: randomUUID(),
+				role: 'ai',
+				text: `No answer: ${why}`,
+				at: new Date().toISOString(),
+				model: selection.modelId,
+				error: true,
+			}
+		}
+		return this.addCodeMessage(repoId, reviewId, id, at, reply)
+	}
+
+	questionsFor(repoId: string, reviewId: string): Array<CodeQuestion> {
+		return this.store.read().repos[repoId]?.reviews[reviewId]?.questions ?? []
+	}
+
+	async deleteCodeQuestion(repoId: string, reviewId: string, questionId: string): Promise<Array<CodeQuestion>> {
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.reviews[reviewId]
+			if (r?.questions) r.questions = r.questions.filter((q) => q.id !== questionId)
+		})
+		return structuredClone(this.questionsFor(repoId, reviewId))
+	}
+
+	/** Appends to a conversation about code in the stored review, creating it on the first message. */
+	private async addCodeMessage(repoId: string, reviewId: string, id: string, anchor: Anchor, m: CodeMessage): Promise<Array<CodeQuestion>> {
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.reviews[reviewId]
+			if (!r) return
+			const list = (r.questions ??= [])
+			const q = list.find((x) => x.id === id)
+			if (q) q.messages.push(m)
+			else list.push({ id, anchor, messages: [m] })
+		})
+		return structuredClone(this.questionsFor(repoId, reviewId))
 	}
 
 	/** Appends to a finding's thread in the stored run (never a stale copy), then notifies. */

@@ -47,6 +47,7 @@ interface Props {
 	onRestore(finding: Finding): void
 	/** Asks the model about a finding; resolves with an error message, or null once the answer is saved. */
 	onAsk(finding: Finding, question: string): Promise<string | null>
+	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
 }
 
 type Filter = 'open' | 'accepted' | 'dismissed'
@@ -86,6 +87,7 @@ export function FindingsPanel({
 	onNote,
 	onRestore,
 	onAsk,
+	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
 	const [runId, setRunId] = useState<string | null>(null)
@@ -235,6 +237,7 @@ export function FindingsPanel({
 							foldedUnder={f.mergedInto ? (byId.get(f.mergedInto)?.title ?? null) : null}
 							onShowSeparately={(x) => onRestore(x)}
 							onAsk={(q) => onAsk(f, q)}
+							askModelPicker={askModelPicker}
 							askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
 						/>
 					))
@@ -798,6 +801,7 @@ interface CardProps {
 	onShowSeparately(f: Finding): void
 	onAsk(question: string): Promise<string | null>
 	askDisabled: string | null
+	askModelPicker: React.ReactNode
 }
 
 const REASON_LABEL: Record<DismissReason, string> = {
@@ -1024,7 +1028,7 @@ function FindingCard(p: CardProps) {
 				</dl>
 			)}
 			{(!!f.thread?.length || asking) && <Thread messages={f.thread ?? []} pending={asking} />}
-			<AskBox key={f.id} focus={p.focusAsk} disabled={p.askDisabled} onBusy={setAsking} onAsk={p.onAsk} />
+			<AskBox key={f.id} focus={p.focusAsk} disabled={p.askDisabled} onBusy={setAsking} onAsk={p.onAsk} modelPicker={p.askModelPicker} />
 			<div className="finding-actions">
 				{state === 'open' && (
 					<>
@@ -1106,9 +1110,10 @@ interface AskProps {
 	disabled: string | null
 	onBusy(busy: boolean): void
 	onAsk(question: string): Promise<string | null>
+	modelPicker: React.ReactNode
 }
 
-function AskBox({ focus, disabled, onBusy, onAsk }: AskProps) {
+function AskBox({ focus, disabled, onBusy, onAsk, modelPicker }: AskProps) {
 	const [open, setOpen] = useState(focus !== null)
 	const [text, setText] = useState('')
 	const [busy, setBusy] = useState(false)
@@ -1162,8 +1167,9 @@ function AskBox({ focus, disabled, onBusy, onAsk }: AskProps) {
 			/>
 			{error && <p className="small error-text">{error}</p>}
 			<div className="ask-actions">
-				<span className="muted small">Sent to the model that raised it, with the code around it · ⌘↵ to send</span>
+				<span className="muted small">With the code around it · ⌘↵ to send</span>
 				<span className="spacer" />
+				{modelPicker}
 				<button
 					className="btn small primary"
 					onClick={() => void send()}

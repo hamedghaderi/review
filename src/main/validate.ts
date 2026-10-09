@@ -179,7 +179,7 @@ export function browserState(v: unknown): BrowserState {
 	}
 }
 
-function anchor(v: unknown, review: Review): Anchor {
+export function anchor(v: unknown, review: Review): Anchor {
 	const o = obj(v, 'anchor')
 	if (o.repoId !== review.repoId || o.baseSha !== review.baseSha || o.headSha !== review.headSha) bad('anchor snapshot')
 	const side = o.side

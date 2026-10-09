@@ -6,8 +6,9 @@ interface Props {
 	selection: ModelSelection | null
 	disabled: boolean
 	onSelect(selection: ModelSelection): void
-	onSelectTeam(teamId: string): void
+	onSelectTeam?(teamId: string): void // absent: models only (the picker for questions)
 	onManage(team?: 'new' | string): void
+	compact?: boolean // a small button showing only the model, for Ask AI boxes
 }
 
 export function sourceLabel(m: ModelView): string {
@@ -24,6 +25,20 @@ export function sourceTitle(m: ModelView): string {
 	return 'From the built-in catalog; account access is not verified until the connection is tested.'
 }
 
+/** The model for questions, as a small picker in each Ask AI box. One choice, shared by all of them and remembered. */
+export function AskModel({ settings, onManage }: { settings: AiSettingsView | null; onManage(): void }) {
+	return (
+		<ModelPicker
+			compact
+			settings={settings}
+			selection={settings?.questionModel ?? null}
+			disabled={false}
+			onSelect={(sel) => void window.review.selectAskModel(sel)}
+			onManage={onManage}
+		/>
+	)
+}
+
 /** Only connections that can run a review appear in the picker. */
 function usable(c: ConnectionView): boolean {
 	return c.status === 'connected' || c.status === 'testing'
@@ -33,20 +48,24 @@ function usable(c: ConnectionView): boolean {
  * Compact provider/model picker. Keyboard: ↑/↓ move, Enter selects, Esc closes; typing filters.
  * Shows "Connect AI provider" when nothing is usable.
  */
-export function ModelPicker({ settings, selection, disabled, onSelect, onSelectTeam, onManage }: Props) {
+export function ModelPicker({ settings, selection, disabled, onSelect, onSelectTeam, onManage, compact = false }: Props) {
 	const [open, setOpen] = useState(false)
 	const [query, setQuery] = useState('')
 	const [cursor, setCursor] = useState(0)
-	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
+	const [anchor, setAnchor] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
 	const ref = useRef<HTMLDivElement>(null)
 	const input = useRef<HTMLInputElement>(null)
 
 	const connections = settings?.connections.filter(usable) ?? []
 	const activeTeam =
-		settings?.reviewer?.kind === 'team' ? settings.teams.find((t) => t.id === (settings.reviewer as { teamId: string }).teamId) : undefined
+		onSelectTeam && settings?.reviewer?.kind === 'team'
+			? settings.teams.find((t) => t.id === (settings.reviewer as { teamId: string }).teamId)
+			: undefined
 	const current = !activeTeam && selection ? connections.find((c) => c.id === selection.connectionId) : undefined
 	const currentModel = current?.models.find((m) => m.id === selection?.modelId)
-	const teams = (settings?.teams ?? []).filter((t) => !query.trim() || t.name.toLowerCase().includes(query.trim().toLowerCase()))
+	const teams = onSelectTeam
+		? (settings?.teams ?? []).filter((t) => !query.trim() || t.name.toLowerCase().includes(query.trim().toLowerCase()))
+		: []
 
 	const groups = useMemo(() => {
 		const q = query.trim().toLowerCase()
@@ -98,7 +117,10 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 
 	function toggle(): void {
 		const rect = ref.current?.getBoundingClientRect()
-		if (rect) setAnchor({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) })
+		const right = rect ? Math.max(8, window.innerWidth - rect.right) : 8
+		// Opens upward when the button sits in the lower half (Ask boxes near the bottom of a panel).
+		if (rect)
+			setAnchor(rect.top > window.innerHeight / 2 ? { bottom: window.innerHeight - rect.top + 6, right } : { top: rect.bottom + 6, right })
 		setQuery('')
 		setOpen((x) => !x)
 	}
@@ -106,7 +128,7 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 	function choose(i: number): void {
 		const f = flat[i]
 		if (!f) return
-		if ('teamId' in f) onSelectTeam(f.teamId)
+		if ('teamId' in f) onSelectTeam?.(f.teamId)
 		else onSelect(f)
 		setOpen(false)
 	}
@@ -130,13 +152,15 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 	const label = activeTeam
 		? `${activeTeam.name} · ${activeTeam.members.length} reviewers`
 		: current && currentModel
-			? `${current.label} · ${currentModel.label}`
+			? compact
+				? currentModel.label
+				: `${current.label} · ${currentModel.label}`
 			: 'Choose model'
 	let index = -1
 	return (
 		<div className="ai-control" ref={ref}>
 			<button
-				className={`btn model-btn ${!current && !activeTeam ? 'warn' : ''} ${activeTeam?.issues.length ? 'warn' : ''}`}
+				className={`btn model-btn ${compact ? 'small ghost compact' : ''} ${!current && !activeTeam ? 'warn' : ''} ${activeTeam?.issues.length ? 'warn' : ''}`}
 				onClick={toggle}
 				aria-haspopup="listbox"
 				aria-expanded={open}
@@ -144,7 +168,9 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 				title={
 					activeTeam
 						? activeTeam.issues.map((i) => i.message).join('\n') || activeTeam.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')
-						: (settings.selectionIssue ?? (currentModel ? sourceTitle(currentModel) : 'Choose the model for the next AI review'))
+						: compact
+							? `${current?.label ?? ''} · ${currentModel?.id ?? 'no model'}\nThe model that answers your questions. Review runs are not affected.`
+							: (settings.selectionIssue ?? (currentModel ? sourceTitle(currentModel) : 'Choose the model for the next AI review'))
 				}
 			>
 				<span className="ellipsis">{label}</span>
@@ -168,48 +194,50 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 						aria-controls="model-list"
 					/>
 					<div className="picker-list" role="listbox" id="model-list" aria-label="Models">
-						<div role="group" aria-label="Review teams">
-							<div className="section-title picker-group">Review teams</div>
-							{teams.map((t) => {
-								index++
-								const i = index
-								const selected = activeTeam?.id === t.id
-								return (
-									<div
-										key={t.id}
-										role="option"
-										aria-selected={selected}
-										className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
-										onMouseEnter={() => setCursor(i)}
-										onClick={() => choose(i)}
-										title={t.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')}
-									>
-										<span className="picker-check" aria-hidden>
-											{selected ? '✓' : ''}
-										</span>
-										<span className="picker-team">
-											<span className="ellipsis">{t.name}</span>
-											<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
-										</span>
-										{t.issues.length ? (
-											<span className="src-tag bad">Needs attention</span>
-										) : (
-											<span className="src-tag team">Team · {t.members.length}</span>
-										)}
-									</div>
-								)
-							})}
-							<div
-								className="picker-item"
-								onClick={() => {
-									setOpen(false)
-									onManage('new')
-								}}
-							>
-								<span className="picker-check" aria-hidden />
-								<span className="muted">+ New review team…</span>
+						{onSelectTeam && (
+							<div role="group" aria-label="Review teams">
+								<div className="section-title picker-group">Review teams</div>
+								{teams.map((t) => {
+									index++
+									const i = index
+									const selected = activeTeam?.id === t.id
+									return (
+										<div
+											key={t.id}
+											role="option"
+											aria-selected={selected}
+											className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
+											onMouseEnter={() => setCursor(i)}
+											onClick={() => choose(i)}
+											title={t.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')}
+										>
+											<span className="picker-check" aria-hidden>
+												{selected ? '✓' : ''}
+											</span>
+											<span className="picker-team">
+												<span className="ellipsis">{t.name}</span>
+												<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
+											</span>
+											{t.issues.length ? (
+												<span className="src-tag bad">Needs attention</span>
+											) : (
+												<span className="src-tag team">Team · {t.members.length}</span>
+											)}
+										</div>
+									)
+								})}
+								<div
+									className="picker-item"
+									onClick={() => {
+										setOpen(false)
+										onManage('new')
+									}}
+								>
+									<span className="picker-check" aria-hidden />
+									<span className="muted">+ New review team…</span>
+								</div>
 							</div>
-						</div>
+						)}
 						{groups.length === 0 && <div className="muted small pad">No models match.</div>}
 						{groups.map((g) => (
 							<div key={g.connection.id} role="group" aria-label={g.connection.label}>

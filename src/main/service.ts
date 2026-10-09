@@ -4,6 +4,7 @@ import type {
 	AiRun,
 	AiScope,
 	BranchPr,
+	CodeQuestion,
 	PastDecision,
 	BranchPreview,
 	BrowserState,
@@ -65,7 +66,7 @@ import { findingRoots } from '../shared/findings.ts'
 import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
-import { aiScope, reviewUpdate } from './validate.ts'
+import { aiScope, anchor, reviewUpdate } from './validate.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
 const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
@@ -765,9 +766,26 @@ export class ReviewService {
 		return ai.retryRules(access, reviewId, runId, rules)
 	}
 
-	async askFinding(reviewId: string, findingId: string, question: string): Promise<AiRun> {
+	async askFinding(reviewId: string, findingId: string, question: string, model: ModelSelection | null): Promise<AiRun> {
 		const { ai, access } = this.aiAccess(reviewId)
-		return ai.ask(access, reviewId, findingId, question)
+		return ai.ask(access, reviewId, findingId, question, model)
+	}
+
+	async askCode(
+		reviewId: string,
+		anchorInput: unknown,
+		question: string,
+		questionId: string | null,
+		selection: ModelSelection,
+	): Promise<Array<CodeQuestion>> {
+		const { ai, access } = this.aiAccess(reviewId)
+		const stored = this.store.read().repos[access.comparison.repoId].reviews[reviewId]
+		return ai.askCode(access, reviewId, anchor(anchorInput, stored), question, questionId, selection)
+	}
+
+	async deleteCodeQuestion(reviewId: string, questionId: string): Promise<Array<CodeQuestion>> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.deleteCodeQuestion(access.comparison.repoId, reviewId, questionId)
 	}
 
 	private aiAccess(reviewId: string): { ai: AiController; access: ComparisonAccess } {

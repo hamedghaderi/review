@@ -903,6 +903,11 @@ test('OmniRoute preset: key auth, gateway-reported per-model limits drive batch 
 								max_input_tokens: 200000,
 								max_output_tokens: 16000,
 							},
+							// Not text models: OmniRoute lists them too, and sending them a review fails with a 400.
+							{ id: 'aihorde/2DN', object: 'model', type: 'image', output_modalities: ['image'] },
+							{ id: 'veo-free/veo', object: 'model', type: 'video', output_modalities: ['video'] },
+							{ id: 'x/embed', object: 'model', type: 'embedding' },
+							{ id: 'y/draw', object: 'model', output_modalities: ['image'] },
 						],
 					},
 				}
@@ -916,6 +921,11 @@ test('OmniRoute preset: key auth, gateway-reported per-model limits drive batch 
 		assert.equal(c.contextWindow, null, 'no fixed window: use what the gateway reports')
 		await connections.setCredential(c.id, 'omni-key-123456', true)
 		await connections.test(c.id)
+		assert.deepEqual(
+			connections.view().connections[0].models.map((x) => x.id),
+			['auto/best-coding'],
+			'image, video and embedding models are not offered',
+		)
 		const m = connections.view().connections[0].models[0]
 		assert.deepEqual([m.id, m.contextWindow, m.maxOutputTokens], ['auto/best-coding', 200000, 16000])
 		const cfg = await connections.runConfig({ connectionId: c.id, modelId: 'auto/best-coding' })

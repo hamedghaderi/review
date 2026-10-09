@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
 	Anchor,
 	ChangedFile,
+	CodeQuestion,
 	CommentDraft,
 	Comparison,
 	DiscussionThread,
@@ -10,7 +11,7 @@ import type {
 	ReviewComment,
 	Side,
 } from '../../shared/types.ts'
-import { CommentCard, Composer, DraftStub, type PostedState } from './Comment.tsx'
+import { CommentCard, Composer, DraftStub, QuestionCard, type PostedState } from './Comment.tsx'
 import { ThreadCard } from './Discussion.tsx'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
 
@@ -34,6 +35,13 @@ interface Props {
 	highlight: Anchor | null // an AI finding's source range, shown while the finding is selected
 	threads: Array<DiscussionThread> // this file's existing GitHub threads (PR reviews)
 	published: ReadonlyMap<string, PostedState> // comment id → its state on GitHub (PR reviews only)
+	questions: Array<CodeQuestion> // your questions to the AI about this file's code
+	asking: ReadonlySet<string> // question ids waiting for an answer, plus "new" while a first question is sent
+	askDisabled: string | null // why a question can't be sent now
+	askModel: string | null // the model that answers, shown on the button
+	askModelPicker: React.ReactNode // picks that model
+	onAskCode(anchor: Anchor, text: string, questionId: string | null): Promise<string | null>
+	onDeleteQuestion(id: string): void
 	discussed(anchor: Anchor, commentId: string | null): Array<DiscussionThread>
 	onToggleViewed(): void
 	onStartDraft(anchor: Anchor): void
@@ -48,7 +56,11 @@ interface Props {
 
 type Load<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; value: T }
 
-type Item = { kind: 'comment'; c: ReviewComment } | { kind: 'draft'; d: CommentDraft } | { kind: 'thread'; t: DiscussionThread }
+type Item =
+	| { kind: 'comment'; c: ReviewComment }
+	| { kind: 'draft'; d: CommentDraft }
+	| { kind: 'thread'; t: DiscussionThread }
+	| { kind: 'question'; q: CodeQuestion }
 
 export function DiffView(p: Props) {
 	const { comparison, file } = p
@@ -135,11 +147,12 @@ export function DiffView(p: Props) {
 		}
 		const items: Array<Item> = [
 			...p.comments.map((c): Item => ({ kind: 'comment', c })),
+			...p.questions.map((q): Item => ({ kind: 'question', q })),
 			...p.drafts.filter((d) => d.commentId === null || d.id === p.activeDraftId).map((d): Item => ({ kind: 'draft', d })),
 		]
 		for (const it of items) {
 			if (it.kind === 'thread') continue
-			const a = it.kind === 'comment' ? it.c.anchor : it.d.anchor
+			const a = it.kind === 'comment' ? it.c.anchor : it.kind === 'question' ? it.q.anchor : it.d.anchor
 			if (!a.side || !a.startLine || !a.endLine) {
 				fileLevel.push(it)
 				continue
@@ -149,7 +162,7 @@ export function DiffView(p: Props) {
 			else byRow.set(i, [...(byRow.get(i) ?? []), it])
 		}
 		return { byRow, fileLevel, unplaced, elsewhere }
-	}, [rows, p.comments, p.drafts, p.activeDraftId, p.threads, p.published])
+	}, [rows, p.comments, p.drafts, p.activeDraftId, p.threads, p.published, p.questions])
 
 	const commentedLines = useMemo(() => {
 		const s = new Set<string>()
@@ -268,6 +281,20 @@ export function DiffView(p: Props) {
 
 	const renderItem = (it: Item): React.ReactNode => {
 		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} />
+		if (it.kind === 'question') {
+			const q = it.q
+			return (
+				<QuestionCard
+					key={q.id}
+					question={q}
+					pending={p.asking.has(q.id)}
+					disabled={q.id.startsWith('new:') ? 'This question was not saved. Delete it and ask again.' : p.askDisabled}
+					modelPicker={p.askModelPicker}
+					onAsk={(text) => p.onAskCode(q.anchor, text, q.id)}
+					onDelete={() => p.onDeleteQuestion(q.id)}
+				/>
+			)
+		}
 		if (it.kind === 'comment') {
 			const pending = p.drafts.some((d) => d.commentId === it.c.id)
 			if (pending && activeDraft?.commentId === it.c.id) return null
@@ -298,6 +325,18 @@ export function DiffView(p: Props) {
 					onDiscard={() => p.onDiscardDraft(d.id)}
 					onToggleExtend={() => setExtending((x) => !x)}
 					onAskAi={d.findingId && p.onShowFinding ? () => p.onShowFinding!(d.findingId!) : undefined}
+					onAskCode={
+						d.commentId === null && d.findingId === null
+							? () => {
+									// The draft becomes the question card at the same lines, which shows the text and the answer.
+									p.onDiscardDraft(d.id)
+									void p.onAskCode(d.anchor, d.body.trim(), null)
+								}
+							: undefined
+					}
+					askCodeDisabled={p.asking.has('new') ? 'Waiting for the answer to your last question…' : p.askDisabled}
+					askCodeModel={p.askModel}
+					modelPicker={p.askModelPicker}
 				/>
 			)
 		}

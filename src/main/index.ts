@@ -201,8 +201,28 @@ function registerIpc(): void {
 	handle(IPC.gifSearch, (query: unknown, offset: unknown) =>
 		giphy.find(typeof query === 'string' ? query.slice(0, 200) : '', typeof offset === 'number' ? offset : -1),
 	)
+	// Questions go to the model picked for them; a finding without one goes to the model that raised it.
 	handle(IPC.aiAsk, (reviewId: unknown, findingId: unknown, question: unknown) =>
-		service.askFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), str(question, 'question', 4000)),
+		service.askFinding(
+			comparisonId(reviewId),
+			str(findingId, 'finding id', 64),
+			str(question, 'question', 4000),
+			connections.pickedAskModel(),
+		),
+	)
+	handle(IPC.aiAskCode, async (reviewId: unknown, anchor: unknown, question: unknown, questionId: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first.')
+		return service.askCode(
+			comparisonId(reviewId),
+			anchor,
+			str(question, 'question', 4000),
+			questionId === null ? null : str(questionId, 'question id', 64),
+			selection,
+		)
+	})
+	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
+		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)
 	handle(IPC.aiRetryRules, (reviewId: unknown, runId: unknown, rules: unknown) =>
 		service.retryAiRules(comparisonId(reviewId), str(runId, 'run id', 64), reviewRules(rules)),
@@ -226,6 +246,7 @@ function registerIpc(): void {
 	handle(IPC.aiRemoveModel, (id: unknown, m: unknown) => view(() => connections.removeModel(connectionId(id), modelId(m))))
 	handle(IPC.aiProbeModel, (id: unknown, m: unknown) => view(() => connections.probeModel(connectionId(id), modelId(m))))
 	handle(IPC.aiSelectModel, (sel: unknown) => view(() => connections.select(modelSelection(sel))))
+	handle(IPC.aiSelectAskModel, (sel: unknown) => view(() => connections.selectAskModel(modelSelection(sel))))
 	handle(IPC.aiSetLimits, (limits: unknown) => view(() => connections.setLimits(reviewLimits(limits))))
 	handle(IPC.aiSetLevels, (levels: unknown) => view(() => connections.setLevels(findingLevels(levels))))
 	handle(IPC.aiSaveTeam, (team: unknown) => view(() => connections.saveTeam(reviewTeam(team))))
