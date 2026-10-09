@@ -327,7 +327,7 @@ export class AiController {
 			levels: config.levels,
 			provenance: { connectionId: config.connectionId, connectionLabel: config.connectionLabel, endpoint: config.endpoint },
 			concurrency: this.concurrency,
-			maxAttempts: 3,
+			maxAttempts: 5,
 			backoffMs: defaultBackoff,
 		}
 	}

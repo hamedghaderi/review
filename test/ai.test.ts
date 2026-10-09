@@ -10,7 +10,7 @@ import { validateBatchOutput } from '../src/main/ai/findings.ts'
 import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
 import { buildInput, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
-import { answeredRequests, startRun, type RunInput, type RunnerOptions } from '../src/main/ai/runner.ts'
+import { answeredRequests, defaultBackoff, startRun, type RunInput, type RunnerOptions } from '../src/main/ai/runner.ts'
 import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { ReviewStore } from '../src/main/store.ts'
@@ -1159,6 +1159,18 @@ test('retrying a failed rule asks only its reviewer about only that rule and com
 	)
 	assert.equal(run.coverage.batchesDone, run.coverage.batchesTotal)
 	assert.ok(run.coverage.files.filter((f) => f.state !== 'not-reviewable').every((f) => f.state === 'reviewed'))
+})
+
+test('retry waits grow, are jittered, cap at 30 s and follow the server’s Retry-After', () => {
+	const busy = new ProviderError('server', 'server error (502)')
+	for (let i = 0; i < 50; i++) {
+		const first = defaultBackoff(0, busy)
+		assert.ok(first >= 1000 && first <= 2000)
+		const late = defaultBackoff(10, busy)
+		assert.ok(late >= 15_000 && late <= 30_000)
+	}
+	assert.equal(defaultBackoff(0, new ProviderError('rate-limit', '429', 7000)), 7000)
+	assert.equal(defaultBackoff(0, new ProviderError('rate-limit', '429', 120_000)), 30_000)
 })
 
 test('a retry of one rule leaves the request failed while other rules of the same reviewer are still missing', async () => {
