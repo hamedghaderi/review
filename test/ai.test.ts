@@ -599,7 +599,8 @@ test('switching comparisons cancels the active run; its results stay with the or
 			aiRuns: {},
 		}
 	})
-	const provider = createFakeProvider({ delayMs: 200, script: () => out([finding()]) })
+	// Long enough that the run is still going after start() persists it on a slow CI disk; cancelling ends the wait.
+	const provider = createFakeProvider({ delayMs: 10_000, script: () => out([finding()]) })
 	const seen: Array<AiRun> = []
 	const controller = new AiController(store, fixedConfig(provider), (r) => seen.push(r))
 	const access = {
