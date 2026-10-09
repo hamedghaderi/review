@@ -12,6 +12,14 @@
     <a href="https://github.com/sponsors/hamedghaderi"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub" /></a>
   </p>
   <p>
+    <a href="https://www.producthunt.com/products/review-2/reviews/new?utm_source=badge-product_review&amp;utm_medium=badge&amp;utm_source=badge-review-2">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/product_review.svg?product_id=1336268&amp;theme=dark" />
+        <img src="https://api.producthunt.com/widgets/embed-image/v1/product_review.svg?product_id=1336268&amp;theme=light" alt="Review on Product Hunt" width="250" height="54" />
+      </picture>
+    </a>
+  </p>
+  <p>
     <a href="https://review-code.dev/"><strong>Website</strong></a> ·
     <a href="https://github.com/hamedghaderi/review/releases/latest"><strong>Download</strong></a> ·
     <a href="docs/guide.md"><strong>User guide</strong></a>

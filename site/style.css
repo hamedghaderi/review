@@ -215,6 +215,14 @@ kbd {
 	color: var(--color-muted);
 	font: 400 var(--text-xs) / 1.5 var(--font-mono);
 }
+.ph-badge {
+	display: inline-block;
+	border-radius: var(--radius-sm);
+	transition: transform var(--dur-base) var(--ease-out);
+}
+.ph-badge:hover {
+	transform: translateY(-2px);
+}
 .hero__shot {
 	max-width: 1180px;
 	margin: var(--space-3xl) auto 0;
