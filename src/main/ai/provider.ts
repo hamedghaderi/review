@@ -121,6 +121,12 @@ export function outputBudget(limits: ModelLimits): number {
 	return Math.max(1024, Math.min(limits.maxOutputTokens, 32_000, Math.floor(limits.contextWindow / 4)))
 }
 
+/**
+ * Ends a lookup conversation on the last round. Claude models (directly or through gateways) reply with nothing when
+ * the conversation ends on tool results and tools are switched off; asking for the answer makes them write it.
+ */
+export const FINAL_ANSWER = 'No more lookups. Answer now with the JSON only.'
+
 /** Most rounds of a lookup conversation: one per call at most, plus the final answer. */
 export function maxRounds(tools: ReviewTools | undefined): number {
 	return tools ? 20 : 1

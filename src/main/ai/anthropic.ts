@@ -15,6 +15,7 @@ import type { AiUsage } from '../../shared/types.ts'
 import {
 	addUsage,
 	clip,
+	FINAL_ANSWER,
 	maxRounds,
 	ProviderError,
 	rejectsTools,
@@ -104,7 +105,7 @@ export function createAnthropicProvider(
 							model: o.model,
 							max_tokens: o.maxOutputTokens,
 							system: request.instructions,
-							messages,
+							messages: last && messages.length > 1 ? withFinalAnswer(messages) : messages,
 							output_config: { format: { type: 'json_schema', schema: request.schema?.json ?? REVIEW_JSON_SCHEMA } },
 							// Every round resends the conversation, so the cached prefix is read back instead of paid in full.
 							...(offer
@@ -147,6 +148,13 @@ export function createAnthropicProvider(
 			}
 		},
 	}
+}
+
+/** The last turn holds the tool results; the request for the answer joins it, after them, as the API requires. */
+function withFinalAnswer(messages: Array<MessageParam>): Array<MessageParam> {
+	const lastTurn = messages[messages.length - 1]
+	const content = typeof lastTurn.content === 'string' ? [{ type: 'text' as const, text: lastTurn.content }] : lastTurn.content
+	return [...messages.slice(0, -1), { ...lastTurn, content: [...content, { type: 'text', text: FINAL_ANSWER }] }]
 }
 
 function usageOf(message: Message): AiUsage | null {

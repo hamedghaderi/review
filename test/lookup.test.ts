@@ -11,7 +11,7 @@ import { createFakeProvider, emptyEvaluation, type FakeScript } from '../src/mai
 import { createGeminiProvider } from '../src/main/ai/gemini.ts'
 import { createReviewTools, type ReviewTools } from '../src/main/ai/lookup.ts'
 import { createOpenAIChatProvider, createOpenAIResponsesProvider } from '../src/main/ai/openai.ts'
-import type { ProviderRequest, ReviewProvider } from '../src/main/ai/provider.ts'
+import { FINAL_ANSWER, type ProviderRequest, type ReviewProvider } from '../src/main/ai/provider.ts'
 import { startRun, type RunnerOptions } from '../src/main/ai/runner.ts'
 import type { AiRun, ChangedFile, Comparison } from '../src/shared/types.ts'
 
@@ -224,6 +224,8 @@ const LOOPS: Array<{
 			assert.equal(msgs[1].role, 'assistant')
 			assert.equal(msgs[1].content[0].type, 'thinking', 'the reply goes back unchanged, thinking included')
 			assert.deepEqual(msgs[2].content[0], { type: 'tool_result', tool_use_id: 'tu1', content: 'FILE CONTENT 42', is_error: false })
+			assert.deepEqual(msgs[2].content[1], { type: 'text', text: FINAL_ANSWER }, 'the last round asks for the answer')
+			assert.equal(msgs.length, 3)
 		},
 		noTools: (b) => !('tools' in b),
 	},
@@ -314,9 +316,11 @@ const LOOPS: Array<{
 			assert.equal(first.tool_choice, 'auto')
 			assert.equal(second.tool_choice, 'none')
 			const msgs = second.messages as Array<Record<string, unknown>>
-			assert.equal(msgs.length, 4)
+			assert.equal(msgs.length, 5)
 			assert.equal((msgs[2].tool_calls as Array<{ id: string }>)[0].id, 'call1')
 			assert.deepEqual(msgs[3], { role: 'tool', tool_call_id: 'call1', content: 'FILE CONTENT 42' })
+			assert.deepEqual(msgs[4], { role: 'user', content: FINAL_ANSWER }, 'the last round asks for the answer')
+			assert.equal((first.messages as Array<unknown>).length, 2, 'only the last round asks')
 		},
 		noTools: (b) => !('tools' in b),
 	},
