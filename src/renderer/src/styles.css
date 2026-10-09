@@ -392,18 +392,23 @@ input[type='checkbox'] {
 	display: flex;
 	flex-direction: column;
 }
+/*
+ * A 1px line with an 11px grab area. The extra width lies over the right-hand panel's left edge, which has no
+ * scrollbar; the panel on the left keeps its scrollbar (always on its right edge) free.
+ */
 .splitter {
-	width: 5px;
-	margin: 0 -2px;
+	width: 11px;
+	margin: 0 -8px 0 -2px;
 	z-index: 2;
 	cursor: col-resize;
 	flex-shrink: 0;
 	position: relative;
+	touch-action: none;
 }
 .splitter::after {
 	content: '';
 	position: absolute;
-	inset: 0 2px;
+	inset: 0 8px 0 2px;
 	background: var(--border);
 }
 .splitter:hover::after {
@@ -1293,6 +1298,24 @@ input[type='checkbox'] {
 .findings-seg {
 	margin: 8px 8px 0;
 	flex-shrink: 0;
+}
+/* The run summary and the findings scroll as one, so a tall summary never leaves the list a sliver; the filter stays on top. */
+.findings-scroll {
+	overflow-y: auto;
+}
+.findings-scroll > .comments-list {
+	flex: none;
+	overflow: visible;
+}
+.findings-scroll > .findings-seg {
+	position: sticky;
+	top: 8px;
+	z-index: 1;
+	background: var(--panel);
+	box-shadow: 0 -8px 0 8px var(--panel); /* covers the cards scrolling past above and beside it */
+}
+.findings-scroll .run-details {
+	max-height: none;
 }
 .finding-card {
 	border: 1px solid var(--border);
