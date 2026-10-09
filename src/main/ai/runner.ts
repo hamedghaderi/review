@@ -399,7 +399,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (!limits)
 			throw new Error('This run was recorded before its limits were saved, so its requests cannot be rebuilt. Run the review again.')
 		let related: RelatedResult | null = null
-		if (limits.relatedCode !== false && input.loadRelated) related = await input.loadRelated(sources, controller.signal)
+		// A search that fails again (as in a partial clone) gives the run what it had: the excerpt check below decides.
+		if (limits.relatedCode !== false && input.loadRelated)
+			related = await input.loadRelated(sources, controller.signal).catch((e: unknown) => {
+				if (controller.signal.aborted) throw e
+				return null
+			})
 		const facts = input.loadFacts ? await input.loadFacts(sources, controller.signal) : null
 		if (controller.signal.aborted) return finish(null)
 		const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...decisionFacts(input.decisions ?? [], sources)]

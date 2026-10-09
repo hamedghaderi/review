@@ -1210,6 +1210,34 @@ test('a retry of one rule leaves the request failed while other rules of the sam
 	assert.ok(retried.coverage.files.filter((f) => f.state !== 'not-reviewable').every((f) => f.state === 'partial'))
 })
 
+test('a retry still sends its requests when the related-code search fails again, as it did on the first run', async () => {
+	const s = sources()
+	const brokenSearch = async (): Promise<never> => {
+		throw new Error('git grep failed: fatal: unable to read tree (f38bc3)')
+	}
+	const input = {
+		reviewId: s.comp.id,
+		comparison: s.comp,
+		scope: { kind: 'all' as const },
+		loadSources: async () => s.srcs,
+		previousFindings: [],
+	}
+	const first = await startRun(
+		{ ...input, loadRelated: brokenSearch },
+		options(createFakeProvider({ script: () => new ProviderError('server', 'server error (502)') }), { maxAttempts: 1 }),
+		() => {},
+	).done
+	assert.equal(first.status, 'failed')
+	const ok = createFakeProvider({ script: () => out([finding()]) })
+	const retried = await startRun(
+		{ ...input, loadRelated: brokenSearch, retry: { run: first, rules: ['bug'], providers: new Map([[null, ok]]) } },
+		options(ok),
+		() => {},
+	).done
+	assert.ok(ok.calls > 0, 'the retry reached the model')
+	assert.ok(!retried.errors.some((e) => /git grep/.test(e)))
+})
+
 test('retrying all missing rules sends each missed request once, asking only the rules it did not answer', async () => {
 	const s = sources()
 	const failing = createFakeProvider({ script: () => new ProviderError('server', 'server error (529)') })
