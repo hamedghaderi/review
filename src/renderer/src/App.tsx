@@ -40,7 +40,8 @@ import { stackGuide } from '../../shared/prStack.ts'
 import { StackControl } from './Stack.tsx'
 import { CommentsPanel } from './CommentsPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
-import { discussedAt } from './discussed.ts'
+import type { PostedState } from './Comment.tsx'
+import { discussedAt, ownThread } from './discussed.ts'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
 import { ModelPicker } from './ModelPicker.tsx'
@@ -631,15 +632,17 @@ export function App() {
 	const current = discussion && comparison && discussion.reviewId === comparison.id ? discussion : null
 	const threads: Array<DiscussionThread> = useMemo(() => current?.value?.threads ?? [], [current?.value])
 	const fileThreads = useMemo(() => threads.filter((t) => t.fileKey === selected), [threads, selected])
-	// A comment isn't "already discussed" by the thread it was itself published as.
-	const discussed = (anchor: Anchor, commentId: string | null): Array<DiscussionThread> => {
+	// The GitHub ids and links of a comment's own published copy.
+	const ownIds = (commentId: string | null): Set<string> => {
 		const c = commentId ? review?.comments.find((x) => x.id === commentId) : undefined
 		const own = new Set<string>()
 		const pub = commentId ? review?.publication?.comments[commentId] : undefined
 		if (pub) own.add(pub.githubId).add(pub.url)
 		if (c?.carried?.published) own.add(c.carried.published.url)
-		return discussedAt(threads, anchor, own)
+		return own
 	}
+	// A comment isn't "already discussed" by the thread it was itself published as.
+	const discussed = (anchor: Anchor, commentId: string | null): Array<DiscussionThread> => discussedAt(threads, anchor, ownIds(commentId))
 	const openThread = (t: DiscussionThread): void => {
 		if (!t.fileKey || !comparison) return
 		selectFile(t.fileKey)
@@ -746,6 +749,22 @@ export function App() {
 	const file = comparison?.files.find((f) => f.key === selected) ?? null
 	const fileComments = useMemo(() => review?.comments.filter((c) => c.anchor.fileKey === selected) ?? [], [review?.comments, selected])
 	const fileDrafts = useMemo(() => review?.drafts.filter((d) => d.anchor.fileKey === selected) ?? [], [review?.drafts, selected])
+	// Where each comment stands on GitHub (PR reviews only): its published copy, whether a later edit is still unsent, and
+	// the thread it started, whose replies show on the comment instead of in a second card.
+	const published = useMemo(() => {
+		const m = new Map<string, PostedState>()
+		if (!comparison?.pr) return m
+		for (const c of fileComments) {
+			const pub = review?.publication?.comments[c.id]
+			const url = pub?.url ?? c.carried?.published?.url ?? null
+			m.set(c.id, {
+				url,
+				edited: !!pub && pub.body !== c.body,
+				thread: url || pub ? ownThread(fileThreads, ownIds(c.id)) : null,
+			})
+		}
+		return m
+	}, [comparison?.pr, fileComments, fileThreads, review?.publication]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Short on screen; when it was saved, or why it failed, is in the tooltip.
 	const unsent = review ? ops.unsentComments(review) : 0
@@ -1129,6 +1148,7 @@ export function App() {
 									reveal={reveal}
 									highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
 									threads={fileThreads}
+									published={published}
 									discussed={discussed}
 									onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
 									onStartDraft={(a) => {

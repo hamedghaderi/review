@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Anchor, CommentDraft, DiscussionThread, ReviewComment } from '../../shared/types.ts'
-import { AlreadyDiscussed } from './Discussion.tsx'
+import { AlreadyDiscussed, InlineReply, MoreOnGitHub, ThreadState } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
@@ -8,11 +8,6 @@ import { RichText } from './RichText.tsx'
 export function anchorLabel(a: Anchor): string {
 	if (a.side === null || a.startLine === null || a.endLine === null) return 'File comment'
 	return `${a.side === 'old' ? 'Old' : 'New'} · ${rangeLabel({ start: a.startLine, end: a.endLine })}`
-}
-
-/** An outdated comment is labelled with the lines it was written on, in the snapshot it came from. */
-export function commentLabel(c: ReviewComment): string {
-	return c.carried?.outdated ? `Outdated · ${anchorLabel(c.carried.anchor)}` : anchorLabel(c.anchor)
 }
 
 /** The code an outdated comment was written on, with its old line numbers. */
@@ -68,15 +63,12 @@ export function Composer({ draft, discussed, extending, onChange, onSubmit, onKe
 	return (
 		<div className="composer" data-item={draft.id} onMouseUp={(e) => e.stopPropagation()}>
 			<div className="composer-head">
-				{a.side ? (
-					<span className={`side-pill ${a.side}`}>{a.side === 'old' ? 'Old version' : 'New version'}</span>
-				) : (
-					<span className="side-pill file">File</span>
-				)}
-				<span className="composer-range">{a.side ? rangeLabel({ start: a.startLine!, end: a.endLine! }) : 'Whole file'}</span>
-				<span className="muted mono ellipsis" title={anchorPath(a)}>
-					{anchorPath(a)}
+				<b className="ic-who you">You</b>
+				<span className="muted small" title={anchorPath(a)}>
+					{editing ? 'Editing' : 'Commenting on'} {a.side ? rangeLabel({ start: a.startLine!, end: a.endLine! }) : 'the whole file'}
+					{a.side === 'old' ? ' of the old version' : ''}
 				</span>
+				<span className="spacer" />
 				{onToggleExtend && a.side && (
 					<button
 						className={`btn small ghost ${extending ? 'on' : ''}`}
@@ -127,13 +119,38 @@ export function Composer({ draft, discussed, extending, onChange, onSubmit, onKe
 	)
 }
 
+/** A comment's state on GitHub, in a PR review. */
+export interface PostedState {
+	url: string | null // its published copy; null: not posted yet
+	edited: boolean // changed here since it was posted
+	thread: DiscussionThread | null // the thread it started, once the discussion is read
+}
+
 interface CardProps {
 	comment: ReviewComment
+	posted: PostedState | null // null outside PR reviews, where nothing is posted
 	pendingEdit: boolean
 	discussed: Array<DiscussionThread>
 	onEdit(): void
 	onDelete(): void
 	onAskAi?(): void // comments made from an AI finding: ask the model about it
+}
+
+/** Where your comment stands: only here, on GitHub, or on GitHub with a newer edit not sent yet. */
+function SentState({ posted }: { posted: PostedState }) {
+	if (!posted.url) return <span className="ic-state">Not posted</span>
+	return (
+		<>
+			<a className="ic-state gh" href={posted.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+				On GitHub ↗
+			</a>
+			{posted.edited && (
+				<span className="ic-state accent" title="Publish to update the copy on GitHub">
+					Edit not posted
+				</span>
+			)}
+		</>
+	)
 }
 
 function AskAiButton({ onClick }: { onClick(): void }) {
@@ -144,13 +161,22 @@ function AskAiButton({ onClick }: { onClick(): void }) {
 	)
 }
 
-export function CommentCard({ comment, pendingEdit, discussed, onEdit, onDelete, onAskAi }: CardProps) {
+export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi }: CardProps) {
+	const thread = posted?.thread ?? null
+	const replies = thread ? thread.comments.slice(1) : []
 	return (
-		<div className="comment-card" data-item={comment.id} onMouseUp={(e) => e.stopPropagation()}>
-			<div className="comment-head">
-				<span className="muted small">{commentLabel(comment)}</span>
-				{comment.carried?.outdated && <span className="tag warn">Outdated</span>}
-				{pendingEdit && <span className="tag">Unsaved edit</span>}
+		<div className="ic ic-you" data-item={comment.id} onMouseUp={(e) => e.stopPropagation()}>
+			<div className="ic-head">
+				<b className="ic-who you">You</b>
+				{posted && <SentState posted={posted} />}
+				{thread && <ThreadState t={thread} />}
+				{comment.carried?.outdated && !thread?.outdated && (
+					<span className="ic-state warn" title={comment.carried.outdated.reason}>
+						Outdated
+					</span>
+				)}
+				{pendingEdit && <span className="ic-state accent">Unsaved edit</span>}
+				{comment.findingId && <span className="muted small">from AI</span>}
 				<span className="spacer" />
 				{onAskAi && <AskAiButton onClick={onAskAi} />}
 				<button className="btn small ghost" onClick={onEdit}>
@@ -162,24 +188,30 @@ export function CommentCard({ comment, pendingEdit, discussed, onEdit, onDelete,
 			</div>
 			<OutdatedCode comment={comment} />
 			<AlreadyDiscussed threads={discussed} />
-			<RichText className="comment-body" text={comment.body} />
+			<RichText className="ic-body" text={comment.body} />
+			{replies.map((c) => (
+				<InlineReply key={c.id} c={c} />
+			))}
+			{thread && <MoreOnGitHub t={thread} />}
 		</div>
 	)
 }
 
 export function DraftStub({ draft, onResume, onDiscard }: { draft: CommentDraft; onResume(): void; onDiscard(): void }) {
 	return (
-		<div className="draft-stub" data-item={draft.id} onMouseUp={(e) => e.stopPropagation()}>
-			<span className="tag">Unfinished</span>
-			<span className="muted small">{anchorLabel(draft.anchor)}</span>
-			<span className="ellipsis">{draft.body.split('\n')[0]}</span>
-			<span className="spacer" />
-			<button className="btn small ghost" onClick={onDiscard}>
-				Discard
-			</button>
-			<button className="btn small" onClick={onResume}>
-				Resume
-			</button>
+		<div className="ic ic-you ic-draft" data-item={draft.id} onMouseUp={(e) => e.stopPropagation()}>
+			<div className="ic-head">
+				<b className="ic-who you">You</b>
+				<span className="ic-state accent">Draft</span>
+				<span className="ellipsis muted">{draft.body.split('\n')[0] || 'Empty'}</span>
+				<span className="spacer" />
+				<button className="btn small ghost" onClick={onDiscard}>
+					Discard
+				</button>
+				<button className="btn small" onClick={onResume}>
+					Resume
+				</button>
+			</div>
 		</div>
 	)
 }
