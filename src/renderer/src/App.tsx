@@ -514,6 +514,21 @@ export function App() {
 		else setDiscussion(null)
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+	// A read that failed (offline, GitHub down) is tried again when the connection returns or the window regains focus.
+	const discussionFailed = discussion?.value?.status === 'unavailable' && !discussion.loading
+	useEffect(() => {
+		if (!discussionFailed || !session || !comparison?.pr) return
+		const repoId = session.repo.id
+		const id = comparison.id
+		const retry = (): void => loadDiscussion(repoId, id)
+		window.addEventListener('online', retry)
+		window.addEventListener('focus', retry)
+		return () => {
+			window.removeEventListener('online', retry)
+			window.removeEventListener('focus', retry)
+		}
+	}, [discussionFailed, session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
 	// Who approved or reviewed the open pull request, re-read as often as the PR is checked for new commits.
 	const [prReview, setPrReview] = useState<{ id: string; value: PrReviewState | null; author: string | null } | null>(null)
 	useEffect(() => {
