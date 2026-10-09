@@ -105,6 +105,13 @@ export type ModelAnswer = z.infer<typeof answerSchema>
 export const ANSWER_SCHEMA_NAME = 'finding_answer'
 export const ANSWER_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(answerSchema, { target: 'draft-7' }))
 
+/** The answer to a question about lines of code you selected. */
+export const explainSchema = z.object({
+	answer: z.string().describe('The reply to the question, in plain words, citing the code by line number where it helps.'),
+})
+export const EXPLAIN_SCHEMA_NAME = 'code_answer'
+export const EXPLAIN_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(explainSchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

@@ -778,6 +778,20 @@ input[type='checkbox'] {
 .ic-gh {
 	border-left-color: var(--gh);
 }
+/* Your private question to the AI: yours (purple) but dashed, since it is never posted. */
+.ic-ai {
+	border-left-style: dashed;
+	background: var(--panel);
+}
+.ic-ai .thread-msg {
+	font-size: 13px;
+}
+.ic-ai .ask-box {
+	margin: 0;
+}
+.ic-ai .ask-box textarea {
+	min-height: 30px;
+}
 .ic.is-resolved {
 	border-left-color: var(--border-strong);
 	background: var(--panel);
@@ -812,6 +826,9 @@ input[type='checkbox'] {
 }
 .ic-who.gh {
 	color: var(--gh);
+}
+.ic-who.ai {
+	color: var(--accent);
 }
 /* A state word: "Open", "Resolved", "Not posted", "Draft"… Color carries meaning, the word says it. */
 .ic-state {

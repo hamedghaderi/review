@@ -214,6 +214,14 @@ The **Context** tab in the right panel holds what the code can't tell the review
 - Each request of the next run sends the text fenced as its own section, right after the description: the notes first, then the files share what's left of 20,000 characters (short files whole, long ones cut evenly and marked as cut). The run details list it under **Background** (for example "your notes, 2 files (spec.md, error.log), 1 image (checkout.png)").
 - The instructions let the notes say what the change is for and where to look, but files and images can contain anything (text in a screenshot included), so nothing in them relaxes the rules, removes a finding the code supports or changes the output format.
 
+### Asking about code
+
+Select lines you don't understand (drag across the code, or click a line number and Shift-click another), type a question in the box that opens, and press **Ask AI** (or ⌥↵) instead of **Add comment**.
+
+- The question goes to the model chosen in the header, never a team. It gets the selected lines with their numbers, the change around them, up to 60 lines of the file on each side, the pull request's title and description, and your earlier messages about the same lines. With lookups on (**Review input limits**), it can also open up to 6 files or searches in the reviewed commits, to find a caller or a definition.
+- The answer appears in a card at those lines, marked **Private** with a dashed edge. Questions are saved with the review, never posted, and never sent to the AI reviewer. Ask a follow-up in the card; a conversation holds up to 20 messages. **Delete** removes it.
+- On the old side (deleted lines), the model sees the selected lines and the diff, not the whole old file.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

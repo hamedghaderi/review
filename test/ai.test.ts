@@ -935,6 +935,84 @@ test('ask: the question goes to the model that raised the finding, with the code
 	await assert.rejects(controller.ask(access, s.comp.id, f.id, '   '), /Write a question first/)
 })
 
+test('ask about code: the selected lines, the change and the file around them go to the chosen model; the answer is saved privately', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const asked: Array<{ input: string; schema: string | undefined; tools: boolean }> = []
+	let reply: unknown = { answer: 'Line 3 now adds the numbers; before, it subtracted them.' }
+	const provider = createFakeProvider({
+		script: (req) => {
+			asked.push({ input: req.input, schema: req.schema?.name, tools: !!req.tools })
+			return reply as ReviewOutput
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	const at = { ...emptyReview(), id: s.comp.id }
+	const anchor = {
+		repoId: at.repoId,
+		baseSha: at.baseSha,
+		headSha: at.headSha,
+		fileKey: 'src/app.ts',
+		oldPath: 'src/app.ts',
+		newPath: 'src/app.ts',
+		side: 'new' as const,
+		startLine: 3,
+		endLine: 3,
+		excerpt: '  return a + b',
+	}
+	const first = await controller.askCode(access, s.comp.id, anchor, 'What does this line do?', null, SEL)
+	assert.equal(asked[0].schema, 'code_answer')
+	assert.match(asked[0].input, /# The selected lines: src\/app\.ts, after the change, lines 3-3\n {4}3 {2} {2}return a \+ b/)
+	assert.match(asked[0].input, /-  return a - b/, 'the change around the lines')
+	assert.match(asked[0].input, /export function run\(\)/, 'the file around the lines')
+	assert.match(asked[0].input, /# The developer asks\nWhat does this line do\?$/)
+	assert.equal(first.length, 1)
+	assert.deepEqual(
+		first[0].messages.map((m) => [m.role, m.text]),
+		[
+			['you', 'What does this line do?'],
+			['ai', 'Line 3 now adds the numbers; before, it subtracted them.'],
+		],
+	)
+
+	// A follow-up continues the same conversation, with the earlier messages.
+	const next = await controller.askCode(access, s.comp.id, anchor, 'And before?', first[0].id, SEL)
+	assert.equal(next.length, 1)
+	assert.equal(next[0].messages.length, 4)
+	assert.match(asked[1].input, /# Earlier messages about these lines\nDeveloper: What does this line do\?\nYou: Line 3 now adds/)
+
+	// A bad answer is saved as an error, not lost; the question is kept.
+	reply = { nope: true }
+	const bad = await controller.askCode(access, s.comp.id, anchor, 'Third?', first[0].id, SEL)
+	assert.equal(bad[0].messages.at(-1)?.error, true)
+	assert.match(bad[0].messages.at(-1)?.text ?? '', /^No answer: The answer did not match/)
+
+	// Saved on the review, and deletable.
+	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].questions?.length, 1)
+	assert.deepEqual(await controller.deleteCodeQuestion('/repo', s.comp.id, first[0].id), [])
+	await assert.rejects(controller.askCode(access, s.comp.id, anchor, '  ', null, SEL), /Write a question first/)
+	await assert.rejects(controller.askCode(access, s.comp.id, { ...anchor, fileKey: 'nope.ts' }, 'Hi', null, SEL), /not part of this change/)
+	await assert.rejects(controller.askCode(access, s.comp.id, anchor, 'Hi', 'gone', SEL), /no longer exists/)
+})
+
 // ─── Review teams ─────────────────────────────────────────────────────────────
 
 test('team run: members check only their rules, in parallel, and merge into one run and one checklist', async () => {

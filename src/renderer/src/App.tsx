@@ -7,6 +7,8 @@ import type {
 	Anchor,
 	AppError,
 	BrowserState,
+	CodeMessage,
+	CodeQuestion,
 	CompareTarget,
 	Comparison,
 	Discussion,
@@ -728,6 +730,65 @@ export function App() {
 		setReveal({ fileKey: f.anchor.fileKey, itemId: res.draftId ?? res.commentId, anchor: f.anchor, nonce: Date.now() })
 	}
 
+	// Questions about selected code. The question shows at once with "Reading the code…"; the saved list replaces it when the
+	// answer arrives. The list lives on the review, but only the main process writes it, so it is kept apart from edits.
+	const [questions, setQuestions] = useState<Array<CodeQuestion>>([])
+	const [asking, setAsking] = useState<ReadonlySet<string>>(new Set())
+	useEffect(() => {
+		setQuestions(loaded?.review.questions ?? [])
+		setAsking(new Set())
+	}, [loaded])
+	const askDisabled = !aiSelection
+		? 'Choose a model in the header first.'
+		: aiProblem && !aiSettings?.connections.some((c) => c.status === 'connected')
+			? aiProblem
+			: null
+	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
+		if (!comparison) return 'No comparison is open.'
+		const id = questionId ?? `new:${Date.now()}`
+		const mine: CodeMessage = { id: `${id}:q`, role: 'you', text, at: new Date().toISOString() }
+		setQuestions((qs) =>
+			questionId
+				? qs.map((q) => (q.id === questionId ? { ...q, messages: [...q.messages, mine] } : q))
+				: [...qs, { id, anchor, messages: [mine] }],
+		)
+		setAsking((s) => new Set([...s, id, ...(questionId ? [] : ['new'])]))
+		const reviewId = comparison.id
+		const r = await window.review.askCode(reviewId, anchor, text, questionId)
+		if (comparisonIdRef.current !== reviewId) return null
+		setAsking((s) => new Set([...s].filter((x) => x !== id && x !== 'new')))
+		if (!r.ok) {
+			// Nothing was saved. A follow-up goes back to its box (which keeps the text); a first question stays on screen,
+			// with why, so its text is not lost.
+			const why: CodeMessage = {
+				id: `${id}:e`,
+				role: 'ai',
+				text: `Not sent: ${r.error.message}`,
+				at: new Date().toISOString(),
+				error: true,
+			}
+			setQuestions((qs) =>
+				qs.map((q) =>
+					q.id !== id
+						? q
+						: questionId
+							? { ...q, messages: q.messages.filter((m) => m !== mine) }
+							: { ...q, messages: [...q.messages, why] },
+				),
+			)
+			return r.error.message
+		}
+		// The saved list, plus first questions that are still on their way or were not sent.
+		setQuestions((qs) => [...qs.filter((q) => q.id.startsWith('new:') && q.id !== id), ...r.value])
+		return null
+	}
+	const deleteQuestion = async (id: string): Promise<void> => {
+		if (!comparison) return
+		if (id.startsWith('new:')) return setQuestions((qs) => qs.filter((q) => q.id !== id)) // never saved
+		const r = await window.review.deleteCodeQuestion(comparison.id, id)
+		if (r.ok && comparisonIdRef.current === comparison.id) setQuestions((qs) => [...qs.filter((q) => q.id.startsWith('new:')), ...r.value])
+	}
+
 	const askFinding = async (f: Finding, question: string): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const r = await window.review.askFinding(comparison.id, f.id, question)
@@ -749,6 +810,7 @@ export function App() {
 	const file = comparison?.files.find((f) => f.key === selected) ?? null
 	const fileComments = useMemo(() => review?.comments.filter((c) => c.anchor.fileKey === selected) ?? [], [review?.comments, selected])
 	const fileDrafts = useMemo(() => review?.drafts.filter((d) => d.anchor.fileKey === selected) ?? [], [review?.drafts, selected])
+	const fileQuestions = useMemo(() => questions.filter((q) => q.anchor.fileKey === selected), [questions, selected])
 	// Where each comment stands on GitHub (PR reviews only): its published copy, whether a later edit is still unsent, and
 	// the thread it started, whose replies show on the comment instead of in a second card.
 	const published = useMemo(() => {
@@ -1149,6 +1211,11 @@ export function App() {
 									highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
 									threads={fileThreads}
 									published={published}
+									questions={fileQuestions}
+									asking={asking}
+									askDisabled={askDisabled}
+									onAskCode={askCode}
+									onDeleteQuestion={(id) => void deleteQuestion(id)}
 									discussed={discussed}
 									onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
 									onStartDraft={(a) => {

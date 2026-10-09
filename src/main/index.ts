@@ -204,6 +204,21 @@ function registerIpc(): void {
 	handle(IPC.aiAsk, (reviewId: unknown, findingId: unknown, question: unknown) =>
 		service.askFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), str(question, 'question', 4000)),
 	)
+	// A question about selected code goes to the model chosen in the header, never a team: one answer, one model.
+	handle(IPC.aiAskCode, async (reviewId: unknown, anchor: unknown, question: unknown, questionId: unknown) => {
+		const selection = connections.view().selection
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model in the header first.')
+		return service.askCode(
+			comparisonId(reviewId),
+			anchor,
+			str(question, 'question', 4000),
+			questionId === null ? null : str(questionId, 'question id', 64),
+			selection,
+		)
+	})
+	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
+		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
+	)
 	handle(IPC.aiRetryRules, (reviewId: unknown, runId: unknown, rules: unknown) =>
 		service.retryAiRules(comparisonId(reviewId), str(runId, 'run id', 64), reviewRules(rules)),
 	)
