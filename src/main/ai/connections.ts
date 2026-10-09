@@ -82,6 +82,7 @@ interface SettingsFile {
 	levels: FindingLevelSettings
 	teams: Array<ReviewTeam>
 	teamId: string | null // selected team; takes precedence over `selection` for runs
+	askModel?: ModelSelection | null // the model you picked for questions (Ask AI); absent: a default, see `questionModel`
 }
 
 export interface RunConfig {
@@ -149,7 +150,24 @@ export class ConnectionService {
 			promptVersion: PROMPT_VERSION,
 			catalogUpdated: CATALOG_UPDATED,
 		}
-		return { ...view, questionModel: questionModel(view) }
+		return { ...view, questionModel: questionModel(view, d.askModel ?? null) }
+	}
+
+	/** The model you picked for questions, while it is still offered; null when none was picked. */
+	pickedAskModel(): ModelSelection | null {
+		const v = this.view()
+		const p = this.file.read().askModel ?? null
+		return p && v.questionModel?.connectionId === p.connectionId && v.questionModel.modelId === p.modelId ? p : null
+	}
+
+	/** Remembers the model for questions (Ask AI), without changing what runs reviews. */
+	async selectAskModel(selection: ModelSelection): Promise<void> {
+		if (!this.connectionView(this.get(selection.connectionId)).models.some((m) => m.id === selection.modelId))
+			throw new AppFail('invalid-input', 'That model is not offered by this connection.')
+		await this.file.update((f) => {
+			f.askModel = selection
+		})
+		this.emit()
 	}
 
 	async create(input: NewConnectionInput): Promise<ConnectionView> {
@@ -667,12 +685,14 @@ export class ConnectionService {
 
 /** Credentials are bound to the exact endpoint, protocol and auth method they were entered for. */
 /**
- * Who answers questions about selected code. With a team chosen: the member that checks callers and structure (it
- * reads the code around a change), else the first member whose model is offered. Otherwise the chosen model.
+ * Who answers questions (Ask AI): the model you picked for them, while it is offered. Otherwise a default: with a team
+ * chosen, the member that checks callers and structure (it reads the code around a change), else the first member whose
+ * model is offered; without a team, the chosen model.
  */
-export function questionModel(v: Omit<AiSettingsView, 'questionModel'>): ModelSelection | null {
+export function questionModel(v: Omit<AiSettingsView, 'questionModel'>, picked: ModelSelection | null = null): ModelSelection | null {
 	const offered = (connectionId: string, modelId: string): boolean =>
 		v.connections.some((c) => c.id === connectionId && c.models.some((m) => m.id === modelId))
+	if (picked && offered(picked.connectionId, picked.modelId)) return picked
 	const r = v.reviewer
 	if (r?.kind === 'team') {
 		const members = v.teams.find((t) => t.id === r.teamId)?.members ?? []
@@ -757,6 +777,7 @@ export function migrateSettings(raw: unknown): SettingsFile {
 		levels: d.levels?.enabled?.length ? d.levels : DEFAULT_LEVEL_SETTINGS,
 		teams: Array.isArray(d.teams) ? d.teams.map(adoptNewRules) : [],
 		teamId: typeof d.teamId === 'string' ? d.teamId : null,
+		askModel: d.askModel ?? null,
 	}
 }
 

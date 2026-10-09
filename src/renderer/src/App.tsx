@@ -46,7 +46,7 @@ import type { PostedState } from './Comment.tsx'
 import { discussedAt, ownThread } from './discussed.ts'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
-import { ModelPicker } from './ModelPicker.tsx'
+import { AskModel, ModelPicker } from './ModelPicker.tsx'
 import { ProviderSettings } from './ProviderSettings.tsx'
 import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
@@ -741,8 +741,10 @@ export function App() {
 	const askDisabled = !aiSettings?.connections.some((c) => c.status === 'connected')
 		? (aiProblem ?? 'No AI provider is connected.')
 		: !aiSettings.questionModel
-			? 'Choose a model or a review team in the header first.'
+			? 'Choose a model for questions first.'
 			: null
+	// One model for every Ask AI box (code and findings); picking it in any box changes them all.
+	const askModelPicker = <AskModel settings={aiSettings} onManage={() => setSettingsOpen({ team: null })} />
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const id = questionId ?? `new:${Date.now()}`
@@ -1215,6 +1217,7 @@ export function App() {
 									asking={asking}
 									askDisabled={askDisabled}
 									askModel={aiSettings?.questionModel?.modelId ?? null}
+									askModelPicker={askModelPicker}
 									onAskCode={askCode}
 									onDeleteQuestion={(id) => void deleteQuestion(id)}
 									discussed={discussed}
@@ -1343,6 +1346,7 @@ export function App() {
 										onOpen={openFinding}
 										onAccept={acceptFinding}
 										onAsk={askFinding}
+										askModelPicker={askModelPicker}
 										onDismiss={(f, reason) => {
 											change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))
 											if (selectedFinding?.id === f.id) setSelectedFinding(null)

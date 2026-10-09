@@ -1498,6 +1498,16 @@ a.ic-state:hover {
 	border-color: var(--warn-fg);
 	color: var(--warn-fg);
 }
+/* The model picker inside Ask AI boxes: small, just the model name. */
+.model-btn.compact {
+	max-width: 180px;
+	font-size: 11px;
+	color: var(--text-2);
+}
+.ai-control:has(> .model-btn.compact) {
+	min-width: 0;
+	flex-shrink: 1;
+}
 .chev-down {
 	font-size: 10px;
 	color: var(--text-2);

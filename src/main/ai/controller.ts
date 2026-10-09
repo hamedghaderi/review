@@ -254,7 +254,13 @@ export class AiController {
 	 * about it. The question is saved first, so it shows while the answer is pending; a failed answer is saved as an
 	 * error message instead of being lost.
 	 */
-	async ask(access: ComparisonAccess, reviewId: string, findingId: string, question: string): Promise<AiRun> {
+	async ask(
+		access: ComparisonAccess,
+		reviewId: string,
+		findingId: string,
+		question: string,
+		picked: ModelSelection | null = null,
+	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
 		const text = question.trim()
@@ -266,9 +272,10 @@ export class AiController {
 		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish before asking about its findings.')
 		if ((finding.thread?.length ?? 0) >= MAX_THREAD_MESSAGES)
 			throw new AppFail('invalid-input', 'This conversation is full. Add your conclusion to the comment instead.')
+		// The model you picked for questions; without one, the model that raised the finding.
 		const member = finding.memberId ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
-		const connectionId = member?.connectionId ?? run.connectionId
-		const modelId = member?.model ?? run.model
+		const connectionId = picked?.connectionId ?? member?.connectionId ?? run.connectionId
+		const modelId = picked?.modelId ?? member?.model ?? run.model
 		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
 		let config: RunConfig
 		try {
@@ -276,7 +283,7 @@ export class AiController {
 		} catch (e) {
 			throw new AppFail(
 				'ai-unavailable',
-				`The model that raised this finding (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`,
+				`${picked ? 'The model' : 'The model that raised this finding'} (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`,
 			)
 		}
 		const history = finding.thread ?? []
@@ -288,7 +295,10 @@ export class AiController {
 		let reply: FindingMessage
 		try {
 			const response = await config.provider.review(
-				buildAskRequest({ finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null }),
+				buildAskRequest(
+					{ finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null },
+					modelId !== (member?.model ?? run.model),
+				),
 				AbortSignal.timeout(180_000),
 			)
 			const a = parseAnswer(response.output)
@@ -347,19 +357,11 @@ export class AiController {
 		// The full file is only one side; the old side's lines come from the excerpt and the diff.
 		const fileLines = lines?.kind === 'text' && at.side !== 'old' ? lines.lines : null
 		const tools = config.limits.lookups !== false && access.tools ? access.tools(EXPLAIN_LOOKUPS) : undefined
-		const pr = access.comparison.pr
+		const pr = access.comparison.pr ? { title: access.comparison.pr.title, body: access.comparison.pr.body } : null
 		let reply: CodeMessage
 		try {
 			const response = await config.provider.review(
-				buildExplainRequest({
-					anchor: at,
-					question: text,
-					history,
-					patch,
-					fileLines,
-					pr: pr ? { title: pr.title, body: pr.body } : null,
-					tools,
-				}),
+				buildExplainRequest({ anchor: at, question: text, history, patch, fileLines, pr, tools }),
 				AbortSignal.timeout(180_000),
 			)
 			reply = { id: randomUUID(), role: 'ai', text: parseExplain(response.output), at: new Date().toISOString(), model: selection.modelId }

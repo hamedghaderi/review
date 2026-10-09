@@ -1159,6 +1159,7 @@ export const IPC = {
 	aiRemoveModel: 'ai:model-remove',
 	aiProbeModel: 'ai:model-probe',
 	aiSelectModel: 'ai:model-select',
+	aiSelectAskModel: 'ai:ask-model-select',
 	aiSetLimits: 'ai:limits-set',
 	aiSetLevels: 'ai:levels-set',
 	aiAsk: 'ai:ask',
@@ -1257,6 +1258,8 @@ export interface ReviewApi {
 	removeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	probeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
+	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
+	selectAskModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	setReviewLimits(limits: ReviewLimits): Promise<Result<AiSettingsView>>
 	setFindingLevels(levels: FindingLevelSettings): Promise<Result<AiSettingsView>>
 	/** Creates or replaces a review team. */

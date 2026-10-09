@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, ReviewComment } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { AlreadyDiscussed, InlineReply, MoreOnGitHub, ThreadState } from './Discussion.tsx'
@@ -54,6 +54,7 @@ interface ComposerProps {
 	onAskCode?(): void // a new comment on selected lines: send the text to the AI as a question instead
 	askCodeDisabled?: string | null // why the question can't be sent now (no model chosen…)
 	askCodeModel?: string | null // the model that answers
+	modelPicker?: ReactNode // the picker for that model
 }
 
 export function Composer({
@@ -69,6 +70,7 @@ export function Composer({
 	onAskCode,
 	askCodeDisabled,
 	askCodeModel,
+	modelPicker,
 }: ComposerProps) {
 	const ref = useRef<HTMLTextAreaElement>(null)
 	useEffect(() => {
@@ -134,6 +136,7 @@ export function Composer({
 				<button className="btn small ghost" onClick={onDiscard}>
 					{editing ? 'Discard edit' : 'Discard'}
 				</button>
+				{onAskCode && modelPicker}
 				{onAskCode && (
 					<button
 						className="btn small"
@@ -239,12 +242,13 @@ interface QuestionProps {
 	question: CodeQuestion
 	pending: boolean
 	disabled: string | null
+	modelPicker: ReactNode
 	onAsk(text: string): Promise<string | null> // a follow-up; returns why it failed, or null
 	onDelete(): void
 }
 
 /** Your private conversation with the AI about these lines: never posted. */
-export function QuestionCard({ question: q, pending, disabled, onAsk, onDelete }: QuestionProps) {
+export function QuestionCard({ question: q, pending, disabled, modelPicker, onAsk, onDelete }: QuestionProps) {
 	const [open, setOpen] = useState(true)
 	const [text, setText] = useState('')
 	const [error, setError] = useState<string | null>(null)
@@ -304,6 +308,7 @@ export function QuestionCard({ question: q, pending, disabled, onAsk, onDelete }
 							{text.trim() && (
 								<div className="ask-actions">
 									<span className="spacer" />
+									{modelPicker}
 									<button className="btn small primary" onClick={() => void send()} disabled={!!disabled} title={disabled ?? undefined}>
 										Ask
 									</button>

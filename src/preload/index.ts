@@ -75,6 +75,7 @@ const api: ReviewApi = {
 	removeModel: (id, model) => ipcRenderer.invoke(IPC.aiRemoveModel, id, model),
 	probeModel: (id, model) => ipcRenderer.invoke(IPC.aiProbeModel, id, model),
 	selectModel: (selection) => ipcRenderer.invoke(IPC.aiSelectModel, selection),
+	selectAskModel: (selection) => ipcRenderer.invoke(IPC.aiSelectAskModel, selection),
 	setReviewLimits: (limits) => ipcRenderer.invoke(IPC.aiSetLimits, limits),
 	setFindingLevels: (levels) => ipcRenderer.invoke(IPC.aiSetLevels, levels),
 	askFinding: (reviewId, findingId, question) => ipcRenderer.invoke(IPC.aiAsk, reviewId, findingId, question),

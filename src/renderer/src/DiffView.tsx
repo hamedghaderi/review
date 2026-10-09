@@ -39,6 +39,7 @@ interface Props {
 	asking: ReadonlySet<string> // question ids waiting for an answer, plus "new" while a first question is sent
 	askDisabled: string | null // why a question can't be sent now
 	askModel: string | null // the model that answers, shown on the button
+	askModelPicker: React.ReactNode // picks that model
 	onAskCode(anchor: Anchor, text: string, questionId: string | null): Promise<string | null>
 	onDeleteQuestion(id: string): void
 	discussed(anchor: Anchor, commentId: string | null): Array<DiscussionThread>
@@ -288,6 +289,7 @@ export function DiffView(p: Props) {
 					question={q}
 					pending={p.asking.has(q.id)}
 					disabled={q.id.startsWith('new:') ? 'This question was not saved. Delete it and ask again.' : p.askDisabled}
+					modelPicker={p.askModelPicker}
 					onAsk={(text) => p.onAskCode(q.anchor, text, q.id)}
 					onDelete={() => p.onDeleteQuestion(q.id)}
 				/>
@@ -334,6 +336,7 @@ export function DiffView(p: Props) {
 					}
 					askCodeDisabled={p.asking.has('new') ? 'Waiting for the answer to your last question…' : p.askDisabled}
 					askCodeModel={p.askModel}
+					modelPicker={p.askModelPicker}
 				/>
 			)
 		}

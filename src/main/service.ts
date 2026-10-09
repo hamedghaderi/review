@@ -766,9 +766,9 @@ export class ReviewService {
 		return ai.retryRules(access, reviewId, runId, rules)
 	}
 
-	async askFinding(reviewId: string, findingId: string, question: string): Promise<AiRun> {
+	async askFinding(reviewId: string, findingId: string, question: string, model: ModelSelection | null): Promise<AiRun> {
 		const { ai, access } = this.aiAccess(reviewId)
-		return ai.ask(access, reviewId, findingId, question)
+		return ai.ask(access, reviewId, findingId, question, model)
 	}
 
 	async askCode(

@@ -897,11 +897,11 @@ test('ask: the question goes to the model that raised the finding, with the code
 			aiRuns: {},
 		}
 	})
-	const asked: Array<{ input: string; schema: string }> = []
+	const asked: Array<{ input: string; schema: string; instructions: string }> = []
 	const provider = createFakeProvider({
 		script: (req) => {
 			if (req.schema) {
-				asked.push({ input: req.input, schema: req.schema.name })
+				asked.push({ input: req.input, schema: req.schema.name, instructions: req.instructions })
 				return { answer: 'You are right: it is never unmounted, so nothing leaks.', verdict: 'wrong', level: 'should_fix' }
 			}
 			return out([finding()])
@@ -933,6 +933,13 @@ test('ask: the question goes to the model that raised the finding, with the code
 	)
 	assert.equal(controller.runsFor('/repo', s.comp.id)[0].findings[0].thread?.length, 2)
 	await assert.rejects(controller.ask(access, s.comp.id, f.id, '   '), /Write a question first/)
+
+	// A model picked for questions answers instead of the one that raised it, told it is judging another's finding.
+	const picked = { connectionId: SEL.connectionId, modelId: 'other-model' }
+	const withPick = await controller.ask(access, s.comp.id, f.id, 'Still?', picked)
+	assert.equal(withPick.findings.find((x) => x.id === f.id)!.thread!.at(-1)?.model, 'other-model')
+	assert.match(asked[0].instructions, /^You reviewed a code change/)
+	assert.match(asked.at(-1)!.instructions, /^Another AI reviewer looked at a code change/)
 })
 
 test('ask about code: the selected lines, the change and the file around them go to the chosen model; the answer is saved privately', async () => {
@@ -1045,6 +1052,14 @@ test('questions about code go to one model: with a team, its callers member, els
 		modelId: 'gpt',
 	})
 	assert.equal(questionModel(view({})), null)
+	// A model you picked for questions wins over the defaults, while it is offered.
+	const picked = { connectionId: 'c', modelId: 'gpt' }
+	assert.deepEqual(questionModel(view({ reviewer: { kind: 'team', teamId: 't' } }), picked), picked)
+	assert.deepEqual(
+		questionModel(view({ reviewer: { kind: 'team', teamId: 't' } }), { connectionId: 'c', modelId: 'gone' }),
+		{ connectionId: 'c', modelId: 'opus' },
+		'a picked model no longer offered falls back to the default',
+	)
 })
 
 // ─── Review teams ─────────────────────────────────────────────────────────────
