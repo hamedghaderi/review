@@ -100,104 +100,99 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 			{open && (
 				<div className="popover" role="dialog" aria-label="Run AI review" style={anchor ?? undefined}>
 					<div className="popover-title">Run AI review</div>
-					<fieldset className="scope-choice">
-						<label>
-							<input
-								type="radio"
-								name="ai-scope"
-								checked={effectiveScope === 'file'}
-								disabled={!currentFile}
-								onChange={() => setScope('file')}
-							/>
-							<span>
-								Current file
-								<span className="muted small mono ellipsis block">
-									{currentFile ? (currentFile.newPath ?? currentFile.oldPath) : 'No file selected'}
-								</span>
-							</span>
-						</label>
-						<label>
-							<input type="radio" name="ai-scope" checked={effectiveScope === 'all'} onChange={() => setScope('all')} />
-							<span>
-								All changed files
-								<span className="muted small block">
-									{fileCount} file{fileCount === 1 ? '' : 's'}; binary and unchanged-content files are skipped
-								</span>
-							</span>
-						</label>
-					</fieldset>
-					{!team && (
-						<label className="option passes">
-							<input
-								type="checkbox"
-								checked={passes}
-								onChange={(e) => {
-									setPasses(e.target.checked)
-									savePasses(e.target.checked)
-								}}
-							/>
-							<span>
-								<span>Focused passes</span>
-								<span className="muted small">
-									Run this model once per role (defects, security, callers, tests), each on only the files its rules apply to. Sharper, but
-									uses more tokens.
-								</span>
-							</span>
-						</label>
-					)}
+					<div className="seg soft" role="radiogroup" aria-label="Scope">
+						<button
+							role="radio"
+							aria-checked={effectiveScope === 'all'}
+							className={effectiveScope === 'all' ? 'on' : ''}
+							title="Binary and unchanged-content files are skipped"
+							onClick={() => setScope('all')}
+						>
+							All {fileCount} file{fileCount === 1 ? '' : 's'}
+						</button>
+						<button
+							role="radio"
+							aria-checked={effectiveScope === 'file'}
+							className={effectiveScope === 'file' ? 'on' : ''}
+							title={currentFile ? (currentFile.newPath ?? currentFile.oldPath ?? undefined) : 'No file selected'}
+							disabled={!currentFile}
+							onClick={() => setScope('file')}
+						>
+							Current file
+						</button>
+					</div>
 					{team ? (
-						<div className="small team-summary">
-							<div>
-								<b>{team.name}</b> <span className="muted">· each reviewer checks only its rules, all at the same time</span>
+						<ul className="team-members small" title="Each reviewer checks only its rules, all at the same time">
+							{team.members.map((m, i) => (
+								<li
+									key={m.id}
+									className="ellipsis"
+									title={`${teamConnections[i]?.label ?? '?'} · ${m.modelId}\n${m.rules.map((r) => RULE_LABEL[r]).join(', ')}`}
+								>
+									<b>{m.role}</b> <span className="muted mono">{m.modelId}</span>
+								</li>
+							))}
+						</ul>
+					) : (
+						<>
+							<div className="small ellipsis">
+								{connection?.label ?? '—'} · <span className="mono">{model?.id ?? '—'}</span>
+								{fixture && <span className="pill warn">Fixture</span>}
 							</div>
-							<ul className="team-members">
-								{team.members.map((m, i) => (
-									<li key={m.id}>
-										<b>{m.role}</b>
-										<div className="muted mono ellipsis" title={`${teamConnections[i]?.label ?? '?'} · ${m.modelId}`}>
-											{teamConnections[i]?.label ?? '?'} · {m.modelId}
-										</div>
-										<div className="muted">{m.rules.map((r) => RULE_LABEL[r]).join(', ')}</div>
-									</li>
-								))}
-							</ul>
-						</div>
-					) : null}
-					<dl className="ai-meta small" hidden={!!team}>
-						<dt>Provider</dt>
-						<dd>
-							{connection ? connection.label : '—'}
-							{connection && connection.label !== connection.providerLabel && <span className="muted">({connection.providerLabel})</span>}
-							{fixture && <span className="pill warn">Fixture</span>}
-						</dd>
-						<dt>Model</dt>
-						<dd className="mono" title={model ? sourceTitle(model) : undefined}>
-							{model?.id ?? '—'}
-						</dd>
-						{connection && !fixture && (
-							<>
-								<dt>Endpoint</dt>
-								<dd className="mono ellipsis">{connection.baseUrl}</dd>
-							</>
-						)}
-						<dt>Prompt</dt>
-						<dd className="mono">{settings?.promptVersion ?? '…'}</dd>
-						<dt>Limits</dt>
-						<dd>
-							{limits
-								? `${limits.contextLines} context lines, up to ${limits.maxBatchChars.toLocaleString()} chars per request (reduced to fit the model), ${limits.maxRunChars.toLocaleString()} per run${limits.relatedCode ? ', with related code' : ''}${limits.lookups ? ', with lookups' : ''}`
-								: '…'}
-						</dd>
-					</dl>
-					<p className="muted small">
-						{team
-							? `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent to the ${team.members.length} reviewers (${[...new Set(teamConnections.map((c) => c?.label))].join(', ')}), each getting only the files its rules apply to. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' Each reviewer can also open files and search the code in the pinned commits while it reviews.' : ''}`
-							: fixture
-								? 'The fixture provider returns deterministic sample findings. Nothing leaves this computer.'
-								: `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent${local ? ' to this local server' : ` to ${connection?.label ?? 'the provider'}`}. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' The model can also open files and search the code in the pinned commits while it reviews.' : ''} Uncommitted changes are not included.`}{' '}
-						{team ? 'Each reviewer’s model stays fixed for this run.' : 'The provider and model stay fixed for this run.'} Results are
-						suggestions; they never mark files as viewed.
-					</p>
+							<label
+								className="option passes"
+								title="Run this model once per role (defects, security, callers, tests), each on only the files its rules apply to. Sharper, but uses more tokens."
+							>
+								<input
+									type="checkbox"
+									checked={passes}
+									onChange={(e) => {
+										setPasses(e.target.checked)
+										savePasses(e.target.checked)
+									}}
+								/>
+								<span>Focused passes</span>
+							</label>
+						</>
+					)}
+					<details className="run-info small">
+						<summary>What gets sent</summary>
+						<dl className="ai-meta" hidden={!!team}>
+							<dt>Provider</dt>
+							<dd>
+								{connection ? connection.label : '—'}
+								{connection && connection.label !== connection.providerLabel && <span className="muted">({connection.providerLabel})</span>}
+								{fixture && <span className="pill warn">Fixture</span>}
+							</dd>
+							<dt>Model</dt>
+							<dd className="mono" title={model ? sourceTitle(model) : undefined}>
+								{model?.id ?? '—'}
+							</dd>
+							{connection && !fixture && (
+								<>
+									<dt>Endpoint</dt>
+									<dd className="mono ellipsis">{connection.baseUrl}</dd>
+								</>
+							)}
+							<dt>Prompt</dt>
+							<dd className="mono">{settings?.promptVersion ?? '…'}</dd>
+							<dt>Limits</dt>
+							<dd>
+								{limits
+									? `${limits.contextLines} context lines, up to ${limits.maxBatchChars.toLocaleString()} chars per request (reduced to fit the model), ${limits.maxRunChars.toLocaleString()} per run${limits.relatedCode ? ', with related code' : ''}${limits.lookups ? ', with lookups' : ''}`
+									: '…'}
+							</dd>
+						</dl>
+						<p className="muted small">
+							{team
+								? `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent to the ${team.members.length} reviewers (${[...new Set(teamConnections.map((c) => c?.label))].join(', ')}), each getting only the files its rules apply to. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' Each reviewer can also open files and search the code in the pinned commits while it reviews.' : ''}`
+								: fixture
+									? 'The fixture provider returns deterministic sample findings. Nothing leaves this computer.'
+									: `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent${local ? ' to this local server' : ` to ${connection?.label ?? 'the provider'}`}. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' The model can also open files and search the code in the pinned commits while it reviews.' : ''} Uncommitted changes are not included.`}{' '}
+							{team ? 'Each reviewer’s model stays fixed for this run.' : 'The provider and model stay fixed for this run.'} Results are
+							suggestions; they never mark files as viewed.
+						</p>
+					</details>
 					{problem && <p className="error-text small">{problem}</p>}
 					<div className="popover-actions">
 						<button className="btn small ghost" onClick={() => setOpen(false)}>
