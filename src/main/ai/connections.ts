@@ -131,7 +131,7 @@ export class ConnectionService {
 	view(): AiSettingsView {
 		const d = this.file.read()
 		const connections = d.connections.map((c) => this.connectionView(c))
-		return {
+		const view: Omit<AiSettingsView, 'questionModel'> = {
 			providers: PROVIDERS.filter((p) => !p.development || this.showDevelopment || d.connections.some((c) => c.kind === p.kind)),
 			connections,
 			selection: this.validSelection(d.selection, connections),
@@ -149,6 +149,7 @@ export class ConnectionService {
 			promptVersion: PROMPT_VERSION,
 			catalogUpdated: CATALOG_UPDATED,
 		}
+		return { ...view, questionModel: questionModel(view) }
 	}
 
 	async create(input: NewConnectionInput): Promise<ConnectionView> {
@@ -665,6 +666,22 @@ export class ConnectionService {
 }
 
 /** Credentials are bound to the exact endpoint, protocol and auth method they were entered for. */
+/**
+ * Who answers questions about selected code. With a team chosen: the member that checks callers and structure (it
+ * reads the code around a change), else the first member whose model is offered. Otherwise the chosen model.
+ */
+export function questionModel(v: Omit<AiSettingsView, 'questionModel'>): ModelSelection | null {
+	const offered = (connectionId: string, modelId: string): boolean =>
+		v.connections.some((c) => c.id === connectionId && c.models.some((m) => m.id === modelId))
+	const r = v.reviewer
+	if (r?.kind === 'team') {
+		const members = v.teams.find((t) => t.id === r.teamId)?.members ?? []
+		const pick = [...members.filter((m) => m.rules.includes('breaking-change')), ...members].find((m) => offered(m.connectionId, m.modelId))
+		if (pick) return { connectionId: pick.connectionId, modelId: pick.modelId }
+	}
+	return v.selection
+}
+
 function endpointKey(c: StoredConnection): string {
 	return `${c.protocol} ${c.baseUrl}`
 }

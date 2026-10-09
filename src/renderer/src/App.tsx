@@ -738,10 +738,10 @@ export function App() {
 		setQuestions(loaded?.review.questions ?? [])
 		setAsking(new Set())
 	}, [loaded])
-	const askDisabled = !aiSelection
-		? 'Choose a model in the header first.'
-		: aiProblem && !aiSettings?.connections.some((c) => c.status === 'connected')
-			? aiProblem
+	const askDisabled = !aiSettings?.connections.some((c) => c.status === 'connected')
+		? (aiProblem ?? 'No AI provider is connected.')
+		: !aiSettings.questionModel
+			? 'Choose a model or a review team in the header first.'
 			: null
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
@@ -1214,6 +1214,7 @@ export function App() {
 									questions={fileQuestions}
 									asking={asking}
 									askDisabled={askDisabled}
+									askModel={aiSettings?.questionModel?.modelId ?? null}
 									onAskCode={askCode}
 									onDeleteQuestion={(id) => void deleteQuestion(id)}
 									discussed={discussed}

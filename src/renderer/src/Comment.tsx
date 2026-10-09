@@ -53,6 +53,7 @@ interface ComposerProps {
 	onAskAi?(): void // drafts made from an AI finding: ask the model about it
 	onAskCode?(): void // a new comment on selected lines: send the text to the AI as a question instead
 	askCodeDisabled?: string | null // why the question can't be sent now (no model chosen…)
+	askCodeModel?: string | null // the model that answers
 }
 
 export function Composer({
@@ -67,6 +68,7 @@ export function Composer({
 	onAskAi,
 	onAskCode,
 	askCodeDisabled,
+	askCodeModel,
 }: ComposerProps) {
 	const ref = useRef<HTMLTextAreaElement>(null)
 	useEffect(() => {
@@ -137,7 +139,9 @@ export function Composer({
 						className="btn small"
 						onClick={onAskCode}
 						disabled={!draft.body.trim() || !!askCodeDisabled}
-						title={askCodeDisabled ?? 'Send the text as a question to the AI, with these lines and the code around them. Only you see it.'}
+						title={
+							askCodeDisabled ?? `Ask ${askCodeModel ?? 'the AI'} about these lines, with the code around them. Only you see the answer.`
+						}
 					>
 						Ask AI
 					</button>

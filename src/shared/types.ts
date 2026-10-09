@@ -1034,6 +1034,7 @@ export interface AiSettingsView {
 	selectionIssue: string | null // why a remembered selection is no longer usable
 	teams: Array<ReviewTeamView>
 	reviewer: ReviewerChoice | null // what the next run uses (a model or a team)
+	questionModel: ModelSelection | null // who answers questions about selected code: the chosen model, or one team member
 	storage: CredentialStorageInfo
 	limits: ReviewLimits
 	levels: FindingLevelSettings

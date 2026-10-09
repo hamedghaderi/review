@@ -142,7 +142,7 @@ After a successful test, catalog entries the account doesn't list are no longer 
 
 ### Choosing a model
 
-The picker next to **Run AI review…** groups models by connected provider. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.
+The picker next to **Run AI review…** groups models by connected provider. Only text models are listed: image, video and embedding models that a gateway such as OmniRoute reports (by `type` or `output_modalities`) are left out, since they can't answer a review. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.
 
 When a review starts, the chosen connection, provider, protocol, model, endpoint and credential are fixed for the whole run. Changing the picker only affects later runs. Disconnecting a provider, replacing its key or changing its endpoint cancels a run that is using it, and any late responses are discarded. After an error the app never switches to another provider or credential. Each run stores its provenance (connection, provider, protocol, model, endpoint, prompt version, the limits actually used), so past reviews stay readable after a provider is disconnected.
 
@@ -218,7 +218,7 @@ The **Context** tab in the right panel holds what the code can't tell the review
 
 Select lines you don't understand (drag across the code, or click a line number and Shift-click another), type a question in the box that opens, and press **Ask AI** (or ⌥↵) instead of **Add comment**.
 
-- The question goes to the model chosen in the header, never a team. It gets the selected lines with their numbers, the change around them, up to 60 lines of the file on each side, the pull request's title and description, and your earlier messages about the same lines. With lookups on (**Review input limits**), it can also open up to 6 files or searches in the reviewed commits, to find a caller or a definition.
+- The question goes to one model, named in the **Ask AI** tooltip: the model chosen in the header, or, with a review team chosen, the team member that checks callers and structure (the first member whose model is offered, if that one isn't). It gets the selected lines with their numbers, the change around them, up to 60 lines of the file on each side, the pull request's title and description, and your earlier messages about the same lines. With lookups on (**Review input limits**), it can also open up to 6 files or searches in the reviewed commits, to find a caller or a definition.
 - The answer appears in a card at those lines, marked **Private** with a dashed edge. Questions are saved with the review, never posted, and never sent to the AI reviewer. Ask a follow-up in the card; a conversation holds up to 20 messages. **Delete** removes it.
 - On the old side (deleted lines), the model sees the selected lines and the diff, not the whole old file.
 

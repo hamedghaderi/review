@@ -1013,6 +1013,40 @@ test('ask about code: the selected lines, the change and the file around them go
 	await assert.rejects(controller.askCode(access, s.comp.id, anchor, 'Hi', 'gone', SEL), /no longer exists/)
 })
 
+test('questions about code go to one model: with a team, its callers member, else its first offered member; otherwise the chosen model', async () => {
+	const { questionModel } = await import('../src/main/ai/connections.ts')
+	const conn = (id: string, models: Array<string>) => ({ id, models: models.map((m) => ({ id: m })) })
+	const team = {
+		id: 't',
+		name: 'Max Deep',
+		issues: [],
+		members: [
+			{ id: 'd', role: 'Defects', connectionId: 'c', modelId: 'gpt', rules: ['bug' as const] },
+			{ id: 'k', role: 'Callers & structure', connectionId: 'c', modelId: 'opus', rules: ['breaking-change' as const] },
+		],
+	}
+	const view = (over: object) =>
+		({ connections: [conn('c', ['gpt', 'opus', 'aihorde/2DN'])], teams: [team], selection: null, reviewer: null, ...over }) as Parameters<
+			typeof questionModel
+		>[0]
+	const image = { connectionId: 'c', modelId: 'aihorde/2DN' }
+	// A team chosen: the stale single-model choice (an image model here) is not used.
+	assert.deepEqual(questionModel(view({ selection: image, reviewer: { kind: 'team', teamId: 't' } })), {
+		connectionId: 'c',
+		modelId: 'opus',
+	})
+	assert.deepEqual(
+		questionModel(view({ reviewer: { kind: 'team', teamId: 't' }, connections: [conn('c', ['gpt'])] })),
+		{ connectionId: 'c', modelId: 'gpt' },
+		'the callers member’s model is gone: the next offered member',
+	)
+	assert.deepEqual(questionModel(view({ selection: { connectionId: 'c', modelId: 'gpt' }, reviewer: { kind: 'model' } })), {
+		connectionId: 'c',
+		modelId: 'gpt',
+	})
+	assert.equal(questionModel(view({})), null)
+})
+
 // ─── Review teams ─────────────────────────────────────────────────────────────
 
 test('team run: members check only their rules, in parallel, and merge into one run and one checklist', async () => {

@@ -77,6 +77,8 @@ export function createOpenAIAccount(o: OpenAIClientOptions): ProviderAccount {
 				if (o.kind === 'openrouter') return await listOpenRouter(c, o, signal)
 				const out: Array<DiscoveredModel> = []
 				for await (const m of c.models.list({ signal })) {
+					// Gateways like OmniRoute also list image, video and embedding models, which cannot answer in text.
+					if (!writesText(m)) continue
 					// OpenAI omits limits; some compatible gateways (e.g. OmniRoute) report them per model.
 					out.push({
 						id: m.id,
@@ -114,6 +116,14 @@ async function listOpenRouter(c: OpenAI, o: OpenAIClientOptions, signal: AbortSi
 		})
 		.filter((m) => m.id && o)
 		.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/** False only when the listing says so: a `type` other than chat/text, or output modalities without text. */
+export function writesText(m: object): boolean {
+	const r = m as Record<string, unknown>
+	if (typeof r.type === 'string' && !['chat', 'text', 'language', 'llm', 'completion'].includes(r.type.toLowerCase())) return false
+	const out = r.output_modalities
+	return !Array.isArray(out) || out.length === 0 || out.includes('text')
 }
 
 function numberField(o: object, key: string): number | null {

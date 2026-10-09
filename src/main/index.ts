@@ -204,10 +204,10 @@ function registerIpc(): void {
 	handle(IPC.aiAsk, (reviewId: unknown, findingId: unknown, question: unknown) =>
 		service.askFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), str(question, 'question', 4000)),
 	)
-	// A question about selected code goes to the model chosen in the header, never a team: one answer, one model.
+	// A question about selected code goes to one model: the one chosen in the header, or, with a team chosen, the team's.
 	handle(IPC.aiAskCode, async (reviewId: unknown, anchor: unknown, question: unknown, questionId: unknown) => {
-		const selection = connections.view().selection
-		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model in the header first.')
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model or a review team in the header first.')
 		return service.askCode(
 			comparisonId(reviewId),
 			anchor,

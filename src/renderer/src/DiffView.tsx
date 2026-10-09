@@ -38,6 +38,7 @@ interface Props {
 	questions: Array<CodeQuestion> // your questions to the AI about this file's code
 	asking: ReadonlySet<string> // question ids waiting for an answer, plus "new" while a first question is sent
 	askDisabled: string | null // why a question can't be sent now
+	askModel: string | null // the model that answers, shown on the button
 	onAskCode(anchor: Anchor, text: string, questionId: string | null): Promise<string | null>
 	onDeleteQuestion(id: string): void
 	discussed(anchor: Anchor, commentId: string | null): Array<DiscussionThread>
@@ -332,6 +333,7 @@ export function DiffView(p: Props) {
 							: undefined
 					}
 					askCodeDisabled={p.asking.has('new') ? 'Waiting for the answer to your last question…' : p.askDisabled}
+					askCodeModel={p.askModel}
 				/>
 			)
 		}
