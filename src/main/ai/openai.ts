@@ -18,6 +18,7 @@ import {
 	addUsage,
 	clip,
 	dataUrl,
+	FINAL_ANSWER,
 	maxRounds,
 	ProviderError,
 	rejectsTools,
@@ -284,7 +285,11 @@ export function createOpenAIChatProvider(o: OpenAIModelOptions): ReviewProvider 
 				c.chat.completions.create(
 					{
 						model: o.model,
-						messages: [...messages(useJsonMode), ...turns],
+						messages: [
+							...messages(useJsonMode),
+							...turns,
+							...(last && turns.length ? [{ role: 'user' as const, content: FINAL_ANSWER }] : []),
+						],
 						response_format: useJsonMode
 							? { type: 'json_object' }
 							: {
