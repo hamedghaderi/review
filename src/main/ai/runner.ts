@@ -116,8 +116,13 @@ export interface RunHandle {
 	done: Promise<AiRun>
 }
 
+/**
+ * 2 s, 4 s, 8 s… up to 30 s, or what the server asked for. Jittered so parallel reviewers that failed together
+ * (a busy gateway shared with other tools) do not all come back at the same moment.
+ */
 export function defaultBackoff(attempt: number, error: ProviderError): number {
-	return Math.min(30_000, error.retryAfterMs ?? 1000 * 2 ** attempt)
+	if (error.retryAfterMs !== null) return Math.min(30_000, error.retryAfterMs)
+	return Math.min(30_000, 2000 * 2 ** attempt) * (0.5 + Math.random() / 2)
 }
 
 /**
