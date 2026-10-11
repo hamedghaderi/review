@@ -210,6 +210,7 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						<button className={`conn-item ${mcpPane?.kind === 'import' ? 'on' : ''}`} onClick={() => showMcp({ kind: 'import' })}>
 							<span className="ellipsis">+ Import from Claude Code</span>
 						</button>
+						<div className="app-version muted small selectable">Review {__APP_VERSION__}</div>
 					</nav>
 					<section className="settings-main">
 						{mcpPane?.kind === 'import' ? (

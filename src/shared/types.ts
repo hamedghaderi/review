@@ -217,6 +217,13 @@ export interface NotificationPrefs {
 	sound: boolean
 }
 
+export interface AppUpdate {
+	version: string
+	current: string // the version running now
+	url: string // the release page to download from
+	canInstall: boolean // the release has this system's installer, so the app can download and open it
+}
+
 /** Sent to the window when a review-request notification is clicked. */
 export interface InboxOpen {
 	repoId: string
@@ -1184,6 +1191,11 @@ export const IPC = {
 	mcpSetTools: 'mcp:set-tools',
 	mcpClaudeCandidates: 'mcp:claude-candidates',
 	mcpImportClaude: 'mcp:import-claude',
+	updateStatus: 'update:status',
+	updateAvailable: 'update:available',
+	skipUpdate: 'update:skip',
+	installUpdate: 'update:install',
+	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
 	flushDone: 'app:flushed',
 } as const
@@ -1297,6 +1309,15 @@ export interface ReviewApi {
 	gifRemoveKey(): Promise<Result<GifStatus>>
 	/** Rating-G GIFs for a search (trending when empty); a newer search cancels an older one. */
 	gifSearch(query: string, offset?: number): Promise<Result<GifPage>>
+	/** A newer release of the app you haven't skipped, or null. */
+	updateStatus(): Promise<Result<AppUpdate | null>>
+	onUpdateAvailable(handler: (update: AppUpdate) => void): () => void
+	/** Stops announcing this release (a later one is announced again). */
+	skipUpdate(version: string): Promise<Result<boolean>>
+	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
+	installUpdate(): Promise<Result<boolean>>
+	/** Download progress of `installUpdate`, from 0 to 1. */
+	onUpdateProgress(handler: (fraction: number) => void): () => void
 	onFlushRequest(handler: () => Promise<void>): () => void
 }
 
