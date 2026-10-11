@@ -6,6 +6,7 @@ import type {
 	AiScope,
 	Anchor,
 	AppError,
+	AppUpdate,
 	BrowserState,
 	CodeMessage,
 	CodeQuestion,
@@ -128,6 +129,9 @@ export function App() {
 	const [openError, setOpenError] = useState<{ error: AppError; url: string | null } | null>(null)
 	const [notice, setNotice] = useState<string | null>(null)
 	const [github, setGithub] = useState<GitHubStatus | null>(null)
+	const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null)
+	const [updateProgress, setUpdateProgress] = useState<number | null>(null) // while downloading
+	const [updateError, setUpdateError] = useState<string | null>(null)
 	const [githubOpen, setGithubOpen] = useState(false)
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
@@ -207,6 +211,21 @@ export function App() {
 		void window.review.githubStatus().then((r) => r.ok && setGithub(r.value))
 		return window.review.onGitHubStatus(setGithub)
 	}, [])
+
+	useEffect(() => {
+		void window.review.updateStatus().then((r) => r.ok && setAppUpdate(r.value))
+		return window.review.onUpdateAvailable(setAppUpdate)
+	}, [])
+	useEffect(() => window.review.onUpdateProgress(setUpdateProgress), [])
+	// The app quits once the installer opens; saving first means nothing typed since the last autosave is lost.
+	const installUpdate = async (): Promise<void> => {
+		setUpdateError(null)
+		setUpdateProgress(0)
+		await Promise.all([persist(), flushBrowser()])
+		const r = await window.review.installUpdate()
+		setUpdateProgress(null)
+		if (!r.ok) setUpdateError(r.error.message)
+	}
 
 	useEffect(() => {
 		void window.review.getAiSettings().then((r) => r.ok && setAiSettings(r.value))
@@ -1103,6 +1122,44 @@ export function App() {
 				<button className="banner notice-banner" onClick={() => setNotice(null)} title="Dismiss">
 					{notice} ✕
 				</button>
+			)}
+			{appUpdate && (
+				<div className={`banner${updateError ? ' error-banner' : ''}`} role={updateError ? 'alert' : 'status'}>
+					<span className="selectable">
+						{updateProgress !== null
+							? `Downloading Review ${appUpdate.version}… ${Math.round(updateProgress * 100)}%`
+							: updateError
+								? `Could not update: ${updateError}`
+								: `Review ${appUpdate.version} is available. You have ${appUpdate.current}.`}
+					</span>
+					<span className="spacer" />
+					{appUpdate.canInstall && (
+						<button className="btn small primary" onClick={() => void installUpdate()} disabled={updateProgress !== null}>
+							{updateError ? 'Try again' : 'Update'}
+						</button>
+					)}
+					{(!appUpdate.canInstall || updateError) && (
+						<a className={`btn small${appUpdate.canInstall ? '' : ' primary'}`} href={appUpdate.url} target="_blank" rel="noreferrer">
+							Download from GitHub ↗
+						</a>
+					)}
+					{updateProgress === null && (
+						<>
+							<button
+								className="btn small ghost"
+								onClick={() => {
+									void window.review.skipUpdate(appUpdate.version)
+									setAppUpdate(null)
+								}}
+							>
+								Skip this version
+							</button>
+							<button className="btn small ghost" onClick={() => setAppUpdate(null)} aria-label="Dismiss">
+								✕
+							</button>
+						</>
+					)}
+				</div>
 			)}
 			{openError && (
 				<div className="banner error-banner" role="alert">

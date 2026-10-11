@@ -12,6 +12,7 @@ export interface StoreData {
 	openRepoIds?: Array<string> // the repository tabs, in order; absent in older files
 	// The review requests seen at the last check, so notifications report only what changed (also across restarts).
 	inboxWatch?: { login: string | null; state: WatchState; at: string }
+	skippedVersion?: string // a release you chose not to be told about again
 }
 
 export interface RepoState {
@@ -127,6 +128,7 @@ export function migrate(raw: unknown): StoreData {
 		repos: d.repos ?? {},
 		...(d.openRepoIds ? { openRepoIds: d.openRepoIds } : {}),
 		...(d.inboxWatch ? { inboxWatch: d.inboxWatch } : {}),
+		...(typeof d.skippedVersion === 'string' ? { skippedVersion: d.skippedVersion } : {}),
 	}
 }
 

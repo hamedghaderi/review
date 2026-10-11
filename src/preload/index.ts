@@ -3,6 +3,7 @@ import {
 	IPC,
 	type AiRun,
 	type AiSettingsView,
+	type AppUpdate,
 	type GitHubStatus,
 	type InboxOpen,
 	type McpSettingsView,
@@ -107,6 +108,19 @@ const api: ReviewApi = {
 		const listener = (_e: Electron.IpcRendererEvent, run: AiRun): void => handler(run)
 		ipcRenderer.on(IPC.aiRunUpdate, listener)
 		return () => ipcRenderer.removeListener(IPC.aiRunUpdate, listener)
+	},
+	updateStatus: () => ipcRenderer.invoke(IPC.updateStatus),
+	onUpdateAvailable: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, update: AppUpdate): void => handler(update)
+		ipcRenderer.on(IPC.updateAvailable, listener)
+		return () => ipcRenderer.removeListener(IPC.updateAvailable, listener)
+	},
+	skipUpdate: (version) => ipcRenderer.invoke(IPC.skipUpdate, version),
+	installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
+	onUpdateProgress: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, fraction: number): void => handler(fraction)
+		ipcRenderer.on(IPC.updateProgress, listener)
+		return () => ipcRenderer.removeListener(IPC.updateProgress, listener)
 	},
 	onFlushRequest: (handler) => {
 		const listener = (): void => {

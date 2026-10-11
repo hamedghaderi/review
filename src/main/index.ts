@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -12,7 +13,7 @@ import {
 	shell,
 	type IpcMainInvokeEvent,
 } from 'electron'
-import { IPC, type InboxOpen, type Result } from '../shared/types.ts'
+import { IPC, type AppUpdate, type InboxOpen, type Result } from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { AiController } from './ai/controller.ts'
@@ -25,6 +26,7 @@ import { InboxWatcher, type RepoEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
+import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
 import {
 	apiKey,
 	bool,
@@ -149,6 +151,16 @@ function registerIpc(): void {
 			null,
 		)
 		return github.status()
+	})
+	handle(IPC.updateStatus, async () => pendingUpdate())
+	handle(IPC.installUpdate, async () => {
+		await installUpdate()
+		return true
+	})
+	handle(IPC.skipUpdate, async (version: unknown) => {
+		const v = str(version, 'version', 64)
+		await store.update((d) => void (d.skippedVersion = v))
+		return true
 	})
 	handle(IPC.markPrSeen, (repoId: unknown, n: unknown) => service.markPrSeen(str(repoId, 'repository'), prNumber(n)))
 	handle(IPC.openKnownRepo, (repoId: unknown) => service.openKnown(str(repoId, 'repository')))
@@ -395,7 +407,75 @@ app.whenReady().then(async () => {
 	app.on('activate', () => {
 		if (!win) createWindow()
 	})
+	if (runningVersion) {
+		void checkForUpdate()
+		setInterval(() => void checkForUpdate(), 12 * 60 * 60_000)
+	}
 })
+
+// Development runs skip the update check; `REVIEW_UPDATE_FROM=0.1.0 npm run dev` pretends to be that version to try it.
+const runningVersion = app.isPackaged ? app.getVersion() : (process.env.REVIEW_UPDATE_FROM ?? null)
+let newest: Release | null = null
+let announcedVersion: string | null = null
+let installing: Promise<void> | null = null
+
+function pendingUpdate(): AppUpdate | null {
+	if (!newest || newest.version === store.read().skippedVersion) return null
+	const canInstall = !!newest.asset && (process.platform !== 'linux' || !!process.env.APPIMAGE)
+	return { version: newest.version, current: runningVersion!, url: RELEASES_URL, canInstall }
+}
+
+/**
+ * There is no auto-update (the app isn't Developer ID signed), so a newer GitHub release is announced: a banner in the
+ * window, and a notification once per version per run that brings the window forward. A skipped version stays quiet.
+ */
+async function checkForUpdate(): Promise<void> {
+	newest = (await newerRelease(runningVersion!, process.platform, process.arch)) ?? newest
+	const update = pendingUpdate()
+	if (!update) return
+	if (win && !win.isDestroyed()) win.webContents.send(IPC.updateAvailable, update)
+	const version = update.version
+	if (version === announcedVersion || !Notification.isSupported()) return
+	announcedVersion = version
+	const n = new Notification({ title: `Review ${version} is available`, body: `You have ${runningVersion}. Click to update.` })
+	shown.add(n)
+	n.on('click', () => {
+		shown.delete(n)
+		focusWindow(() => {})
+	})
+	n.on('close', () => shown.delete(n))
+	n.show()
+}
+
+/**
+ * Downloads this system's installer and hands over to it. macOS opens the disk image (drag Review to Applications) and
+ * Windows runs the setup, then the app quits so it can be replaced. A Linux AppImage replaces itself and restarts.
+ */
+function installUpdate(): Promise<void> {
+	installing ??= (async () => {
+		const asset = newest?.asset
+		if (!asset) throw new Error('This release has no installer for your system. Download it from GitHub.')
+		const progress = (fraction: number): void => {
+			if (win && !win.isDestroyed()) win.webContents.send(IPC.updateProgress, fraction)
+		}
+		if (process.platform === 'linux') {
+			const target = process.env.APPIMAGE
+			if (!target) throw new Error('Only the AppImage can update itself. Download the new version from GitHub.')
+			await download(asset, target, progress)
+			app.relaunch({ execPath: target })
+			app.quit()
+			return
+		}
+		const dir = join(app.getPath('temp'), 'review-update')
+		await mkdir(dir, { recursive: true })
+		const file = join(dir, asset.name)
+		await download(asset, file, progress)
+		const error = await shell.openPath(file)
+		if (error) throw new Error(`The installer was downloaded to ${file} but could not be opened: ${error}`)
+		app.quit()
+	})().finally(() => (installing = null))
+	return installing
+}
 
 app.on('web-contents-created', (_e, contents) => {
 	contents.on('will-attach-webview', (e) => e.preventDefault())

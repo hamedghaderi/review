@@ -1655,6 +1655,10 @@ a.ic-state:hover {
 .settings-nav .add-title {
 	margin-top: 14px;
 }
+.settings-nav .app-version {
+	margin-top: auto;
+	padding: 14px 8px 2px;
+}
 .conn-item {
 	display: flex;
 	align-items: center;
