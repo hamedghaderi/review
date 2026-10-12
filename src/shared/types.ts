@@ -463,7 +463,8 @@ export interface PublishPlan {
 	pr: { repo: string; number: number; url: string; headSha: string | null; state: PrState }
 	snapshotHead: string
 	headMoved: boolean // the PR has newer commits than this snapshot
-	pending: { kind: 'none' } | { kind: 'ours' | 'other'; url: string; commit: string; usable: boolean } // `other`: started outside this app
+	// `other`: started outside this app. `comments`: how many it holds, all still visible only to you.
+	pending: { kind: 'none' } | { kind: 'ours' | 'other'; url: string; commit: string; usable: boolean; comments: number }
 	blocked: AppError | null // publishing new comments is impossible right now (no token, pending review on another commit…)
 	items: Array<PublishItem>
 	drafts: number // unsubmitted local drafts, never published

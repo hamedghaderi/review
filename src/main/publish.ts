@@ -69,7 +69,13 @@ export class Publisher {
 			snapshotHead: r.headSha,
 			headMoved: !!state && state.headSha !== r.headSha,
 			pending: pending
-				? { kind: ours ? 'ours' : 'other', url: pending.url, commit: pending.commit, usable: pending.commit === r.headSha }
+				? {
+						kind: ours ? 'ours' : 'other',
+						url: pending.url,
+						commit: pending.commit,
+						usable: pending.commit === r.headSha,
+						comments: pending.comments.length,
+					}
 				: { kind: 'none' },
 			blocked,
 			items,

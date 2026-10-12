@@ -34,7 +34,7 @@ import { AiRunControl } from './AiRunControl.tsx'
 import { Browser, type BrowserHandle } from './Browser.tsx'
 import { GitHubSettings } from './GitHubSettings.tsx'
 import { BranchPrHint, isAuthProblem, lookupProblem, useBranchPr } from './BranchPrHint.tsx'
-import { PublishDialog } from './PublishDialog.tsx'
+import { PublishDialog, type PendingReview } from './PublishDialog.tsx'
 import { QuickOpen } from './QuickOpen.tsx'
 import { ReviewBadge } from './PrReview.tsx'
 import { PanelBoundary } from './PanelBoundary.tsx'
@@ -135,6 +135,7 @@ export function App() {
 	const [githubOpen, setGithubOpen] = useState(false)
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
+	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
 	const browserRef = useRef<BrowserHandle>(null)
 	const [aiSettings, setAiSettings] = useState<AiSettingsView | null>(null)
 	const [settingsOpen, setSettingsOpen] = useState<false | { team: 'new' | string | null }>(false)
@@ -849,6 +850,14 @@ export function App() {
 		return m
 	}, [comparison?.pr, fileComments, fileThreads, review?.publication]) // eslint-disable-line react-hooks/exhaustive-deps
 
+	// A pending review this app started, from the local record (no GitHub read); the Publish dialog corrects it.
+	useEffect(() => {
+		const r = reviewRef.current
+		const p = r?.pr ? r.publication?.reviews.find((x) => x.state === 'pending') : undefined
+		const comments = p ? Object.values(r!.publication!.comments).filter((c) => c.reviewId === p.id).length : 0
+		setPendingReview(p && comments ? { reviewId: r!.id, comments, url: p.url } : null)
+	}, [comparison?.id])
+
 	// Short on screen; when it was saved, or why it failed, is in the tooltip.
 	const unsent = review ? ops.unsentComments(review) : 0
 	const saveLabel =
@@ -1116,6 +1125,22 @@ export function App() {
 						this branch review keeps its own copy.
 					</span>
 					<BranchPrHint data={branchPr.data} error={null} opening={!!busy} onOpen={openBranchPr} />
+				</div>
+			)}
+			{view === 'review' && comparison?.pr && !publishOpen && pendingReview?.reviewId === comparison.id && pendingReview.comments > 0 && (
+				<div className="banner" role="status">
+					<span>
+						Your review on GitHub is <strong>still pending</strong>: {pendingReview.comments} comment
+						{pendingReview.comments === 1 ? '' : 's'} only you can see. Submit it to share {pendingReview.comments === 1 ? 'it' : 'them'}{' '}
+						with the author.
+					</span>
+					<span className="spacer" />
+					<button className="btn small primary" onClick={() => setPublishOpen(true)}>
+						Submit review…
+					</button>
+					<button className="btn small ghost" onClick={() => setPendingReview(null)} aria-label="Dismiss">
+						✕
+					</button>
 				</div>
 			)}
 			{view === 'review' && notice && (
@@ -1447,6 +1472,7 @@ export function App() {
 					}}
 					beforePublish={persist}
 					blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
+					onPending={setPendingReview}
 				/>
 			)}
 			{paletteOpen && session && (

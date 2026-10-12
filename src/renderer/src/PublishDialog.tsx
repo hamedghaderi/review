@@ -14,6 +14,14 @@ interface Props {
 	onOpenGitHubSettings(): void
 	beforePublish(): Promise<void> // saves pending local edits first
 	blocking: BlockingSummary | null // where the AI review's blocking findings stand; null without AI findings
+	onPending(pending: PendingReview | null): void // what GitHub said about your pending review, each time it is read
+}
+
+/** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
+export interface PendingReview {
+	reviewId: string
+	comments: number
+	url: string
 }
 
 /** Summaries typed but not submitted yet, by review, for this app session. */
@@ -29,13 +37,23 @@ const EVENTS: Array<[ReviewEvent, string, string]> = [
  * Publishes the snapshot's comments into the viewer's pending GitHub review (visible only to them), then optionally
  * submits it. Each step is an explicit action; the plan is re-read from GitHub before and after.
  */
-export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpenGitHubSettings, beforePublish, blocking }: Props) {
+export function PublishDialog({
+	repoId,
+	reviewId,
+	writeTokenUrl,
+	onClose,
+	onOpenGitHubSettings,
+	beforePublish,
+	blocking,
+	onPending,
+}: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
 	const [selected, setSelected] = useState<Set<string>>(new Set())
 	const [outside, setOutside] = useState<'file' | 'skip'>('file')
 	const [results, setResults] = useState<Map<string, PublishOutcome>>(new Map())
 	const [running, setRunning] = useState<string | null>(null)
+	const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null) // while adding comments
 	// Blocking findings you added to the review are changes you are asking for, so that is the suggestion.
 	const [event, setEvent] = useState<ReviewEvent>(blocking?.added ? 'REQUEST_CHANGES' : 'COMMENT')
 	const [summary, setSummaryState] = useState(() => unsentSummaries.get(reviewId) ?? '')
@@ -84,10 +102,12 @@ export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpen
 			const r = await window.review.publishPlan(repoId, reviewId)
 			if (!r.ok) return setError(r.error)
 			setPlan(r.value)
+			const p = r.value.pending
+			onPending(p.kind === 'none' ? null : { reviewId, comments: p.comments, url: p.url })
 			setCheckedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
 			if (!keepSelection) setSelected(new Set(r.value.items.filter((i) => i.status !== 'published').map((i) => i.commentId)))
 		},
-		[repoId, reviewId],
+		[repoId, reviewId], // eslint-disable-line react-hooks/exhaustive-deps
 	)
 
 	useEffect(() => {
@@ -107,10 +127,13 @@ export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpen
 	const toPublish = plan?.items.filter((i) => selected.has(i.commentId) && i.status !== 'published') ?? []
 
 	async function publish(): Promise<void> {
+		const items = toPublish
+		setRunning('Adding comments…')
+		setProgress({ done: 0, total: items.length, current: items[0]?.label ?? '' })
 		await beforePublish()
 		const next = new Map(results)
-		for (const item of toPublish) {
-			setRunning(`Adding ${item.label}…`)
+		for (const [n, item] of items.entries()) {
+			setProgress({ done: n, total: items.length, current: item.label })
 			const r = await window.review.publishComment(repoId, reviewId, item.commentId, outside)
 			next.set(item.commentId, r.ok ? r.value : { commentId: item.commentId, status: 'failed', message: r.error.message, url: null })
 			setResults(new Map(next))
@@ -120,8 +143,10 @@ export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpen
 				break
 			}
 		}
-		setRunning(null)
+		setProgress(null)
+		setRunning('Checking GitHub…')
 		await load(true)
+		setRunning(null)
 		setSelected(new Set())
 	}
 
@@ -219,6 +244,29 @@ export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpen
 										The pull request has newer commits ({plan.pr.headSha?.slice(0, 7)}) than this snapshot ({plan.snapshotHead.slice(0, 7)}
 										). Comments are attached to the snapshot’s commit; GitHub may show them as outdated where the lines changed since.
 									</p>
+								)}
+								{progress && (
+									<div className="publish-progress" role="status" aria-live="polite">
+										<div className="publish-progress-line small">
+											<span>
+												Adding comment {Math.min(progress.done + 1, progress.total)} of {progress.total} to your pending review…
+											</span>
+											<span className="spacer" />
+											<span className="muted">{Math.round((100 * progress.done) / progress.total)}%</span>
+										</div>
+										<div
+											className="publish-progress-bar"
+											role="progressbar"
+											aria-label="Comments added"
+											aria-valuemin={0}
+											aria-valuemax={progress.total}
+											aria-valuenow={progress.done}
+										>
+											<span style={{ width: `${(100 * progress.done) / progress.total}%` }} />
+										</div>
+										<span className="small muted mono ellipsis">{progress.current}</span>
+										<span className="small muted">Keep this window open until it finishes.</span>
+									</div>
 								)}
 								{plan.items.length === 0 && (
 									<p className="muted small">This snapshot has no comments yet. You can still submit a review with a summary below.</p>
@@ -322,6 +370,14 @@ export function PublishDialog({ repoId, reviewId, writeTokenUrl, onClose, onOpen
 									<span className="step-n">2</span>
 									<h3 id="publish-step-submit">Submit</h3>
 								</div>
+								{plan.pending.kind !== 'none' && plan.pending.usable && plan.pending.comments > 0 && !running && (
+									<div className="pending-callout small" role="status">
+										<strong>
+											{plan.pending.comments} comment{plan.pending.comments === 1 ? ' is' : 's are'} waiting in your pending review.
+										</strong>{' '}
+										Only you can see {plan.pending.comments === 1 ? 'it' : 'them'} until you submit the review below.
+									</div>
+								)}
 								{submitted && (
 									<p className="small ok-text">
 										Submitted.{' '}
