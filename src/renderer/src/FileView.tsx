@@ -26,7 +26,11 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 	})
 	const scroller = useRef<HTMLDivElement>(null)
 	placeRef.current = () => scroller.current?.scrollTop ?? 0
-	useSymbolLinks(scroller, () => file.side, onLookup)
+	useSymbolLinks(
+		scroller,
+		(el) => ({ side: file.side, path: file.path, line: Number(el.closest('[data-line]')?.getAttribute('data-line')) || null }),
+		onLookup,
+	)
 
 	useEffect(() => {
 		let live = true

@@ -18,9 +18,18 @@ const DEFINITIONS: Array<RegExp> = [
 	/\b(?:function\*?|def|fn|func|fun|sub|class|interface|trait|struct|enum|type|record|module|protocol|object|impl)\s+(?:\([^)]*\)\s*)?([A-Za-z_$][\w$]*)/,
 	// const foo = (…) => / = async function / = x =>
 	/\b(?:const|let|var|val)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/,
-	// methods: name(args) {  — with optional modifiers, generics and a return type
-	/^\s*(?:(?:public|private|protected|internal|static|async|override|abstract|final|virtual|export|default|readonly|open|suspend|synchronized|get|set)\s+)*(?:[\w$<>[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>)?\s*\([^;]*\)\s*(?::\s*[^{;=]+|->\s*[^{;]+|throws\s+[^{;]+)?\s*\{\s*$/,
+	// methods: name(args) {  — with optional modifiers, generics and a return type. Not a call in a Go or Rust
+	// condition (`if ok(x) {`), whose keyword would otherwise read as a return type.
+	/^\s*(?:(?:public|private|protected|internal|static|async|override|abstract|final|virtual|export|default|readonly|open|suspend|synchronized|get|set)\s+)*(?:(?!(?:if|for|while|switch|match|return|else|when|guard|unless|until|elif|case|new|await|throw|yield|go|defer|select|loop)\s)[\w$<>[\],.?]+\s+)?([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>)?\s*\([^;]*\)\s*(?::\s*[^{;=]+|->\s*[^{;]+|throws\s+[^{;]+)?\s*\{\s*$/,
+	// a method whose parameters continue on the next lines: `async name(`, with at least one modifier, so a bare
+	// multi-line call isn't one
+	/^\s*(?:(?:public|private|protected|internal|static|async|override|abstract|final|virtual|readonly|open|suspend|synchronized|get|set)\s+)+([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>)?\s*\(\s*$/,
+	// class fields: name = (…) => / private name = async function
+	/^\s*(?:(?:public|private|protected|static|readonly|override)\s+)*([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/,
 ]
+
+// A line that is a comment: `// the function foo` or ` * class Foo` names a thing without defining it.
+const COMMENT = /^\s*(?:\/\/|\/\*|\*|#(?!include|define|if|else|endif|pragma)|--|<!--|"""|''')/
 
 export const NOT_NAMES = new Set(
 	`if else for while do switch case catch try finally return throw new delete typeof instanceof in of with yield await async
@@ -34,6 +43,7 @@ export const NOT_NAMES = new Set(
 
 /** The name a line defines, or null. */
 export function definedName(text: string): string | null {
+	if (COMMENT.test(text)) return null
 	for (const re of DEFINITIONS) {
 		const m = re.exec(text)
 		if (m && !NOT_NAMES.has(m[1])) return m[1]

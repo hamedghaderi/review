@@ -80,7 +80,16 @@ export function DiffView(p: Props) {
 	const scroller = useRef<HTMLDivElement>(null)
 	p.placeRef.current = () => scroller.current?.scrollTop ?? 0
 	// Removed lines are looked up at the base commit, everything else at the head commit.
-	useSymbolLinks(scroller, (el) => (el.closest('.row.line')?.classList.contains('del') ? 'old' : 'new'), p.onLookup)
+	useSymbolLinks(
+		scroller,
+		(el) => {
+			const rowEl = el.closest('.row.line')
+			const side: Side = rowEl?.classList.contains('del') ? 'old' : 'new'
+			const row = rows[Number(rowEl?.getAttribute('data-row'))]
+			return { side, path: side === 'old' ? file.oldPath : file.newPath, line: row ? lineNo(row, side) : null }
+		},
+		p.onLookup,
+	)
 
 	useEffect(() => {
 		let live = true

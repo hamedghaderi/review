@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
+import { definedName } from '../src/main/symbols.ts'
 
 function tmp(): string {
 	return mkdtempSync(join(tmpdir(), 'review-symbols-'))
@@ -174,4 +175,21 @@ test('a file outside the change opens at either commit, read-only', async () => 
 	const base = await svc.loadFileAt(id, 'src/rates.ts', 'old')
 	assert.equal(base.kind === 'text' && base.lines[0], 'export const oldRate = (n: number) => n * 0.2')
 	await assert.rejects(svc.loadFileAt(id, 'src/checkout.ts', 'old'), /not in the base commit/)
+})
+
+test('calls in conditions and names in comments are not definitions; class fields and multi-line signatures are', () => {
+	for (const line of [
+		'\tif isAdmin(user) {',
+		'\tswitch kind(x) {',
+		'\tnew Thread(r) {',
+		'// call the function isAdmin first',
+		' * Unlike class Report, this',
+		'# def summarize is old',
+	])
+		assert.equal(definedName(line), null, line)
+	assert.equal(definedName('\tasync lookupSymbol('), 'lookupSymbol')
+	assert.equal(definedName('\tprivate handle = async (e: Event) => {'), 'handle')
+	assert.equal(definedName('\tonClick = () => {'), 'onClick')
+	assert.equal(definedName('func (s *Server) Serve(port int) error {'), 'Serve')
+	assert.equal(definedName('public static int count(List<String> xs) {'), 'count')
 })

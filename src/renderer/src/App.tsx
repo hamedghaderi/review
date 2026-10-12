@@ -54,7 +54,7 @@ import { ProviderSettings } from './ProviderSettings.tsx'
 import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
 import { FileView, type OutsideFile } from './FileView.tsx'
-import { IS_MAC, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
+import { byProximity, IS_MAC, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
 import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
@@ -907,8 +907,15 @@ export function App() {
 		const res = await window.review.lookupSymbol(comparison.id, r.name, r.side, r.kind)
 		if (gen !== lookupGen.current) return
 		if (!res.ok) return setSymbolPop({ ...r, state: 'error', message: res.error.message })
-		if (r.kind === 'definition' && res.value.hits.length === 1) return jumpTo(res.value.hits[0], r.side)
-		setSymbolPop({ ...r, state: 'done', value: res.value })
+		if (r.kind === 'uses') return setSymbolPop({ ...r, state: 'done', value: res.value })
+		const hits = byProximity(res.value.hits, r.from)
+		// A definition in the clicked file shadows same-named ones elsewhere; one candidate opens directly.
+		const local = hits.filter((h) => h.path === r.from.path)
+		const only = local.length === 1 ? local[0] : hits.length === 1 ? hits[0] : null
+		// ⌘/Ctrl-click on the name where it is defined: there is nowhere to go, so show its uses instead.
+		if (only && only.path === r.from.path && only.line === r.from.line) return void lookup({ ...r, kind: 'uses' })
+		if (only) return jumpTo(only, r.side)
+		setSymbolPop({ ...r, state: 'done', value: { ...res.value, hits } })
 	}
 	const closeSymbolPop = useCallback(() => {
 		lookupGen.current++
