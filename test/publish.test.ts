@@ -361,6 +361,7 @@ test('publishing creates one pending review on the snapshot commit, adds threads
 		assert.equal(r.comments.at(-1)!.subjectType, 'FILE')
 		const after = await pub.plan('/r', id)
 		assert.ok(after.items.every((i) => i.status === 'published'))
+		assert.equal(after.pending.kind !== 'none' && after.pending.comments, 5, 'the plan says how many comments are still pending')
 		assert.equal(Object.keys(store.read().repos['/r'].reviews[id].publication!.comments).length, 5)
 	} finally {
 		await mock.close()

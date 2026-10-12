@@ -2725,6 +2725,38 @@ button.palette-action:hover {
 .publish-item.done {
 	opacity: 0.75;
 }
+.publish-progress {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 12px;
+	border: 1px solid var(--accent-line);
+	border-radius: 6px;
+	background: var(--accent-soft);
+}
+.publish-progress-line {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.publish-progress-bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--border);
+	overflow: hidden;
+}
+.publish-progress-bar > span {
+	display: block;
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.2s ease;
+}
+.pending-callout {
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+}
 .publish-main {
 	display: flex;
 	flex-direction: column;
