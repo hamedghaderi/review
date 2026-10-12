@@ -22,8 +22,20 @@ interface GitOutput {
 	truncated: boolean
 }
 
-// Read-only, non-interactive invocation. Pathspecs are literal so file names are never treated as globs.
-const GLOBAL_ARGS = ['--no-pager', '--literal-pathspecs', '-c', 'core.quotepath=off', '-c', 'core.fsmonitor=false', '-c', 'color.ui=false']
+// Read-only, non-interactive invocation. Pathspecs are literal so file names are never treated as globs. Submodules
+// are never entered, even with `submodule.recurse` set: their commits may be missing (git grep then fails outright).
+const GLOBAL_ARGS = [
+	'--no-pager',
+	'--literal-pathspecs',
+	'-c',
+	'core.quotepath=off',
+	'-c',
+	'core.fsmonitor=false',
+	'-c',
+	'color.ui=false',
+	'-c',
+	'submodule.recurse=false',
+]
 
 const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
 

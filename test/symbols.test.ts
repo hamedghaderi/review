@@ -123,6 +123,50 @@ test('the base side looks names up at the base commit, and marks removed lines',
 	)
 })
 
+test('lookups work with submodule.recurse on and a submodule commit that is not checked out', async () => {
+	const dir = tmp()
+	const run = (cwd: string, ...a: Array<string>): string =>
+		execFileSync(
+			'git',
+			['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-c', 'protocol.file.allow=always', ...a],
+			{ cwd, encoding: 'utf8' },
+		).trim()
+	const sub = join(dir, 'sub')
+	const main = join(dir, 'main')
+	mkdirSync(sub)
+	mkdirSync(main)
+	run(sub, 'init', '-q', '-b', 'main')
+	writeFileSync(join(sub, 'a.txt'), 'x\n')
+	run(sub, 'add', '-A')
+	run(sub, 'commit', '-qm', 's')
+	run(main, 'init', '-q', '-b', 'main')
+	writeFileSync(join(main, 'a.ts'), 'export function base() {}\n')
+	run(main, 'submodule', 'add', '-q', '../sub', 'sub')
+	run(main, 'add', '-A')
+	run(main, 'commit', '-qm', 'base')
+	run(main, 'checkout', '-qb', 'topic')
+	writeFileSync(join(main, 'b.ts'), 'export function target() {}\n')
+	// The gitlink points at a commit the submodule's clone doesn't have, as in a shallow submodule.
+	run(main, 'update-index', '--cacheinfo', `160000,${'1'.repeat(40)},sub`)
+	run(main, 'add', 'b.ts')
+	run(main, 'commit', '-qm', 'topic')
+	run(main, 'config', 'submodule.recurse', 'true')
+
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(main)
+	const { comparison } = await svc.loadComparison(s.repo.id, {
+		kind: 'target',
+		target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+	})
+	const d = await svc.lookupSymbol(comparison.id, 'target', 'new', 'definition')
+	assert.deepEqual(
+		d.hits.map((h) => h.path),
+		['b.ts'],
+	)
+})
+
 test('a file outside the change opens at either commit, read-only', async () => {
 	const { svc, id } = await world()
 	const head = await svc.loadFileAt(id, 'src/cart.ts', 'new')
