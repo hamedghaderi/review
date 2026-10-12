@@ -311,6 +311,28 @@ export type PatchResult =
 
 export type FileLinesResult = { kind: 'text'; lines: Array<string> } | { kind: 'binary' } | { kind: 'too-large'; reason: string }
 
+/** A name in code, as go to definition and find uses read it: letters, digits, `_` and `$`, not starting with a digit. */
+export const IDENT = /[A-Za-z_$][\w$]*/g
+
+export type SymbolKind = 'definition' | 'uses'
+
+export interface SymbolHit {
+	path: string // at the looked-up commit
+	line: number
+	text: string // the matching line, trimmed
+	fileKey: string | null // the changed file at this path, or null for a file the change doesn't touch
+	inDiff: boolean // a line the change added (head) or removed (base)
+}
+
+/** Text matches for a name at the head commit, or the base commit for `side: 'old'`. */
+export interface SymbolLookup {
+	name: string
+	side: Side
+	kind: SymbolKind
+	hits: Array<SymbolHit>
+	truncated: boolean // more matches than are listed
+}
+
 export interface Anchor {
 	repoId: string
 	baseSha: string
@@ -1153,6 +1175,8 @@ export const IPC = {
 	prDiscussion: 'gh:discussion',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
+	loadFileAt: 'diff:file-at',
+	lookupSymbol: 'diff:lookup-symbol',
 	saveReview: 'review:save',
 	aiSettings: 'ai:settings',
 	aiSettingsChanged: 'ai:settings-changed',
@@ -1255,6 +1279,10 @@ export interface ReviewApi {
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
+	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */
+	loadFileAt(comparisonId: string, path: string, side: Side): Promise<Result<FileLinesResult>>
+	/** Where a name is defined or used, by text, at the head commit (base for `side: 'old'`). */
+	lookupSymbol(comparisonId: string, name: string, side: Side, kind: SymbolKind): Promise<Result<SymbolLookup>>
 	saveReview(review: Review): Promise<Result<{ savedAt: string }>>
 	getAiSettings(): Promise<Result<AiSettingsView>>
 	onAiSettingsChanged(handler: (view: AiSettingsView) => void): () => void

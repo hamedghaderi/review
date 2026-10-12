@@ -28,6 +28,8 @@ import type {
 	ReviewRule,
 	ReviewSummary,
 	ReviewTarget,
+	Side,
+	SymbolHit,
 	TargetProbe,
 } from '../../shared/types.ts'
 import { AiRunControl } from './AiRunControl.tsx'
@@ -51,6 +53,8 @@ import { AskModel, ModelPicker } from './ModelPicker.tsx'
 import { ProviderSettings } from './ProviderSettings.tsx'
 import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
+import { FileView, type OutsideFile } from './FileView.tsx'
+import { IS_MAC, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
 import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
@@ -624,6 +628,7 @@ export function App() {
 	}, [review?.comments])
 
 	const selectFile = (key: string): void => {
+		setOutside(null)
 		if (key === selected) return
 		if (activeDraftId) {
 			const d = review?.drafts.find((x) => x.id === activeDraftId)
@@ -829,6 +834,98 @@ export function App() {
 	}
 
 	const file = comparison?.files.find((f) => f.key === selected) ?? null
+
+	// Go to definition and find uses. The center shows a changed file's diff, or a file outside the change read-only;
+	// each jump records where you were, for back (⌘[ / Alt+←) and forward (⌘] / Alt+→).
+	// A diff place keeps the line a jump marked there, so the same context is shown when you come back.
+	type Place = { kind: 'diff'; fileKey: string; scrollTop: number; mark: Anchor | null } | ({ kind: 'file' } & Omit<OutsideFile, 'nonce'>)
+	const [outside, setOutside] = useState<OutsideFile | null>(null)
+	const [symbolPop, setSymbolPop] = useState<SymbolPop | null>(null)
+	const placeRef = useRef<(() => number) | null>(null)
+	const history = useRef<{ back: Array<Place>; forward: Array<Place> }>({ back: [], forward: [] })
+	const lookupGen = useRef(0)
+	useEffect(() => {
+		setOutside(null)
+		setSymbolPop(null)
+		history.current = { back: [], forward: [] }
+	}, [comparison?.id])
+	const here = (): Place | null => {
+		const scrollTop = placeRef.current?.() ?? 0
+		if (outside) return { kind: 'file', path: outside.path, side: outside.side, line: outside.line, scrollTop }
+		const mark = reveal?.mark && reveal.fileKey === selected ? reveal.anchor : null
+		return selected ? { kind: 'diff', fileKey: selected, scrollTop, mark } : null
+	}
+	const goTo = (p: Place): void => {
+		if (p.kind === 'file') return setOutside({ ...p, nonce: Date.now() })
+		selectFile(p.fileKey)
+		setReveal({ fileKey: p.fileKey, itemId: null, anchor: p.mark, mark: !!p.mark, nonce: Date.now(), scrollTop: p.scrollTop })
+	}
+	const travel = (dir: 'back' | 'forward'): void => {
+		const h = history.current
+		const [from, to] = dir === 'back' ? [h.back, h.forward] : [h.forward, h.back]
+		const next = from.pop()
+		if (!next) return
+		const cur = here()
+		if (cur) to.push(cur)
+		setSymbolPop(null)
+		goTo(next)
+	}
+	const travelRef = useRef(travel)
+	travelRef.current = travel
+	const jumpTo = (hit: SymbolHit, side: Side): void => {
+		if (!comparison) return
+		setSymbolPop(null)
+		const cur = here()
+		if (cur) history.current = { back: [...history.current.back.slice(-99), cur], forward: [] }
+		if (!hit.fileKey) return setOutside({ path: hit.path, side, line: hit.line, scrollTop: null, nonce: Date.now() })
+		const f = comparison.files.find((x) => x.key === hit.fileKey)
+		selectFile(hit.fileKey)
+		setSelectedFinding(null)
+		setReveal({
+			fileKey: hit.fileKey,
+			itemId: null,
+			nonce: Date.now(),
+			mark: true,
+			anchor: {
+				repoId: comparison.repoId,
+				baseSha: comparison.baseSha,
+				headSha: comparison.headSha,
+				fileKey: hit.fileKey,
+				oldPath: f?.oldPath ?? null,
+				newPath: f?.newPath ?? null,
+				side,
+				startLine: hit.line,
+				endLine: hit.line,
+				excerpt: '',
+			},
+		})
+	}
+	const lookup = async (r: SymbolRequest): Promise<void> => {
+		if (!comparison) return
+		const gen = ++lookupGen.current
+		setSymbolPop({ ...r, state: 'loading' })
+		const res = await window.review.lookupSymbol(comparison.id, r.name, r.side, r.kind)
+		if (gen !== lookupGen.current) return
+		if (!res.ok) return setSymbolPop({ ...r, state: 'error', message: res.error.message })
+		if (r.kind === 'definition' && res.value.hits.length === 1) return jumpTo(res.value.hits[0], r.side)
+		setSymbolPop({ ...r, state: 'done', value: res.value })
+	}
+	const closeSymbolPop = useCallback(() => {
+		lookupGen.current++
+		setSymbolPop(null)
+	}, [])
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent): void => {
+			if (document.querySelector('.modal') || isTyping(document.activeElement)) return
+			const back = IS_MAC ? e.metaKey && !e.altKey && !e.ctrlKey && e.key === '[' : e.altKey && !e.ctrlKey && e.key === 'ArrowLeft'
+			const fwd = IS_MAC ? e.metaKey && !e.altKey && !e.ctrlKey && e.key === ']' : e.altKey && !e.ctrlKey && e.key === 'ArrowRight'
+			if (!back && !fwd) return
+			e.preventDefault()
+			travelRef.current(back ? 'back' : 'forward')
+		}
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	}, [])
 	const fileComments = useMemo(() => review?.comments.filter((c) => c.anchor.fileKey === selected) ?? [], [review?.comments, selected])
 	const fileDrafts = useMemo(() => review?.drafts.filter((d) => d.anchor.fileKey === selected) ?? [], [review?.drafts, selected])
 	const fileQuestions = useMemo(() => questions.filter((q) => q.anchor.fileKey === selected), [questions, selected])
@@ -1257,6 +1354,8 @@ export function App() {
 										to pick a different base branch or target.
 									</p>
 								</div>
+							) : outside ? (
+								<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
 							) : file ? (
 								<DiffView
 									key={`${comparison.id}:${file.key}`}
@@ -1309,6 +1408,8 @@ export function App() {
 										change((r) => ops.deleteComment(r, cid))
 									}}
 									onShowFinding={showFinding}
+									onLookup={(r) => void lookup(r)}
+									placeRef={placeRef}
 								/>
 							) : (
 								<div className="empty muted">Select a file.</div>
@@ -1449,6 +1550,7 @@ export function App() {
 					blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 				/>
 			)}
+			{symbolPop && <SymbolPopover pop={symbolPop} onPick={jumpTo} onFindUses={(r) => void lookup(r)} onClose={closeSymbolPop} />}
 			{paletteOpen && session && (
 				<QuickOpen
 					repo={repo ?? session.repo}

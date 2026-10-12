@@ -64,6 +64,19 @@ The old snapshot is not changed. Each comment is carried from a snapshot once, s
 
 Publishing: a comment already published from an earlier snapshot shows as published and isn't posted again, since GitHub keeps it on the PR itself. An outdated comment is treated like one outside the diff: skipped, or posted as a file comment that names its old lines and commit (`**lines 20–21 at 1a2b3c4:** …`).
 
+## Following code: go to definition and find uses
+
+To follow a path through a change (which function calls which, who else uses the one that changed) without leaving the app:
+
+- **Go to definition**: `⌘`-click (`Ctrl`-click on Windows and Linux) a name in the code. With the key held, the name under the pointer is underlined. One definition opens directly; several show a list of `path:line` with the matching line to pick from; none shows a short note.
+- **Find uses**: `⌘⇧`-click (`Ctrl+Shift`-click), or **Find uses** in the definitions list. Uses are grouped by file. Lines this change touched are marked **changed**, and the count says how many are outside the change. Definitions and import lines are not counted as uses.
+- **Where results open**: a result in a changed file jumps to that line in the diff (expanding collapsed context if needed) and marks it. A result in a file the change doesn't touch opens it **read-only** at the head commit, at that line. You can't comment there; go back to the diff for that.
+- **Back and forward**: `⌘[` and `⌘]` (`Alt+←` and `Alt+→` elsewhere) return to where you were, with the scroll position. Selecting a file in the tree leaves the read-only view.
+- **Which commit**: lookups read the reviewed commits, never the working tree. On a removed line, names are looked up at the base commit, and results open at the base commit (removed lines are marked **removed**).
+- A plain click and drag still start a comment; `⌘`/`Ctrl`-click never does.
+
+Limits: it is a text match, not a language server. A name can be a different thing with the same name, so a common name can list several definitions, and a use can be of another thing called the same. Definitions are recognised by the common forms of JS/TS, Python, Go, Rust, Java, Kotlin, C#, PHP and Ruby (functions, methods, classes, types, `const x = () =>`), the same patterns the AI reviewer's related code uses; anything else is not found. Only source files are searched, and vendored, built and generated folders (`node_modules`, `vendor`, `dist`, `build` and similar), lock files and lines over 400 characters are skipped. At most 50 definitions and 300 uses are listed.
+
 ## Existing discussion on GitHub
 
 PR reviews show what has already been said on the pull request, so you and the AI don't raise a point that was discussed or resolved already. It only reads from GitHub: nothing is posted, replied to or resolved from here, and existing comments never go into what **Publish** sends.

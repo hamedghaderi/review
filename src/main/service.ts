@@ -32,6 +32,9 @@ import type {
 	ReviewRule,
 	ReviewTarget,
 	SearchSlot,
+	Side,
+	SymbolKind,
+	SymbolLookup,
 	TargetProbe,
 } from '../shared/types.ts'
 import {
@@ -41,6 +44,7 @@ import {
 	compareSnapshot,
 	ensureCommits,
 	findRoot,
+	git,
 	mergeBase,
 	ObjectUnavailable,
 	readBlob,
@@ -56,6 +60,7 @@ import { Publisher } from './publish.ts'
 import { carryComments } from './carry.ts'
 import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
+import { findSymbol } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -73,6 +78,14 @@ const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
 const CHANGED_LINES_LIMIT = 10_000
 const FILE_LINES_LIMIT = 8 * 1024 * 1024
 const PR_ATTEMPTS = 3
+
+function blobLines(buf: Buffer, truncated: boolean): FileLinesResult {
+	if (truncated) return { kind: 'too-large', reason: `File exceeds ${mb(FILE_LINES_LIMIT)}` }
+	if (buf.subarray(0, 8000).includes(0)) return { kind: 'binary' }
+	const lines = buf.toString('utf8').split('\n')
+	if (lines[lines.length - 1] === '') lines.pop()
+	return { kind: 'text', lines: lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l)) }
+}
 
 export function defaultBrowserState(): BrowserState {
 	return {
@@ -732,11 +745,42 @@ export class ReviewService {
 		const blob = b?.newBlob ?? b?.oldBlob
 		if (!blob) return { kind: 'text', lines: [] }
 		const { buf, truncated } = await readBlob(data.root, blob, FILE_LINES_LIMIT)
-		if (truncated) return { kind: 'too-large', reason: `File exceeds ${mb(FILE_LINES_LIMIT)}` }
-		if (buf.subarray(0, 8000).includes(0)) return { kind: 'binary' }
-		const lines = buf.toString('utf8').split('\n')
-		if (lines[lines.length - 1] === '') lines.pop()
-		return { kind: 'text', lines: lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l)) }
+		return blobLines(buf, truncated)
+	}
+
+	/** Any file at the head commit (base for `side: 'old'`), for the read-only view of files outside the change. */
+	async loadFileAt(comparisonId: string, path: string, side: Side): Promise<FileLinesResult> {
+		const data = this.loaded(comparisonId)
+		const sha = side === 'old' ? data.comparison.baseSha : data.comparison.headSha
+		const r = await git(data.root, ['cat-file', 'blob', `${sha}:${path}`], FILE_LINES_LIMIT)
+		if (!r.truncated && r.code !== 0) throw new AppFail('not-found', `${path} is not in the ${side === 'old' ? 'base' : 'head'} commit.`)
+		return blobLines(r.stdout, r.truncated)
+	}
+
+	/** Go to definition and find uses: text matches at one commit, with the lines this change touched marked. */
+	async lookupSymbol(comparisonId: string, name: string, side: Side, kind: SymbolKind): Promise<SymbolLookup> {
+		const data = this.loaded(comparisonId)
+		const c = data.comparison
+		const found = await findSymbol(data.root, side === 'old' ? c.baseSha : c.headSha, name, side, kind)
+		const byPath = new Map(
+			c.files.flatMap((f) => ((side === 'old' ? f.oldPath : f.newPath) ? [[(side === 'old' ? f.oldPath : f.newPath)!, f]] : [])),
+		)
+		const changed = new Map<string, Set<number>>() // file key → the lines it added (head) or removed (base)
+		for (const h of found.hits) {
+			const f = byPath.get(h.path)
+			if (!f) continue
+			h.fileKey = f.key
+			if (!changed.has(f.key)) {
+				const p = await this.loadPatch(comparisonId, f.key, false).catch(() => null)
+				const lines = p?.kind === 'text' ? p.hunks.flatMap((x) => x.lines) : []
+				changed.set(
+					f.key,
+					new Set(lines.flatMap((l) => (side === 'old' ? (l.kind === 'del' ? [l.oldNo!] : []) : l.kind === 'add' ? [l.newNo!] : []))),
+				)
+			}
+			h.inDiff = changed.get(f.key)!.has(h.line)
+		}
+		return found
 	}
 
 	async saveReview(input: unknown): Promise<{ savedAt: string }> {
@@ -853,9 +897,14 @@ export class ReviewService {
 		return r
 	}
 
-	private file(comparisonId: string, fileKey: string) {
+	private loaded(comparisonId: string): ComparisonData {
 		const data = this.comparisons.get(comparisonId)
 		if (!data) throw new AppFail('not-found', 'That comparison is not loaded.')
+		return data
+	}
+
+	private file(comparisonId: string, fileKey: string) {
+		const data = this.loaded(comparisonId)
 		const file = data.comparison.files.find((f) => f.key === fileKey)
 		if (!file) throw new AppFail('not-found', 'That file is not part of this comparison.')
 		return { data, file }

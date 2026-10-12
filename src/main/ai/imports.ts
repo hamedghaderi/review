@@ -1,5 +1,6 @@
 import { posix } from 'node:path'
 import { git } from '../git.ts'
+import { SKIP_DIRS } from '../symbols.ts'
 import type { ContextFact, FileSource } from './context.ts'
 
 /**
@@ -27,7 +28,6 @@ const MAX_FILES = 200 // changed files whose importers are traced
 const IMPORT_LINE =
 	/^\s*(import\b|export\b[^;]*\bfrom\b|\}\s*from\s|from\s+[\w.]+\s+import\b|use\s+[\w\\]|require(_relative)?\b|#\s*include\b|@import\b|load\b)|\brequire\s*\(|\bimport\s*\(/
 
-const SKIP_DIRS = /(^|\/)(node_modules|vendor|bower_components|dist|build|out|coverage|target|\.next|\.nuxt|__pycache__|\.venv|venv)\//
 const CODE =
 	/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue|svelte|py|pyi|rb|go|rs|java|kt|kts|scala|groovy|cs|php|swift|m|mm|c|h|cc|cpp|cxx|hpp|hh|dart|ex|exs|scss|sass|less)$/i
 export const TEST_PATH =

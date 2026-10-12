@@ -349,6 +349,21 @@ export function aiScope(v: unknown, fileKeys: ReadonlySet<string>): AiScope {
 	bad('AI review scope')
 }
 
+/** A file path from the repository root: no absolute paths, no ".." parts. */
+export function repoPath(v: unknown): string {
+	const s = str(v, 'path')
+	if (s.startsWith('/') || s.includes('\\') || s.includes('\0') || /^[A-Za-z]:/.test(s) || s.split('/').some((x) => x === '..' || x === ''))
+		bad('path')
+	return s
+}
+
+/** One identifier, as go to definition reads it from the code. */
+export function symbolName(v: unknown): string {
+	const s = str(v, 'name', 200)
+	if (!/^[A-Za-z_$][\w$]*$/.test(s)) bad('name')
+	return s
+}
+
 export function comparisonId(v: unknown): string {
 	const s = str(v, 'comparison id', 200)
 	const [a, b, extra] = s.split('..')

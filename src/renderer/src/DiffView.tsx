@@ -13,6 +13,7 @@ import type {
 } from '../../shared/types.ts'
 import { CommentCard, Composer, DraftStub, QuestionCard, type PostedState } from './Comment.tsx'
 import { ThreadCard } from './Discussion.tsx'
+import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
 
 const EXPAND_STEP = 20
@@ -22,6 +23,8 @@ export interface RevealRequest {
 	itemId: string | null
 	anchor: Anchor | null
 	nonce: number
+	mark?: boolean // a go-to-definition target: the line is marked until the next reveal
+	scrollTop?: number // back and forward: restores this scroll position instead
 }
 
 interface Props {
@@ -52,6 +55,8 @@ interface Props {
 	onEditComment(id: string): void
 	onDeleteComment(id: string): void
 	onShowFinding?(findingId: string): void // opens the finding a comment was made from, to ask about it
+	onLookup(r: SymbolRequest): void // ⌘/Ctrl-click on a name
+	placeRef: React.RefObject<(() => number) | null> // reads the scroll position, for back and forward
 }
 
 type Load<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'done'; value: T }
@@ -73,6 +78,9 @@ export function DiffView(p: Props) {
 	const [notice, setNotice] = useState<string | null>(null)
 	const [blockIdx, setBlockIdx] = useState(-1)
 	const scroller = useRef<HTMLDivElement>(null)
+	p.placeRef.current = () => scroller.current?.scrollTop ?? 0
+	// Removed lines are looked up at the base commit, everything else at the head commit.
+	useSymbolLinks(scroller, (el) => (el.closest('.row.line')?.classList.contains('del') ? 'old' : 'new'), p.onLookup)
 
 	useEffect(() => {
 		let live = true
@@ -105,6 +113,7 @@ export function DiffView(p: Props) {
 			...p.comments.map((c) => c.anchor),
 			...p.drafts.map((d) => d.anchor),
 			...(p.highlight ? [p.highlight] : []),
+			...(p.reveal?.mark && p.reveal.fileKey === file.key && p.reveal.anchor ? [p.reveal.anchor] : []),
 			...p.threads.flatMap((t) => (t.placed ? [{ side: t.side, ...t.placed }] : [])),
 		]
 		for (const a of ranges) {
@@ -112,7 +121,7 @@ export function DiffView(p: Props) {
 				for (const n of linesToReveal(gaps, { side: a.side, start: a.startLine, end: a.endLine }, fileLines.length)) s.add(n)
 		}
 		return s
-	}, [gaps, fileLines, p.comments, p.drafts, p.highlight, p.threads, revealed])
+	}, [gaps, fileLines, p.comments, p.drafts, p.highlight, p.threads, p.reveal, file.key, revealed])
 
 	const { rows, blocks } = useMemo(
 		() => (hunks ? buildRows(hunks, gaps, shown, fileLines) : { rows: [] as Array<Row>, blocks: [] }),
@@ -180,6 +189,12 @@ export function DiffView(p: Props) {
 		const r = p.reveal
 		if (!r || r.fileKey !== file.key || handled.current === r.nonce || patch.state !== 'done') return
 		const a = r.anchor
+		if (r.scrollTop !== undefined) {
+			if (gaps && lines === null) return
+			handled.current = r.nonce
+			if (scroller.current) scroller.current.scrollTop = r.scrollTop
+			return
+		}
 		let target: Element | null = null
 		if (a?.side && a.startLine) {
 			const n = rows.findIndex((row) => lineNo(row, a.side!) === a.startLine)
@@ -232,7 +247,7 @@ export function DiffView(p: Props) {
 	}
 
 	const onMouseUp = (e: React.MouseEvent): void => {
-		if ((e.target as Element).closest('.ln')) return
+		if ((e.target as Element).closest('.ln') || isMod(e)) return // ⌘/Ctrl-click looks a name up
 		const sel = window.getSelection()
 		if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
 		const range = sel.getRangeAt(0)
@@ -405,13 +420,15 @@ export function DiffView(p: Props) {
 		const h = p.highlight
 		const hNo = h?.side === 'old' ? l.oldNo : h?.side === 'new' ? l.newNo : null
 		const found = h !== null && hNo !== null && hNo >= (h.startLine ?? 0) && hNo <= (h.endLine ?? 0)
+		const ra = p.reveal?.mark && p.reveal.fileKey === file.key ? p.reveal.anchor : null
+		const jumped = !!ra?.side && (ra.side === 'old' ? l.oldNo : l.newNo) === ra.startLine
 		const marked = (l.oldNo !== null && commentedLines.has(`old${l.oldNo}`)) || (l.newNo !== null && commentedLines.has(`new${l.newNo}`))
 		const items = byRow.get(i)
 		return (
 			<div key={row.key} className="row-wrap">
 				<div
 					data-row={i}
-					className={`row line ${l.kind} ${selOld || selNew ? 'sel' : ''} ${found ? 'finding-hl' : ''} ${marked ? 'marked' : ''}`}
+					className={`row line ${l.kind} ${selOld || selNew ? 'sel' : ''} ${found ? 'finding-hl' : ''} ${marked ? 'marked' : ''} ${jumped ? 'jump-target' : ''}`}
 				>
 					<button
 						className="ln"

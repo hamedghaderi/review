@@ -1,4 +1,5 @@
 import { git } from '../git.ts'
+import { grepCommit } from '../symbols.ts'
 import type { AiLookups, RiskLevel } from '../../shared/types.ts'
 
 /**
@@ -171,21 +172,14 @@ export function createReviewTools(
 				const prefix = a.path_prefix === null || a.path_prefix === undefined ? '' : cleanPath(a.path_prefix)
 				if (prefix === null) return refuse('"path_prefix" must be a folder path from the repository root, without ".." parts.')
 				seen(log.searches, prefix ? `${text} (in ${prefix})` : text)
-				const r = await git(
-					repo.root,
-					['grep', '-n', '-I', '-F', '-z', '--no-color', '-e', text, repo.headSha, '--', ...(prefix ? [prefix] : [])],
-					GREP_LIMIT,
-					{ signal, timeoutMs: 20_000 },
-				)
-				if (r.code > 1 && !r.truncated) return refuse(`The search failed: ${r.stderr.trim().slice(0, 200)}`)
-				const at = `${repo.headSha}:`
-				const hits = r.stdout
-					.toString('utf8')
-					.split('\n')
-					.flatMap((rec) => {
-						const [loc, no, line] = rec.split('\0')
-						return loc?.startsWith(at) && line !== undefined ? [`${loc.slice(at.length)}:${no}: ${clip(line.trim(), 200)}`] : []
-					})
+				const r = await grepCommit(repo.root, repo.headSha, [text], {
+					paths: prefix ? [prefix] : [],
+					maxBytes: GREP_LIMIT,
+					timeoutMs: 20_000,
+					signal,
+				})
+				if (r.failed) return refuse(`The search failed: ${r.failed.slice(0, 200)}`)
+				const hits = r.hits.map((h) => `${h.path}:${h.line}: ${clip(h.text.trim(), 200)}`)
 				if (!hits.length) return { text: `No matches for "${text}"${prefix ? ` under ${prefix}` : ''}.`, error: false }
 				const shown = hits.slice(0, SEARCH_MAX_HITS)
 				const more = hits.length > shown.length || r.truncated ? `\n(more matches not shown; narrow the search with path_prefix)` : ''
