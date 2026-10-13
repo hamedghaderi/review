@@ -16,16 +16,19 @@ import type {
 	DismissReason,
 	Finding,
 	FindingDecision,
+	FindingCategory,
 	FindingMessage,
 	FindingVerification,
 	Review,
 	ReviewRule,
+	Severity,
 	StoredRule,
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { useStored } from './useStored.ts'
 
 interface Props {
 	runs: Array<AiRun>
@@ -51,6 +54,9 @@ interface Props {
 }
 
 type Filter = 'open' | 'accepted' | 'dismissed'
+
+const LEVEL_FILTERS = ['all', ...Object.keys(LEVEL_META)] as Array<Severity | 'all'>
+const RULE_FILTERS = ['all', ...Object.keys(CATEGORY_LABEL)] as Array<FindingCategory | 'all'>
 
 export const RULE_LABEL: Record<StoredRule, string> = {
 	bug: 'Bugs and logic errors',
@@ -91,6 +97,9 @@ export function FindingsPanel({
 	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
+	const [level, setLevel] = useStored<Severity | 'all'>('review.findingLevel', 'all', LEVEL_FILTERS)
+	const [rule, setRule] = useStored<FindingCategory | 'all'>('review.findingRule', 'all', RULE_FILTERS)
+	const [query, setQuery] = useState('')
 	const [runId, setRunId] = useState<string | null>(null)
 	const [showDetails, setShowDetails] = useState(false)
 	const latest = runs[runs.length - 1] ?? null
@@ -122,12 +131,29 @@ export function FindingsPanel({
 		if (owner && owner.id !== run?.id) setRunId(owner.id)
 		const f = owner?.findings.find((x) => x.id === selectedFindingId)
 		if (f) setFilter(findingState(review, roots, f, byId))
+		if (f && !matches(f)) {
+			setLevel('all')
+			setRule('all')
+			setQuery('')
+		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [selectedFindingId])
 
+	const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+	const matches = (f: Finding): boolean => {
+		if (level !== 'all' && f.severity !== level) return false
+		if (rule !== 'all' && f.category !== rule) return false
+		const text = `${f.title}\n${f.body ?? f.evidence}\n${anchorPath(f.anchor)}`.toLowerCase()
+		return words.every((w) => text.includes(w))
+	}
+	const filtered = items.filter((it) => matches(it.f))
 	const counts: Record<FindingState, number> = { open: 0, accepted: 0, dismissed: 0 }
-	for (const it of items) counts[it.state]++
-	const shown = items.filter((it) => it.state === filter)
+	for (const it of filtered) counts[it.state]++
+	const inTab = items.filter((it) => it.state === filter)
+	const levels = [...new Set(inTab.map((it) => it.f.severity))].sort((a, b) => SEVERITY_ORDER[a] - SEVERITY_ORDER[b])
+	const rules = [...new Set(inTab.flatMap((it) => (it.f.category ? [it.f.category] : [])))]
+	const shown = filtered.filter((it) => it.state === filter)
+	const narrowed = level !== 'all' || rule !== 'all' || words.length > 0
 	// A repeat from a later run inherits the decision on the finding it repeats; that one holds the reason and note.
 	const decisionOwner = (f: Finding): { finding: Finding; decision: FindingDecision | null } => {
 		const seen = new Set<string>()
@@ -207,9 +233,56 @@ export function FindingsPanel({
 					</button>
 				))}
 			</div>
+			{items.length > 0 && (
+				<div className="findings-filters">
+					<input
+						className="search"
+						type="search"
+						placeholder="Filter by text or file"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+					<select value={level} onChange={(e) => setLevel(e.target.value as Severity | 'all')} aria-label="Level">
+						<option value="all">All levels</option>
+						{[...new Set([...levels, ...(level === 'all' ? [] : [level])])].map((l) => (
+							<option key={l} value={l}>
+								{LEVEL_META[l].label} ({inTab.filter((it) => it.f.severity === l).length})
+							</option>
+						))}
+					</select>
+					{(rules.length > 1 || rule !== 'all') && (
+						<select value={rule} onChange={(e) => setRule(e.target.value as FindingCategory | 'all')} aria-label="Rule">
+							<option value="all">All rules</option>
+							{[...new Set([...rules, ...(rule === 'all' ? [] : [rule])])].map((c) => (
+								<option key={c} value={c}>
+									{CATEGORY_LABEL[c]} ({inTab.filter((it) => it.f.category === c).length})
+								</option>
+							))}
+						</select>
+					)}
+				</div>
+			)}
 			<div className="comments-list">
 				{shown.length === 0 ? (
-					<div className="muted pad small">{emptyText(run, filter, items.length)}</div>
+					<div className="muted pad small">
+						{narrowed && inTab.length > 0 ? (
+							<>
+								No findings match.{' '}
+								<button
+									className="link"
+									onClick={() => {
+										setLevel('all')
+										setRule('all')
+										setQuery('')
+									}}
+								>
+									Clear filters
+								</button>
+							</>
+						) : (
+							emptyText(run, filter, items.length)
+						)}
+					</div>
 				) : (
 					shown.map(({ f, state }) => (
 						<FindingCard

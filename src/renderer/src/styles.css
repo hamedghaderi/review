@@ -464,7 +464,8 @@ input[type='checkbox'] {
 	min-height: 0;
 	flex: 1;
 }
-.tree-tools {
+.tree-tools,
+.list-tools {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
@@ -1366,6 +1367,19 @@ a.ic-state:hover {
 /* The run summary and the findings scroll as one, so a tall summary never leaves the list a sliver; the filter stays on top. */
 .findings-scroll {
 	overflow-y: auto;
+}
+.findings-filters {
+	display: flex;
+	gap: 6px;
+	margin: 6px 8px 0;
+	flex-shrink: 0;
+}
+.findings-filters .search {
+	flex: 1;
+	min-width: 0;
+}
+.findings-filters select {
+	max-width: 40%;
 }
 .findings-scroll > .comments-list {
 	flex: none;

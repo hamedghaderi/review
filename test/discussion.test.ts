@@ -9,7 +9,7 @@ import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '.
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
-import { discussedAt, ownThread } from '../src/renderer/src/discussed.ts'
+import { discussedAt, hasReply, matchesThread, ownThread } from '../src/renderer/src/discussed.ts'
 import type { Anchor, Comparison, CredentialStorageInfo, DiscussionThread } from '../src/shared/types.ts'
 
 function tmp(): string {
@@ -445,4 +445,31 @@ test('replyToThread checks the thread is on this PR, then replies and resolves',
 	sent.length = 0
 	await assert.rejects(gh.replyToThread('o/r', 8, 'T1', 'x', false), /not on this pull request/)
 	assert.deepEqual(sent, ['node'], 'nothing written to another PR’s thread')
+})
+
+test('thread filters: open/resolved, anyone who wrote in it, and whether someone else answered', () => {
+	const c = (author: string | null) => ({
+		id: author ?? 'x',
+		author,
+		association: null,
+		body: '',
+		bodyTruncated: false,
+		createdAt: null,
+		url: null,
+		pending: false,
+	})
+	const t = (resolved: boolean | null, authors: Array<string | null>, omitted = 0) =>
+		({ resolved, comments: authors.map(c), commentsOmitted: omitted }) as unknown as DiscussionThread
+	const open = t(false, ['me', 'ann'])
+	const done = t(true, ['bob'])
+	const unknown = t(null, ['me'])
+	const pick = (s: Parameters<typeof matchesThread>[1], a: string | null = null) =>
+		[open, done, unknown].filter((x) => matchesThread(x, s, a))
+	assert.deepEqual(pick('all'), [open, done, unknown])
+	assert.deepEqual(pick('open'), [open])
+	assert.deepEqual(pick('resolved'), [done])
+	assert.deepEqual(pick('all', 'ann'), [open], 'a reply counts, not only who started it')
+	assert.equal(hasReply(open), true)
+	assert.equal(hasReply(t(false, ['me', 'me'])), false, 'only my own follow-ups')
+	assert.equal(hasReply(t(false, ['me'], 2)), true, 'replies GitHub left out')
 })

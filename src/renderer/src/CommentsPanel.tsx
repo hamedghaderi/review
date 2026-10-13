@@ -3,16 +3,37 @@ import { LEVEL_META } from '../../shared/findings.ts'
 import type { Anchor, ChangedFile, CommentDraft, ReviewComment, Severity } from '../../shared/types.ts'
 import { anchorPath } from './Comment.tsx'
 import { rangeLabel } from './diffModel.ts'
+import { COMMENT_FILTERS, matchesComment, type CommentFilter } from './reviewOps.ts'
 import { RichText } from './RichText.tsx'
+import { useStored } from './useStored.ts'
 
 interface Props {
 	comments: Array<ReviewComment>
 	drafts: Array<CommentDraft>
 	files: Array<ChangedFile>
+	unsent: ReadonlySet<string> | null // comment ids publishing would send; null outside PR reviews
+	replied: ReadonlySet<string> | null // comment ids someone answered on GitHub; null outside PR reviews
 	onOpen(fileKey: string, itemId: string, anchor: ReviewComment['anchor'], draftId: string | null): void
 }
 
-export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
+export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent, replied, onOpen }: Props) {
+	const [stored, setFilter] = useStored<CommentFilter>('review.commentFilter', 'all', COMMENT_FILTERS)
+	// A remembered PR-only filter doesn't apply to a branch review, which has no tab for it.
+	const filter = (stored === 'unsent' || stored === 'replied') && !unsent ? 'all' : stored
+	const [query, setQuery] = useState('')
+	const sets = { unsent: unsent ?? new Set<string>(), replied: replied ?? new Set<string>() }
+	const keep = (c: { id: string; body: string; findingId: string | null; anchor: Anchor }): boolean =>
+		matchesComment(c, filter, query.trim(), sets)
+	const comments = all.filter(keep)
+	const drafts = allDrafts.filter(keep)
+	const filtering = filter !== 'all' || query.trim() !== ''
+	const counts: Record<CommentFilter, number> = {
+		all: all.length,
+		you: all.filter((c) => !c.findingId).length,
+		ai: all.filter((c) => c.findingId).length,
+		unsent: all.filter((c) => sets.unsent.has(c.id)).length,
+		replied: all.filter((c) => sets.replied.has(c.id)).length,
+	}
 	const order = new Map(files.map((f, i) => [f.key, i]))
 	const sortKey = (a: ReviewComment['anchor']): [number, number] => [order.get(a.fileKey) ?? 1e9, a.startLine ?? 0]
 	const byPos = <T extends { anchor: ReviewComment['anchor'] }>(xs: Array<T>): Array<T> =>
@@ -44,6 +65,43 @@ export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
 
 	return (
 		<div className="comments">
+			{(all.length > 0 || allDrafts.length > 0) && (
+				<div className="list-tools">
+					<input
+						className="search"
+						type="search"
+						placeholder="Filter by text or file"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+					<div className="seg" role="tablist">
+						{(
+							[
+								['all', 'All', null],
+								['you', 'Yours', 'Comments you wrote'],
+								['ai', 'AI', 'Comments made from AI findings'],
+								...(unsent
+									? [
+											['unsent', 'Not posted', 'Not on GitHub yet, or edited since'],
+											['replied', 'Replied', 'Someone answered on GitHub'],
+										]
+									: []),
+							] as Array<[CommentFilter, string, string | null]>
+						).map(([k, label, hint]) => (
+							<button
+								key={k}
+								role="tab"
+								aria-selected={filter === k}
+								className={filter === k ? 'on' : ''}
+								title={hint ?? undefined}
+								onClick={() => setFilter(k)}
+							>
+								{label} <span className="count">{counts[k]}</span>
+							</button>
+						))}
+					</div>
+				</div>
+			)}
 			<div className="comments-list">
 				{unfinished.length > 0 && (
 					<section>
@@ -62,7 +120,9 @@ export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
 				)}
 				{comments.length === 0 && unfinished.length === 0 ? (
 					<div className="muted pad small">
-						No comments yet. Click a line number, Shift-click to extend, or select code text to start a comment.
+						{filtering
+							? 'No comments match.'
+							: 'No comments yet. Click a line number, Shift-click to extend, or select code text to start a comment.'}
 					</div>
 				) : (
 					<>

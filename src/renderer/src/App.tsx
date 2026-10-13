@@ -46,7 +46,7 @@ import { StackControl } from './Stack.tsx'
 import { CommentsPanel } from './CommentsPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
 import type { PostedState } from './Comment.tsx'
-import { discussedAt, ownThread } from './discussed.ts'
+import { discussedAt, hasReply, ownThread } from './discussed.ts'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
 import { AskModel, ModelPicker } from './ModelPicker.tsx'
@@ -1530,7 +1530,25 @@ export function App() {
 										onConnect={() => setGithubOpen(true)}
 									/>
 								) : rightTab === 'comments' || rightTab === 'github' ? (
-									<CommentsPanel comments={review.comments} drafts={review.drafts} files={files} onOpen={openItem} />
+									<CommentsPanel
+										comments={review.comments}
+										drafts={review.drafts}
+										files={files}
+										unsent={isPrReview ? ops.unsentIds(review) : null}
+										replied={
+											isPrReview
+												? new Set(
+														review.comments
+															.filter((c) => {
+																const t = ownThread(threads, ownIds(c.id))
+																return !!t && hasReply(t)
+															})
+															.map((c) => c.id),
+													)
+												: null
+										}
+										onOpen={openItem}
+									/>
 								) : (
 									<FindingsPanel
 										runs={aiRuns}
