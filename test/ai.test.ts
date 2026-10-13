@@ -2170,13 +2170,13 @@ test('comment filter: by author, by not posted, and by every word of the text or
 	const a = { newPath: 'src/Billing.ts', oldPath: 'src/Billing.ts' } as never
 	const mine = { id: 'm', body: 'Rename this', findingId: null, anchor: a }
 	const ai = { id: 'x', body: 'Null check missing', findingId: 'f1', anchor: a }
-	const unsent = new Set(['x'])
-	const ids = (f: Parameters<typeof matchesComment>[1], q = '') =>
-		[mine, ai].filter((c) => matchesComment(c, f, q, unsent)).map((c) => c.id)
+	const sets = { unsent: new Set(['x']), replied: new Set(['m']) }
+	const ids = (f: Parameters<typeof matchesComment>[1], q = '') => [mine, ai].filter((c) => matchesComment(c, f, q, sets)).map((c) => c.id)
 	assert.deepEqual(ids('all'), ['m', 'x'])
 	assert.deepEqual(ids('you'), ['m'])
 	assert.deepEqual(ids('ai'), ['x'])
 	assert.deepEqual(ids('unsent'), ['x'])
+	assert.deepEqual(ids('replied'), ['m'])
 	assert.deepEqual(ids('all', 'billing null'), ['x'], 'path and body, all words')
 	assert.deepEqual(ids('you', 'null'), [])
 })

@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import type { ChangedFile, Discussion, DiscussionComment, DiscussionThread } from '../../shared/types.ts'
 import { ago } from './branches.ts'
+import { matchesThread, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
+import { useStored } from './useStored.ts'
+
+const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'open', 'resolved']
 
 function who(ts: Array<DiscussionThread>): string {
 	const names = [...new Set(ts.map((t) => t.comments[0]?.author ?? 'unknown user'))]
@@ -280,6 +284,23 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 			(a.placed?.startLine ?? a.originalLine ?? 0) - (b.placed?.startLine ?? b.originalLine ?? 0),
 	)
 	const openCount = threads.filter((t) => t.resolved === false).length
+	const known = threads.some((t) => t.resolved !== null) // without a token GitHub doesn't say what's resolved
+	const [stored, setState] = useStored<ThreadFilter>('review.threadFilter', 'all', THREAD_FILTERS)
+	const state = known ? stored : 'all'
+	const [author, setAuthor] = useState<string | null>(null)
+	const authors = [
+		...new Set(
+			[...threads.flatMap((t) => t.comments), ...(d?.reviews ?? []), ...(d?.conversation ?? [])].flatMap((x) =>
+				x.author ? [x.author] : [],
+			),
+		),
+	].sort((a, b) => a.localeCompare(b))
+	const who = author && authors.includes(author) ? author : null
+	const shown = threads.filter((t) => matchesThread(t, state, who))
+	// Reviews and the conversation have no open/resolved state, so they show only under "All".
+	const showReviews = state !== 'all' ? [] : (d?.reviews ?? []).filter((r) => !who || r.author === who)
+	const showConversation = state !== 'all' ? [] : (d?.conversation ?? []).filter((c) => !who || c.author === who)
+	const narrowed = state !== 'all' || !!who
 	return (
 		<div className="comments">
 			<div className="gh-status small">
@@ -308,17 +329,60 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 					)}
 				</div>
 			)}
+			{(threads.length > 0 || authors.length > 1) && (
+				<div className="list-tools">
+					{known && (
+						<div className="seg" role="tablist" aria-label="Thread state">
+							{(
+								[
+									['all', 'All', threads.length],
+									['open', 'Open', openCount],
+									['resolved', 'Resolved', threads.filter((t) => t.resolved === true).length],
+								] as const
+							).map(([k, label, n]) => (
+								<button key={k} role="tab" aria-selected={state === k} className={state === k ? 'on' : ''} onClick={() => setState(k)}>
+									{label} <span className="count">{n}</span>
+								</button>
+							))}
+						</div>
+					)}
+					{authors.length > 1 && (
+						<select value={who ?? ''} onChange={(e) => setAuthor(e.target.value || null)} aria-label="Author">
+							<option value="">Everyone</option>
+							{authors.map((a) => (
+								<option key={a} value={a}>
+									{a}
+								</option>
+							))}
+						</select>
+					)}
+				</div>
+			)}
 			<div className="comments-list">
 				{d && d.status !== 'unavailable' && !threads.length && !d.reviews.length && !d.conversation.length && (
 					<div className="muted pad small">No review comments or conversation on this pull request yet.</div>
 				)}
-				{threads.length > 0 && (
+				{narrowed && !shown.length && !showReviews.length && !showConversation.length && (
+					<div className="muted pad small">
+						Nothing matches.{' '}
+						<button
+							className="link"
+							onClick={() => {
+								setState('all')
+								setAuthor(null)
+							}}
+						>
+							Clear filters
+						</button>
+					</div>
+				)}
+				{shown.length > 0 && (
 					<section>
 						<div className="section-title">
-							Threads · {threads.length}
-							{openCount ? ` · ${openCount} open` : ''}
+							Threads · {shown.length}
+							{!narrowed && openCount ? ` · ${openCount} open` : ''}
 						</div>
-						{threads.map((t) => (
+						{shown.map((t) => (
 							<button key={t.id} className="comment-item" disabled={!t.fileKey} onClick={() => onOpen(t)}>
 								<div className="ci-loc">
 									<span className="mono ellipsis">{t.path}</span>
@@ -338,10 +402,10 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 						))}
 					</section>
 				)}
-				{d && d.reviews.length > 0 && (
+				{showReviews.length > 0 && (
 					<section>
-						<div className="section-title">Reviews · {d.reviews.length}</div>
-						{d.reviews.map((r) => (
+						<div className="section-title">Reviews · {showReviews.length}</div>
+						{showReviews.map((r) => (
 							<div key={r.id} className="gh-thread">
 								<div className="gh-comment-head small">
 									<b>{r.author ?? 'unknown user'}</b>
@@ -361,10 +425,10 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 						))}
 					</section>
 				)}
-				{d && d.conversation.length > 0 && (
+				{showConversation.length > 0 && (
 					<section>
-						<div className="section-title">Conversation · {d.conversation.length}</div>
-						{d.conversation.map((c) => (
+						<div className="section-title">Conversation · {showConversation.length}</div>
+						{showConversation.map((c) => (
 							<div key={c.id} className="gh-thread">
 								<CommentView c={c} />
 							</div>

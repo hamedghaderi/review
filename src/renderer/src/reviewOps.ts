@@ -220,18 +220,23 @@ export function unsentComments(r: Review): number {
 	return unsentIds(r).size
 }
 
-export type CommentFilter = 'all' | 'you' | 'ai' | 'unsent'
+export const COMMENT_FILTERS = ['all', 'you', 'ai', 'unsent', 'replied'] as const
+export type CommentFilter = (typeof COMMENT_FILTERS)[number]
 
-/** The comments panel filter: who wrote it, whether it still has to be published, and words in its text or path. */
+/**
+ * The comments panel filter: who wrote it, whether it still has to be published, whether someone answered it on
+ * GitHub, and words in its text or path.
+ */
 export function matchesComment(
 	c: { id: string; body: string; findingId: string | null; anchor: Anchor },
 	filter: CommentFilter,
 	query: string,
-	unsent: ReadonlySet<string>,
+	sets: { unsent: ReadonlySet<string>; replied: ReadonlySet<string> },
 ): boolean {
 	if (filter === 'you' && c.findingId) return false
 	if (filter === 'ai' && !c.findingId) return false
-	if (filter === 'unsent' && !unsent.has(c.id)) return false
+	if (filter === 'unsent' && !sets.unsent.has(c.id)) return false
+	if (filter === 'replied' && !sets.replied.has(c.id)) return false
 	const text = `${c.body}\n${c.anchor.newPath ?? ''}\n${c.anchor.oldPath ?? ''}`.toLowerCase()
 	return query
 		.toLowerCase()

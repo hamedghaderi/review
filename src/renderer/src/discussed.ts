@@ -13,6 +13,21 @@ export function ownThread(threads: Array<DiscussionThread>, own: ReadonlySet<str
 	return threads.find((t) => c(t) && (own.has(c(t).id) || (c(t).url !== null && own.has(c(t).url!)))) ?? null
 }
 
+/** Someone other than the thread's author answered it (replies GitHub left out count, since they can't be checked). */
+export function hasReply(t: DiscussionThread): boolean {
+	const author = t.comments[0]?.author
+	return t.commentsOmitted > 0 || t.comments.slice(1).some((c) => c.author !== author)
+}
+
+export type ThreadFilter = 'all' | 'open' | 'resolved'
+
+/** The GitHub panel filter. `author`: anyone who wrote in the thread, not only who started it. */
+export function matchesThread(t: DiscussionThread, state: ThreadFilter, author: string | null): boolean {
+	if (state === 'open' && t.resolved !== false) return false
+	if (state === 'resolved' && t.resolved !== true) return false
+	return !author || t.comments.some((c) => c.author === author)
+}
+
 export function discussedAt(threads: Array<DiscussionThread>, a: Anchor, own: ReadonlySet<string> = new Set()): Array<DiscussionThread> {
 	return threads.filter((t) => {
 		const p = t.placed

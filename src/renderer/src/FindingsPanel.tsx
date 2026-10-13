@@ -28,6 +28,7 @@ import { anchorLabel, anchorPath } from './Comment.tsx'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { useStored } from './useStored.ts'
 
 interface Props {
 	runs: Array<AiRun>
@@ -53,6 +54,9 @@ interface Props {
 }
 
 type Filter = 'open' | 'accepted' | 'dismissed'
+
+const LEVEL_FILTERS = ['all', ...Object.keys(LEVEL_META)] as Array<Severity | 'all'>
+const RULE_FILTERS = ['all', ...Object.keys(CATEGORY_LABEL)] as Array<FindingCategory | 'all'>
 
 export const RULE_LABEL: Record<StoredRule, string> = {
 	bug: 'Bugs and logic errors',
@@ -93,8 +97,8 @@ export function FindingsPanel({
 	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
-	const [level, setLevel] = useState<Severity | 'all'>('all')
-	const [rule, setRule] = useState<FindingCategory | 'all'>('all')
+	const [level, setLevel] = useStored<Severity | 'all'>('review.findingLevel', 'all', LEVEL_FILTERS)
+	const [rule, setRule] = useStored<FindingCategory | 'all'>('review.findingRule', 'all', RULE_FILTERS)
 	const [query, setQuery] = useState('')
 	const [runId, setRunId] = useState<string | null>(null)
 	const [showDetails, setShowDetails] = useState(false)

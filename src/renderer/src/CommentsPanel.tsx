@@ -3,23 +3,27 @@ import { LEVEL_META } from '../../shared/findings.ts'
 import type { Anchor, ChangedFile, CommentDraft, ReviewComment, Severity } from '../../shared/types.ts'
 import { anchorPath } from './Comment.tsx'
 import { rangeLabel } from './diffModel.ts'
-import { matchesComment, type CommentFilter } from './reviewOps.ts'
+import { COMMENT_FILTERS, matchesComment, type CommentFilter } from './reviewOps.ts'
 import { RichText } from './RichText.tsx'
+import { useStored } from './useStored.ts'
 
 interface Props {
 	comments: Array<ReviewComment>
 	drafts: Array<CommentDraft>
 	files: Array<ChangedFile>
 	unsent: ReadonlySet<string> | null // comment ids publishing would send; null outside PR reviews
+	replied: ReadonlySet<string> | null // comment ids someone answered on GitHub; null outside PR reviews
 	onOpen(fileKey: string, itemId: string, anchor: ReviewComment['anchor'], draftId: string | null): void
 }
 
-export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent, onOpen }: Props) {
-	const [filter, setFilter] = useState<CommentFilter>('all')
+export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent, replied, onOpen }: Props) {
+	const [stored, setFilter] = useStored<CommentFilter>('review.commentFilter', 'all', COMMENT_FILTERS)
+	// A remembered PR-only filter doesn't apply to a branch review, which has no tab for it.
+	const filter = (stored === 'unsent' || stored === 'replied') && !unsent ? 'all' : stored
 	const [query, setQuery] = useState('')
-	const none = new Set<string>()
+	const sets = { unsent: unsent ?? new Set<string>(), replied: replied ?? new Set<string>() }
 	const keep = (c: { id: string; body: string; findingId: string | null; anchor: Anchor }): boolean =>
-		matchesComment(c, filter, query.trim(), unsent ?? none)
+		matchesComment(c, filter, query.trim(), sets)
 	const comments = all.filter(keep)
 	const drafts = allDrafts.filter(keep)
 	const filtering = filter !== 'all' || query.trim() !== ''
@@ -27,7 +31,8 @@ export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent,
 		all: all.length,
 		you: all.filter((c) => !c.findingId).length,
 		ai: all.filter((c) => c.findingId).length,
-		unsent: unsent ? all.filter((c) => unsent.has(c.id)).length : 0,
+		unsent: all.filter((c) => sets.unsent.has(c.id)).length,
+		replied: all.filter((c) => sets.replied.has(c.id)).length,
 	}
 	const order = new Map(files.map((f, i) => [f.key, i]))
 	const sortKey = (a: ReviewComment['anchor']): [number, number] => [order.get(a.fileKey) ?? 1e9, a.startLine ?? 0]
@@ -71,11 +76,26 @@ export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent,
 					/>
 					<div className="seg" role="tablist">
 						{(
-							[['all', 'All'], ['you', 'Yours'], ['ai', 'From AI'], ...(unsent ? [['unsent', 'Not posted']] : [])] as Array<
-								[CommentFilter, string]
+							[
+								['all', 'All', null],
+								['you', 'Yours', 'Comments you wrote'],
+								['ai', 'AI', 'Comments made from AI findings'],
+								...(unsent
+									? [
+											['unsent', 'Not posted', 'Not on GitHub yet, or edited since'],
+											['replied', 'Replied', 'Someone answered on GitHub'],
+										]
+									: []),
+							] as Array<[CommentFilter, string, string | null]>
+						).map(([k, label, hint]) => (
+							<button
+								key={k}
+								role="tab"
+								aria-selected={filter === k}
+								className={filter === k ? 'on' : ''}
+								title={hint ?? undefined}
+								onClick={() => setFilter(k)}
 							>
-						).map(([k, label]) => (
-							<button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
 								{label} <span className="count">{counts[k]}</span>
 							</button>
 						))}
