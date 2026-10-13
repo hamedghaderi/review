@@ -3,16 +3,32 @@ import { LEVEL_META } from '../../shared/findings.ts'
 import type { Anchor, ChangedFile, CommentDraft, ReviewComment, Severity } from '../../shared/types.ts'
 import { anchorPath } from './Comment.tsx'
 import { rangeLabel } from './diffModel.ts'
+import { matchesComment, type CommentFilter } from './reviewOps.ts'
 import { RichText } from './RichText.tsx'
 
 interface Props {
 	comments: Array<ReviewComment>
 	drafts: Array<CommentDraft>
 	files: Array<ChangedFile>
+	unsent: ReadonlySet<string> | null // comment ids publishing would send; null outside PR reviews
 	onOpen(fileKey: string, itemId: string, anchor: ReviewComment['anchor'], draftId: string | null): void
 }
 
-export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
+export function CommentsPanel({ comments: all, drafts: allDrafts, files, unsent, onOpen }: Props) {
+	const [filter, setFilter] = useState<CommentFilter>('all')
+	const [query, setQuery] = useState('')
+	const none = new Set<string>()
+	const keep = (c: { id: string; body: string; findingId: string | null; anchor: Anchor }): boolean =>
+		matchesComment(c, filter, query.trim(), unsent ?? none)
+	const comments = all.filter(keep)
+	const drafts = allDrafts.filter(keep)
+	const filtering = filter !== 'all' || query.trim() !== ''
+	const counts: Record<CommentFilter, number> = {
+		all: all.length,
+		you: all.filter((c) => !c.findingId).length,
+		ai: all.filter((c) => c.findingId).length,
+		unsent: unsent ? all.filter((c) => unsent.has(c.id)).length : 0,
+	}
 	const order = new Map(files.map((f, i) => [f.key, i]))
 	const sortKey = (a: ReviewComment['anchor']): [number, number] => [order.get(a.fileKey) ?? 1e9, a.startLine ?? 0]
 	const byPos = <T extends { anchor: ReviewComment['anchor'] }>(xs: Array<T>): Array<T> =>
@@ -44,6 +60,28 @@ export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
 
 	return (
 		<div className="comments">
+			{(all.length > 0 || allDrafts.length > 0) && (
+				<div className="list-tools">
+					<input
+						className="search"
+						type="search"
+						placeholder="Filter by text or file"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+					<div className="seg" role="tablist">
+						{(
+							[['all', 'All'], ['you', 'Yours'], ['ai', 'From AI'], ...(unsent ? [['unsent', 'Not posted']] : [])] as Array<
+								[CommentFilter, string]
+							>
+						).map(([k, label]) => (
+							<button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
+								{label} <span className="count">{counts[k]}</span>
+							</button>
+						))}
+					</div>
+				</div>
+			)}
 			<div className="comments-list">
 				{unfinished.length > 0 && (
 					<section>
@@ -62,7 +100,9 @@ export function CommentsPanel({ comments, drafts, files, onOpen }: Props) {
 				)}
 				{comments.length === 0 && unfinished.length === 0 ? (
 					<div className="muted pad small">
-						No comments yet. Click a line number, Shift-click to extend, or select code text to start a comment.
+						{filtering
+							? 'No comments match.'
+							: 'No comments yet. Click a line number, Shift-click to extend, or select code text to start a comment.'}
 					</div>
 				) : (
 					<>

@@ -1530,7 +1530,13 @@ export function App() {
 										onConnect={() => setGithubOpen(true)}
 									/>
 								) : rightTab === 'comments' || rightTab === 'github' ? (
-									<CommentsPanel comments={review.comments} drafts={review.drafts} files={files} onOpen={openItem} />
+									<CommentsPanel
+										comments={review.comments}
+										drafts={review.drafts}
+										files={files}
+										unsent={isPrReview ? ops.unsentIds(review) : null}
+										onOpen={openItem}
+									/>
 								) : (
 									<FindingsPanel
 										runs={aiRuns}

@@ -210,9 +210,33 @@ export function removeContextImage(r: Review, id: string): Review {
 }
 
 /** Comments that publishing would send: never published, or edited since they were. */
-export function unsentComments(r: Review): number {
+export function unsentIds(r: Review): Set<string> {
 	const sent = r.publication?.comments ?? {}
-	return r.comments.filter((c) => sent[c.id]?.body !== c.body).length
+	// A comment carried from an earlier snapshot where it was already published is not sent again (see Publisher.item).
+	return new Set(r.comments.filter((c) => (sent[c.id] ? sent[c.id].body !== c.body : !c.carried?.published)).map((c) => c.id))
+}
+
+export function unsentComments(r: Review): number {
+	return unsentIds(r).size
+}
+
+export type CommentFilter = 'all' | 'you' | 'ai' | 'unsent'
+
+/** The comments panel filter: who wrote it, whether it still has to be published, and words in its text or path. */
+export function matchesComment(
+	c: { id: string; body: string; findingId: string | null; anchor: Anchor },
+	filter: CommentFilter,
+	query: string,
+	unsent: ReadonlySet<string>,
+): boolean {
+	if (filter === 'you' && c.findingId) return false
+	if (filter === 'ai' && !c.findingId) return false
+	if (filter === 'unsent' && !unsent.has(c.id)) return false
+	const text = `${c.body}\n${c.anchor.newPath ?? ''}\n${c.anchor.oldPath ?? ''}`.toLowerCase()
+	return query
+		.toLowerCase()
+		.split(/\s+/)
+		.every((w) => text.includes(w))
 }
 
 /**

@@ -31,6 +31,7 @@ import {
 	deleteComment,
 	editComment,
 	forSave,
+	matchesComment,
 	unsentComments,
 	plainPreview,
 	setFindingDecision,
@@ -2161,6 +2162,23 @@ test('publish count: comments never published, or edited since, are the ones sti
 	assert.equal(unsentComments(r), 2)
 	assert.equal(unsentComments({ ...r, comments: [c('same', 'b')] }), 0)
 	assert.equal(unsentComments(emptyReview()), 0)
+	const carried = { ...c('old', 'd'), carried: { published: { url: 'u' } } as never }
+	assert.equal(unsentComments({ ...emptyReview(), comments: [carried] }), 0, 'already on GitHub from an earlier snapshot')
+})
+
+test('comment filter: by author, by not posted, and by every word of the text or path', () => {
+	const a = { newPath: 'src/Billing.ts', oldPath: 'src/Billing.ts' } as never
+	const mine = { id: 'm', body: 'Rename this', findingId: null, anchor: a }
+	const ai = { id: 'x', body: 'Null check missing', findingId: 'f1', anchor: a }
+	const unsent = new Set(['x'])
+	const ids = (f: Parameters<typeof matchesComment>[1], q = '') =>
+		[mine, ai].filter((c) => matchesComment(c, f, q, unsent)).map((c) => c.id)
+	assert.deepEqual(ids('all'), ['m', 'x'])
+	assert.deepEqual(ids('you'), ['m'])
+	assert.deepEqual(ids('ai'), ['x'])
+	assert.deepEqual(ids('unsent'), ['x'])
+	assert.deepEqual(ids('all', 'billing null'), ['x'], 'path and body, all words')
+	assert.deepEqual(ids('you', 'null'), [])
 })
 
 test('publish preview: an AI finding reads as text, with its level and rule as pills', () => {
