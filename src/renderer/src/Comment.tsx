@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, ReviewComment } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
-import { AlreadyDiscussed, InlineReply, MoreOnGitHub, ThreadState } from './Discussion.tsx'
+import { AlreadyDiscussed, InlineReply, MoreOnGitHub, ThreadReplyBox, ThreadState, type ReplyFn } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
@@ -175,6 +175,7 @@ interface CardProps {
 	onEdit(): void
 	onDelete(): void
 	onAskAi?(): void // comments made from an AI finding: ask the model about it
+	onReply?: ReplyFn // reply to / resolve the GitHub thread it started
 }
 
 /** Where your comment stands: only here, on GitHub, or on GitHub with a newer edit not sent yet. */
@@ -202,7 +203,7 @@ function AskAiButton({ onClick }: { onClick(): void }) {
 	)
 }
 
-export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi }: CardProps) {
+export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply }: CardProps) {
 	const thread = posted?.thread ?? null
 	const replies = thread ? thread.comments.slice(1) : []
 	return (
@@ -234,6 +235,7 @@ export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, o
 				<InlineReply key={c.id} c={c} />
 			))}
 			{thread && <MoreOnGitHub t={thread} />}
+			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} />}
 		</div>
 	)
 }

@@ -151,6 +151,13 @@ export class ReviewService {
 		return this.requirePublisher(repoId).submit(repoId, reviewId, event, body)
 	}
 
+	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<void> {
+		this.repo(repoId)
+		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
+		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
+		return this.requireGitHub().replyToThread(pr.repo, pr.number, threadId, body, resolve)
+	}
+
 	/**
 	 * The open PR review's existing activity on GitHub, placed on this snapshot. Read-only, and never fatal: a failed
 	 * read comes back as `unavailable` so the UI never implies the PR has no history.

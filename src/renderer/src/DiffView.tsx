@@ -12,7 +12,7 @@ import type {
 	Side,
 } from '../../shared/types.ts'
 import { CommentCard, Composer, DraftStub, QuestionCard, type PostedState } from './Comment.tsx'
-import { ThreadCard } from './Discussion.tsx'
+import { ThreadCard, type ReplyFn } from './Discussion.tsx'
 import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
 
@@ -55,6 +55,7 @@ interface Props {
 	onEditComment(id: string): void
 	onDeleteComment(id: string): void
 	onShowFinding?(findingId: string): void // opens the finding a comment was made from, to ask about it
+	onReply?: ReplyFn // reply to / resolve a GitHub thread (PR reviews)
 	onLookup(r: SymbolRequest): void // ⌘/Ctrl-click on a name
 	placeRef: React.RefObject<(() => number) | null> // reads the scroll position, for back and forward
 }
@@ -304,7 +305,7 @@ export function DiffView(p: Props) {
 	}
 
 	const renderItem = (it: Item): React.ReactNode => {
-		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} />
+		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} />
 		if (it.kind === 'question') {
 			const q = it.q
 			return (
@@ -332,6 +333,7 @@ export function DiffView(p: Props) {
 					onEdit={() => p.onEditComment(it.c.id)}
 					onDelete={() => p.onDeleteComment(it.c.id)}
 					onAskAi={it.c.findingId && p.onShowFinding ? () => p.onShowFinding!(it.c.findingId!) : undefined}
+					onReply={p.onReply}
 				/>
 			)
 		}

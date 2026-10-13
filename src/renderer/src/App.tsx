@@ -1440,6 +1440,16 @@ export function App() {
 										change((r) => ops.deleteComment(r, cid))
 									}}
 									onShowFinding={showFinding}
+									onReply={
+										comparison.pr
+											? async (threadId, body, resolve) => {
+													const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, resolve)
+													if (!r.ok) return r.error.message
+													loadDiscussion(session.repo.id, comparison.id)
+													return null
+												}
+											: undefined
+									}
 									onLookup={(r) => void lookup(r)}
 									placeRef={placeRef}
 								/>
