@@ -40,6 +40,12 @@
 
 Download the installer for your system from the [latest release](https://github.com/hamedghaderi/review/releases/latest). You need Git installed.
 
+On macOS you can also use Homebrew:
+
+```sh
+brew install hamedghaderi/tap/review
+```
+
 The installers aren't signed yet, so your system asks once on first open. On macOS, go to **System Settings → Privacy & Security** and click **Open Anyway**. On Windows, click **More info → Run anyway**.
 
 ## Build from source
