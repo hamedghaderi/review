@@ -601,7 +601,16 @@ export interface CodeQuestion {
 
 /** The only reasons the reviewer may comment (pr-narrative reviewer policy): four defects, two structural, one residue. */
 export type FindingCategory =
-	'bug' | 'security' | 'error-handling' | 'breaking-change' | 'file-split' | 'over-engineered' | 'convention' | 'test-value' | 'residue'
+	| 'bug'
+	| 'security'
+	| 'error-handling'
+	| 'breaking-change'
+	| 'file-split'
+	| 'over-engineered'
+	| 'convention'
+	| 'misleading-name'
+	| 'test-value'
+	| 'residue'
 
 /** How a changed test fails to protect what it claims to (rule "test-value"). */
 export const TEST_PATTERNS = [
@@ -626,6 +635,7 @@ export const REVIEW_RULES = [
 	'file-split',
 	'over-engineered',
 	'convention',
+	'misleading-name',
 	'test-value',
 	'residue-1',
 	'residue-2',
@@ -669,7 +679,11 @@ export type ReviewerChoice = { kind: 'model'; selection: ModelSelection; passes?
 export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> = [
 	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling'] },
 	{ id: 'security', role: 'Security', rules: ['security'] },
-	{ id: 'callers', role: 'Callers & structure', rules: ['breaking-change', 'file-split', 'over-engineered', 'convention'] },
+	{
+		id: 'callers',
+		role: 'Callers & structure',
+		rules: ['breaking-change', 'file-split', 'over-engineered', 'convention', 'misleading-name'],
+	},
 	{
 		id: 'tests',
 		role: 'Tests & leftover code',

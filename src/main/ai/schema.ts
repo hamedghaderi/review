@@ -10,7 +10,18 @@ export const modelFindingSchema = z.object({
 	start_line: z.int().describe('First line number on the chosen side (inclusive).'),
 	end_line: z.int().describe('Last line number on the chosen side (inclusive).'),
 	category: z
-		.enum(['bug', 'security', 'error-handling', 'breaking-change', 'file-split', 'over-engineered', 'convention', 'test-value', 'residue'])
+		.enum([
+			'bug',
+			'security',
+			'error-handling',
+			'breaking-change',
+			'file-split',
+			'over-engineered',
+			'convention',
+			'misleading-name',
+			'test-value',
+			'residue',
+		])
 		.describe('The one rule this finding falls under.'),
 	signature: z.int().nullable().describe('For category "residue": the signature number 1-6. Otherwise null.'),
 	test_pattern: z

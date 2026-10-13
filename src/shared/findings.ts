@@ -86,6 +86,7 @@ export const CATEGORY_LABEL: Record<FindingCategory, string> = {
 	'file-split': 'File structure',
 	'over-engineered': 'Over-engineered',
 	convention: 'Convention',
+	'misleading-name': 'Misleading name',
 	'test-value': 'Test value',
 	residue: 'Residue',
 }

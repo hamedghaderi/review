@@ -67,7 +67,7 @@ const TEAM: Array<{ id: string; role: string; rules: Array<ReviewRule>; window: 
 	{
 		id: 'callers',
 		role: 'Callers & structure',
-		rules: ['breaking-change', 'file-split', 'over-engineered', 'convention'],
+		rules: ['breaking-change', 'file-split', 'over-engineered', 'convention', 'misleading-name'],
 		window: 200_000,
 	},
 	{ id: 'tests', role: 'Tests & leftover code', rules: ['test-value', ...RESIDUE], window: 200_000 },

@@ -242,6 +242,15 @@ function checkPolicy(
 			adjusted: f.severity === 'blocking' ? `Lowered to ${LEVEL_NAME[level]}: residue has no behavior, so it cannot block.` : null,
 		}
 	}
+	if (f.category === 'misleading-name') {
+		if (f.severity === 'pre_existing') return 'Misleading name must be one this change added or renamed, not pre-existing'
+		const level = residueLevel(levels)
+		if (!level) return 'Misleading name needs the nit, suggestion or should fix level, and all three are turned off'
+		return {
+			severity: level,
+			adjusted: f.severity === 'blocking' ? `Lowered to ${LEVEL_NAME[level]}: a name has no behavior, so it cannot block.` : null,
+		}
+	}
 	let severity: FindingLevel = f.severity
 	let adjusted: string | null = null
 	if (severity === 'blocking' && !f.disproof?.trim()) {
@@ -270,10 +279,11 @@ const SEVERITY_RANK: Record<string, number> = {
 	low: 6,
 }
 
-type Budget = 'defect' | 'structure' | 'convention' | 'tests' | 'residue'
+type Budget = 'defect' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue'
 export function budgetOf(c: FindingCategory | undefined): Budget {
 	if (c === 'file-split' || c === 'over-engineered') return 'structure'
 	if (c === 'test-value') return 'tests'
+	if (c === 'misleading-name') return 'naming'
 	return c === 'convention' ? 'convention' : c === 'residue' ? 'residue' : 'defect'
 }
 
@@ -282,6 +292,7 @@ export const BUDGETS = {
 	defect: { perFile: 3, total: 10 },
 	structure: { perFile: 2, total: 2 },
 	convention: { perFile: 3, total: 3 },
+	naming: { perFile: 2, total: 3 },
 	tests: { perFile: 2, total: 4 },
 	residue: { perFile: 2, total: 4 },
 } as const
@@ -321,9 +332,11 @@ function label(k: Budget): string {
 			? 'structural findings'
 			: k === 'convention'
 				? 'convention findings'
-				: k === 'tests'
-					? 'test findings'
-					: 'residue findings'
+				: k === 'naming'
+					? 'misleading-name findings'
+					: k === 'tests'
+						? 'test findings'
+						: 'residue findings'
 }
 
 function squash(s: string): string {

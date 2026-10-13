@@ -60,6 +60,7 @@ export const RULE_LABEL: Record<StoredRule, string> = {
 	'file-split': 'File takes on a second job',
 	'over-engineered': 'Machinery for requirements that do not exist',
 	convention: 'Differs from how the codebase does it (e.g. untranslated text)',
+	'misleading-name': 'Names that say something the code does not do',
 	'test-value': 'Tests that cannot catch the bug they are for',
 	'residue-1': RESIDUE_LABEL[1],
 	'residue-2': RESIDUE_LABEL[2],
@@ -605,7 +606,7 @@ function requestsFor(run: AiRun, memberId: string | null | undefined): number {
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
 	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'breaking-change'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
-	{ title: 'Conventions', rules: ['convention'] },
+	{ title: 'Conventions', rules: ['convention', 'misleading-name'] },
 	{ title: 'Tests', rules: ['test-value'] },
 	{ title: 'Leftover code', rules: ['residue-1', 'residue-2', 'residue-3', 'residue-4', 'residue-5', 'residue-6'] },
 ]
