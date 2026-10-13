@@ -198,6 +198,15 @@ function registerIpc(): void {
 	handle(IPC.submitReview, (repoId: unknown, reviewId: unknown, event: unknown, body: unknown) =>
 		service.submitReview(str(repoId, 'repository'), comparisonId(reviewId), reviewEvent(event), reviewBody(body)),
 	)
+	handle(IPC.replyToThread, (repoId: unknown, reviewId: unknown, threadId: unknown, body: unknown, resolve: unknown) =>
+		service.replyToThread(
+			str(repoId, 'repository'),
+			comparisonId(reviewId),
+			str(threadId, 'thread id', 128),
+			reviewBody(body),
+			bool(resolve, 'resolve'),
+		),
+	)
 	handle(IPC.loadPatch, (cid: unknown, key: unknown, force: unknown) =>
 		service.loadPatch(comparisonId(cid), str(key, 'file'), bool(force, 'force')),
 	)

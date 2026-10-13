@@ -3457,10 +3457,15 @@ button.stack-row:hover {
 	font: inherit;
 	font-size: 12px;
 }
-.ask-box .ask-actions {
+.ask-box .ask-actions,
+.reply-actions {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+}
+.ic .reply-box,
+.ic .reply-actions {
+	margin: 6px 0 0;
 }
 
 /* Finding level settings */

@@ -889,6 +889,25 @@ fragment LinkedIssue on Issue {
 		return d.updatePullRequestReviewComment.pullRequestReviewComment
 	}
 
+	/**
+	 * Replies to a review thread of this pull request and/or resolves it. Posted straight away, like GitHub's own Reply
+	 * (GitHub keeps it pending if you have a pending review). The thread is checked to belong to the PR first.
+	 */
+	async replyToThread(repo: string, number: number, threadId: string, body: string, resolve: boolean): Promise<void> {
+		checkRepo(repo)
+		if (!(await this.token())) throw new AppFail('github-auth', 'Connect GitHub (a token, or your GitHub CLI login) to reply.')
+		const d = await this.graphql<{ node: { pullRequest?: { number: number; repository: { nameWithOwner: string } } } | null }>(
+			THREAD_PR_QUERY,
+			{ id: threadId },
+		)
+		const pr = d.node?.pullRequest
+		if (!pr || pr.number !== number || pr.repository.nameWithOwner.toLowerCase() !== repo.toLowerCase())
+			throw new AppFail('invalid-input', 'That thread is not on this pull request.')
+		if (body.trim())
+			await this.graphql(REPLY_MUTATION, { input: { pullRequestReviewThreadId: threadId, body } }, undefined, { write: true })
+		if (resolve) await this.graphql(RESOLVE_MUTATION, { input: { threadId } }, undefined, { write: true })
+	}
+
 	async submitReview(reviewId: string, event: ReviewEvent, body: string): Promise<{ id: string; url: string; submittedAt: string | null }> {
 		const d = await this.graphql<{
 			submitPullRequestReview: { pullRequestReview: { id: string; url: string; submittedAt: string | null } }
@@ -1022,6 +1041,18 @@ const UPDATE_COMMENT_MUTATION = `mutation($input: UpdatePullRequestReviewComment
 
 const SUBMIT_MUTATION = `mutation($input: SubmitPullRequestReviewInput!) {
   submitPullRequestReview(input: $input) { pullRequestReview { id url submittedAt } }
+}`
+
+const THREAD_PR_QUERY = `query($id: ID!) {
+  node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } }
+}`
+
+const REPLY_MUTATION = `mutation($input: AddPullRequestReviewThreadReplyInput!) {
+  addPullRequestReviewThreadReply(input: $input) { comment { id } }
+}`
+
+const RESOLVE_MUTATION = `mutation($input: ResolveReviewThreadInput!) {
+  resolveReviewThread(input: $input) { thread { id } }
 }`
 
 function checkRepo(repo: string): void {

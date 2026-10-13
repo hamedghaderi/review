@@ -422,3 +422,27 @@ test('activity reads GitHub only: GraphQL pages through threads with a token, RE
 		await new Promise<void>((r) => server.close(() => r()))
 	}
 })
+
+test('replyToThread checks the thread is on this PR, then replies and resolves', async () => {
+	const sent: Array<string> = []
+	const gh = new GitHubService(tokens('ghp_' + 't'.repeat(36)), {
+		fetch: async (_url, init) => {
+			const q = JSON.parse(String(init?.body)).query as string
+			const name = /(addPullRequestReviewThreadReply|resolveReviewThread|node)\(/.exec(q)![1]
+			sent.push(name)
+			const data =
+				name === 'node'
+					? { node: { pullRequest: { number: 7, repository: { nameWithOwner: 'o/r' } } } }
+					: { [name]: { comment: { id: 'c' } } }
+			return new Response(JSON.stringify({ data }), { status: 200 })
+		},
+	})
+	await gh.replyToThread('o/r', 7, 'T1', 'Done', true)
+	assert.deepEqual(sent, ['node', 'addPullRequestReviewThreadReply', 'resolveReviewThread'])
+	sent.length = 0
+	await gh.replyToThread('o/r', 7, 'T1', '  ', true)
+	assert.deepEqual(sent, ['node', 'resolveReviewThread'], 'blank text: resolve only')
+	sent.length = 0
+	await assert.rejects(gh.replyToThread('o/r', 8, 'T1', 'x', false), /not on this pull request/)
+	assert.deepEqual(sent, ['node'], 'nothing written to another PR’s thread')
+})

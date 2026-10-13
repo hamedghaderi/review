@@ -118,6 +118,77 @@ function hunkTail(h: string): string {
 	return h.split('\n').slice(-6).join('\n')
 }
 
+export type ReplyFn = (threadId: string, body: string, resolve: boolean) => Promise<string | null> // returns why it failed, or null
+
+/** Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state. */
+export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: ReplyFn }) {
+	const [open, setOpen] = useState(false)
+	const [text, setText] = useState('')
+	const [busy, setBusy] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+	if (t.resolved === null) return null
+	const send = async (resolve: boolean): Promise<void> => {
+		if (busy || (!text.trim() && !resolve)) return
+		setBusy(true)
+		setError(null)
+		const problem = await onReply(t.id, text.trim(), resolve)
+		setBusy(false)
+		if (problem) return setError(problem)
+		setText('')
+		setOpen(false)
+	}
+	if (!open)
+		return (
+			<div className="ask-actions reply-actions">
+				<button className="btn small ghost" onClick={() => setOpen(true)}>
+					Reply
+				</button>
+				{t.resolved === false && (
+					<button className="btn small ghost" onClick={() => void send(true)} disabled={busy}>
+						{busy ? 'Resolving…' : 'Resolve'}
+					</button>
+				)}
+				{error && <span className="small error-text">{error}</span>}
+			</div>
+		)
+	return (
+		<div className="ask-box reply-box">
+			<textarea
+				autoFocus
+				value={text}
+				rows={2}
+				placeholder="Reply on GitHub (⌘↵ to send)"
+				onChange={(e) => setText(e.target.value)}
+				onKeyDown={(e) => {
+					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+						e.preventDefault()
+						void send(false)
+					} else if (e.key === 'Escape') {
+						e.preventDefault()
+						setOpen(false)
+					}
+				}}
+			/>
+			{error && <p className="small error-text">{error}</p>}
+			<div className="ask-actions">
+				<span className="muted small">Posted to GitHub right away (or added to your pending review, if you have one).</span>
+				<span className="spacer" />
+				<button className="btn small ghost" onClick={() => setOpen(false)} disabled={busy}>
+					Cancel
+				</button>
+				{t.resolved === false && (
+					<button className="btn small" onClick={() => void send(true)} disabled={busy}>
+						{text.trim() ? 'Reply and resolve' : 'Resolve'}
+					</button>
+				)}
+				<button className="btn small primary" onClick={() => void send(false)} disabled={busy || !text.trim()}>
+					{busy ? 'Sending…' : 'Reply'}
+				</button>
+			</div>
+		</div>
+	)
+}
+
 /** Replies a card leaves out, linked to GitHub. */
 export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
 	if (!t.commentsOmitted) return null
@@ -128,7 +199,7 @@ export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
  * Someone else's thread on GitHub, read-only, in the code: who started it, its state, and the replies. Resolved threads
  * start as one line. Threads started by your own published comments are shown on your comment card instead.
  */
-export function ThreadCard({ thread: t }: { thread: DiscussionThread }) {
+export function ThreadCard({ thread: t, onReply }: { thread: DiscussionThread; onReply?: ReplyFn }) {
 	const [open, setOpen] = useState(t.resolved !== true)
 	const [root, ...replies] = t.comments
 	return (
@@ -174,6 +245,7 @@ export function ThreadCard({ thread: t }: { thread: DiscussionThread }) {
 						<InlineReply key={c.id} c={c} />
 					))}
 					<MoreOnGitHub t={t} />
+					{onReply && <ThreadReplyBox t={t} onReply={onReply} />}
 				</>
 			)}
 		</div>

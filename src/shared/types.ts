@@ -1188,6 +1188,7 @@ export const IPC = {
 	publishComment: 'publish:comment',
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
+	replyToThread: 'gh:thread-reply',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
 	loadFileAt: 'diff:file-at',
@@ -1292,6 +1293,8 @@ export interface ReviewApi {
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<Result<PublishedReview>>
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
+	/** Posts a reply to a GitHub review thread (if `body` isn't blank) and/or resolves it. Only on explicit user action. */
+	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<Result<void>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
 	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */
