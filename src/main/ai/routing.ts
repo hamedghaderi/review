@@ -18,6 +18,7 @@ const APPLIES: Record<string, (kind: FileKind, risk: FileRisk | undefined) => bo
 	'file-split': (k) => k === 'code',
 	'over-engineered': (k) => k === 'code',
 	convention: (k) => k === 'code',
+	'misleading-name': (k) => k === 'code',
 	'test-value': (k) => k === 'test',
 	residue: (k) => k === 'code' || k === 'test' || k === 'docs',
 }

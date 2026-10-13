@@ -169,14 +169,14 @@ When a review starts, the chosen connection, provider, protocol, model, endpoint
 
 ### Review teams
 
-A review team splits the 14 rules between several models, so each one checks only its part. Create one with **+ New review team** in the model picker, or under **Settings → AI providers → Review teams**. A new team starts with four roles and a connected model suggested for each; you can rename roles, pick any connected model, add or remove reviewers (1 to 8), and choose who checks each rule:
+A review team splits the 15 rules between several models, so each one checks only its part. Create one with **+ New review team** in the model picker, or under **Settings → AI providers → Review teams**. A new team starts with four roles and a connected model suggested for each; you can rename roles, pick any connected model, add or remove reviewers (1 to 8), and choose who checks each rule:
 
-| Role                  | Rules                                                                          |
-| --------------------- | ------------------------------------------------------------------------------ |
-| Defects               | Bugs, missing or hidden error handling                                         |
-| Security              | Security                                                                       |
-| Callers & structure   | Breaking changes, a file taking on a second job, over-engineering, conventions |
-| Tests & leftover code | Test value, the 6 leftover-code signatures                                     |
+| Role                  | Rules                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| Defects               | Bugs, missing or hidden error handling                                                           |
+| Security              | Security                                                                                         |
+| Callers & structure   | Breaking changes, a file taking on a second job, over-engineering, conventions, misleading names |
+| Tests & leftover code | Test value, the 6 leftover-code signatures                                                       |
 
 Every rule must have exactly one reviewer before a team can be saved. Pick a team in the model picker like a single model; choosing a model switches back.
 
@@ -185,7 +185,7 @@ Every rule must have exactly one reviewer before a team can be saved. Pick a tea
 How a team run works:
 
 - Every member gets the full review policy plus an assignment naming only its rules. Answers outside those rules are rejected, and each member must report on each of its rules.
-- Each member gets only the changed files its rules apply to (`src/main/ai/routing.ts`). Bugs and error handling: code and configuration. Security: code and configuration not rated low risk, so tests, docs and plain config go elsewhere. Breaking changes: code, configuration and lock files (they carry the dependency facts). File split, over-engineering and conventions: code. Test value: test files, plus the changed code those tests import. Leftover code: code, tests and docs. Generated, vendored and binary files go to nobody and are listed as not reviewable. A member's overview marks the other files as checked by other members. A single model still gets every file.
+- Each member gets only the changed files its rules apply to (`src/main/ai/routing.ts`). Bugs and error handling: code and configuration. Security: code and configuration not rated low risk, so tests, docs and plain config go elsewhere. Breaking changes: code, configuration and lock files (they carry the dependency facts). File split, over-engineering, conventions and misleading names: code. Test value: test files, plus the changed code those tests import. Leftover code: code, tests and docs. Generated, vendored and binary files go to nobody and are listed as not reviewable. A member's overview marks the other files as checked by other members. A single model still gets every file.
 - The change is cut into excerpts once, sized for the member with the smallest context window, so an excerpt id means the same lines for everyone. Each member then packs its own files into requests sized for its own model: a large-context model gets few large requests, a small one more small ones. The run limit applies to each member's input. All members run at the same time.
 - Each member's model and credential are captured before anything is sent. If one can't start, the run doesn't start. Disconnecting any member's provider cancels the run.
 - Results merge into one run. Two members reporting the same lines and source become one finding, marked "also reported by". The review limits apply to the merged total.

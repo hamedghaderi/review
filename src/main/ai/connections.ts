@@ -764,7 +764,7 @@ function adoptNewRules(saved: ReviewTeam): ReviewTeam {
 		t.members.find((m) => m.rules.includes('breaking-change')) ?? t.members.find((m) => m.rules.includes('file-split')) ?? t.members[0]
 	return { ...t, members: t.members.map((m) => (m === heir ? { ...m, rules: [...m.rules, ...missing] } : m)) }
 }
-const LATER_RULES: Array<ReviewRule> = ['convention', 'test-value'] // added in reviewer-2026-10-01.6 and -10-02.2
+const LATER_RULES: Array<ReviewRule> = ['convention', 'test-value', 'misleading-name'] // added in reviewer-2026-10-01.6, -10-02.2 and -10-13.1
 
 export function migrateSettings(raw: unknown): SettingsFile {
 	const d = raw as Partial<SettingsFile> | null
