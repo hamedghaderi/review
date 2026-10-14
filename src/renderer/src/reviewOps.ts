@@ -5,6 +5,7 @@ import type {
 	CommentDraft,
 	DismissReason,
 	Finding,
+	FindingDecision,
 	FindingLevel,
 	Review,
 	ReviewComment,
@@ -164,7 +165,14 @@ export function setFindingDecision(
 	status: 'dismissed' | 'open',
 	why: { reason?: DismissReason | null; note?: string | null } = {},
 ): Review {
-	const d = { status, decidedAt: now(), ...(status === 'dismissed' ? { reason: why.reason ?? null, note: why.note ?? null } : {}) }
+	const { history = [], ...prev } = r.findingDecisions[findingId] ?? {}
+	const d: FindingDecision = {
+		status,
+		decidedAt: now(),
+		...(status === 'dismissed' ? { reason: why.reason ?? null, note: why.note ?? null } : {}),
+	}
+	// ponytail: keeps the last 20 earlier decisions per finding; enough to see a dismiss/restore pattern
+	if (prev.status) d.history = [...history, prev as FindingDecision].slice(-20)
 	return { ...r, findingDecisions: { ...r.findingDecisions, [findingId]: d } }
 }
 
