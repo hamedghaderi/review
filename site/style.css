@@ -296,7 +296,8 @@ kbd {
 /* Wide tiles let the capture run off the right edge */
 .tile--comment,
 .tile--palette,
-.tile--compare {
+.tile--compare,
+.tile--uses {
 	grid-column: span 4;
 }
 .tile--comment .tile__img,
@@ -307,12 +308,19 @@ kbd {
 	border-right: 0;
 	border-top-right-radius: 0;
 }
-.tile--providers {
+.tile--providers,
+.tile--filters {
 	grid-column: span 2;
 	grid-row: span 2;
 }
-.tile--providers .tile__img {
+.tile--providers .tile__img,
+.tile--filters .tile__img {
 	width: 94%;
+	align-self: center;
+}
+/* The uses list is read to its right edge, so it stays whole */
+.tile--uses .tile__img {
+	width: min(100%, 640px);
 	align-self: center;
 }
 .tile--plain {
@@ -327,6 +335,9 @@ kbd {
 }
 .tile--compare .tile__img {
 	width: 130%;
+}
+.tile--half {
+	grid-column: span 3;
 }
 
 /* Download */
@@ -512,12 +523,18 @@ kbd {
 
 /* Tablet */
 @media (max-width: 960px) {
+	/* Lets the two tall tiles share a row */
+	.grid {
+		grid-auto-flow: dense;
+	}
 	.tile--comment,
 	.tile--palette,
-	.tile--compare {
+	.tile--compare,
+	.tile--uses {
 		grid-column: span 6;
 	}
-	.tile--providers {
+	.tile--providers,
+	.tile--filters {
 		grid-column: span 3;
 		grid-row: span 1;
 	}
@@ -551,6 +568,7 @@ kbd {
 		padding-inline: var(--space-md);
 	}
 	.tile--providers,
+	.tile--filters,
 	.tile--plain {
 		grid-column: span 6;
 	}
@@ -560,7 +578,8 @@ kbd {
 	.tile--plain {
 		padding-bottom: var(--space-lg);
 	}
-	.tile--providers .tile__img {
+	.tile--providers .tile__img,
+	.tile--filters .tile__img {
 		width: 70%;
 	}
 	.files {

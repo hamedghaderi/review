@@ -175,16 +175,59 @@
 						/>
 					</article>
 
-					<article class="tile reveal tile--plain">
+					<article class="tile reveal tile--filters">
+						<div class="tile__text">
+							<h3>See what's left</h3>
+							<p>
+								Narrow comments to yours, the AI's, not posted yet or replied to on GitHub, and threads to open or resolved. Your filters
+								stay put next time.
+							</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-filters.webp"
+							width="634"
+							height="1232"
+							loading="lazy"
+							alt="The comments panel with filters for All, Yours, AI, Not posted and Replied, above four comments."
+						/>
+					</article>
+
+					<article class="tile reveal tile--uses">
+						<div class="tile__text">
+							<h3>⌘/Ctrl-click to the definition</h3>
+							<p>
+								Jump from any name in the diff to where it's defined, or Shift-click to list its uses. Files outside the change open at the
+								reviewed commit.
+							</p>
+						</div>
+						<img
+							class="tile__img"
+							src="img/crop-uses.webp"
+							width="1030"
+							height="492"
+							loading="lazy"
+							alt="The uses of hasReply, listed by file, with the lines this change touched marked as changed."
+						/>
+					</article>
+
+					<article class="tile reveal tile--plain tile--half">
 						<h3>Nothing posts by itself</h3>
-						<p>Comments go to your pending review on GitHub only when you publish. You choose when to submit.</p>
+						<p>
+							New comments wait in your pending review on GitHub until you publish, with progress as they go. You choose when to submit.
+						</p>
+					</article>
+
+					<article class="tile reveal tile--plain tile--half">
+						<h3>Answer threads in place</h3>
+						<p>Reply to a GitHub thread or resolve it right from the diff. Replies go out when you send them, like on GitHub.</p>
 					</article>
 				</div>
 			</section>
 
 			<section class="download" id="download" aria-labelledby="download-title">
 				<h2 id="download-title">Download</h2>
-				<p class="download__sub">Free. Needs Git installed.</p>
+				<p class="download__sub">Free. Needs Git installed. Review lets you know when a new version is out and installs it for you.</p>
 				<ul class="files">
 					<li data-platform="mac-arm64">
 						<a href="https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-arm64.dmg">
@@ -211,6 +254,11 @@
 						</a>
 					</li>
 				</ul>
+
+				<div class="source">
+					<p>On macOS, Homebrew works too.</p>
+					<pre><code>brew install hamedghaderi/tap/review</code></pre>
+				</div>
 
 				<details class="first-open">
 					<summary>Your system warns on first open. Here's why.</summary>
