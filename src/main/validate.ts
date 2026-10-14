@@ -300,13 +300,24 @@ function decisions(v: unknown, known: ReadonlyMap<string, string>): Record<strin
 	if (entries.length > LIMITS.items) bad('finding decisions')
 	for (const [id, raw] of entries) {
 		if (!known.has(id)) bad('finding decision (unknown finding)')
-		const d = obj(raw, 'finding decision')
-		if (d.status !== 'accepted' && d.status !== 'dismissed' && d.status !== 'open') bad('finding decision status')
-		out[id] = { status: d.status, decidedAt: iso(d.decidedAt, 'decision date') }
-		if (d.status === 'dismissed') {
-			if (d.reason !== undefined && d.reason !== null) out[id].reason = oneOf(d.reason, DISMISS_REASONS, 'dismiss reason')
-			if (d.note !== undefined && d.note !== null) out[id].note = text(d.note, 'dismiss note', 500).trim() || null
+		out[id] = decision(raw)
+		const history = obj(raw, 'finding decision').history
+		if (history !== undefined) {
+			const list = arr(history, 'decision history')
+			if (list.length > 20) bad('decision history')
+			out[id].history = list.map(decision)
 		}
+	}
+	return out
+}
+
+function decision(raw: unknown): FindingDecision {
+	const d = obj(raw, 'finding decision')
+	if (d.status !== 'accepted' && d.status !== 'dismissed' && d.status !== 'open') bad('finding decision status')
+	const out: FindingDecision = { status: d.status, decidedAt: iso(d.decidedAt, 'decision date') }
+	if (d.status === 'dismissed') {
+		if (d.reason !== undefined && d.reason !== null) out.reason = oneOf(d.reason, DISMISS_REASONS, 'dismiss reason')
+		if (d.note !== undefined && d.note !== null) out.note = text(d.note, 'dismiss note', 500).trim() || null
 	}
 	return out
 }

@@ -1136,6 +1136,17 @@ function FindingCard(p: CardProps) {
 				</div>
 			)}
 			{state === 'dismissed' && p.decision?.status === 'dismissed' && <DismissedNote finding={f} decision={p.decision} onNote={p.onNote} />}
+			{!!p.decision?.history?.length && (
+				<div className="small muted">
+					Earlier:{' '}
+					{p.decision.history
+						.map(
+							(h) =>
+								`${h.status === 'dismissed' ? `dismissed${h.reason ? ` (${REASON_LABEL[h.reason]})` : ''}${h.note ? `: "${h.note}"` : ''}` : 'restored'} ${new Date(h.decidedAt).toLocaleString()}`,
+						)
+						.join(' · ')}
+				</div>
+			)}
 		</div>
 	)
 }

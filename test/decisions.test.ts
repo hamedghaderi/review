@@ -57,6 +57,32 @@ test('a dismissal keeps its reason and note; restoring drops them; the note can 
 	)
 })
 
+test('dismissing again or restoring keeps the earlier decisions, and they survive saving', () => {
+	let r = setFindingDecision(review(), 'f1', 'dismissed', { reason: 'wrong' })
+	r = setDismissNote(r, 'f1', 'checked by the caller')
+	r = setFindingDecision(r, 'f1', 'open')
+	r = setFindingDecision(r, 'f1', 'dismissed', { reason: 'intended' })
+	const d = r.findingDecisions.f1
+	assert.equal(d.reason, 'intended')
+	assert.deepEqual(
+		d.history?.map((h) => [h.status, h.reason, h.note]),
+		[
+			['dismissed', 'wrong', 'checked by the caller'],
+			['open', undefined, undefined],
+		],
+	)
+	assert.ok(
+		d.history?.every((h) => !('history' in h)),
+		'history is flat',
+	)
+
+	const saved = reviewUpdate(r, review(), new Map([['f1', 'f1']]))
+	assert.deepEqual(saved.findingDecisions.f1.history, d.history)
+
+	for (let i = 0; i < 30; i++) r = setFindingDecision(r, 'f1', i % 2 ? 'open' : 'dismissed')
+	assert.equal(r.findingDecisions.f1.history?.length, 20)
+})
+
 function changed(path: string): ChangedFile {
 	return { key: path, status: 'modified', oldPath: path, newPath: path, additions: 1, deletions: 1, binary: false, similarity: null }
 }

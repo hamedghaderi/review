@@ -809,6 +809,7 @@ export interface FindingDecision {
 	decidedAt: string
 	reason?: DismissReason | null // dismissed: why; told to later runs of the same pull request or branch
 	note?: string | null // dismissed: the reviewer's own words, e.g. where it is handled
+	history?: Array<Omit<FindingDecision, 'history'>> // earlier decisions on this finding, oldest first
 }
 
 export const DISMISS_REASONS = ['wrong', 'not-worth-it', 'handled-elsewhere', 'intended'] as const
