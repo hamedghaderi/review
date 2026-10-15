@@ -758,13 +758,26 @@ function adoptNewRules(saved: ReviewTeam): ReviewTeam {
 		})),
 	}
 	const owned = new Set(t.members.flatMap((m) => m.rules))
-	const missing = LATER_RULES.filter((r) => !owned.has(r))
+	const missing = LATER_RULES.filter((r) => !owned.has(r.rule))
 	if (!missing.length) return t
-	const heir =
-		t.members.find((m) => m.rules.includes('breaking-change')) ?? t.members.find((m) => m.rules.includes('file-split')) ?? t.members[0]
-	return { ...t, members: t.members.map((m) => (m === heir ? { ...m, rules: [...m.rules, ...missing] } : m)) }
+	// Each new rule goes to whoever checks the rule closest to it, else the first member.
+	const heirOf = ({ near }: (typeof LATER_RULES)[number]) =>
+		near.map((n) => t.members.find((m) => m.rules.includes(n))).find(Boolean) ?? t.members[0]
+	return {
+		...t,
+		members: t.members.map((m) => {
+			const mine = missing.filter((r) => heirOf(r) === m).map((r) => r.rule)
+			return mine.length ? { ...m, rules: [...m.rules, ...mine] } : m
+		}),
+	}
 }
-const LATER_RULES: Array<ReviewRule> = ['convention', 'test-value', 'misleading-name'] // added in reviewer-2026-10-01.6, -10-02.2 and -10-13.1
+// Added in reviewer-2026-10-01.6, -10-02.2, -10-13.1 and -10-15.1.
+const LATER_RULES: Array<{ rule: ReviewRule; near: Array<ReviewRule> }> = [
+	{ rule: 'convention', near: ['breaking-change', 'file-split'] },
+	{ rule: 'test-value', near: ['breaking-change', 'file-split'] },
+	{ rule: 'misleading-name', near: ['breaking-change', 'file-split'] },
+	{ rule: 'performance', near: ['bug', 'error-handling'] },
+]
 
 export function migrateSettings(raw: unknown): SettingsFile {
 	const d = raw as Partial<SettingsFile> | null

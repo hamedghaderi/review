@@ -23,8 +23,28 @@ const AREAS: Array<{ re: RegExp; why: string; weight: number }> = [
 	},
 	{ re: /(^|\/)(migrations?|migrate)\/|\.sql$|(^|\/)schema\.(prisma|rb|sql|graphql)$/i, why: 'database migration or schema', weight: 3 },
 	{
+		re: /(^|[/_.-])(jobs?|queues?|workers?|consumers?|schedul(e|er|ers|ing)|cron\w*|daemons?)([/_.-]|$)/i,
+		why: 'background jobs or queues (retries, ordering, concurrency)',
+		weight: 2,
+	},
+	{
 		re: /(^|\/)(\.github\/workflows|\.gitlab-ci|\.circleci|k8s|kubernetes|helm|terraform|deploy)(\/|\.|$)|(^|\/)(Dockerfile|docker-compose[\w.-]*|Jenkinsfile|Procfile)$|\.tf$/i,
 		why: 'build or deployment configuration',
+		weight: 2,
+	},
+]
+
+// What changed lines do, whatever the file is called: these are where a race or a half-done update hides.
+const LINE_SIGNALS: Array<{ re: RegExp; why: string; weight: number }> = [
+	{
+		// 'status' => …, ->set('state', …), .status = …, status: Status.X, UPDATE … SET status
+		re: /(['"])(status|state|phase|stage)\1\s*=>|\bset\(\s*(['"])(status|state|phase|stage)\3\s*,|(->|\.)(status|state|phase|stage)\s*=(?!=)|\b(status|state|phase|stage)\s*:\s*[A-Z]\w*\.|\bSET\s+[`"]?(status|state)\b/,
+		why: 'writes a status or state field',
+		weight: 2,
+	},
+	{
+		re: /\b(lockForUpdate|sharedLock|FOR UPDATE|SKIP LOCKED|beginTransaction|DB::transaction|transaction\(|withoutOverlapping|ShouldBeUnique|mutex|Mutex|semaphore|Semaphore|Atomics\.|compareAndSet|compare_and_swap|affected_rows|affectedRows|rowCount\(\))/,
+		why: 'locks, transactions or atomic updates',
 		weight: 2,
 	},
 ]
@@ -98,6 +118,13 @@ export function classifyRisk(sources: Array<FileSource>, related: RelatedResult 
 			if (spaced.some((p) => a.re.test(p))) {
 				score += a.weight
 				reasons.push(a.why)
+			}
+		}
+		const changed = patch.kind === 'text' ? patch.hunks.flatMap((h) => h.lines.filter((l) => l.kind !== 'ctx').map((l) => l.text)) : []
+		for (const s of LINE_SIGNALS) {
+			if (changed.some((t) => s.re.test(t))) {
+				score += s.weight
+				reasons.push(s.why)
 			}
 		}
 		if (MANIFEST.test(path)) {

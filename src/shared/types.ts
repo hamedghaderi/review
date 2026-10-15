@@ -604,6 +604,7 @@ export type FindingCategory =
 	| 'bug'
 	| 'security'
 	| 'error-handling'
+	| 'performance'
 	| 'breaking-change'
 	| 'file-split'
 	| 'over-engineered'
@@ -631,6 +632,7 @@ export const REVIEW_RULES = [
 	'bug',
 	'security',
 	'error-handling',
+	'performance',
 	'breaking-change',
 	'file-split',
 	'over-engineered',
@@ -677,7 +679,7 @@ export type ReviewerChoice = { kind: 'model'; selection: ModelSelection; passes?
 
 /** The roles a new team starts with, and the passes of a focused-pass run. Each rule belongs to exactly one role. */
 export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> = [
-	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling'] },
+	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling', 'performance'] },
 	{ id: 'security', role: 'Security', rules: ['security'] },
 	{
 		id: 'callers',
@@ -816,6 +818,13 @@ export const DISMISS_REASONS = ['wrong', 'not-worth-it', 'handled-elsewhere', 'i
 export type DismissReason = (typeof DISMISS_REASONS)[number]
 
 /** A finding the reviewer dismissed, as later runs are told about it. */
+/** The limitations of the newest finished run of the same pull request or branch, told to the next run. */
+export interface EarlierLimitations {
+	runId: string
+	headSha: string
+	items: Array<string>
+}
+
 export interface PastDecision {
 	path: string
 	line: number | null
@@ -881,7 +890,7 @@ export interface AiRunCoverage {
 	inputChars: number
 	// Code outside the change sent as read-only reference (definitions and uses); absent on older runs.
 	related?: { symbols: number; sent: number; chars: number; omitted: number; notes: Array<string> } | null
-	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions'; text: string }> // what the app computed or read for the reviewer; absent on older runs
+	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier'; text: string }> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
 }
 
@@ -956,6 +965,7 @@ export interface AiRun {
 	unexplained?: Array<{ fileKey: string; why: string }> // changed files the reviewer could not connect to the change's purpose
 	outdatedDocs?: Array<OutdatedDoc> // project docs (.review/*.md) the change makes wrong without updating them
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
+	earlier?: EarlierLimitations | null // what an earlier run could not settle, given to this run to settle first
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
 	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked

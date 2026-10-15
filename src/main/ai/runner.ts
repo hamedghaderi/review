@@ -15,6 +15,7 @@ import {
 	type SuppliedExcerpt,
 	type FindingVerification,
 	type PastDecision,
+	type EarlierLimitations,
 	type ReviewContext,
 } from '../../shared/types.ts'
 import type { LinkedIssue } from '../github.ts'
@@ -30,7 +31,7 @@ import { routeFiles, unroutedReason } from './routing.ts'
 import { buildEvidence, supportFor, uncoveredCi, type EvidenceIndex } from './evidence.ts'
 import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts'
 import { buildMergeRequest, readGroups } from './merge.ts'
-import { decisionFacts } from './decisions.ts'
+import { decisionFacts, earlierFacts } from './decisions.ts'
 import { importFacts, importSummary } from './imports.ts'
 import type { FactsResult } from './facts.ts'
 import {
@@ -103,6 +104,8 @@ export interface RunInput {
 	previousFindings: Array<Finding> // from earlier runs of the same review, used to mark repeats
 	/** Findings the reviewer dismissed on earlier runs of the same pull request or branch, told to this run. */
 	decisions?: Array<PastDecision>
+	/** What the newest finished run of the same pull request or branch could not settle; a retry passes its run's own. */
+	earlier?: EarlierLimitations | null
 	/**
 	 * Re-asks rules of a finished run, on the requests that did not cover them, and merges the answers into that run.
 	 * `providers` holds each owning reviewer's provider, by member id (null for a single-model run); `options.team` is ignored.
@@ -173,6 +176,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				unexplained: [],
 				team: null,
 				levels,
+				earlier: input.earlier ?? null,
 			}
 	const description = input.comparison.pr?.body?.trim() || null
 	const images = input.images ?? []
@@ -307,7 +311,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				}
 			}
 			const told = decisionFacts(input.decisions ?? [], sources)
-			const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...told]
+			const leads = earlierFacts(input.earlier ?? null, sources)
+			const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...told, ...leads]
 			const risk = classifyRisk(sources, related)
 			evidence = buildEvidence(sources, facts?.annotations ?? [], related ? related.importers : null)
 			const prepared = prepareChange(sources, tight.limits, allFacts)
@@ -361,6 +366,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 								},
 							]
 						: []),
+					...(leads.length
+						? [
+								{
+									kind: 'earlier' as const,
+									text: `${input.earlier!.items.length} question${input.earlier!.items.length === 1 ? '' : 's'} the run on ${input.earlier!.headSha.slice(0, 7)} could not settle ${input.earlier!.items.length === 1 ? 'was' : 'were'} given to the reviewer to settle first.`,
+								},
+							]
+						: []),
 				],
 				lookups: lookups
 					? { ...emptyLookups(), ...(input.external?.failures.length ? { externalUnavailable: input.external.failures } : {}) }
@@ -407,7 +420,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			})
 		const facts = input.loadFacts ? await input.loadFacts(sources, controller.signal) : null
 		if (controller.signal.aborted) return finish(null)
-		const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...decisionFacts(input.decisions ?? [], sources)]
+		const allFacts = [
+			...(facts?.facts ?? []),
+			...importFacts(related?.importers ?? []),
+			...decisionFacts(input.decisions ?? [], sources),
+			...earlierFacts(input.earlier ?? null, sources),
+		]
 		const risk = classifyRisk(sources, related)
 		evidence = buildEvidence(sources, facts?.annotations ?? [], related ? related.importers : null)
 		// Team runs recorded before members got their own requests shared one set, sized for the smallest member.

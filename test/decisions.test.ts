@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { FileSource } from '../src/main/ai/context.ts'
-import { decisionFacts } from '../src/main/ai/decisions.ts'
+import { decisionFacts, earlierFacts } from '../src/main/ai/decisions.ts'
 import { createFakeProvider, emptyEvaluation } from '../src/main/ai/fake.ts'
 import { startRun } from '../src/main/ai/runner.ts'
 import { reviewUpdate } from '../src/main/validate.ts'
 import { setDismissNote, setFindingDecision } from '../src/renderer/src/reviewOps.ts'
 import { blockingSummary, findingRoots } from '../src/shared/findings.ts'
-import type { AiRun, ChangedFile, Comparison, Finding, PastDecision, Review } from '../src/shared/types.ts'
+import type { AiRun, ChangedFile, Comparison, EarlierLimitations, Finding, PastDecision, Review } from '../src/shared/types.ts'
 
 const BASE = 'a'.repeat(40)
 const HEAD = 'b'.repeat(40)
@@ -187,6 +187,80 @@ test('earlier dismissals reach the next run with the file they are about, in the
 	)
 })
 
+const EARLIER: EarlierLimitations = {
+	runId: 'r1',
+	headSha: 'c'.repeat(40),
+	items: [
+		'Defects: whether view.ts escapes the name could not be read before the lookup limit.',
+		'Defects: the code that reads this flag was not supplied.',
+	],
+}
+
+test('what an earlier run could not settle reaches the next run, with the files it names, and the run records it', async () => {
+	assert.deepEqual(earlierFacts(EARLIER, SOURCES), [
+		{
+			kind: 'earlier',
+			title: 'Questions an earlier run could not settle (it reviewed commit ccccccc)',
+			text: '- Defects: whether view.ts escapes the name could not be read before the lookup limit.',
+			fileKeys: ['src/view.ts'],
+		},
+		{
+			kind: 'earlier',
+			title: 'Questions an earlier run could not settle (it reviewed commit ccccccc)',
+			text: '- Defects: the code that reads this flag was not supplied.',
+			fileKeys: null,
+		},
+	])
+	assert.deepEqual(earlierFacts(null, SOURCES), [])
+
+	const inputs: Array<string> = []
+	const comparison: Comparison = {
+		id: `${BASE}..${HEAD}`,
+		repoId: '/repo',
+		baseRef: 'main',
+		baseTipSha: BASE,
+		baseSha: BASE,
+		headSha: HEAD,
+		headRef: 'topic',
+		target: null,
+		pr: null,
+		files: SOURCES.map((s) => s.file),
+	}
+	const run = await startRun(
+		{
+			reviewId: comparison.id,
+			comparison,
+			scope: { kind: 'all' },
+			loadSources: async () => SOURCES,
+			previousFindings: [],
+			earlier: EARLIER,
+		},
+		{
+			provider: createFakeProvider({
+				script: (req) => {
+					inputs.push(req.input)
+					return { findings: [], evaluation: emptyEvaluation(), unexplained_files: [], limitations: [] }
+				},
+			}),
+			limits: { contextLines: 3, maxBatchChars: 100_000, maxRunChars: 1_000_000 },
+			concurrency: 1,
+			maxAttempts: 1,
+			backoffMs: () => 0,
+		},
+		() => {},
+	).done
+	assert.equal(run.status, 'completed')
+	assert.match(
+		inputs[0],
+		/## Questions an earlier run could not settle \(it reviewed commit ccccccc\)\n- Defects: whether view\.ts escapes/,
+	)
+	assert.match(inputs[0], /the code that reads this flag/)
+	assert.deepEqual(run.earlier, EARLIER, 'kept on the run, so a retry rebuilds the same requests')
+	assert.ok(
+		run.coverage.facts!.some((f) => f.kind === 'earlier' && /2 questions the run on ccccccc could not settle were given/.test(f.text)),
+	)
+})
+
 test('the publish summary counts each blocking finding once: added, undecided (with the double-check), dismissed', () => {
 	const mk = (id: string, over: Partial<Finding> = {}): Finding =>
 		({
@@ -228,4 +302,48 @@ test('the publish summary counts each blocking finding once: added, undecided (w
 	let r = setFindingDecision(review(), 'b', 'dismissed', { reason: 'wrong' })
 	r = { ...r, comments: [{ id: 'k', findingId: 'c' } as Review['comments'][number]] }
 	assert.deepEqual(blockingSummary(r, runs, roots), { added: 1, open: 2, openHolds: 1, openWrong: 1, dismissed: 1 })
+})
+
+test('the next run is told what the newest finished run of the same pull request left unsettled, not other runs', async () => {
+	const { mkdtempSync } = await import('node:fs')
+	const { tmpdir } = await import('node:os')
+	const { join } = await import('node:path')
+	const { ReviewStore } = await import('../src/main/store.ts')
+	const { ReviewService } = await import('../src/main/service.ts')
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'review-earlier-')))
+	await store.load()
+	const pr = { kind: 'pr' as const, repo: 'o/r', number: 7 }
+	const snap = (head: string, target: Review['target']): Review => ({ ...review(), id: `${BASE}..${head}`, headSha: head, target })
+	const old = snap('1'.repeat(40), pr)
+	const now = snap('2'.repeat(40), pr)
+	const other = snap('3'.repeat(40), { ...pr, number: 8 })
+	const run = (id: string, head: string, finishedAt: string | null, limitations: Array<string>, extra: Partial<AiRun> = {}) =>
+		({ id, headSha: head, status: 'completed', fixture: false, finishedAt, limitations, findings: [], ...extra }) as unknown as AiRun
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: null,
+			reviews: { [old.id]: old, [now.id]: now, [other.id]: other },
+			aiRuns: {
+				[old.id]: [
+					run('a', old.headSha, '2026-10-15T08:00:00.000Z', ['first look']),
+					run('b', old.headSha, '2026-10-15T08:05:00.000Z', ['newer look']),
+				],
+				[now.id]: [
+					run('c', now.headSha, '2026-10-15T08:09:00.000Z', ['a fixture'], { fixture: true }),
+					run('d', now.headSha, null, ['still running'], { status: 'running' }),
+				],
+				[other.id]: [run('e', other.headSha, '2026-10-15T09:00:00.000Z', ['another pull request'])],
+			},
+		}
+	})
+	const svc = new ReviewService(store, null)
+	const earlier = (c: Review) => svc['earlierLimitations']('/repo', { ...c, pr: null, files: [] } as unknown as Comparison)
+	assert.deepEqual(earlier(now), { runId: 'b', headSha: old.headSha, items: ['newer look'] })
+	await store.update((d) => {
+		d.repos['/repo'].aiRuns[now.id].push(run('f', now.headSha, '2026-10-15T08:10:00.000Z', []))
+	})
+	assert.equal(earlier(now), null, 'the newest run settled everything, so older notes are stale')
 })

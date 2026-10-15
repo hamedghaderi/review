@@ -312,3 +312,70 @@ test('a new file brings existing files of the same kind from its folder, so the 
 	)
 	assert.ok(!snippets.some((x) => x.reasons.some((r) => r.startsWith('peer of `Touched.php`'))), 'only added files get peers')
 })
+
+test('code that writes the same table or status field as the change comes along, nearest folders first, tests left out', async () => {
+	const dir = tmp()
+	const run = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	const write = (files: Record<string, string>): void => {
+		for (const [f, text] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, f)), { recursive: true })
+			writeFileSync(join(dir, f), text)
+		}
+	}
+	const php = (body: string) => `<?php\nclass X\n{\n    public function go(int $id): void\n    {\n${body}\n    }\n}\n`
+	run('init', '-q', '-b', 'main')
+	write({
+		'app/Orders/ShipOrder.php': php(`        DB::table('orders')->where('id', $id)->update(['status' => OrderStatus::Shipped]);`),
+		'app/Billing/RefundOrder.php': php(
+			`        $this->order->update(['status' => OrderStatus::Refunded]);\n        $this->invoice->update(['status' => InvoiceStatus::Void]);`,
+		),
+		'app/Users/BanUser.php': php(`        $user->update(['status' => UserStatus::Banned]);`),
+		'tests/Feature/OrderTest.php': php(`        $x = ['status' => OrderStatus::Refunded];`),
+		'app/Reports/Archive.php': php(`        DB::table('orders')->where('id', $id)->update(['archived' => 1]);`),
+	})
+	run('add', '-A')
+	run('commit', '-qm', 'base')
+	run('checkout', '-qb', 'topic')
+	write({
+		'app/Orders/CancelOrder.php': php(
+			`        DB::table('orders')->where('id', $id)->update([\n            'status' => OrderStatus::Canceled,\n        ]);`,
+		),
+	})
+	run('add', '-A')
+	run('commit', '-qm', 'topic')
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(dir)
+	const { comparison } = await svc.loadComparison(s.repo.id, {
+		kind: 'target',
+		target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+	})
+	const sources: Array<FileSource> = []
+	for (const file of comparison.files)
+		sources.push({
+			file,
+			patch: await svc.loadPatch(comparison.id, file.key, false),
+			fullText: await svc.loadFileLines(comparison.id, file.key),
+		})
+
+	const { snippets } = await findRelated(dir, comparison.headSha, sources)
+	const writers = (what: string) => snippets.filter((x) => x.reasons.some((r) => r.startsWith(`also writes ${what}`))).map((x) => x.path)
+	assert.deepEqual(writers('`status` with `OrderStatus` values'), ['app/Orders/ShipOrder.php', 'app/Billing/RefundOrder.php'])
+	assert.deepEqual(writers('the `orders` table'), ['app/Orders/ShipOrder.php', 'app/Reports/Archive.php'], 'nearest folder first')
+	const refund = snippets.find((x) => x.path === 'app/Billing/RefundOrder.php')!
+	assert.ok(
+		refund.lines.some((l) => l.includes('$this->invoice->update')),
+		'enough around the write to see what else it updates',
+	)
+	assert.ok(refund.fileKeys.has('app/Orders/CancelOrder.php'))
+	assert.match(refund.reasons[0], /as the change does \(in `go`, line 4\)/)
+	assert.ok(
+		!snippets.some((x) => x.path.startsWith('tests/') || x.path === 'app/Users/BanUser.php'),
+		'tests and other status types are left out',
+	)
+})

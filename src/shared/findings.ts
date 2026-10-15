@@ -82,6 +82,7 @@ export const CATEGORY_LABEL: Record<FindingCategory, string> = {
 	bug: 'Bug',
 	security: 'Security',
 	'error-handling': 'Error handling',
+	performance: 'Performance',
 	'breaking-change': 'Breaking change',
 	'file-split': 'File structure',
 	'over-engineered': 'Over-engineered',

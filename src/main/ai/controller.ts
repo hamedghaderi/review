@@ -15,6 +15,7 @@ import {
 	type ReviewRule,
 	type ReviewTeam,
 	type PastDecision,
+	type EarlierLimitations,
 	type ReviewContext,
 } from '../../shared/types.ts'
 import { AppFail } from '../git.ts'
@@ -47,6 +48,8 @@ export interface ComparisonAccess {
 	contextImages?(): Promise<Array<RequestImage>>
 	/** Findings the reviewer dismissed on earlier runs of this pull request or branch, newest first. */
 	pastDecisions?(): Array<PastDecision>
+	/** What the newest finished run of this pull request or branch could not settle. */
+	earlierLimitations?(): EarlierLimitations | null
 	/** Read-only lookups in the comparison's two commits, for one review request, plus the run's MCP tools if any. */
 	tools?(budget: LookupBudget, external?: ExternalTools | null): ReviewTools
 	/** Connects the enabled MCP servers for one run; null when none is enabled. */
@@ -473,6 +476,7 @@ export class AiController {
 				tools: tools ? (budget) => tools.call(access, budget, external) : undefined,
 				external,
 				decisions: access.pastDecisions?.() ?? [],
+				earlier: input.retry ? (input.retry.run.earlier ?? null) : (access.earlierLimitations?.() ?? null),
 			},
 			options,
 			(run) => void this.persist(repoId, run),

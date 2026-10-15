@@ -2,6 +2,7 @@ import { git } from '../git.ts'
 import { definedName, grepCommit, type GrepHit, IDENT, IMPORT, NOT_NAMES, skipPath } from '../symbols.ts'
 import type { FileSource } from './context.ts'
 import { findImporters, type FileImporters } from './imports.ts'
+import { fileKind } from './risk.ts'
 
 /**
  * Related code for the AI reviewer: where names the change uses are defined, and where names the change defines,
@@ -150,7 +151,14 @@ export async function findRelated(root: string, headSha: string, sources: Array<
 	}
 	// Changed file → every file that imports it (at its current or old path).
 	const importedBy = new Map(importers.map((f) => [f.fileKey, new Set([...f.importers, ...f.tests, ...f.stale])]))
-	if (!names.length) return { snippets: await peerFiles(root, headSha, sources, read, signal), symbols: 0, notes, importers }
+	const writers = await otherWriters(root, headSha, sources, read, notes, signal)
+	if (!names.length)
+		return {
+			snippets: mergeOverlapping([...writers, ...(await peerFiles(root, headSha, sources, read, signal))]),
+			symbols: 0,
+			notes,
+			importers,
+		}
 	const r = await grepCommit(root, headSha, names, { word: true, maxBytes: GREP_LIMIT, timeoutMs: 30_000, signal })
 	if (r.failed) throw new Error(`git grep failed: ${r.failed}`)
 	if (r.truncated) notes.push('The related-code search stopped early: too many matches.')
@@ -243,8 +251,156 @@ export async function findRelated(root: string, headSha: string, sources: Array<
 			priority: p.priority,
 		})
 	}
-	raw.push(...(await peerFiles(root, headSha, sources, read, signal)))
+	raw.push(...writers, ...(await peerFiles(root, headSha, sources, read, signal)))
 	return { snippets: mergeOverlapping(raw), symbols: names.length - common.length, notes, importers }
+}
+
+const STATE = 'status|state|phase|stage'
+// A state field set to a value of a named type: 'status' => OrderStatus::X, ->set('state', S::X), order.status = Status.X…
+const FIELD_WRITES: Array<RegExp> = [
+	new RegExp(`(['"])(${STATE})\\1\\s*=>\\s*\\\\?([A-Z]\\w*)::`),
+	new RegExp(`\\bset\\(\\s*(['"])(${STATE})\\1\\s*,\\s*\\\\?([A-Z]\\w*)::`),
+	new RegExp(`()->(${STATE})\\s*=\\s*\\\\?([A-Z]\\w*)::`),
+	new RegExp(`()(?:\\.|\\b)(${STATE})\\s*[:=]\\s*([A-Z]\\w*)\\.`),
+]
+// A write to a named table: query builders (update('orders', …), table('orders')->update) and SQL.
+const TABLE_WRITES: Array<RegExp> = [
+	/\b(?:update|insert|replace|delete|update_batch|insert_batch|upsert)\(\s*['"](\w+)['"]/,
+	/\btable\(\s*['"](\w+)['"]\s*\).*->(?:update|insert|upsert|delete|increment|decrement)\w*\(/,
+	/\b(?:UPDATE|INSERT INTO|DELETE FROM)\s+[`"]?(\w+)/,
+]
+const MAX_WRITTEN = 6 // tables and fields searched
+const WRITERS_PER_TARGET = 4 // files shown for each
+const WRITE_CONTEXT = 8
+
+interface Written {
+	label: string
+	patterns: Array<string> // fixed strings that find other writes of the same thing
+	fileKeys: Set<string>
+	dirs: Array<string> // folders of the changed files that write it, to rank writers by nearness
+}
+
+/** The tables and state fields the change's added lines write, keyed by what they are. */
+export function writtenTargets(sources: Array<FileSource>): Map<string, Written> {
+	const out = new Map<string, Written>()
+	const add = (key: string, label: string, patterns: () => Array<string>, file: FileSource['file']): void => {
+		const w = out.get(key) ?? { label, patterns: patterns(), fileKeys: new Set(), dirs: [] }
+		w.fileKeys.add(file.key)
+		const path = file.newPath ?? file.key
+		w.dirs.push(path.slice(0, path.lastIndexOf('/') + 1))
+		out.set(key, w)
+	}
+	for (const { file, patch } of sources) {
+		if (patch.kind !== 'text') continue
+		for (const h of patch.hunks) {
+			for (const l of h.lines) {
+				if (l.kind !== 'add' || /^\s*(\/\/|#|\*|\/\*)/.test(l.text)) continue
+				for (const re of FIELD_WRITES) {
+					const m = re.exec(l.text)
+					if (!m) continue
+					const [f, t] = [m[2], m[3]]
+					add(`field:${f}:${t}`, `\`${f}\` with \`${t}\` values`, () => fieldPatterns(f, t), file)
+				}
+				for (const re of TABLE_WRITES) {
+					const m = re.exec(l.text)
+					if (m && !NOT_NAMES.has(m[1])) add(`table:${m[1]}`, `the \`${m[1]}\` table`, () => tablePatterns(m[1]), file)
+				}
+			}
+		}
+	}
+	return new Map([...out].slice(0, MAX_WRITTEN))
+}
+
+function fieldPatterns(f: string, t: string): Array<string> {
+	return [
+		`'${f}' => ${t}::`,
+		`"${f}" => ${t}::`,
+		`'${f}' => \\${t}::`,
+		`set('${f}', ${t}::`,
+		`set("${f}", ${t}::`,
+		`->${f} = ${t}::`,
+		`.${f} = ${t}.`,
+		`${f}: ${t}.`,
+		`${f}=${t}.`,
+	]
+}
+
+function tablePatterns(t: string): Array<string> {
+	return [
+		...['update', 'insert', 'replace', 'delete', 'update_batch', 'insert_batch', 'upsert'].flatMap((v) => [`${v}('${t}'`, `${v}("${t}"`]),
+		`table('${t}')`,
+		`table("${t}")`,
+		`UPDATE ${t} `,
+		`UPDATE \`${t}\``,
+		`INSERT INTO ${t}`,
+		`DELETE FROM ${t}`,
+	]
+}
+
+/**
+ * Other code that writes what the change writes: the same table, or the same state field with values of the same type.
+ * How the codebase makes that change elsewhere shows what a new writer may leave out, such as a second record every
+ * other writer also updates. Nearest folders first, since sibling code most often follows the same pattern. Changed
+ * files are left out (their lines are in the excerpts), and so are tests.
+ */
+async function otherWriters(
+	root: string,
+	headSha: string,
+	sources: Array<FileSource>,
+	read: (path: string) => Promise<Array<string> | null>,
+	notes: Array<string>,
+	signal?: AbortSignal,
+): Promise<Array<RelatedSnippet>> {
+	const targets = writtenTargets(sources)
+	if (!targets.size) return []
+	const r = await grepCommit(
+		root,
+		headSha,
+		[...targets.values()].flatMap((w) => w.patterns),
+		{ maxBytes: GREP_LIMIT, timeoutMs: 30_000, signal },
+	)
+	if (r.failed) {
+		notes.push(`Other writers of what the change writes could not be searched: ${r.failed}`)
+		return []
+	}
+	const changed = new Set(sources.flatMap((s) => [s.file.newPath, s.file.oldPath].filter((p): p is string => !!p)))
+	const out: Array<RelatedSnippet> = []
+	for (const w of targets.values()) {
+		const byFile = new Map<string, GrepHit>()
+		for (const h of r.hits) {
+			if (changed.has(h.path) || skipPath(h.path) || fileKind(h.path) !== 'code' || byFile.has(h.path)) continue
+			if (w.patterns.some((p) => h.text.includes(p))) byFile.set(h.path, h)
+		}
+		const near = (path: string): number => Math.max(...w.dirs.map((d) => sharedDirs(d, path)))
+		const picked = [...byFile.values()]
+			.sort((a, b) => near(b.path) - near(a.path) || a.path.localeCompare(b.path))
+			.slice(0, WRITERS_PER_TARGET)
+		for (const h of picked) {
+			const lines = await read(h.path)
+			if (!lines) continue
+			const [start, end] = [Math.max(1, h.line - WRITE_CONTEXT), Math.min(lines.length, h.line + WRITE_CONTEXT)]
+			const inside = enclosingDefinition(lines, h.line)
+			out.push({
+				path: h.path,
+				start,
+				end,
+				lines: lines.slice(start - 1, end),
+				reasons: [`also writes ${w.label}, as the change does${inside ? ` (in \`${inside.name}\`, line ${inside.line})` : ''}`],
+				fileKeys: new Set(w.fileKeys),
+				priority: 1,
+			})
+		}
+	}
+	return out
+}
+
+/** How many leading folders a file shares with a folder ("app/Jobs/" and "app/Jobs/Sync/A.php" share 2). */
+function sharedDirs(dir: string, path: string): number {
+	const a = dir.split('/').filter(Boolean)
+	const b = path.split('/').slice(0, -1)
+	let n = 0
+	while (n < a.length && n < b.length && a[n] === b[n]) n++
+	return n
 }
 
 const PEER_FILES = 2 // per added file
