@@ -424,12 +424,22 @@ export async function aheadBehind(root: string, base: string, head: string): Pro
 const DIFF_FLAGS = ['-r', '-M', '--no-ext-diff', '--no-textconv', '--no-relative', '--no-color']
 
 async function buildComparison(root: string, s: Omit<Comparison, 'id' | 'files'>): Promise<ComparisonData> {
-	const [raw, numstat] = await Promise.all([
-		gitText(root, ['diff-tree', ...DIFF_FLAGS, '-z', '--raw', '--no-abbrev', s.baseSha, s.headSha]),
-		gitText(root, ['diff-tree', ...DIFF_FLAGS, '-z', '--numstat', s.baseSha, s.headSha]),
-	])
-	const { files, blobs } = parseChanges(raw, numstat)
+	const { files, blobs } = await changesBetween(root, s.baseSha, s.headSha, true)
 	return { root, blobs, comparison: { ...s, id: `${s.baseSha}..${s.headSha}`, files } }
+}
+
+/** Files changed between two commits, with their blob ids. Line counts stay null unless `counts`. */
+export async function changesBetween(
+	root: string,
+	from: string,
+	to: string,
+	counts: boolean,
+): Promise<Pick<ComparisonData, 'blobs'> & { files: Array<ChangedFile> }> {
+	const [raw, numstat] = await Promise.all([
+		gitText(root, ['diff-tree', ...DIFF_FLAGS, '-z', '--raw', '--no-abbrev', from, to]),
+		counts ? gitText(root, ['diff-tree', ...DIFF_FLAGS, '-z', '--numstat', from, to]) : '',
+	])
+	return parseChanges(raw, numstat)
 }
 
 const ZERO = /^0+$/
@@ -490,4 +500,79 @@ export async function readBlob(root: string, blob: string, maxBytes: number): Pr
 	const r = await git(root, ['cat-file', 'blob', blob], maxBytes)
 	if (!r.truncated && r.code !== 0) throw new AppFail('git-failed', `git cat-file failed: ${r.stderr.trim()}`)
 	return { buf: r.stdout, truncated: r.truncated }
+}
+
+/** A file at a commit, or null when there is no file at that path. A file over `maxBytes` comes back `truncated`. */
+export async function readAt(
+	root: string,
+	sha: string,
+	path: string,
+	maxBytes: number,
+	signal?: AbortSignal,
+): Promise<{ buf: Buffer; truncated: boolean } | null> {
+	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['cat-file', 'blob', `${sha}:${path}`], maxBytes, { signal })
+	return r.truncated || r.code === 0 ? { buf: r.stdout, truncated: r.truncated } : null
+}
+
+/** A folder at a commit ('' is the root), names relative to it; null when there is no such folder. */
+export async function listAt(
+	root: string,
+	sha: string,
+	dir: string,
+	o: { recursive?: boolean; signal?: AbortSignal } = {},
+): Promise<Array<{ name: string; folder: boolean }> | null> {
+	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['ls-tree', ...(o.recursive ? ['-r'] : []), '-z', `${sha}:${dir}`], 1024 * 1024, { signal: o.signal })
+	if (r.code !== 0) return null
+	return r.stdout
+		.toString('utf8')
+		.split('\0')
+		.flatMap((rec) => {
+			const m = /^\d+ (\w+) [0-9a-f]+\t(.*)$/s.exec(rec)
+			return m ? [{ name: m[2], folder: m[1] === 'tree' }] : []
+		})
+}
+
+export interface GrepHit {
+	path: string
+	line: number
+	text: string
+}
+
+/** Fixed-string `git grep` on a commit. `failed` is git's error; a search cut at `maxBytes` is `truncated`, not failed. */
+export async function grepCommit(
+	root: string,
+	sha: string,
+	patterns: Array<string>,
+	o: { word?: boolean; paths?: Array<string>; maxBytes: number; timeoutMs: number; signal?: AbortSignal },
+): Promise<{ hits: Array<GrepHit>; truncated: boolean; failed: string | null }> {
+	const r = await git(
+		root,
+		[
+			'grep',
+			'-n',
+			'-I',
+			...(o.word ? ['-w'] : []),
+			'-F',
+			'-z',
+			'--no-color',
+			...patterns.flatMap((p) => ['-e', p]),
+			sha,
+			'--',
+			...(o.paths ?? []),
+		],
+		o.maxBytes,
+		{ signal: o.signal, timeoutMs: o.timeoutMs },
+	)
+	if (r.code > 1 && !r.truncated) return { hits: [], truncated: false, failed: r.stderr.trim() || `exit ${r.code}` }
+	const at = `${sha}:`
+	const hits = r.stdout
+		.toString('utf8')
+		.split('\n')
+		.flatMap((rec) => {
+			const [loc, no, text] = rec.split('\0')
+			return loc?.startsWith(at) && text !== undefined ? [{ path: loc.slice(at.length), line: Number(no), text }] : []
+		})
+	return { hits, truncated: r.truncated, failed: null }
 }

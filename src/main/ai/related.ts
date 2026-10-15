@@ -1,5 +1,5 @@
-import { git } from '../git.ts'
-import { definedName, grepCommit, type GrepHit, IDENT, IMPORT, NOT_NAMES, skipPath } from '../symbols.ts'
+import { grepCommit, type GrepHit, listAt, readAt } from '../git.ts'
+import { definedName, IDENT, IMPORT, NOT_NAMES, skipPath } from '../symbols.ts'
 import type { FileSource } from './context.ts'
 import { findImporters, type FileImporters } from './imports.ts'
 import { fileKind } from './risk.ts'
@@ -130,10 +130,10 @@ export async function findRelated(root: string, headSha: string, sources: Array<
 	const read = async (path: string): Promise<Array<string> | null> => {
 		if (files.has(path)) return files.get(path)!
 		if (files.size >= MAX_FILES) return null
-		const b = await git(root, ['cat-file', 'blob', `${headSha}:${path}`], FILE_LIMIT, { signal })
+		const b = await readAt(root, headSha, path, FILE_LIMIT, signal)
 		const lines =
-			b.code === 0 && !b.truncated
-				? b.stdout
+			b && !b.truncated
+				? b.buf
 						.toString('utf8')
 						.split('\n')
 						.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
@@ -429,12 +429,11 @@ async function peerFiles(
 		const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
 		const name = path.slice(slash + 1)
 		const ext = name.includes('.') ? name.slice(name.indexOf('.')) : ''
-		const r = await git(root, ['ls-tree', '--name-only', '-z', `${headSha}:${dir}`], 1024 * 1024, { signal })
-		if (r.code !== 0) continue
-		const peers = r.stdout
-			.toString('utf8')
-			.split('\0')
-			.filter((n) => n && n !== name && n.endsWith(ext) && !changed.has(dir + n) && !skipPath(dir + n))
+		const list = await listAt(root, headSha, dir, { signal })
+		if (!list) continue
+		const peers = list
+			.map((e) => e.name)
+			.filter((n) => n !== name && n.endsWith(ext) && !changed.has(dir + n) && !skipPath(dir + n))
 			.sort((a, b) => sharedEnding(b, name) - sharedEnding(a, name) || a.localeCompare(b))
 			.slice(0, PEER_FILES)
 		for (const peer of peers) {

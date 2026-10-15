@@ -1,5 +1,5 @@
 import { posix } from 'node:path'
-import { git } from '../git.ts'
+import { grepCommit } from '../git.ts'
 import { SKIP_DIRS } from '../symbols.ts'
 import type { ContextFact, FileSource } from './context.ts'
 
@@ -55,19 +55,11 @@ export async function findImporters(
 	}
 	const words = [...new Set(targets.map((t) => moduleWord(t.path)).filter((w) => w.length >= 3))]
 	if (!words.length) return []
-	const r = await git(
-		root,
-		['grep', '-n', '-I', '-w', '-F', '-z', '--no-color', ...words.flatMap((w) => ['-e', w]), headSha, '--'],
-		GREP_LIMIT,
-		{ signal, timeoutMs: 30_000 },
-	)
-	if (r.code > 1 && !r.truncated) throw new Error(`git grep failed: ${r.stderr.trim()}`)
-	const at = `${headSha}:`
+	const r = await grepCommit(root, headSha, words, { word: true, maxBytes: GREP_LIMIT, timeoutMs: 30_000, signal })
+	if (r.failed) throw new Error(`git grep failed: ${r.failed}`)
 	const found = new Map<Target, Set<string>>(targets.map((t) => [t, new Set()]))
-	for (const rec of r.stdout.toString('utf8').split('\n')) {
-		const [loc, , text] = rec.split('\0')
-		if (!loc?.startsWith(at) || text === undefined || text.length > 400 || !IMPORT_LINE.test(text)) continue
-		const importer = loc.slice(at.length)
+	for (const { path: importer, text } of r.hits) {
+		if (text.length > 400 || !IMPORT_LINE.test(text)) continue
 		if (SKIP_DIRS.test(importer)) continue
 		const specs = importSpecs(text)
 		if (!specs.length) continue

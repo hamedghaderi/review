@@ -1,4 +1,4 @@
-import { AppFail, git, isSha, parseChanges, readBlob } from './git.ts'
+import { AppFail, changesBetween, git, readAt, readBlob } from './git.ts'
 
 const CODE_LINES = 40 // old lines kept to show an outdated comment's code
 const BLOB_LIMIT = 8 * 1024 * 1024
@@ -33,20 +33,7 @@ export class Mapper {
 	}
 
 	private async readMoves(): Promise<Map<string, PathMove>> {
-		const r = await git(this.root, [
-			'diff-tree',
-			'-r',
-			'-M',
-			'--no-ext-diff',
-			'--no-textconv',
-			'-z',
-			'--raw',
-			'--no-abbrev',
-			this.from,
-			this.to,
-		])
-		if (r.code !== 0) throw new AppFail('git-failed', `git diff-tree failed: ${r.stderr.trim()}`)
-		const { files, blobs } = parseChanges(r.stdout.toString('utf8'), '')
+		const { files, blobs } = await changesBetween(this.root, this.from, this.to, false)
 		const out = new Map<string, PathMove>()
 		for (const f of files) {
 			if (!f.oldPath) continue // added in the later commit; nothing was anchored there
@@ -94,20 +81,12 @@ export class Mapper {
 
 	/** The text of lines start..end in the earlier commit (capped), shown with an outdated comment. */
 	async oldLines(path: string, m: PathMove | null, start: number, end: number): Promise<Array<string>> {
-		const blob = m?.oldBlob ?? (await resolveBlob(this.root, `${this.from}:${path}`))
-		if (!blob) return []
-		const { buf } = await readBlob(this.root, blob, BLOB_LIMIT)
-		if (buf.subarray(0, 8000).includes(0)) return []
-		return buf
+		const r = m?.oldBlob ? await readBlob(this.root, m.oldBlob, BLOB_LIMIT) : await readAt(this.root, this.from, path, BLOB_LIMIT)
+		if (!r || r.buf.subarray(0, 8000).includes(0)) return []
+		return r.buf
 			.toString('utf8')
 			.split('\n')
 			.slice(start - 1, Math.min(end, start + CODE_LINES - 1))
 			.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
 	}
-}
-
-async function resolveBlob(root: string, rev: string): Promise<string | null> {
-	const r = await git(root, ['rev-parse', '--verify', '--quiet', '--end-of-options', rev])
-	const sha = r.stdout.toString('utf8').trim()
-	return r.code === 0 && isSha(sha) ? sha : null
 }

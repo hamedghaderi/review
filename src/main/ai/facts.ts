@@ -1,4 +1,4 @@
-import { git } from '../git.ts'
+import { listAt, readAt } from '../git.ts'
 import type { CommitChecks } from '../github.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { dependencyFacts } from './deps.ts'
@@ -137,18 +137,17 @@ interface ProjectDoc {
  * change under review cannot rewrite what the reviewer is told about the codebase; edits take effect once merged.
  */
 async function projectDocs(root: string, baseSha: string, signal?: AbortSignal): Promise<Array<ProjectDoc>> {
-	const ls = await git(root, ['ls-tree', '-r', '-z', '--name-only', baseSha, '--', PROJECT_DIR], 1024 * 1024, { signal })
-	if (ls.code !== 0) return []
-	const paths = ls.stdout
-		.toString('utf8')
-		.split('\0')
+	const ls = await listAt(root, baseSha, PROJECT_DIR, { recursive: true, signal })
+	if (!ls) return []
+	const paths = ls
+		.map((e) => PROJECT_DIR + e.name)
 		.filter((p) => p.endsWith('.md'))
 		.sort((a, b) => Number(b === PROJECT_CONTEXT_PATH) - Number(a === PROJECT_CONTEXT_PATH))
 		.slice(0, MAX_DOCS + 1)
 	const docs = await Promise.all(
 		paths.map(async (path) => {
-			const r = await git(root, ['cat-file', 'blob', `${baseSha}:${path}`], 1024 * 1024, { signal })
-			return { path, text: r.code === 0 ? r.stdout.toString('utf8').trim() : '' }
+			const r = await readAt(root, baseSha, path, 1024 * 1024, signal)
+			return { path, text: r && !r.truncated ? r.buf.toString('utf8').trim() : '' }
 		}),
 	)
 	return docs.filter((d) => d.text)

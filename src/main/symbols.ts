@@ -1,4 +1,4 @@
-import { git } from './git.ts'
+import { grepCommit } from './git.ts'
 import { IDENT, type Side, type SymbolHit, type SymbolKind, type SymbolLookup } from '../shared/types.ts'
 
 /**
@@ -63,49 +63,6 @@ const CODE =
 /** Not a source file, or vendored, built or generated. */
 export function skipPath(p: string): boolean {
 	return !CODE.test(p) || SKIP_DIRS.test(p) || SKIP_FILES.test(p)
-}
-
-export interface GrepHit {
-	path: string
-	line: number
-	text: string
-}
-
-/** Fixed-string `git grep` on a commit. `failed` is git's error; a search cut at `maxBytes` is `truncated`, not failed. */
-export async function grepCommit(
-	root: string,
-	sha: string,
-	patterns: Array<string>,
-	o: { word?: boolean; paths?: Array<string>; maxBytes: number; timeoutMs: number; signal?: AbortSignal },
-): Promise<{ hits: Array<GrepHit>; truncated: boolean; failed: string | null }> {
-	const r = await git(
-		root,
-		[
-			'grep',
-			'-n',
-			'-I',
-			...(o.word ? ['-w'] : []),
-			'-F',
-			'-z',
-			'--no-color',
-			...patterns.flatMap((p) => ['-e', p]),
-			sha,
-			'--',
-			...(o.paths ?? []),
-		],
-		o.maxBytes,
-		{ signal: o.signal, timeoutMs: o.timeoutMs },
-	)
-	if (r.code > 1 && !r.truncated) return { hits: [], truncated: false, failed: r.stderr.trim() || `exit ${r.code}` }
-	const at = `${sha}:`
-	const hits = r.stdout
-		.toString('utf8')
-		.split('\n')
-		.flatMap((rec) => {
-			const [loc, no, text] = rec.split('\0')
-			return loc?.startsWith(at) && text !== undefined ? [{ path: loc.slice(at.length), line: Number(no), text }] : []
-		})
-	return { hits, truncated: r.truncated, failed: null }
 }
 
 const LOOKUP_GREP_LIMIT = 8 * 1024 * 1024
