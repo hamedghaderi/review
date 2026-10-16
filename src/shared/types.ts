@@ -209,6 +209,7 @@ export interface GitHubStatus {
 	writeTokenUrl: string // read and write (publishing reviews)
 	notifications: NotificationPrefs
 	notificationProblem: string | null // the last notification could not be shown (e.g. blocked in System Settings)
+	autoReview: boolean // review new requests with AI and submit the result on GitHub as you; off by default
 }
 
 /** Desktop notifications for review requests in repositories opened in the app. */
@@ -229,6 +230,16 @@ export interface InboxOpen {
 	repoId: string
 	repo: string // "owner/name"
 	number: number
+}
+
+/** What an automatic review of one pull request head did. */
+export interface AutoReviewRecord {
+	head: string // the head commit it was started for
+	at: string
+	reviewId: string | null // the snapshot it reviewed, when one was opened
+	outcome: 'approved' | 'changes-requested' | 'commented' | 'skipped' | 'failed'
+	message: string // what happened, in words, as the notification said
+	url: string | null // the submitted review on GitHub
 }
 
 export interface GitHubMapping {
@@ -959,6 +970,7 @@ export interface AiRun {
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
 	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked
+	auto?: boolean // started by automatic review: its findings are added and published by the main process, not the window
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
@@ -1170,6 +1182,7 @@ export const IPC = {
 	githubUseCli: 'gh:use-cli',
 	githubSetNotifications: 'gh:notifications',
 	githubTestNotification: 'gh:notification-test',
+	githubSetAutoReview: 'gh:auto-review',
 	markPrSeen: 'gh:seen',
 	openKnownRepo: 'repo:open-known',
 	closeRepoTab: 'repo:close-tab',
@@ -1178,6 +1191,7 @@ export const IPC = {
 	repoTabs: 'repo:tabs',
 	inboxOpen: 'inbox:open',
 	inboxChanged: 'inbox:changed',
+	reviewChanged: 'review:changed',
 	githubSetRepo: 'gh:repo-set',
 	searchPrs: 'gh:search',
 	prDetail: 'gh:detail',
@@ -1262,6 +1276,8 @@ export interface ReviewApi {
 	githubSetNotifications(prefs: NotificationPrefs): Promise<Result<GitHubStatus>>
 	/** Shows a sample review-request notification; the status reports whether the system allowed it. */
 	githubTestNotification(): Promise<Result<GitHubStatus>>
+	/** Turns automatic review on or off: new review requests are reviewed by AI and submitted on GitHub as you, approvals included. */
+	githubSetAutoReview(enabled: boolean): Promise<Result<GitHubStatus>>
 	/** Records that you looked at a pull request, so the Inbox stops calling it new. */
 	markPrSeen(repoId: string, number: number): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */
@@ -1277,6 +1293,8 @@ export interface ReviewApi {
 	onInboxOpen(handler: (target: InboxOpen) => void): () => void
 	/** Your review requests or reviewed pull requests changed on GitHub (seen by the background check). */
 	onInboxChanged(handler: () => void): () => void
+	/** An automatic review added comments to a stored review; a window showing it merges them in. */
+	onReviewChanged(handler: (review: Review) => void): () => void
 	githubSetRepo(repoId: string, repo: string): Promise<Result<GitHubMapping>>
 	/** Newer searches cancel older ones; stale responses resolve with a `cancelled` error. */
 	searchPrs(repoId: string, query: PrQuery, slot: SearchSlot): Promise<Result<PrPage>>

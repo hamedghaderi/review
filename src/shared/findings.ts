@@ -1,4 +1,4 @@
-import type { AiRun, CommentDraft, Finding, FindingCategory, Review, ReviewComment, Severity, TestPattern } from './types.ts'
+import type { AiRun, CommentDraft, Finding, FindingCategory, FindingLevel, Review, ReviewComment, Severity, TestPattern } from './types.ts'
 
 export type FindingState = 'open' | 'accepted' | 'dismissed'
 
@@ -128,6 +128,64 @@ export function levelLine(f: Pick<Finding, 'severity' | 'category' | 'signature'
 	return [`${meta.emoji} <kbd>${meta.label.toUpperCase()}</kbd>`, topic ? `<kbd>${topic.toLowerCase()}</kbd>` : null]
 		.filter(Boolean)
 		.join(' ')
+}
+
+/**
+ * The comment text for an accepted finding: a level label line, the body as written (result first), then the
+ * disproof for blocking findings and a collapsed background, which is what a reviewer would post. "Why flagged"
+ * stays in the app.
+ */
+export function findingCommentBody(f: Finding): string {
+	if (f.body === undefined)
+		return [`**${f.title}** (${f.severity})`, '', f.problem, '', `Consequence: ${f.consequence}`, '', `Suggestion: ${f.suggestion}`].join(
+			'\n',
+		)
+	const parts = [levelLine(f), f.body]
+	if (f.alsoAt?.length)
+		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
+	if (f.disproof) parts.push(`**How to check this is wrong:** ${f.disproof}`)
+	if (f.background) parts.push(`<details><summary>Background</summary>\n\n${f.background}\n\n</details>`)
+	return parts.join('\n\n')
+}
+
+/**
+ * Adds a finished run's open findings at the chosen levels as comments, so they show in the code without accepting
+ * them one by one. They stay local until published, and can be edited or deleted like any comment. Dismissed,
+ * held-back and already added findings (also from earlier runs) are skipped, and so are findings folded under another
+ * as the same problem and findings the double-check showed to be likely wrong. `commentIds` are the comments added.
+ */
+export function autoAddFindings(
+	r: Review,
+	run: AiRun,
+	runs: Array<AiRun>,
+	roots: Map<string, string>,
+	levels: ReadonlyArray<FindingLevel>,
+): { review: Review; added: number; commentIds: Array<string> } {
+	const byId = new Map(runs.flatMap((x) => x.findings.map((f) => [f.id, f] as const)))
+	let review = r
+	const commentIds: Array<string> = []
+	for (const f of run.findings) {
+		if (f.heldBack || !(levels as ReadonlyArray<string>).includes(f.severity)) continue
+		// Folded under another finding as the same problem: that one carries it.
+		if (f.mergedInto) continue
+		// The double-check showed it is likely wrong: leave it for a person to decide.
+		if (f.verification?.verdict === 'wrong' && !f.verification.error) continue
+		if (findingState(review, roots, f, byId) !== 'open') continue
+		const t = new Date().toISOString()
+		const c: ReviewComment = {
+			id: crypto.randomUUID(),
+			anchor: f.anchor,
+			body: findingCommentBody(f),
+			createdAt: t,
+			updatedAt: t,
+			findingId: f.id,
+		}
+		const findingDecisions = { ...review.findingDecisions }
+		delete findingDecisions[f.id]
+		review = { ...review, comments: [...review.comments, c], findingDecisions }
+		commentIds.push(c.id)
+	}
+	return { review, added: commentIds.length, commentIds }
 }
 
 /** Where the blocking findings of a review stand, for the decision to approve or request changes. */

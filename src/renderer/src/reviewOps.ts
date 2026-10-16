@@ -1,17 +1,17 @@
-import { findingLink, findingState, levelLine } from '../../shared/findings.ts'
+import { findingCommentBody, findingLink } from '../../shared/findings.ts'
 import type {
-	AiRun,
 	Anchor,
 	CommentDraft,
 	DismissReason,
 	Finding,
 	FindingDecision,
-	FindingLevel,
 	Review,
 	ReviewComment,
 	ReviewContext,
 	ContextImage,
 } from '../../shared/types.ts'
+
+export { autoAddFindings, findingCommentBody } from '../../shared/findings.ts'
 
 function now(): string {
 	return new Date().toISOString()
@@ -86,24 +86,6 @@ export function forSave(r: Review): Review {
 }
 
 /**
- * The comment text for an accepted finding: a level label line, the body as written (result first), then the
- * disproof for blocking findings and a collapsed background, which is what a reviewer would post. "Why flagged"
- * stays in the app.
- */
-export function findingCommentBody(f: Finding): string {
-	if (f.body === undefined)
-		return [`**${f.title}** (${f.severity})`, '', f.problem, '', `Consequence: ${f.consequence}`, '', `Suggestion: ${f.suggestion}`].join(
-			'\n',
-		)
-	const parts = [levelLine(f), f.body]
-	if (f.alsoAt?.length)
-		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
-	if (f.disproof) parts.push(`**How to check this is wrong:** ${f.disproof}`)
-	if (f.background) parts.push(`<details><summary>Background</summary>\n\n${f.background}\n\n</details>`)
-	return parts.join('\n\n')
-}
-
-/**
  * Adds a finding to the review as an editable draft. Returns the existing draft or comment instead when the finding
  * (or an equivalent finding from another run) was already added.
  */
@@ -125,38 +107,6 @@ export function acceptFinding(
 	const findingDecisions = { ...r.findingDecisions }
 	delete findingDecisions[f.id]
 	return { review: { ...r, drafts: [...r.drafts, d], findingDecisions }, draftId: d.id, commentId: null, created: true }
-}
-
-/**
- * Adds a finished run's open findings at the chosen levels as comments, so they show in the code without accepting
- * them one by one. They stay local until published, and can be edited or deleted like any comment. Dismissed,
- * held-back and already added findings (also from earlier runs) are skipped, and so are findings folded under another
- * as the same problem and findings the double-check showed to be likely wrong.
- */
-export function autoAddFindings(
-	r: Review,
-	run: AiRun,
-	runs: Array<AiRun>,
-	roots: Map<string, string>,
-	levels: ReadonlyArray<FindingLevel>,
-): { review: Review; added: number } {
-	const byId = new Map(runs.flatMap((x) => x.findings.map((f) => [f.id, f] as const)))
-	let review = r
-	let added = 0
-	for (const f of run.findings) {
-		if (f.heldBack || !(levels as ReadonlyArray<string>).includes(f.severity)) continue
-		// Folded under another finding as the same problem: that one carries it.
-		if (f.mergedInto) continue
-		// The double-check showed it is likely wrong: leave it for a person to decide.
-		if (f.verification?.verdict === 'wrong' && !f.verification.error) continue
-		if (findingState(review, roots, f, byId) !== 'open') continue
-		const res = acceptFinding(review, f, roots)
-		if (res.created && res.draftId) {
-			review = submitDraft(res.review, res.draftId)
-			added++
-		}
-	}
-	return { review, added }
 }
 
 export function setFindingDecision(

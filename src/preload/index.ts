@@ -7,6 +7,7 @@ import {
 	type GitHubStatus,
 	type InboxOpen,
 	type McpSettingsView,
+	type Review,
 	type ReviewApi,
 } from '../shared/types.ts'
 
@@ -31,6 +32,7 @@ const api: ReviewApi = {
 	githubUseCli: (enabled) => ipcRenderer.invoke(IPC.githubUseCli, enabled),
 	githubSetNotifications: (prefs) => ipcRenderer.invoke(IPC.githubSetNotifications, prefs),
 	githubTestNotification: () => ipcRenderer.invoke(IPC.githubTestNotification),
+	githubSetAutoReview: (enabled) => ipcRenderer.invoke(IPC.githubSetAutoReview, enabled),
 	markPrSeen: (repoId, n) => ipcRenderer.invoke(IPC.markPrSeen, repoId, n),
 	openKnownRepo: (repoId) => ipcRenderer.invoke(IPC.openKnownRepo, repoId),
 	closeRepoTab: (repoId) => ipcRenderer.invoke(IPC.closeRepoTab, repoId),
@@ -41,6 +43,11 @@ const api: ReviewApi = {
 		const listener = (_e: Electron.IpcRendererEvent, target: InboxOpen): void => handler(target)
 		ipcRenderer.on(IPC.inboxOpen, listener)
 		return () => ipcRenderer.removeListener(IPC.inboxOpen, listener)
+	},
+	onReviewChanged: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, review: Review): void => handler(review)
+		ipcRenderer.on(IPC.reviewChanged, listener)
+		return () => ipcRenderer.removeListener(IPC.reviewChanged, listener)
 	},
 	onInboxChanged: (handler) => {
 		const listener = (): void => handler()

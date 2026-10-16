@@ -22,6 +22,7 @@ import { McpService } from './ai/mcp.ts'
 import { AppFail } from './git.ts'
 import { ghCli } from './ghcli.ts'
 import { GitHubService } from './github.ts'
+import { AutoReviewer } from './autoReview.ts'
 import { InboxWatcher, type RepoEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
@@ -68,6 +69,7 @@ let credentials: CredentialService
 let mcp: McpService
 let github: GitHubService
 let watcher: InboxWatcher
+let autoReviewer: AutoReviewer
 let giphy: GiphyService
 let quitting = false
 // How old a connection's model list may be before it is re-listed in the background, and when the model picker opens.
@@ -143,6 +145,11 @@ function registerIpc(): void {
 		void watcher.check()
 		return github.status()
 	})
+	handle(IPC.githubSetAutoReview, async (enabled: unknown) => {
+		await github.setAutoReview(bool(enabled, 'automatic review'))
+		void watcher.check()
+		return github.status()
+	})
 	handle(IPC.githubTestNotification, async () => {
 		await present(
 			new Notification({
@@ -185,7 +192,7 @@ function registerIpc(): void {
 
 	handle(IPC.prDiscussion, (repoId: unknown, reviewId: unknown) => service.prDiscussion(str(repoId, 'repository'), comparisonId(reviewId)))
 
-	// Publishing to GitHub. Only explicit user actions reach these; nothing is published automatically.
+	// Publishing to GitHub. Only explicit user actions reach these; automatic review (off by default) publishes from the main process.
 	handle(IPC.publishPlan, (repoId: unknown, reviewId: unknown) => service.publishPlan(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.publishComment, (repoId: unknown, reviewId: unknown, commentId: unknown, outside: unknown) =>
 		service.publishComment(
@@ -381,7 +388,10 @@ app.whenReady().then(async () => {
 		github,
 		store,
 		known: () => service.knownGitHubRepos(),
-		notify: showNotifications,
+		notify: (events) => {
+			if (github.notifications.enabled) showNotifications(events)
+			autoReviewer.take(events)
+		},
 		badge: (n) => app.setBadgeCount(n),
 		changed: () => {
 			service.forgetMyReviews()
@@ -419,6 +429,44 @@ app.whenReady().then(async () => {
 		if (win && !win.isDestroyed()) win.webContents.send(IPC.mcpSettingsChanged, v)
 	})
 	service.attachMcp(mcp)
+	autoReviewer = new AutoReviewer({
+		store,
+		enabled: () => github.autoReview,
+		viewer: () => github.status().login,
+		reviewer: () => {
+			const v = connections.view()
+			if (!v.reviewer) throw new AppFail('ai-unavailable', v.selectionIssue ?? 'Choose a model or team for AI reviews first.')
+			connections.checkChoice(v.reviewer)
+			const r = v.reviewer
+			const label = r.kind === 'team' ? (v.teams.find((t) => t.id === r.teamId)?.name ?? 'a review team') : r.selection.modelId
+			return { choice: r, label }
+		},
+		levels: () => connections.view().levels.autoAdd,
+		busy: () => ai.busy,
+		runsFor: (repoId, reviewId) => ai.runsFor(repoId, reviewId),
+		whenDone: (runId) => ai.whenDone(runId),
+		open: (repoId, pr, signal) => service.openInBackground(repoId, pr, signal),
+		start: (reviewId, choice, label) => service.startAutoAi(reviewId, choice, label),
+		addFindings: (repoId, reviewId, runId, levels) => service.addAutoFindings(repoId, reviewId, runId, levels),
+		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
+		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
+		submit: (repoId, reviewId, event, body) => service.submitReview(repoId, reviewId, event, body),
+		reviewChanged: (repoId, reviewId) => {
+			const r = store.read().repos[repoId]?.reviews[reviewId]
+			if (r && win && !win.isDestroyed()) win.webContents.send(IPC.reviewChanged, r)
+		},
+		finished: (e, record) => {
+			// The app acted as you, so this is shown even with review-request notifications off.
+			void present(
+				new Notification({
+					title: `Automatic review: ${e.pr.repo.split('/')[1]}#${e.pr.number}`,
+					body: record.message,
+					silent: !github.notifications.sound,
+				}),
+				{ repoId: e.repoId, repo: e.pr.repo, number: e.pr.number },
+			)
+		},
+	})
 	registerIpc()
 	createWindow()
 	app.on('activate', () => {

@@ -90,7 +90,7 @@ PR reviews show what has already been said on the pull request, so you and the A
 
 ## Publishing a review to GitHub
 
-Reviews opened from a pull request show **Publish** in the header; its tooltip says how many comments it would send (never published, or edited since). For branches, the app looks up their pull request: it asks GitHub for PRs whose head is `owner:branch`, where the owner comes from the remote the branch is pushed to (its upstream, or `origin`). It lists open ones first, and caches the answer for two minutes. The branch preview in Browse and branch reviews both show that PR with **Open PR review**. On a branch review with no PR, the button is shown disabled with the reason. **Open PR review** carries the branch review's comments into the PR review (see [Carrying comments forward](#carrying-comments-forward)). Nothing is ever published automatically, and saving locally never sends anything.
+Reviews opened from a pull request show **Publish** in the header; its tooltip says how many comments it would send (never published, or edited since). For branches, the app looks up their pull request: it asks GitHub for PRs whose head is `owner:branch`, where the owner comes from the remote the branch is pushed to (its upstream, or `origin`). It lists open ones first, and caches the answer for two minutes. The branch preview in Browse and branch reviews both show that PR with **Open PR review**. On a branch review with no PR, the button is shown disabled with the reason. **Open PR review** carries the branch review's comments into the PR review (see [Carrying comments forward](#carrying-comments-forward)). Nothing is published automatically unless you turn on [automatic review](#automatic-review), and saving locally never sends anything.
 
 1. **Add comments to your pending review.** The dialog lists the snapshot's comments with checkboxes. Selected comments go into your _pending_ review on the PR, which only you can see, attached to the snapshot's head commit. The first comment creates the pending review; later ones are added to it. GitHub allows one pending review per person per PR. If you already started one on GitHub for the same commit, the app adds to it. If yours is on a different commit, publishing is blocked with an explanation, since mixing commits would misplace comments.
 2. **Submit** as Comment, Approve or Request changes, with an optional summary (required for Comment and Request changes when there are no comments). Submitting needs a second confirmation, because it is public and can't be undone. You can also finish on GitHub instead.
@@ -113,6 +113,21 @@ The dialog reads your pending review and earlier published reviews from GitHub b
 - Deleting a comment locally leaves it on GitHub.
 
 Writes run one at a time and are spaced out to respect GitHub's limits on creating content. Publishing needs a fine-grained token with **Pull requests: Read and write**. With a read-only token, the dialog explains this and links to a prefilled token page. The publication record is stored with the snapshot in `review-store.json`, written only by the main process; `saveReview` from the renderer can't change it.
+
+### Automatic review
+
+Off by default. With **Review requests automatically with AI** on (**Settings · GitHub**), the app reviews a pull request by itself when your review is requested and submits the review on GitHub **as you**, approvals included. Ticking the box opens a warning first; it is turned on only from there, with **Turn on automatic review**. Unticking turns it off at once.
+
+- **When**: the review-request check (every minute while the app runs) sees a new request, a request after you already reviewed, or a draft marked ready, in a repository you have opened here. New commits on a pull request you reviewed do not start one. It also runs with notifications off. Your own pull requests and drafts are skipped, and each head commit is reviewed at most once.
+- **What runs**: the model or team chosen for AI reviews, on every changed file, the same as **Run** with everything the run normally reads (project context, related code, CI facts, your earlier dismissals). The pull request is opened in the background, so what is on screen doesn't change; the snapshot appears in the review list like any other. One review at a time: if you are running an AI review it waits for yours, and while it runs, starting your own says an automatic review is running. Opening other reviews or repositories doesn't stop it; **Cancel** in its own review does, and then nothing is posted.
+- **What is posted**: findings at the levels under **Add to the code when a run finishes** (**Settings → AI providers → Finding levels**), as comments, the same ones the app would add for you; findings the double-check shows likely wrong are left in the app. The review is then submitted with a short summary that says it was written by AI on your behalf, naming the model or team:
+  - **Request changes** when a blocking finding stands (not dismissed, held back or shown likely wrong).
+  - **Approve** only when every file was reviewed, nothing was posted and no blocking, should-fix or question finding is left.
+  - **Comment** otherwise, saying how many findings were posted and how many were left for a person to check, and when files were not reviewed.
+- **When it doesn't post**: you already have a pending review on that pull request (submitting would send your comments too), the pull request is closed, the run fails or is cancelled, or you turn it off before it posts. Each case shows a notification saying why. If posting fails halfway, the comments already sent stay in your pending review on GitHub.
+- **Afterwards**: a notification says what it did (shown even with review-request notifications off, with the sound setting); clicking it opens the pull request's review. The comments are in the snapshot like ones you added, linked to their findings. If that review is open on screen, they appear there too.
+
+It needs a token that can publish reviews and a model chosen for AI reviews. A run cancelled by quitting the app isn't retried at the next start.
 
 ## AI review
 

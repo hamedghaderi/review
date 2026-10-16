@@ -1,6 +1,6 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AiRun, BrowserState, Review } from '../shared/types.ts'
+import type { AiRun, AutoReviewRecord, BrowserState, Review } from '../shared/types.ts'
 import type { WatchState } from '../shared/inbox.ts'
 
 export const STORE_VERSION = 2
@@ -13,6 +13,8 @@ export interface StoreData {
 	// The review requests seen at the last check, so notifications report only what changed (also across restarts).
 	inboxWatch?: { login: string | null; state: WatchState; at: string }
 	skippedVersion?: string // a release you chose not to be told about again
+	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
+	autoReviews?: Record<string, AutoReviewRecord>
 }
 
 export interface RepoState {
@@ -129,6 +131,7 @@ export function migrate(raw: unknown): StoreData {
 		...(d.openRepoIds ? { openRepoIds: d.openRepoIds } : {}),
 		...(d.inboxWatch ? { inboxWatch: d.inboxWatch } : {}),
 		...(typeof d.skippedVersion === 'string' ? { skippedVersion: d.skippedVersion } : {}),
+		...(d.autoReviews ? { autoReviews: d.autoReviews } : {}),
 	}
 }
 

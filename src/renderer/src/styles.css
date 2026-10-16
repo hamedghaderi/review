@@ -3382,6 +3382,28 @@ button.stack-row:hover {
 .notify-box .check {
 	align-items: flex-start;
 }
+.notify-box.on {
+	border-color: var(--warn-fg);
+}
+.auto-review-warn {
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+	border-radius: 6px;
+	padding: 10px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.auto-review-warn ul {
+	margin: 0;
+	padding-left: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.auto-review-warn p {
+	margin: 0;
+}
 .sev.question {
 	background: var(--gh-soft);
 	color: var(--gh);
