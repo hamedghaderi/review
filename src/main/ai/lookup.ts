@@ -1,5 +1,4 @@
-import { git } from '../git.ts'
-import { grepCommit } from '../symbols.ts'
+import { grepCommit, listAt, readAt } from '../git.ts'
 import type { AiLookups, RiskLevel } from '../../shared/types.ts'
 
 /**
@@ -144,12 +143,12 @@ export function createReviewTools(
 				const path = cleanPath(a.path)
 				if (path === null || !path) return refuse('"path" must be a file path from the repository root, without ".." parts.')
 				const sha = a.version === 'base' ? repo.baseSha : repo.headSha
-				const r = await git(repo.root, ['cat-file', 'blob', `${sha}:${path}`], FILE_LIMIT, { signal })
-				if (r.code !== 0) return refuse(`No file "${path}" at the ${a.version === 'base' ? 'base' : 'head'} commit.`)
+				const r = await readAt(repo.root, sha, path, FILE_LIMIT, signal)
+				if (!r) return refuse(`No file "${path}" at the ${a.version === 'base' ? 'base' : 'head'} commit.`)
 				if (r.truncated) return refuse(`"${path}" is larger than ${FILE_LIMIT / 1024 / 1024} MB and cannot be read.`)
-				if (r.stdout.subarray(0, 8000).includes(0)) return refuse(`"${path}" is a binary file.`)
+				if (r.buf.subarray(0, 8000).includes(0)) return refuse(`"${path}" is a binary file.`)
 				seen(log.paths, path)
-				const lines = r.stdout.toString('utf8').split('\n')
+				const lines = r.buf.toString('utf8').split('\n')
 				if (lines.at(-1) === '') lines.pop()
 				const from = Math.max(1, int(a.start_line) ?? 1)
 				const to = Math.min(lines.length, int(a.end_line) ?? lines.length, from + READ_MAX_LINES - 1)
@@ -188,16 +187,10 @@ export function createReviewTools(
 			case 'list_files': {
 				const dir = cleanPath(a.directory ?? '')
 				if (dir === null) return refuse('"directory" must be a folder path from the repository root, without ".." parts.')
-				const r = await git(repo.root, ['ls-tree', '-z', `${repo.headSha}:${dir}`], 1024 * 1024, { signal })
-				if (r.code !== 0) return refuse(`No folder "${dir}" at the head commit.`)
+				const list = await listAt(repo.root, repo.headSha, dir, { signal })
+				if (!list) return refuse(`No folder "${dir}" at the head commit.`)
 				seen(log.paths, `${dir || '.'}/`)
-				const entries = r.stdout
-					.toString('utf8')
-					.split('\0')
-					.flatMap((rec) => {
-						const m = /^\d+ (\w+) [0-9a-f]+\t(.*)$/s.exec(rec)
-						return m ? [m[1] === 'tree' ? `${m[2]}/` : m[2]] : []
-					})
+				const entries = list.map((e) => (e.folder ? `${e.name}/` : e.name))
 				const shown = entries.slice(0, LIST_MAX_ENTRIES)
 				const more = entries.length > shown.length ? `\n(${entries.length - shown.length} more not shown)` : ''
 				return { text: `${dir || '(root)'}:\n${shown.join('\n')}${more}`, error: false }

@@ -84,7 +84,7 @@ How Review is put together: the AI review pipeline, the code layout and how revi
 | Path                     | Responsibility                                                                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/main/index.ts`      | Window, security settings, IPC registration and sender checks, close-time flush                                                                                                 |
-| `src/main/git.ts`        | Git access (argument arrays, no shell, `--no-ext-diff --no-textconv`); the only write is fetching commits into `refs/review/keep/*`                                             |
+| `src/main/git.ts`        | All repository reads go through here (`readAt`, `listAt`, `grepCommit`, `changesBetween`); argument arrays, no shell. Only write: fetching commits into `refs/review/keep/*`    |
 | `src/main/github.ts`     | GitHub API: PR search (REST/GraphQL), details, review activity, ETag cache, rate limits, error states                                                                           |
 | `src/main/activity.ts`   | Existing review activity: the read-only GraphQL query and REST fallback, normalised and capped                                                                                  |
 | `src/main/discussion.ts` | Places GitHub threads on a snapshot (`linemap.ts` maps lines between commits, shared with carrying comments forward)                                                            |

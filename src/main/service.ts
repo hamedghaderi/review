@@ -45,9 +45,9 @@ import {
 	compareSnapshot,
 	ensureCommits,
 	findRoot,
-	git,
 	mergeBase,
 	ObjectUnavailable,
+	readAt,
 	readBlob,
 	readPatch,
 	readRepo,
@@ -780,9 +780,9 @@ export class ReviewService {
 	async loadFileAt(comparisonId: string, path: string, side: Side): Promise<FileLinesResult> {
 		const data = this.loaded(comparisonId)
 		const sha = side === 'old' ? data.comparison.baseSha : data.comparison.headSha
-		const r = await git(data.root, ['cat-file', 'blob', `${sha}:${path}`], FILE_LINES_LIMIT)
-		if (!r.truncated && r.code !== 0) throw new AppFail('not-found', `${path} is not in the ${side === 'old' ? 'base' : 'head'} commit.`)
-		return blobLines(r.stdout, r.truncated)
+		const r = await readAt(data.root, sha, path, FILE_LINES_LIMIT)
+		if (!r) throw new AppFail('not-found', `${path} is not in the ${side === 'old' ? 'base' : 'head'} commit.`)
+		return blobLines(r.buf, r.truncated)
 	}
 
 	/** Go to definition and find uses: text matches at one commit, with the lines this change touched marked. */

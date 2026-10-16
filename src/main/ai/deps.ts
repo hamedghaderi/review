@@ -1,5 +1,5 @@
 import semver from 'semver'
-import { git } from '../git.ts'
+import { readAt } from '../git.ts'
 import type { FileSource } from './context.ts'
 
 /**
@@ -62,8 +62,8 @@ export async function dependencyFacts(
 	const notes: Array<string> = []
 	const dirs = [...new Set(touched.map((f) => dirOf((f.newPath ?? f.oldPath)!)))]
 	const read = async (sha: string, path: string): Promise<string | null> => {
-		const r = await git(root, ['cat-file', 'blob', `${sha}:${path}`], LOCK_LIMIT, { signal })
-		return r.code === 0 && !r.truncated ? r.stdout.toString('utf8') : null
+		const r = await readAt(root, sha, path, LOCK_LIMIT, signal)
+		return r && !r.truncated ? r.buf.toString('utf8') : null
 	}
 	const json = <T>(text: string | null): T | null => {
 		if (!text) return null
