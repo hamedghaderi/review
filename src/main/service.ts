@@ -18,6 +18,7 @@ import type {
 	LoadedComparison,
 	ModelSelection,
 	PatchResult,
+	PrDescription,
 	PrDetail,
 	PrGraph,
 	PrPage,
@@ -188,6 +189,41 @@ export class ReviewService {
 				omitted: empty,
 			}
 		}
+	}
+
+	/** The open PR review's description, read from GitHub each time (it can change without a new commit). */
+	prDescription(repoId: string, reviewId: string): Promise<PrDescription> {
+		const pr = this.openPrOf(repoId, reviewId)
+		return this.requireGitHub().description(pr.repo, pr.number)
+	}
+
+	previewDescription(repoId: string, reviewId: string, text: string): Promise<string> {
+		const pr = this.openPrOf(repoId, reviewId)
+		return this.requireGitHub().renderMarkdown(pr.repo, text)
+	}
+
+	/**
+	 * Saves a new description on GitHub, then gives it to this review's next AI run too: the run sends the loaded
+	 * comparison's description, which would otherwise stay as it was when the review was opened.
+	 */
+	async updateDescription(repoId: string, reviewId: string, expected: string, body: string): Promise<PrDescription> {
+		const pr = this.openPrOf(repoId, reviewId)
+		const saved = await this.requireGitHub().updateDescription(pr.repo, pr.number, expected, body)
+		const clipped = saved.body.slice(0, 8000)
+		const loaded = this.comparisons.get(reviewId)?.comparison.pr
+		if (loaded) loaded.body = clipped
+		await this.store.update((d) => {
+			const p = d.repos[repoId]?.reviews[reviewId]?.pr
+			if (p) p.body = clipped
+		})
+		return saved
+	}
+
+	private openPrOf(repoId: string, reviewId: string): { repo: string; number: number } {
+		this.repo(repoId)
+		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
+		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
+		return pr
 	}
 
 	/**

@@ -38,6 +38,7 @@ import {
 	notificationPrefs,
 	githubToken,
 	prNumber,
+	prDescriptionText,
 	prQuery,
 	reviewBody,
 	reviewEvent,
@@ -191,6 +192,20 @@ function registerIpc(): void {
 	handle(IPC.branchPr, (repoId: unknown, head: unknown) => service.branchPr(str(repoId, 'repository'), branchRef(head)))
 
 	handle(IPC.prDiscussion, (repoId: unknown, reviewId: unknown) => service.prDiscussion(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.prDescription, (repoId: unknown, reviewId: unknown) =>
+		service.prDescription(str(repoId, 'repository'), comparisonId(reviewId)),
+	)
+	handle(IPC.prDescriptionPreview, (repoId: unknown, reviewId: unknown, text: unknown) =>
+		service.previewDescription(str(repoId, 'repository'), comparisonId(reviewId), prDescriptionText(text)),
+	)
+	handle(IPC.prDescriptionUpdate, (repoId: unknown, reviewId: unknown, expected: unknown, body: unknown) =>
+		service.updateDescription(
+			str(repoId, 'repository'),
+			comparisonId(reviewId),
+			prDescriptionText(expected, 'previous description'),
+			prDescriptionText(body),
+		),
+	)
 
 	// Publishing to GitHub. Only explicit user actions reach these; automatic review (off by default) publishes from the main process.
 	handle(IPC.publishPlan, (repoId: unknown, reviewId: unknown) => service.publishPlan(str(repoId, 'repository'), comparisonId(reviewId)))

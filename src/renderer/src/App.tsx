@@ -44,6 +44,7 @@ import { useMyReviews, usePrGraph } from './prGraph.ts'
 import { stackGuide } from '../../shared/prStack.ts'
 import { StackControl } from './Stack.tsx'
 import { CommentsPanel } from './CommentsPanel.tsx'
+import { DescriptionPanel } from './DescriptionPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
 import type { PostedState } from './Comment.tsx'
 import { discussedAt, hasReply, ownThread } from './discussed.ts'
@@ -145,7 +146,7 @@ export function App() {
 	const [settingsOpen, setSettingsOpen] = useState<false | { team: 'new' | string | null }>(false)
 	const [aiRuns, setAiRuns] = useState<Array<AiRun>>([])
 	const [aiError, setAiError] = useState<string | null>(null)
-	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'github' | 'context'>('comments')
+	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'description' | 'github' | 'context'>('comments')
 	const [discussion, setDiscussion] = useState<{ reviewId: string; value: Discussion | null; loading: boolean } | null>(null)
 	const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null)
 	const left = usePanelWidth('panel.left', 280, 180, 600)
@@ -1502,6 +1503,17 @@ export function App() {
 								{isPrReview && (
 									<button
 										role="tab"
+										aria-selected={rightTab === 'description'}
+										className={rightTab === 'description' ? 'on' : ''}
+										onClick={() => setRightTab('description')}
+										title="The pull request description, as GitHub shows it; edit it here"
+									>
+										Description
+									</button>
+								)}
+								{isPrReview && (
+									<button
+										role="tab"
 										aria-selected={rightTab === 'github'}
 										className={rightTab === 'github' ? 'on' : ''}
 										onClick={() => setRightTab('github')}
@@ -1542,6 +1554,8 @@ export function App() {
 										onAddImages={(i) => change((r) => ops.addContextImages(r, i))}
 										onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
 									/>
+								) : rightTab === 'description' && isPrReview && session && comparison ? (
+									<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => setGithubOpen(true)} />
 								) : rightTab === 'github' && isPrReview ? (
 									<DiscussionPanel
 										discussion={current?.value ?? null}
@@ -1551,7 +1565,7 @@ export function App() {
 										onOpen={openThread}
 										onConnect={() => setGithubOpen(true)}
 									/>
-								) : rightTab === 'comments' || rightTab === 'github' ? (
+								) : rightTab === 'comments' || rightTab === 'github' || rightTab === 'description' ? (
 									<CommentsPanel
 										comments={review.comments}
 										drafts={review.drafts}
