@@ -73,6 +73,7 @@ import { loadFacts } from './ai/facts.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
+import { tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { autoAddFindings, findingRoots } from '../shared/findings.ts'
 import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
@@ -212,6 +213,16 @@ export class ReviewService {
 				omitted: empty,
 			}
 		}
+	}
+
+	/**
+	 * The checks GitHub reports now for the snapshot's head commit, so an approval can be weighed against CI that failed
+	 * or has not finished. Read fresh each time; CI can fail after the review was opened.
+	 */
+	async headChecks(repoId: string, reviewId: string): Promise<HeadChecks> {
+		const pr = this.openPrOf(repoId, reviewId)
+		const head = this.store.read().repos[repoId].reviews[reviewId].headSha
+		return tallyChecks(await this.requireGitHub().checks(pr.repo, head))
 	}
 
 	/** The open PR review's description, read from GitHub each time (it can change without a new commit). */

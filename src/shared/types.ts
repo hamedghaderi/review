@@ -1,3 +1,4 @@
+import type { HeadChecks } from './ci.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -1240,6 +1241,7 @@ export const IPC = {
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
 	prDescription: 'gh:description',
+	headChecks: 'gh:head-checks',
 	prDescriptionPreview: 'gh:description-preview',
 	prDescriptionUpdate: 'gh:description-update',
 	replyToThread: 'gh:thread-reply',
@@ -1351,6 +1353,8 @@ export interface ReviewApi {
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<Result<PublishedReview>>
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
+	/** CI for the open PR review's head commit, as GitHub reports it now. */
+	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>
 	/** The open PR review's description as GitHub has it now. */
 	prDescription(repoId: string, reviewId: string): Promise<Result<PrDescription>>
 	/** Markdown rendered by GitHub in the PR's repository, for previewing an edit. Nothing is saved. */

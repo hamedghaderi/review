@@ -189,6 +189,39 @@ export function autoAddFindings(
 	return { review, added: commentIds.length, commentIds }
 }
 
+/**
+ * Findings the previous finished run of the same snapshot raised that `run` did not raise again, on files `run`
+ * reviewed. Runs are not deterministic, so a re-run can miss what an earlier one saw (or report it so differently that
+ * it isn't matched); these are worth a look before deciding. Dismissed, held-back and folded findings are left out.
+ */
+export function droppedFindings(
+	run: AiRun,
+	runs: Array<AiRun>,
+	review: Review,
+	roots: Map<string, string>,
+): { from: AiRun; findings: Array<Finding> } | null {
+	const finished = (r: AiRun): boolean => r.status === 'completed' || r.status === 'partial'
+	if (!finished(run)) return null
+	const at = runs.findIndex((r) => r.id === run.id)
+	const from = runs
+		.slice(0, Math.max(0, at))
+		.reverse()
+		.find((r) => finished(r) && r.baseSha === run.baseSha && r.headSha === run.headSha)
+	if (!from) return null
+	const reviewed = new Set(run.coverage.files.filter((f) => f.state === 'reviewed' || f.state === 'partial').map((f) => f.fileKey))
+	const raised = new Set(run.findings.map((f) => roots.get(f.id) ?? f.id))
+	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+	const findings = from.findings.filter(
+		(f) =>
+			!f.heldBack &&
+			!f.mergedInto &&
+			reviewed.has(f.anchor.fileKey) &&
+			!raised.has(roots.get(f.id) ?? f.id) &&
+			findingState(review, roots, f, byId) !== 'dismissed',
+	)
+	return findings.length ? { from, findings } : null
+}
+
 /** Where the blocking findings of a review stand, for the decision to approve or request changes. */
 export interface BlockingSummary {
 	added: number // added to the review as comments

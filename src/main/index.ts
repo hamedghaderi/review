@@ -195,6 +195,7 @@ function registerIpc(): void {
 	handle(IPC.prDescription, (repoId: unknown, reviewId: unknown) =>
 		service.prDescription(str(repoId, 'repository'), comparisonId(reviewId)),
 	)
+	handle(IPC.headChecks, (repoId: unknown, reviewId: unknown) => service.headChecks(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.prDescriptionPreview, (repoId: unknown, reviewId: unknown, text: unknown) =>
 		service.previewDescription(str(repoId, 'repository'), comparisonId(reviewId), prDescriptionText(text)),
 	)
@@ -466,6 +467,7 @@ app.whenReady().then(async () => {
 		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
 		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
 		submit: (repoId, reviewId, event, body) => service.submitReview(repoId, reviewId, event, body),
+		checks: (repoId, reviewId) => service.headChecks(repoId, reviewId),
 		reviewChanged: (repoId, reviewId) => {
 			const r = store.read().repos[repoId]?.reviews[reviewId]
 			if (r && win && !win.isDestroyed()) win.webContents.send(IPC.reviewChanged, r)

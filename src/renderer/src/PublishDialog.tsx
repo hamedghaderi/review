@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppError, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
+import type { HeadChecks } from '../../shared/ci.ts'
+import { ago } from './branches.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
 import { insertGif } from '../../shared/gif.ts'
@@ -67,6 +69,8 @@ export function PublishDialog({
 	const [showSent, setShowSent] = useState(false)
 	const [checkedAt, setCheckedAt] = useState<string | null>(null)
 	const [submitted, setSubmitted] = useState<string | null>(null)
+	const [ci, setCi] = useState<HeadChecks | null>(null)
+	const [ciError, setCiError] = useState<string | null>(null)
 	const dialog = useRef<HTMLDivElement>(null)
 	const summaryRef = useRef<HTMLTextAreaElement>(null)
 
@@ -109,6 +113,31 @@ export function PublishDialog({
 		},
 		[repoId, reviewId], // eslint-disable-line react-hooks/exhaustive-deps
 	)
+
+	// CI for the snapshot's head commit, read again before an approval is confirmed: checks often fail after the review.
+	const loadCi = useCallback(async (): Promise<HeadChecks | null> => {
+		const r = await window.review.headChecks(repoId, reviewId)
+		if (!r.ok) {
+			setCiError(r.error.message)
+			return null
+		}
+		setCi(r.value)
+		setCiError(null)
+		return r.value
+	}, [repoId, reviewId])
+
+	useEffect(() => {
+		void loadCi()
+	}, [loadCi])
+
+	async function askToSubmit(): Promise<void> {
+		if (event === 'APPROVE') {
+			setRunning('Checking CI…')
+			await loadCi()
+			setRunning(null)
+		}
+		setConfirmSubmit(true)
+	}
 
 	useEffect(() => {
 		dialog.current?.focus()
@@ -415,6 +444,7 @@ export function PublishDialog({
 										)}
 									</div>
 								)}
+								<CiLine ci={ci} error={ciError} approving={event === 'APPROVE'} onRefresh={() => void loadCi()} />
 								<div className="seg verdict" role="radiogroup" aria-label="Review verdict">
 									{EVENTS.map(([k, label, hint]) => (
 										<button
@@ -457,6 +487,10 @@ export function PublishDialog({
 							<span className="small muted" role="status">
 								<span className="spinner small" aria-hidden /> {running}
 							</span>
+						) : confirmSubmit && event === 'APPROVE' && ci && (ci.failed.length > 0 || ci.pending.length > 0) ? (
+							<span className="small warn-text" role="alert">
+								<strong>{ciWarning(ci)}</strong> Approve anyway? Everyone on the pull request will see it, and it can’t be unsent.
+							</span>
 						) : confirmSubmit ? (
 							<span className="small">
 								Submit as <strong>{EVENTS.find((e) => e[0] === event)![1]}</strong>
@@ -475,7 +509,9 @@ export function PublishDialog({
 									Cancel
 								</button>
 								<button className={`btn primary ${event.toLowerCase()}`} onClick={() => void submit()} disabled={!!running}>
-									{EVENTS.find((e) => e[0] === event)![1]}
+									{event === 'APPROVE' && ci && (ci.failed.length > 0 || ci.pending.length > 0)
+										? 'Approve anyway'
+										: EVENTS.find((e) => e[0] === event)![1]}
 								</button>
 							</>
 						) : (
@@ -483,7 +519,7 @@ export function PublishDialog({
 								<button
 									className={`btn ${addFirst ? '' : 'primary'}`}
 									disabled={!canSubmit}
-									onClick={() => setConfirmSubmit(true)}
+									onClick={() => void askToSubmit()}
 									title={
 										plan.pending.kind === 'none' && event !== 'APPROVE' && !summary.trim()
 											? 'Write a summary, or add comments first'
@@ -529,5 +565,66 @@ function ItemBody({ label, body, tag, url }: { label: string; body: string; tag:
 				<span className="ellipsis">{text}</span>
 			</span>
 		</span>
+	)
+}
+
+/** "1 check failed on this commit (Unit tests, 18 s ago) and 3 haven’t finished." */
+function ciWarning(ci: HeadChecks): string {
+	const parts: Array<string> = []
+	if (ci.failed.length) {
+		const first = ci.failed[0]
+		const more = ci.failed.length > 1 ? ` and ${ci.failed.length - 1} more` : ''
+		parts.push(
+			`${ci.failed.length} check${ci.failed.length === 1 ? '' : 's'} failed on this commit (${first.name}${first.at ? `, ${ago(first.at)}` : ''}${more})`,
+		)
+	}
+	if (ci.pending.length) parts.push(`${ci.pending.length} ${ci.pending.length === 1 ? 'hasn’t' : 'haven’t'} finished`)
+	return `${parts.join(' and ')}.`
+}
+
+/** What CI says about the snapshot's head commit, next to the verdict. */
+function CiLine({
+	ci,
+	error,
+	approving,
+	onRefresh,
+}: {
+	ci: HeadChecks | null
+	error: string | null
+	approving: boolean
+	onRefresh(): void
+}) {
+	if (error)
+		return (
+			<p className="small muted">
+				CI couldn’t be read: {error}{' '}
+				<button className="link" onClick={onRefresh}>
+					Retry
+				</button>
+			</p>
+		)
+	if (!ci) return <p className="small muted">Reading CI…</p>
+	const total = ci.failed.length + ci.pending.length + ci.passed
+	const warn = approving && (ci.failed.length > 0 || ci.pending.length > 0)
+	return (
+		<p
+			className={`small ci-line ${warn ? 'warn-text' : 'muted'}`}
+			title={[...ci.failed.map((f) => `✕ ${f.name}`), ...ci.pending.map((n) => `◌ ${n}`)].join('\n')}
+		>
+			CI on <span className="mono">{ci.sha.slice(0, 7)}</span>:{' '}
+			{total === 0
+				? 'no checks reported'
+				: [
+						ci.failed.length ? `✕ ${ci.failed.length} failed` : null,
+						ci.pending.length ? `◌ ${ci.pending.length} not finished` : null,
+						ci.passed ? `✓ ${ci.passed} passed` : null,
+					]
+						.filter(Boolean)
+						.join(' · ')}
+			{warn && ` — ${ciWarning(ci)}`} · read {ago(ci.readAt)}{' '}
+			<button className="link" onClick={onRefresh}>
+				Refresh
+			</button>
+		</p>
 	)
 }

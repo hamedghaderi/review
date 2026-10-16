@@ -65,6 +65,7 @@ const api: ReviewApi = {
 	submitReview: (repoId, reviewId, event, body) => ipcRenderer.invoke(IPC.submitReview, repoId, reviewId, event, body),
 	prDiscussion: (repoId, reviewId) => ipcRenderer.invoke(IPC.prDiscussion, repoId, reviewId),
 	prDescription: (repoId, reviewId) => ipcRenderer.invoke(IPC.prDescription, repoId, reviewId),
+	headChecks: (repoId, reviewId) => ipcRenderer.invoke(IPC.headChecks, repoId, reviewId),
 	prDescriptionPreview: (repoId, reviewId, text) => ipcRenderer.invoke(IPC.prDescriptionPreview, repoId, reviewId, text),
 	prDescriptionUpdate: (repoId, reviewId, expected, body) => ipcRenderer.invoke(IPC.prDescriptionUpdate, repoId, reviewId, expected, body),
 	replyToThread: (repoId, reviewId, threadId, body, resolve) =>
