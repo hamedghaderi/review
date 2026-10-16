@@ -89,6 +89,7 @@ export interface PrSnapshot {
 	headSha: string
 	body?: string // the author's description, given to the AI reviewer as background (not evidence)
 	author?: string | null // GitHub login of who opened it; absent on snapshots stored before it was recorded
+	authorAssociation?: string | null // their role on the repository (OWNER, MEMBER, COLLABORATOR, NONE…); absent: unknown
 }
 
 export type SearchSlot = 'list' | 'palette'
@@ -177,6 +178,7 @@ export interface PrPage {
 export interface PrDetail extends PrSummary {
 	repo: string
 	body: string
+	authorAssociation?: string | null // the author's role on the repository, as GitHub reports it (OWNER, MEMBER, NONE…)
 	commits: number | null
 	changedFiles: number | null
 	additions: number | null
@@ -580,6 +582,7 @@ export interface DiscussionComment {
 export interface DiscussionReview {
 	id: string
 	author: string | null
+	association?: string | null // OWNER, MEMBER, CONTRIBUTOR, NONE…; absent on discussions read before it was
 	state: string // passed through as GitHub reports it
 	body: string
 	bodyTruncated: boolean
@@ -801,10 +804,24 @@ export interface Finding {
 	memberId?: string | null // the team member that raised it (team runs)
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
+	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
 	// Before prompt reviewer-2026-10-01:
 	problem?: string
 	consequence?: string
 	suggestion?: string
+}
+
+export const RAISED_OUTCOMES = ['agreed', 'rejected', 'unanswered', 'unclear'] as const
+export type RaisedOutcome = (typeof RAISED_OUTCOMES)[number]
+
+/** The model's account of a GitHub thread that raised the same problem: what was decided there and why it raises it again. */
+export interface RaisedBefore {
+	threadId: string // DiscussionThread.id
+	url: string | null // the thread on GitHub, as read during the run
+	path: string
+	outcome: RaisedOutcome
+	whyAgain: string
+	settled?: boolean // someone with write access other than the PR author answered or resolved it (false on automatic reviews)
 }
 
 /** A message a CI tool attached to lines of the head commit (lint, type check, test failure), as GitHub reports it. */

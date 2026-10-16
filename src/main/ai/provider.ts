@@ -101,6 +101,28 @@ export class ProviderError extends Error {
 	}
 }
 
+/**
+ * Parses a model's JSON answer. With structured output enforced it is the object alone, but a gateway that passes the
+ * schema on without enforcing it lets some models wrap it: in a ```json fence, or after a few sentences of summary
+ * written for a person. The object is then taken from a fenced block (the last one that parses), or else from the
+ * first "{" to the last "}". Text around it is dropped; the schema check that follows decides whether it is an answer.
+ */
+export function parseJson(text: string): unknown {
+	const trimmed = text.trim()
+	const fenced = [...trimmed.matchAll(/```[\w-]*[ \t]*\n([\s\S]*?)\n[ \t]*```/g)].map((m) => m[1]).reverse()
+	const from = trimmed.indexOf('{')
+	const to = trimmed.lastIndexOf('}')
+	for (const t of [trimmed, ...fenced, ...(from >= 0 && to > from ? [trimmed.slice(from, to + 1)] : [])]) {
+		try {
+			return JSON.parse(t)
+		} catch {
+			// next candidate
+		}
+	}
+	const start = trimmed.slice(0, 60).replace(/\s+/g, ' ')
+	throw new ProviderError('invalid-output', `The response was not valid JSON (it starts: "${start}${trimmed.length > 60 ? '…' : ''}")`)
+}
+
 /** Removes anything that looks like an API key or bearer token from text that may be stored or shown. */
 export function redactSecrets(text: string): string {
 	return text

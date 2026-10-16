@@ -103,8 +103,31 @@ test('background: open threads come before resolved ones, your unsubmitted comme
 	assert.equal(b.sections[0].tag, 'CONVERSATION')
 	assert.ok(text.indexOf('b.ts:4 (open)') < text.indexOf('a.ts:4 (resolved)'))
 	assert.ok(!text.includes('my draft'))
-	assert.ok(text.includes('@lead (2026-10-02): [review: changes_requested] Needs tests'))
+	assert.ok(text.includes('@lead [no write access] (2026-10-02): [review: changes_requested] Needs tests'))
 	assert.equal(b.summary, 'conversation: 2 threads (1 open), 1 comment')
+})
+
+test('background: threads are labelled T1, T2… in the order sent, so a finding can name the one it raises again', () => {
+	const b = buildBackground({
+		description: null,
+		issues: [],
+		discussion: discussion({
+			threads: [
+				{ ...thread('a.ts', true, [comment('done already')]), url: 'https://github.com/acme/web/pull/7#discussion_r1' },
+				thread('b.ts', false, [comment('why is this async?')]),
+			],
+		}),
+	})
+	const text = b.sections[0].text
+	assert.ok(text.includes('Thread T1 on b.ts:4 (open) [no maintainer answer]:'))
+	assert.ok(text.includes('Thread T2 on a.ts:4 (resolved) [no maintainer answer]:'))
+	assert.equal(b.threads.get('T1')?.id, 'b.ts')
+	assert.deepEqual(b.threads.get('T2'), {
+		id: 'a.ts',
+		url: 'https://github.com/acme/web/pull/7#discussion_r1',
+		path: 'a.ts',
+		settled: false,
+	})
 })
 
 test('background: issues and the conversation stay within their budgets and say what was cut', () => {
@@ -143,7 +166,13 @@ test('background: an unreadable discussion and an empty one add nothing; only th
 		)
 		assert.equal(b.summary, 'description')
 	}
-	assert.deepEqual(buildBackground({ description: null, issues: [], discussion: null }), { sections: [], chars: 0, summary: null })
+	assert.deepEqual(buildBackground({ description: null, issues: [], discussion: null }), {
+		sections: [],
+		chars: 0,
+		summary: null,
+		threads: new Map(),
+		outside: [],
+	})
 })
 
 test('background: your notes and files come right after the description; files share what the notes leave', () => {

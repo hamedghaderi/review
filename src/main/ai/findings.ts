@@ -8,10 +8,12 @@ import {
 	type FindingCategory,
 	type NearMiss,
 	type OutdatedDoc,
+	type RaisedBefore,
 	type RejectedFinding,
 	type ReviewRule,
 	type Side,
 } from '../../shared/types.ts'
+import type { EarlierThread } from './background.ts'
 import type { ContextBatch, ContextExcerpt } from './context.ts'
 import { DEFAULT_LEVELS, residueLevel } from './prompt.ts'
 import { reviewOutputSchema, type ModelFinding } from './schema.ts'
@@ -25,6 +27,7 @@ const TEXT_LIMITS = {
 	evidence: 4000,
 	limitation: 1000,
 	note: 400,
+	whyAgain: 600,
 }
 const MAX_FINDINGS_PER_BATCH = 50
 const MAX_LIMITATIONS_PER_BATCH = 20
@@ -42,7 +45,8 @@ export class InvalidOutputError extends Error {}
 
 /**
  * Checks untrusted model output against the excerpts supplied in this batch. Only findings whose excerpt, file, side,
- * line range and evidence all match are kept; everything else is recorded with a reason.
+ * line range and evidence all match are kept; everything else is recorded with a reason. `threads` are the PR's review
+ * threads by the label the conversation sent them under, so a finding that says it raises one again links to it.
  */
 export function validateBatchOutput(
 	output: unknown,
@@ -51,6 +55,7 @@ export function validateBatchOutput(
 	runId: string,
 	rules: ReadonlyArray<ReviewRule> = REVIEW_RULES,
 	levels: ReadonlyArray<FindingLevel> = DEFAULT_LEVELS,
+	threads: ReadonlyMap<string, EarlierThread> = new Map(),
 ): ValidatedBatch {
 	const parsed = reviewOutputSchema.safeParse(output)
 	if (!parsed.success)
@@ -80,8 +85,13 @@ export function validateBatchOutput(
 			continue
 		}
 		const result = validateFinding(f, excerpts, comparison, runId, levels)
-		if (typeof result === 'string') rejected.push(reject(f, result))
-		else findings.push(result)
+		if (typeof result === 'string') {
+			rejected.push(reject(f, result))
+			continue
+		}
+		const before = raisedBefore(f, threads)
+		if (typeof before === 'string') rejected.push(reject(f, before))
+		else findings.push(before ? { ...result, raisedBefore: before } : result)
 	}
 	const limitations = parsed.data.limitations
 		.map((l) => l.trim())
@@ -116,6 +126,20 @@ export function validateBatchOutput(
 		.slice(0, 10)
 		.map((d) => ({ path: d.doc_path, line: d.line, why: clip(d.why.trim(), TEXT_LIMITS.note) }))
 	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs }
+}
+
+/**
+ * The thread a finding says already raised it. Saying so without what is new is the repeat this field exists to stop,
+ * so it is rejected; a thread id that was never sent is dropped, since the finding itself was checked.
+ */
+function raisedBefore(f: ModelFinding, threads: ReadonlyMap<string, EarlierThread>): RaisedBefore | null | string {
+	const b = f.raised_before
+	if (!b) return null
+	const t = threads.get(b.thread_id.trim())
+	if (!t) return null
+	const why = b.why_again.trim()
+	if (!why) return `Raises thread ${t.path} again without saying what is new since it`
+	return { threadId: t.id, url: t.url, path: t.path, outcome: b.outcome, whyAgain: clip(why, TEXT_LIMITS.whyAgain), settled: t.settled }
 }
 
 function reject(f: ModelFinding, reason: string): RejectedFinding {

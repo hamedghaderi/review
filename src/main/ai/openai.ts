@@ -20,6 +20,7 @@ import {
 	dataUrl,
 	FINAL_ANSWER,
 	maxRounds,
+	parseJson,
 	ProviderError,
 	rejectsTools,
 	scrub,
@@ -412,17 +413,6 @@ function chatUsage(completion: ChatCompletion): AiUsage | null {
 				totalTokens: u.total_tokens ?? 0,
 			}
 		: null
-}
-
-/** Parses model JSON. Tolerates a single fenced block (common with JSON-mode fallbacks), nothing more. */
-export function parseJson(text: string): unknown {
-	const trimmed = text.trim()
-	const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed)
-	try {
-		return JSON.parse(fenced ? fenced[1] : trimmed)
-	} catch {
-		throw new ProviderError('invalid-output', 'The response was not valid JSON')
-	}
 }
 
 function retryAfter(error: APIError): number | null {

@@ -132,9 +132,9 @@ export function levelLine(f: Pick<Finding, 'severity' | 'category' | 'signature'
 }
 
 /**
- * The comment text for an accepted finding: a level label line, the body as written (result first), then the
- * disproof for blocking findings and a collapsed background, which is what a reviewer would post. "Why flagged"
- * stays in the app.
+ * The comment text for an accepted finding: a level label line, the body as written (result first), a link to the
+ * thread it follows up on, then the disproof for blocking findings and a collapsed background, which is what a
+ * reviewer would post. "Why flagged" stays in the app.
  */
 export function findingCommentBody(f: Finding): string {
 	if (f.body === undefined)
@@ -142,6 +142,7 @@ export function findingCommentBody(f: Finding): string {
 			'\n',
 		)
 	const parts = [levelLine(f), f.body]
+	if (f.raisedBefore?.url) parts.push(`Follows up on [an earlier thread](${f.raisedBefore.url}).`)
 	if (f.alsoAt?.length)
 		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
 	if (f.disproof) parts.push(`**How to check this is wrong:** ${f.disproof}`)
@@ -153,7 +154,8 @@ export function findingCommentBody(f: Finding): string {
  * Adds a finished run's open findings at the chosen levels as comments, so they show in the code without accepting
  * them one by one. They stay local until published, and can be edited or deleted like any comment. Dismissed,
  * held-back and already added findings (also from earlier runs) are skipped, and so are findings folded under another
- * as the same problem and findings the double-check showed to be likely wrong. `commentIds` are the comments added.
+ * as the same problem and findings the double-check showed to be likely wrong. `hold` leaves more for a person (an
+ * automatic review holds back findings whose text needs reading first). `commentIds` are the comments added.
  */
 export function autoAddFindings(
 	r: Review,
@@ -161,6 +163,7 @@ export function autoAddFindings(
 	runs: Array<AiRun>,
 	roots: Map<string, string>,
 	levels: ReadonlyArray<FindingLevel>,
+	hold: (f: Finding) => boolean = () => false,
 ): { review: Review; added: number; commentIds: Array<string> } {
 	const byId = new Map(runs.flatMap((x) => x.findings.map((f) => [f.id, f] as const)))
 	let review = r
@@ -172,6 +175,7 @@ export function autoAddFindings(
 		// The double-check showed it is likely wrong: leave it for a person to decide.
 		if (f.verification?.verdict === 'wrong' && !f.verification.error) continue
 		if (findingState(review, roots, f, byId) !== 'open') continue
+		if (hold(f)) continue
 		const t = new Date().toISOString()
 		const c: ReviewComment = {
 			id: crypto.randomUUID(),

@@ -1,4 +1,5 @@
-import { CONTEXT_LIMITS, type Discussion, type DiscussionComment, type ReviewContext } from '../../shared/types.ts'
+import { CONTEXT_LIMITS, type Discussion, type DiscussionComment, type DiscussionThread, type ReviewContext } from '../../shared/types.ts'
+import { hasWriteRole, roleOf } from '../../shared/trust.ts'
 import type { LinkedIssue } from '../github.ts'
 
 /**
@@ -11,6 +12,20 @@ export interface Background {
 	sections: Array<{ tag: 'DESCRIPTION' | 'NOTES' | 'ISSUES' | 'CONVERSATION'; title: string; text: string }>
 	chars: number
 	summary: string | null // for the run's coverage, e.g. "description; issue #12 (closes, 4 comments); conversation: 3 threads (1 open), 2 comments"
+	threads: Map<string, EarlierThread> // the conversation's review threads by the label they were sent under ("T1"), for findings that cite one
+	outside: Array<string> // text in the run written by people without write access, e.g. "the pull request by @x"; empty: none
+}
+
+/**
+ * A review thread a finding says it raises again. `settled`: someone with write access, other than the PR author,
+ * answered or resolved it; only such a thread may settle a finding (never on an automatic review).
+ */
+export type EarlierThread = Pick<DiscussionThread, 'id' | 'url' | 'path'> & { settled: boolean }
+
+/** Who wrote the pull request, so the conversation can say whose answer is whose. */
+export interface PrAuthor {
+	login: string | null
+	association: string | null | undefined
 }
 
 export const DESCRIPTION_MAX = 8000
@@ -46,9 +61,10 @@ function clipText(s: string, n: number): string {
 	return t.length > n ? `${t.slice(0, n - 1)}… [cut]` : t
 }
 
-function line(author: string | null, body: string, at: string | null = null): string {
+/** One comment: who wrote it with their role (PR author, write access, no write access), when, and what. */
+function line(author: string | null, role: string, body: string, at: string | null = null): string {
 	const who = author ? `@${author}` : 'deleted user'
-	return `- ${who}${at ? ` (${at.slice(0, 10)})` : ''}: ${clipText(body, COMMENT_MAX).replace(/\n+/g, ' ⏎ ')}`
+	return `- ${who} [${role}]${at ? ` (${at.slice(0, 10)})` : ''}: ${clipText(body, COMMENT_MAX).replace(/\n+/g, ' ⏎ ')}`
 }
 
 /** Adds lines until the budget runs out, then one line saying how many were left out. */
@@ -65,12 +81,16 @@ function fill(lines: Array<string>, budget: number): { text: string; left: numbe
 	return { text: kept.join('\n'), left }
 }
 
-function issueText(issue: LinkedIssue, budget: number): string {
-	const head = `${issue.repo}#${issue.number} [${issue.state.toLowerCase()}${issue.closes ? ', closed by this pull request' : ', mentioned in the description'}]: ${issue.title}`
+function issueText(issue: LinkedIssue, budget: number, pr: string | null): string {
+	const by =
+		issue.author !== undefined
+			? ` (opened by ${issue.author ? `@${issue.author}` : 'deleted user'} [${roleOf(issue.author, issue.association, pr)}])`
+			: ''
+	const head = `${issue.repo}#${issue.number} [${issue.state.toLowerCase()}${issue.closes ? ', closed by this pull request' : ', mentioned in the description'}]: ${issue.title}${by}`
 	const body = clipText(issue.body, Math.min(ISSUE_BODY_MAX, budget / 2)) || '(no description)'
 	const earlier = issue.commentsTotal - issue.comments.length
 	const comments = fill(
-		issue.comments.filter((c) => c.body.trim()).map((c) => line(c.author, c.body, c.createdAt)),
+		issue.comments.filter((c) => c.body.trim()).map((c) => line(c.author, roleOf(c.author, c.association, pr), c.body, c.createdAt)),
 		Math.max(0, budget - head.length - body.length - 40),
 	)
 	return [
@@ -84,22 +104,60 @@ function issueText(issue: LinkedIssue, budget: number): string {
 
 const visible = (c: DiscussionComment): boolean => !c.pending && !!c.body.trim()
 
-/** Open threads first (they are what is still being discussed), then the PR conversation and review summaries, newest first. */
-function conversationText(d: Discussion): { text: string; threads: number; open: number; comments: number } {
+/**
+ * Open threads first (they are what is still being discussed), then the PR conversation and review summaries, newest
+ * first. Each thread is labelled T1, T2… so a finding can say which one it raises again, and says whether a maintainer
+ * (write access, not the PR author) answered it. On an automatic review no thread is marked answered: nobody reads the
+ * findings before they are posted, so a reply must not be able to talk the reviewer out of one.
+ */
+function conversationText(
+	d: Discussion,
+	pr: string | null,
+	automatic: boolean,
+): {
+	text: string
+	threads: number
+	open: number
+	comments: number
+	labels: Map<string, EarlierThread>
+} {
 	const threads = d.threads.filter((t) => t.comments.some(visible))
 	const open = threads.filter((t) => t.resolved !== true)
-	const blocks = [...open, ...threads.filter((t) => t.resolved === true)].map((t) => {
+	const labels = new Map<string, EarlierThread>()
+	const maintainer = (author: string | null, association: string | null | undefined) => roleOf(author, association, pr) === 'write access'
+	// Who resolved a thread is reported without a role; it counts when that login wrote as a maintainer somewhere here.
+	const maintainers = new Set(
+		[...d.threads.flatMap((t) => t.comments), ...d.conversation, ...d.reviews]
+			.filter((c) => c.author && maintainer(c.author, c.association))
+			.map((c) => c.author!.toLowerCase()),
+	)
+	const blocks = [...open, ...threads.filter((t) => t.resolved === true)].map((t, i) => {
+		const label = `T${i + 1}`
+		const shown = t.comments.filter(visible)
+		const settled =
+			!automatic &&
+			(shown.slice(1).some((c) => maintainer(c.author, c.association)) ||
+				(t.resolved === true && !!t.resolvedBy && maintainers.has(t.resolvedBy.toLowerCase())))
+		labels.set(label, { id: t.id, url: t.url, path: t.path, settled })
 		const where = `${t.path}${t.originalLine ? `:${t.originalLine}` : ''}`
 		const state = [t.resolved === true ? 'resolved' : t.resolved === false ? 'open' : null, t.outdated ? 'outdated' : null]
 			.filter(Boolean)
 			.join(', ')
-		return [`Thread on ${where}${state ? ` (${state})` : ''}:`, ...t.comments.filter(visible).map((c) => line(c.author, c.body))].join('\n')
+		return [
+			`Thread ${label} on ${where}${state ? ` (${state})` : ''} [${settled ? 'a maintainer answered' : 'no maintainer answer'}]:`,
+			...shown.map((c) => line(c.author, roleOf(c.author, c.association, pr), c.body)),
+		].join('\n')
 	})
 	const notes = [
 		...d.reviews
 			.filter((r) => r.body.trim())
-			.map((r) => ({ at: r.submittedAt, text: line(r.author, `[review: ${r.state.toLowerCase()}] ${r.body}`, r.submittedAt) })),
-		...d.conversation.filter(visible).map((c) => ({ at: c.createdAt, text: line(c.author, c.body, c.createdAt) })),
+			.map((r) => ({
+				at: r.submittedAt,
+				text: line(r.author, roleOf(r.author, r.association, pr), `[review: ${r.state.toLowerCase()}] ${r.body}`, r.submittedAt),
+			})),
+		...d.conversation
+			.filter(visible)
+			.map((c) => ({ at: c.createdAt, text: line(c.author, roleOf(c.author, c.association, pr), c.body, c.createdAt) })),
 	]
 		.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
 		.map((x) => x.text)
@@ -110,6 +168,7 @@ function conversationText(d: Discussion): { text: string; threads: number; open:
 		threads: threads.length,
 		open: open.length,
 		comments: notes.length,
+		labels,
 	}
 }
 
@@ -139,14 +198,41 @@ function contextText(c: ReviewContext): string {
 	].join('\n\n')
 }
 
+/**
+ * Text in the run from people without write access: the pull request itself (its code and description) when its
+ * author has none, then issues and comments. Such text can carry instructions, so a run that has any is not offered
+ * MCP tools. A role that wasn't read counts as none.
+ */
+function outsiders(pr: PrAuthor | null, issues: Array<LinkedIssue>, d: Discussion | null): Array<string> {
+	const out: Array<string> = []
+	if (pr && !hasWriteRole(pr.association)) out.push(`the pull request by ${pr.login ? `@${pr.login}` : 'a deleted user'}`)
+	for (const i of issues)
+		if (!hasWriteRole(i.association) || i.comments.some((c) => c.body.trim() && !hasWriteRole(c.association)))
+			out.push(`issue #${i.number}`)
+	if (d && d.status !== 'unavailable') {
+		const comments = [
+			...d.threads.flatMap((t) => t.comments.filter(visible)),
+			...d.conversation.filter(visible),
+			...d.reviews.filter((r) => r.body.trim()),
+		]
+		const n = comments.filter((c) => !hasWriteRole(c.association)).length
+		if (n) out.push(`${n} comment${n === 1 ? '' : 's'} on the pull request`)
+	}
+	return out
+}
+
 export function buildBackground(o: {
 	description: string | null
 	context?: ReviewContext | null
 	issues: Array<LinkedIssue>
 	discussion: Discussion | null
+	pr?: PrAuthor | null // for pull requests: who opened it
+	automatic?: boolean // nobody reads the findings before they are posted
 }): Background {
 	const sections: Background['sections'] = []
 	const parts: Array<string> = []
+	let threads = new Map<string, EarlierThread>()
+	const prLogin = o.pr?.login ?? null
 	const description = o.description?.trim()
 	if (description) {
 		sections.push({
@@ -178,7 +264,7 @@ export function buildBackground(o: {
 		sections.push({
 			tag: 'ISSUES',
 			title: 'Issues this pull request closes or mentions (what was asked for; written by people, not evidence about the code)',
-			text: o.issues.map((i) => issueText(i, each)).join('\n\n'),
+			text: o.issues.map((i) => issueText(i, each, prLogin)).join('\n\n'),
 		})
 		for (const i of o.issues)
 			parts.push(
@@ -187,7 +273,8 @@ export function buildBackground(o: {
 	}
 	const d = o.discussion
 	if (d && d.status !== 'unavailable') {
-		const c = conversationText(d)
+		const c = conversationText(d, prLogin, o.automatic === true)
+		threads = c.labels
 		if (c.threads || c.comments) {
 			sections.push({
 				tag: 'CONVERSATION',
@@ -203,5 +290,7 @@ export function buildBackground(o: {
 		sections,
 		chars: sections.reduce((n, s) => n + s.title.length + s.text.length + 30, 0),
 		summary: parts.length ? parts.join('; ') : null,
+		threads,
+		outside: outsiders(o.pr ?? null, o.issues, o.discussion),
 	}
 }

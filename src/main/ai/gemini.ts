@@ -4,6 +4,7 @@ import {
 	addUsage,
 	clip,
 	maxRounds,
+	parseJson,
 	ProviderError,
 	rejectsTools,
 	scrub,
@@ -167,11 +168,7 @@ export function interpretGemini(response: GenerateContentResponse): ProviderResp
 		.map((p) => p.text)
 		.join('')
 	if (!text.trim()) throw new ProviderError('invalid-output', 'The response contained no output text')
-	try {
-		return { output: JSON.parse(text), usage }
-	} catch {
-		throw new ProviderError('invalid-output', 'The response was not valid JSON')
-	}
+	return { output: parseJson(text), usage }
 }
 
 export function mapGeminiError(error: unknown, secret: string | null, model?: string): ProviderError {
