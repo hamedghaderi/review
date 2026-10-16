@@ -139,7 +139,7 @@ function raisedBefore(f: ModelFinding, threads: ReadonlyMap<string, EarlierThrea
 	if (!t) return null
 	const why = b.why_again.trim()
 	if (!why) return `Raises thread ${t.path} again without saying what is new since it`
-	return { threadId: t.id, url: t.url, path: t.path, outcome: b.outcome, whyAgain: clip(why, TEXT_LIMITS.whyAgain) }
+	return { threadId: t.id, url: t.url, path: t.path, outcome: b.outcome, whyAgain: clip(why, TEXT_LIMITS.whyAgain), settled: t.settled }
 }
 
 function reject(f: ModelFinding, reason: string): RejectedFinding {

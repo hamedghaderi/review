@@ -26,6 +26,7 @@ import type {
 	StoredRule,
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
+import { screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
@@ -330,6 +331,7 @@ export function FindingsPanel({
 							team={run.team}
 							discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
 							earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
+							screened={screenFinding(f, review?.pr?.repo ?? null)}
 							selected={f.id === selectedFindingId}
 							focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
 							onOpen={() => onOpen(f)}
@@ -900,6 +902,7 @@ interface CardProps {
 	team: AiRun['team']
 	discussed: Array<DiscussionThread> // threads on its lines, other than the one it says it raises again
 	earlier: DiscussionThread | null // the thread it says it raises again, as read now
+	screened: Array<string> // what in its text a person should read before posting (see screenFinding)
 	selected: boolean
 	focusAsk: number | null // changes each time the question box should open and take focus
 	onOpen(): void
@@ -1060,6 +1063,11 @@ function FindingCard(p: CardProps) {
 					: ''}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}
 			</div>
+			{p.screened.length > 0 && (
+				<div className="discussed-note raised-note rejected small" title="Automatic review doesn't post a finding like this.">
+					<b>Read before posting:</b> its text has {p.screened.join(', ')}. The AI read pull request text anyone can write.
+				</div>
+			)}
 			{f.raisedBefore && <RaisedBeforeNote r={f.raisedBefore} thread={p.earlier} />}
 			<AlreadyDiscussed threads={discussed} unclaimed />
 			{f.body !== undefined ? (

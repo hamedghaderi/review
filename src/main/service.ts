@@ -75,6 +75,7 @@ import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { autoAddFindings, findingRoots } from '../shared/findings.ts'
+import { screenFinding } from '../shared/screen.ts'
 import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
@@ -473,7 +474,8 @@ export class ReviewService {
 			const runs = repo?.aiRuns[reviewId] ?? []
 			const run = runs.find((x) => x.id === runId)
 			if (!r || !run) return
-			const res = autoAddFindings(r, run, runs, findingRoots(runs), levels)
+			// Nobody reads these before they go out: a finding whose text needs a person stays in the app.
+			const res = autoAddFindings(r, run, runs, findingRoots(runs), levels, (f) => screenFinding(f, r.pr?.repo ?? null).length > 0)
 			if (!res.added) return
 			r.comments = res.review.comments
 			r.findingDecisions = res.review.findingDecisions
@@ -710,6 +712,7 @@ export class ReviewService {
 				headSha: d.headSha,
 				body: d.body.slice(0, 8000),
 				author: d.author,
+				authorAssociation: d.authorAssociation ?? null,
 			},
 		})
 		const notes = [

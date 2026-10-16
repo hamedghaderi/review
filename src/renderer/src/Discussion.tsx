@@ -109,6 +109,9 @@ export function RaisedBeforeNote({ r, thread }: { r: RaisedBefore; thread: Discu
 			on <span className="mono">{where}</span>
 			{thread && thread.resolved !== null ? ` (${thread.resolved ? 'resolved' : 'open'})` : ''}. According to the AI,{' '}
 			{OUTCOME_TEXT[r.outcome]}.
+			{r.settled === false &&
+				(r.outcome === 'agreed' || r.outcome === 'rejected') &&
+				' Nobody with write access other than the PR author answered it, so it wasn’t treated as settled.'}
 			<div>
 				<b>Raised again because:</b> {r.whyAgain}
 			</div>

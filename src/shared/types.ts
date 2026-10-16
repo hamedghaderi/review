@@ -89,6 +89,7 @@ export interface PrSnapshot {
 	headSha: string
 	body?: string // the author's description, given to the AI reviewer as background (not evidence)
 	author?: string | null // GitHub login of who opened it; absent on snapshots stored before it was recorded
+	authorAssociation?: string | null // their role on the repository (OWNER, MEMBER, COLLABORATOR, NONE…); absent: unknown
 }
 
 export type SearchSlot = 'list' | 'palette'
@@ -177,6 +178,7 @@ export interface PrPage {
 export interface PrDetail extends PrSummary {
 	repo: string
 	body: string
+	authorAssociation?: string | null // the author's role on the repository, as GitHub reports it (OWNER, MEMBER, NONE…)
 	commits: number | null
 	changedFiles: number | null
 	additions: number | null
@@ -580,6 +582,7 @@ export interface DiscussionComment {
 export interface DiscussionReview {
 	id: string
 	author: string | null
+	association?: string | null // OWNER, MEMBER, CONTRIBUTOR, NONE…; absent on discussions read before it was
 	state: string // passed through as GitHub reports it
 	body: string
 	bodyTruncated: boolean
@@ -818,6 +821,7 @@ export interface RaisedBefore {
 	path: string
 	outcome: RaisedOutcome
 	whyAgain: string
+	settled?: boolean // someone with write access other than the PR author answered or resolved it (false on automatic reviews)
 }
 
 /** A message a CI tool attached to lines of the head commit (lint, type check, test failure), as GitHub reports it. */

@@ -1,4 +1,5 @@
 import { findingRoots, findingState } from '../shared/findings.ts'
+import { screenFinding } from '../shared/screen.ts'
 import { watchKey } from '../shared/inbox.ts'
 import type {
 	AiRun,
@@ -27,8 +28,10 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
  * What an automatic review submits. Request changes when a blocking finding stands (not dismissed, not held back and
  * not shown likely wrong by the double-check); approve only when every file was reviewed, nothing was posted, no
  * blocking, should-fix or question finding is left, and CI for the head commit finished without a failure (`ci` null:
- * it couldn't be read); otherwise comment. Dismissed findings never count. `ciStopped` says when CI alone stood in the
- * way of an approval, so the caller can wait for checks that haven't finished.
+ * it couldn't be read); otherwise comment. Dismissed findings never count. A finding whose text a person should read
+ * first (see screenFinding) is never posted; it rules out an approval but doesn't request changes, since its text may
+ * be what someone steered the AI into writing. `ciStopped` says when CI alone stood in the way of an approval, so the
+ * caller can wait for checks that haven't finished.
  */
 export function autoVerdict(
 	run: AiRun,
@@ -43,11 +46,13 @@ export function autoVerdict(
 	const state = (f: Finding) => findingState(review, roots, f, byId)
 	const live = run.findings.filter((f) => !f.mergedInto && state(f) !== 'dismissed')
 	const doubted = (f: Finding): boolean => f.verification?.verdict === 'wrong' && !f.verification.error
-	const blocking = live.filter((f) => f.severity === 'blocking' && !f.heldBack && !doubted(f))
+	const repo = review.pr?.repo ?? null
+	const screened = new Set(live.filter((f) => state(f) === 'open' && !f.heldBack && screenFinding(f, repo).length).map((f) => f.id))
+	const blocking = live.filter((f) => f.severity === 'blocking' && !f.heldBack && !doubted(f) && !screened.has(f.id))
 	const concerns = live.filter((f) => CONCERNS.includes(f.severity))
-	const unposted = concerns.filter((f) => state(f) === 'open').length
+	const unposted = concerns.filter((f) => state(f) === 'open' && !screened.has(f.id)).length
 	const complete = run.status === 'completed'
-	const findingsAllow = !blocking.length && !concerns.length && !posted && complete
+	const findingsAllow = !blocking.length && !concerns.length && !screened.size && !posted && complete
 	const ciStopped = !findingsAllow ? null : !ci ? 'unreadable' : ci.failed.length ? 'failed' : ci.pending.length ? 'pending' : null
 	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped ? 'APPROVE' : 'COMMENT'
 	const lines = [
@@ -59,6 +64,10 @@ export function autoVerdict(
 		if (blocking.length) parts.push(`${plural(blocking.length, 'blocking finding')}.`)
 		if (posted) parts.push(`${plural(posted, 'comment')} below.`)
 		if (unposted) parts.push(`${plural(unposted, 'finding')} not posted, left for a person to check.`)
+		if (screened.size)
+			parts.push(
+				`${plural(screened.size, 'finding')} not posted because ${screened.size === 1 ? 'its' : 'their'} text needs a person to read it first, so this is not an approval.`,
+			)
 		if (!complete) parts.push('Some files were not reviewed, so this is not an approval.')
 		if (ci?.failed.length) {
 			const more = ci.failed.length > 1 ? ` and ${ci.failed.length - 1} more` : ''

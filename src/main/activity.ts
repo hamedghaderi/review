@@ -77,7 +77,7 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
       }
       reviews(first: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login } state body submittedAt url }
+        nodes { id author { login } authorAssociation state body submittedAt url }
       }
       comments(first: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
@@ -124,7 +124,15 @@ export interface GqlActivity {
 			}
 			reviews?: {
 				totalCount: number
-				nodes: Array<{ id: string; author: { login: string } | null; state: string; body: string; submittedAt: string | null; url: string }>
+				nodes: Array<{
+					id: string
+					author: { login: string } | null
+					authorAssociation?: string | null
+					state: string
+					body: string
+					submittedAt: string | null
+					url: string
+				}>
 			}
 			comments?: { totalCount: number; nodes: Array<GqlComment> }
 		} | null
@@ -181,6 +189,7 @@ export function fromGraphql(pages: Array<NonNullable<NonNullable<GqlActivity['re
 			.map((r) => ({
 				id: r.id,
 				author: r.author?.login ?? null,
+				association: r.authorAssociation ?? null,
 				state: r.state,
 				...body(r.body),
 				submittedAt: r.submittedAt,
@@ -222,6 +231,7 @@ export interface RestReviewComment {
 export interface RestReview {
 	node_id: string
 	user: { login: string } | null
+	author_association?: string | null
 	state: string
 	body: string | null
 	submitted_at: string | null
@@ -296,6 +306,7 @@ export function fromRest(
 		reviews: kept.map((r) => ({
 			id: r.node_id,
 			author: r.user?.login ?? null,
+			association: r.author_association ?? null,
 			state: r.state,
 			...body(r.body),
 			submittedAt: r.submitted_at,

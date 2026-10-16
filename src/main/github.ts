@@ -919,11 +919,16 @@ export class GitHubService {
 						url: i.html_url,
 						state: i.state.toUpperCase(),
 						body: i.body ?? '',
+						author: i.user?.login ?? null,
+						association: i.author_association ?? null,
 						closes: false,
 						commentsTotal: i.comments,
-						comments: comments
-							.slice(-ISSUE_COMMENTS)
-							.map((c) => ({ author: c.user?.login ?? null, body: c.body ?? '', createdAt: c.created_at })),
+						comments: comments.slice(-ISSUE_COMMENTS).map((c) => ({
+							author: c.user?.login ?? null,
+							association: c.author_association,
+							body: c.body ?? '',
+							createdAt: c.created_at,
+						})),
 					})
 				} catch (e) {
 					if (signal?.aborted) throw e
@@ -951,9 +956,9 @@ export class GitHubService {
 	${aliases}
 }
 fragment LinkedIssue on Issue {
-	number title url state body
+	number title url state body author { login } authorAssociation
 	repository { nameWithOwner }
-	comments(last: ${ISSUE_COMMENTS}) { totalCount nodes { author { login } body createdAt } }
+	comments(last: ${ISSUE_COMMENTS}) { totalCount nodes { author { login } authorAssociation body createdAt } }
 }`,
 			{ owner, name, number },
 			signal,
@@ -966,9 +971,16 @@ fragment LinkedIssue on Issue {
 			url: n.url,
 			state: n.state,
 			body: n.body ?? '',
+			author: n.author?.login ?? null,
+			association: n.authorAssociation ?? null,
 			closes,
 			commentsTotal: n.comments.totalCount,
-			comments: n.comments.nodes.map((c) => ({ author: c.author?.login ?? null, body: c.body ?? '', createdAt: c.createdAt })),
+			comments: n.comments.nodes.map((c) => ({
+				author: c.author?.login ?? null,
+				association: c.authorAssociation ?? null,
+				body: c.body ?? '',
+				createdAt: c.createdAt,
+			})),
 		})
 		const out = (d.repository?.pullRequest?.closingIssuesReferences.nodes ?? [])
 			.filter((n): n is GqlLinkedIssue => !!n)
@@ -1095,7 +1107,9 @@ export interface LinkedIssue {
 	body: string
 	closes: boolean // a closing reference ("Fixes #12"); false: only mentioned in the description
 	commentsTotal: number
-	comments: Array<{ author: string | null; body: string; createdAt: string | null }> // the latest ones, oldest first
+	comments: Array<{ author: string | null; association?: string | null; body: string; createdAt: string | null }> // the latest ones, oldest first
+	author?: string | null // who opened the issue
+	association?: string | null // their role on its repository (OWNER, MEMBER, NONE…)
 }
 
 const MAX_CLOSING = 5
@@ -1112,12 +1126,19 @@ interface GqlLinkedIssue {
 	url: string
 	state: string
 	body: string | null
+	author?: { login: string } | null
+	authorAssociation?: string | null
 	repository: { nameWithOwner: string }
-	comments: { totalCount: number; nodes: Array<{ author: { login: string } | null; body: string | null; createdAt: string | null }> }
+	comments: {
+		totalCount: number
+		nodes: Array<{ author: { login: string } | null; authorAssociation?: string | null; body: string | null; createdAt: string | null }>
+	}
 }
 
 interface RestIssueDetail {
 	title: string
+	user?: { login: string } | null
+	author_association?: string | null
 	html_url: string
 	state: string
 	body: string | null
@@ -1554,6 +1575,7 @@ interface RestPull {
 	created_at: string
 	updated_at: string
 	user: { login: string } | null
+	author_association?: string | null
 	head: RestRef
 	base: RestRef
 	commits?: number
@@ -1584,6 +1606,7 @@ export function fromRestPull(p: RestPull, viewer: string | null): PrDetail {
 		review: null,
 		repo: baseRepo,
 		body: p.body ?? '',
+		authorAssociation: p.author_association ?? null,
 		commits: p.commits ?? null,
 		changedFiles: p.changed_files ?? null,
 		additions: p.additions ?? null,

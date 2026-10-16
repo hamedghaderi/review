@@ -97,10 +97,12 @@ export interface RunInput {
 	images?: Array<RequestImage>
 	/** Dependency range checks and CI results, computed or read by the app. */
 	loadFacts?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<FactsResult>
-	/** Read-only lookups in the reviewed commits, offered to the reviewer when the limits allow; one set per request. */
-	tools?: (budget: LookupBudget) => ReviewTools
+	/** Read-only lookups in the reviewed commits, offered to the reviewer when the limits allow; one set per request. `external`: false leaves out the MCP tools. */
+	tools?: (budget: LookupBudget, external: boolean) => ReviewTools
 	/** MCP tools offered with the lookups (already part of `tools`); described in the instructions and the run's record. */
 	external?: ExternalTools | null
+	/** An automatic review: nobody reads the findings before they are posted, so the conversation can't settle one. */
+	automatic?: boolean
 	previousFindings: Array<Finding> // from earlier runs of the same review, used to mark repeats
 	/** Findings the reviewer dismissed on earlier runs of the same pull request or branch, told to this run. */
 	decisions?: Array<PastDecision>
@@ -182,7 +184,9 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const images = input.images ?? []
 	// Images count against the context window as tokens, not characters; reserve their likely size as characters.
 	const imageChars = images.length * IMAGE_TOKENS * CHARS_PER_TOKEN
-	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null })
+	const pr = input.comparison.pr ? { login: input.comparison.pr.author ?? null, association: input.comparison.pr.authorAssociation } : null
+	const automatic = input.automatic === true
+	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null, pr, automatic })
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups)
 		: options.team
@@ -227,9 +231,19 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		run.fixture = workers.every((w) => w.provider.fixture)
 		for (const w of workers) for (const r of w.rules) run.evaluation!.find((e) => e.rule === r)!.checkedBy = w.id
 	}
-	const external = lookups && input.external?.definitions.length ? input.external : null
-	if (external) for (const w of workers) w.instructions = withExternalTools(w.instructions, external.servers)
-	const toolChars = lookups ? JSON.stringify(TOOL_DEFINITIONS).length + (external ? JSON.stringify(external.definitions).length : 0) : 0
+	// Settled once the background is read: text from outsiders turns the MCP tools off.
+	let external = lookups && input.external?.definitions.length ? input.external : null
+	let toolChars = 0
+	const offerExternal = (): void => {
+		if (external && background.outside.length) {
+			external = null
+			notice(
+				`MCP tools were not offered: this run includes text from people without write access to the repository (${background.outside.join(', ')}), which could tell the reviewer to call them.`,
+			)
+		}
+		if (external) for (const w of workers) w.instructions = withExternalTools(w.instructions, external.servers)
+		toolChars = lookups ? JSON.stringify(TOOL_DEFINITIONS).length + (external ? JSON.stringify(external.definitions).length : 0) : 0
+	}
 	let settled = false
 	let evidence: EvidenceIndex | null = null // CI messages and test imports that findings are checked against
 	const emit = (): void => {
@@ -250,7 +264,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				try {
 					const b = await input.loadBackground(controller.signal)
 					for (const n of b.notes) notice(n)
-					background = buildBackground({ description, context: input.context ?? null, issues: b.issues, discussion: b.discussion })
+					background = buildBackground({
+						description,
+						context: input.context ?? null,
+						issues: b.issues,
+						discussion: b.discussion,
+						pr,
+						automatic,
+					})
 				} catch (e) {
 					if (controller.signal.aborted) return finish(null)
 					notice(
@@ -258,6 +279,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					)
 				}
 			}
+			offerExternal()
 			if (retry) return await rerun(sources)
 			// Excerpts are cut once, to fit the smallest member; each member then packs its own requests to fit its model.
 			const fits = workers.map((w) => {
@@ -550,7 +572,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	async function runBatch(batch: ContextBatch, w: Worker): Promise<BatchOutcome> {
 		for (let attempt = 0; ; attempt++) {
 			const budget = lookups ? lookupBudget(batch, w) : null
-			const tools = budget && input.tools ? input.tools(budget) : undefined
+			const tools = budget && input.tools ? input.tools(budget, external !== null) : undefined
 			const sendImages = images.length > 0 && !w.imagesRejected
 			try {
 				const response = await w.provider.review(
@@ -732,7 +754,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
 			const tools =
 				lookups && input.tools && room >= 2000
-					? input.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) })
+					? input.tools(
+							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
+							external !== null,
+						)
 					: undefined
 			try {
 				const response = await w.provider.review(buildVerifyRequest(f, excerpt, facts, tools), controller.signal)

