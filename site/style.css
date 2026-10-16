@@ -340,6 +340,50 @@ kbd {
 	grid-column: span 3;
 }
 
+/* Sprint — one playful break before the download: copy on the left, and the runner (a cutout) standing on the card,
+ * breaking out over its top edge, lit by a violet bloom */
+.sprint {
+	display: grid;
+	grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+	align-items: center;
+	/* Lines up with the feature tiles: their section is 1180px wide with a gutter on each side */
+	width: min(calc(100% - 2 * var(--space-lg)), calc(1180px - 2 * var(--space-lg)));
+	/* Room above for the runner's head */
+	margin: var(--space-3xl) auto 0;
+	border: var(--rule-w) solid var(--color-rule);
+	border-radius: var(--radius-lg);
+	background:
+		radial-gradient(45% 70% at 72% 55%, var(--color-bloom), transparent 70%),
+		radial-gradient(60% 80% at 15% 50%, var(--color-bloom-2), transparent 70%),
+		linear-gradient(to bottom, var(--color-paper-3), var(--color-paper-2));
+}
+.sprint__text {
+	display: grid;
+	justify-items: start;
+	gap: var(--space-md);
+	padding: var(--space-2xl);
+}
+.sprint h2 {
+	font-size: var(--text-2xl);
+}
+.sprint p {
+	max-width: 36ch;
+	color: var(--color-muted);
+}
+.sprint .btn {
+	margin-top: var(--space-xs);
+}
+.sprint__art {
+	align-self: end;
+	margin: calc(-1 * var(--space-4xl)) 0 0;
+}
+.sprint__art img {
+	width: 100%;
+	aspect-ratio: 1;
+	object-fit: contain;
+	filter: drop-shadow(0 24px 48px var(--color-shadow));
+}
+
 /* Download */
 .download {
 	max-width: 1180px;
@@ -544,6 +588,18 @@ kbd {
 	.files {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
+	/* The runner goes on top, still breaking out over the card's top edge, with the copy below */
+	.sprint {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.sprint__art {
+		order: -1;
+		width: min(100%, 520px);
+		margin: calc(-1 * var(--space-3xl)) auto 0;
+	}
+	.sprint__text {
+		padding-top: 0;
+	}
 }
 
 /* Phone */
@@ -566,6 +622,12 @@ kbd {
 	.download,
 	.footer {
 		padding-inline: var(--space-md);
+	}
+	.sprint {
+		width: calc(100% - 2 * var(--space-md));
+	}
+	.sprint__text {
+		padding: 0 var(--space-lg) var(--space-lg);
 	}
 	.tile--providers,
 	.tile--filters,
