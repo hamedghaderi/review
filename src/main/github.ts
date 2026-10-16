@@ -7,6 +7,7 @@ import type {
 	CredentialStorageInfo,
 	GitHubStatus,
 	NotificationPrefs,
+	PrDescription,
 	PrDetail,
 	PrGraph,
 	PrGraphNode,
@@ -609,6 +610,105 @@ export class GitHubService {
 		}))
 	}
 
+	// ─── Description ──────────────────────────────────────────────────────────
+
+	/**
+	 * A pull request's description: the Markdown, GitHub's rendering of it, and whether you may edit it. One GraphQL
+	 * query with a token; without one, the REST pull request in its HTML form (public repositories only).
+	 */
+	async description(repo: string, number: number, signal?: AbortSignal): Promise<PrDescription> {
+		checkRepo(repo)
+		const fetchedAt = new Date().toISOString()
+		if (await this.token()) {
+			const pr = await this.descriptionNode(repo, number, signal)
+			return {
+				body: lf(pr.body),
+				html: pr.bodyHTML,
+				canEdit: pr.viewerCanUpdate,
+				editIssue: pr.viewerCanUpdate ? null : 'Only the author and people with write access to the repository can edit the description.',
+				updatedAt: pr.updatedAt,
+				url: pr.url,
+				fetchedAt,
+			}
+		}
+		const res = await this.request(
+			`${this.base}/repos/${repo}/pulls/${number}`,
+			{ method: 'GET', headers: { accept: 'application/vnd.github.full+json' } },
+			signal,
+		)
+		const p = (await res.json()) as { body: string | null; body_html?: string | null; updated_at: string | null; html_url: string }
+		return {
+			body: lf(p.body ?? ''),
+			html: p.body_html ?? '',
+			canEdit: false,
+			editIssue: 'Connect GitHub to edit the description.',
+			updatedAt: p.updated_at,
+			url: p.html_url,
+			fetchedAt,
+		}
+	}
+
+	/** Markdown rendered the way GitHub renders it in this repository (issue links, mentions), for previewing an edit. */
+	async renderMarkdown(repo: string, text: string, signal?: AbortSignal): Promise<string> {
+		checkRepo(repo)
+		const res = await this.request(
+			`${this.base}/markdown`,
+			{
+				method: 'POST',
+				headers: { 'content-type': 'application/json', accept: 'text/html' },
+				body: JSON.stringify({ text, mode: 'gfm', context: repo }),
+			},
+			signal,
+		)
+		return res.text()
+	}
+
+	/**
+	 * Replaces the description, unless it changed on GitHub since `expected` was read: then nothing is written, so
+	 * someone else's edit is never overwritten without you seeing it.
+	 */
+	async updateDescription(repo: string, number: number, expected: string, body: string): Promise<PrDescription> {
+		checkRepo(repo)
+		if (!(await this.token()))
+			throw new AppFail('github-auth', 'Connect GitHub (a token, or your GitHub CLI login) to edit the description.')
+		const now = await this.descriptionNode(repo, number)
+		if (lf(now.body) !== lf(expected))
+			throw new AppFail(
+				'pr-changed',
+				'The description was changed on GitHub since you started editing. Reload it to see the new text; your edit is kept.',
+			)
+		if (!now.viewerCanUpdate)
+			throw new AppFail('github-forbidden', 'Only the author and people with write access to the repository can edit the description.')
+		const d = await this.graphql<{ updatePullRequest: { pullRequest: DescriptionNode } }>(
+			UPDATE_DESCRIPTION_MUTATION,
+			{ input: { pullRequestId: now.id, body } },
+			undefined,
+			{ write: true },
+		)
+		const pr = d.updatePullRequest.pullRequest
+		return {
+			body: lf(pr.body),
+			html: pr.bodyHTML,
+			canEdit: pr.viewerCanUpdate,
+			editIssue: null,
+			updatedAt: pr.updatedAt,
+			url: pr.url,
+			fetchedAt: new Date().toISOString(),
+		}
+	}
+
+	private async descriptionNode(repo: string, number: number, signal?: AbortSignal): Promise<DescriptionNode> {
+		const [owner, name] = repo.split('/')
+		const d = await this.graphql<{ repository: { pullRequest: DescriptionNode | null } | null }>(
+			DESCRIPTION_QUERY,
+			{ owner, name, number },
+			signal,
+		)
+		const pr = d.repository?.pullRequest
+		if (!pr) throw new AppFail('github-not-found', `${repo} has no pull request #${number}, or the token has no access to it.`)
+		return pr
+	}
+
 	// ─── HTTP ─────────────────────────────────────────────────────────────────
 
 	private async request(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
@@ -1052,6 +1152,30 @@ const ADD_THREAD_MUTATION = `mutation($input: AddPullRequestReviewThreadInput!) 
 const UPDATE_COMMENT_MUTATION = `mutation($input: UpdatePullRequestReviewCommentInput!) {
   updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id url } }
 }`
+
+interface DescriptionNode {
+	id: string
+	body: string
+	bodyHTML: string
+	viewerCanUpdate: boolean
+	updatedAt: string | null
+	url: string
+}
+
+const DESCRIPTION_FIELDS = 'id body bodyHTML viewerCanUpdate updatedAt url'
+
+const DESCRIPTION_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { ${DESCRIPTION_FIELDS} } }
+}`
+
+const UPDATE_DESCRIPTION_MUTATION = `mutation($input: UpdatePullRequestInput!) {
+  updatePullRequest(input: $input) { pullRequest { ${DESCRIPTION_FIELDS} } }
+}`
+
+/** GitHub stores text edited in the browser with CRLF line endings; the app compares and edits with LF. */
+function lf(s: string): string {
+	return s.replace(/\r\n?/g, '\n')
+}
 
 const SUBMIT_MUTATION = `mutation($input: SubmitPullRequestReviewInput!) {
   submitPullRequestReview(input: $input) { pullRequestReview { id url submittedAt } }

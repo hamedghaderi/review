@@ -131,6 +131,11 @@ export function reviewEvent(v: unknown): ReviewEvent {
 	return oneOf(v, ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'] as const, 'review action')
 }
 
+/** GitHub refuses pull request bodies over 65,536 characters. */
+export function prDescriptionText(v: unknown, what = 'description'): string {
+	return text(v, what, 65_536)
+}
+
 export function reviewBody(v: unknown): string {
 	return text(v, 'review summary', 65_000)
 }

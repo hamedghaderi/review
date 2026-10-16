@@ -225,6 +225,17 @@ export interface AppUpdate {
 	canInstall: boolean // the release has this system's installer, so the app can download and open it
 }
 
+/** A pull request's description as GitHub has it now: the Markdown, and GitHub's own rendering of it. */
+export interface PrDescription {
+	body: string // Markdown, line endings normalised to \n
+	html: string // rendered and sanitised by GitHub; the window sanitises it again before showing it
+	canEdit: boolean // the viewer may change it (author or write access) and the app has a token
+	editIssue: string | null // why it can't be edited, when it can't
+	updatedAt: string | null
+	url: string
+	fetchedAt: string
+}
+
 /** Sent to the window when a review-request notification is clicked. */
 export interface InboxOpen {
 	repoId: string
@@ -1213,6 +1224,9 @@ export const IPC = {
 	publishComment: 'publish:comment',
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
+	prDescription: 'gh:description',
+	prDescriptionPreview: 'gh:description-preview',
+	prDescriptionUpdate: 'gh:description-update',
 	replyToThread: 'gh:thread-reply',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
@@ -1322,6 +1336,12 @@ export interface ReviewApi {
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<Result<PublishedReview>>
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
+	/** The open PR review's description as GitHub has it now. */
+	prDescription(repoId: string, reviewId: string): Promise<Result<PrDescription>>
+	/** Markdown rendered by GitHub in the PR's repository, for previewing an edit. Nothing is saved. */
+	prDescriptionPreview(repoId: string, reviewId: string, text: string): Promise<Result<string>>
+	/** Saves a new description on GitHub; refused with `pr-changed` when it changed there since `expected` was read. */
+	prDescriptionUpdate(repoId: string, reviewId: string, expected: string, body: string): Promise<Result<PrDescription>>
 	/** Posts a reply to a GitHub review thread (if `body` isn't blank) and/or resolves it. Only on explicit user action. */
 	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<Result<void>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
