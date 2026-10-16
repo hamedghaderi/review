@@ -327,6 +327,15 @@ export async function mergeBase(root: string, a: string, b: string, headLabel: s
 	throw new AppFail('git-failed', `git merge-base failed: ${mb.stderr.trim()}`)
 }
 
+/** Whether commit `a` is `b` or one of its ancestors. */
+export async function isAncestor(root: string, a: string, b: string): Promise<boolean> {
+	if (!isSha(a) || !isSha(b)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['merge-base', '--is-ancestor', a, b])
+	if (r.code === 0) return true
+	if (r.code === 1) return false
+	throw new AppFail('git-failed', `git merge-base --is-ancestor failed: ${r.stderr.trim()}`)
+}
+
 /** Rebuilds a stored comparison from its pinned SHAs. */
 export async function compareSnapshot(root: string, s: Omit<Comparison, 'id' | 'files'>): Promise<ComparisonData> {
 	const [b, h] = await Promise.all([resolveCommit(root, s.baseSha), resolveCommit(root, s.headSha)])
@@ -489,6 +498,24 @@ export async function readPatch(data: ComparisonData, file: ChangedFile, maxByte
 	const r = await git(
 		data.root,
 		['diff-tree', ...DIFF_FLAGS, '-p', '-U3', '--src-prefix=a/', '--dst-prefix=b/', baseSha, headSha, '--', ...paths],
+		maxBytes,
+	)
+	if (!r.truncated && r.code !== 0) throw new AppFail('git-failed', `git diff-tree failed: ${r.stderr.trim()}`)
+	return { text: r.stdout.toString('utf8'), truncated: r.truncated }
+}
+
+/** One path's 3-line-context patch between any two commits, e.g. the diff GitHub shows when it differs from the comparison's. */
+export async function readPatchBetween(
+	root: string,
+	base: string,
+	head: string,
+	path: string,
+	maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+	if (!isSha(base) || !isSha(head)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(
+		root,
+		['diff-tree', ...DIFF_FLAGS, '-p', '-U3', '--src-prefix=a/', '--dst-prefix=b/', base, head, '--', path],
 		maxBytes,
 	)
 	if (!r.truncated && r.code !== 0) throw new AppFail('git-failed', `git diff-tree failed: ${r.stderr.trim()}`)

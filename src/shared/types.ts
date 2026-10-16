@@ -308,7 +308,21 @@ export interface Comparison {
 	headRef: string | null // display name of the head, e.g. "feat/login" or "octocat:fix"
 	target: ReviewTarget | null // null for reviews recorded before milestone 3 (HEAD against baseRef)
 	pr: PrSnapshot | null
+	stackedOn?: StackedBase | null // compared with a merged lower PR's last commit instead of the merge base
 	files: Array<ChangedFile>
+}
+
+/**
+ * A pull request that was stacked on another, which was then squash- or rebase-merged, so its base branch no longer
+ * contains that PR's commits. It is compared with the merged PR's last commit (`baseSha` of the comparison), so you
+ * see only its own changes; GitHub's diff still starts at `githubBaseSha`.
+ */
+export interface StackedBase {
+	number: number // the merged pull request it was stacked on
+	branch: string // that pull request's branch, this one's base before GitHub retargeted it
+	headSha: string // the merged pull request's last head commit
+	mergeCommit: string // what landed on the base branch
+	githubBaseSha: string // the merge base GitHub's diff starts at, for placing comments
 }
 
 export interface DiffLine {
@@ -407,6 +421,7 @@ export interface Review {
 	headRef: string | null
 	target?: ReviewTarget | null
 	pr?: PrSnapshot | null
+	stackedOn?: StackedBase | null // see Comparison.stackedOn
 	createdAt: string
 	updatedAt: string
 	comments: Array<ReviewComment>

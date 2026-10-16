@@ -225,9 +225,16 @@ export class Publisher {
 
 	private async item(r: Review, c: ReviewComment): Promise<PublishItem> {
 		const old = c.carried?.outdated
+		const path = c.anchor.newPath ?? c.anchor.oldPath ?? c.anchor.fileKey
 		const placement: PublishPlacement = old
-			? { kind: 'outside-diff', path: c.anchor.newPath ?? c.anchor.oldPath ?? c.anchor.fileKey, reason: `Outdated: ${old.reason}` }
-			: placeComment(c.anchor, await this.hunks(r.id, c.anchor.fileKey))
+			? { kind: 'outside-diff', path, reason: `Outdated: ${old.reason}` }
+			: r.stackedOn && c.anchor.side === 'old'
+				? {
+						kind: 'outside-diff',
+						path,
+						reason: `GitHub’s diff of this pull request starts before #${r.stackedOn.number}, so lines of #${r.stackedOn.number}’s last commit have no place on its left side.`,
+					}
+				: placeComment(c.anchor, await this.hunks(r.id, c.anchor.fileKey))
 		const prev = r.publication?.comments[c.id]
 		// Published from an earlier snapshot: it is already on GitHub, which carries it forward itself.
 		const earlier = !prev ? (c.carried?.published ?? null) : null

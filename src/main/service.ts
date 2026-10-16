@@ -37,6 +37,7 @@ import type {
 	SearchSlot,
 	Side,
 	SymbolKind,
+	StackedBase,
 	SymbolLookup,
 	TargetProbe,
 } from '../shared/types.ts'
@@ -47,11 +48,13 @@ import {
 	compareSnapshot,
 	ensureCommits,
 	findRoot,
+	isAncestor,
 	mergeBase,
 	ObjectUnavailable,
 	readAt,
 	readBlob,
 	readPatch,
+	readPatchBetween,
 	readRepo,
 	resolveBranchTarget,
 	shortRef,
@@ -133,9 +136,29 @@ export class ReviewService {
 
 	/** The 3-line-context hunks GitHub shows for a file, or null when it has no text diff (binary, too large). */
 	private async hunksFor(reviewId: string, fileKey: string) {
-		if (!this.comparisons.has(reviewId)) throw new AppFail('not-found', 'Open this review before publishing it.')
-		const p = await this.loadPatch(reviewId, fileKey, false)
-		return p.kind === 'text' ? p.hunks : null
+		const data = this.comparisons.get(reviewId)
+		if (!data) throw new AppFail('not-found', 'Open this review before publishing it.')
+		const stack = data.comparison.stackedOn
+		if (!stack) {
+			const p = await this.loadPatch(reviewId, fileKey, false)
+			return p.kind === 'text' ? p.hunks : null
+		}
+		// GitHub diffs this PR from the merge base, not from the merged PR's last commit, so lines are placed on that diff.
+		const { file } = this.file(reviewId, fileKey)
+		if (file.binary || !file.newPath) return null
+		const { text, truncated } = await readPatchBetween(
+			data.root,
+			stack.githubBaseSha,
+			data.comparison.headSha,
+			file.newPath,
+			PATCH_FORCE_LIMIT,
+		)
+		if (truncated) return null
+		const section = parsePatch(text).find((s) => !s.isDeleted)
+		if (!section) return []
+		if (section.binary) return null
+		// Its old side is the code before the merged PR, which this comparison's old line numbers don't describe.
+		return section.hunks.map((h) => ({ ...h, lines: h.lines.map((l) => ({ ...l, oldNo: null })) }))
 	}
 
 	private requirePublisher(repoId: string): Publisher {
@@ -487,6 +510,7 @@ export class ReviewService {
 					headRef: c.headRef,
 					target: c.target,
 					pr: c.pr,
+					...(c.stackedOn ? { stackedOn: c.stackedOn } : {}),
 					createdAt: now,
 					updatedAt: now,
 					comments: carry?.comments ?? [],
@@ -653,11 +677,13 @@ export class ReviewService {
 				`GitHub's recorded base for #${d.number} (${d.baseSha.slice(0, 7)}) already contains its head commit, so the original comparison cannot be reconstructed here. Open it on GitHub to see the changes as they were reviewed.`,
 			)
 		}
+		const stack = await this.stackedBase(repo.root, fetchRemote(repo, [d.repo, t.repo]), t, d, baseSha, signal)
 		const data = await compareSnapshot(repo.root, {
 			repoId,
 			baseRef: d.baseRef ?? 'base',
 			baseTipSha: d.baseSha,
-			baseSha,
+			baseSha: stack && 'base' in stack ? stack.base : baseSha,
+			...(stack && 'base' in stack ? { stackedOn: stack.stackedOn } : {}),
 			headSha: d.headSha,
 			headRef: prHeadLabel(d),
 			target: { kind: 'pr', repo: t.repo, number: t.number },
@@ -675,10 +701,58 @@ export class ReviewService {
 				author: d.author,
 			},
 		})
-		const notice = changed
-			? `#${d.number} was updated while it was loading. Showing the latest consistent version (head ${d.headSha.slice(0, 7)}).`
-			: null
-		return { data, notice }
+		const notes = [
+			changed
+				? `#${d.number} was updated while it was loading. Showing the latest consistent version (head ${d.headSha.slice(0, 7)}).`
+				: null,
+			stack && 'base' in stack
+				? `#${d.number} was stacked on #${stack.stackedOn.number}, which was squash- or rebase-merged into ${d.baseRef ?? 'its base'}. Showing only #${d.number}’s own changes, compared with #${stack.stackedOn.number}’s last commit (${stack.base.slice(0, 7)}). GitHub’s diff of #${d.number} still includes #${stack.stackedOn.number}’s changes.`
+				: (stack?.note ?? null),
+		].filter(Boolean)
+		return { data, notice: notes.length ? notes.join(' ') : null }
+	}
+
+	/**
+	 * When this pull request was stacked on another that was then squash- or rebase-merged, its base branch has that
+	 * PR's changes as new commits, so merge-base..head would show them again. Returns the merged PR's last commit that
+	 * this one contains, to compare with instead. Null when the merge base is right: the merged PR landed as a merge
+	 * commit, or this PR has since merged or been rebased onto its base. A failed lookup never stops the review from
+	 * opening; it gives the usual comparison and a note.
+	 */
+	private async stackedBase(
+		root: string,
+		remote: string,
+		t: { repo: string; number: number },
+		d: { baseSha: string; headSha: string; baseRef: string | null },
+		normal: string,
+		signal: AbortSignal,
+	): Promise<{ base: string; stackedOn: StackedBase } | { note: string } | null> {
+		let parent: Awaited<ReturnType<GitHubService['mergedStackParent']>>
+		try {
+			parent = await this.requireGitHub().mergedStackParent(t.repo, t.number, signal)
+		} catch (e) {
+			if (signal.aborted) throw e
+			return {
+				note: `Could not check whether #${t.number} was stacked on a merged pull request (${errorOf(e).message}), so it is compared with the merge base and may show that pull request’s changes too.`,
+			}
+		}
+		if (!parent) return null
+		try {
+			await ensureCommits(root, remote, [parent.headSha, parent.mergeCommit], signal)
+			// Landed as a merge commit, or this PR already merged its base since: the merge base is right.
+			if (await isAncestor(root, parent.mergeCommit, normal)) return null
+			// Landed on some other branch than this PR's base.
+			if (!(await isAncestor(root, parent.mergeCommit, d.baseSha))) return null
+			const base = await mergeBase(root, parent.headSha, d.headSha, `#${t.number}`, `#${parent.number}`)
+			// Rebased onto its base since, so it no longer contains the merged PR's commits.
+			if (base === normal || !(await isAncestor(root, normal, base))) return null
+			return { base, stackedOn: { ...parent, githubBaseSha: normal } }
+		} catch (e) {
+			if (signal.aborted) throw e
+			return {
+				note: `#${t.number} was stacked on #${parent.number}, which was merged, but its last commit could not be read (${errorOf(e).message}), so #${parent.number}’s changes may show here too.`,
+			}
+		}
 	}
 
 	/** Detects new commits on the open review's target. Reads only; nothing is fetched. */
@@ -1114,6 +1188,7 @@ function snapshotOf(r: Review): Omit<Comparison, 'id' | 'files'> {
 		headRef: r.headRef,
 		target: r.target ?? null,
 		pr: r.pr ?? null,
+		...(r.stackedOn ? { stackedOn: r.stackedOn } : {}),
 	}
 }
 

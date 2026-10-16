@@ -120,7 +120,10 @@ interface MockPr {
 }
 
 /** Enough of api.github.com for these tests: pulls/:n, search/issues (paginated) and GraphQL search. Records requests. */
-async function mockGitHub(prs: Array<MockPr>, hooks: { onDetail?(n: number, count: number): void } = {}) {
+async function mockGitHub(
+	prs: Array<MockPr>,
+	hooks: { onDetail?(n: number, count: number): void; graphql?(query: string, variables: Record<string, unknown>): unknown } = {},
+) {
 	const seen: Array<{ method: string; url: string; auth: string | undefined; body: string }> = []
 	const detailCount = new Map<number, number>()
 	const pull = (p: MockPr) => ({
@@ -212,7 +215,10 @@ async function mockGitHub(prs: Array<MockPr>, hooks: { onDetail?(n: number, coun
 				return send(200, { total_count: all.length, incomplete_results: false, items })
 			}
 			if (url.pathname === '/graphql') {
-				const { variables } = JSON.parse(body) as { variables: { q: string; first: number; after: string | null } }
+				const parsed = JSON.parse(body) as { query: string; variables: Record<string, unknown> }
+				const answer = hooks.graphql?.(parsed.query, parsed.variables)
+				if (answer !== undefined) return send(200, { data: answer })
+				const variables = parsed.variables as { q: string; first: number; after: string | null }
 				const all = filter(variables.q)
 				const start = variables.after ? Number(variables.after) : 0
 				const nodes = all.slice(start, start + variables.first).map((p) => ({
@@ -606,6 +612,121 @@ test('fork PR opens at merge-base(base, head)..head without touching the checkou
 	} finally {
 		await mock.close().catch(() => {})
 	}
+})
+
+/**
+ * PR #8 (stack/a) and PR #9 (stack/b, stacked on it), then #8 lands on main as a squash or a merge commit and GitHub
+ * retargets #9 to main. Opens #9.
+ */
+async function openRetargeted(how: 'squash' | 'merge') {
+	const w = world()
+	const sd = runner(w.seed)
+	sd('checkout', '-q', 'main')
+	sd('checkout', '-qb', 'stack/a')
+	const a = commit(sd, w.seed, 'stack-a.txt', 'part a\n', 'part a')
+	sd('checkout', '-qb', 'stack/b')
+	const b = commit(sd, w.seed, 'stack-b.txt', 'part b\n', 'part b')
+	sd('push', '-q', w.up, `${a}:refs/pull/8/head`, `${b}:refs/pull/9/head`)
+	sd('checkout', '-q', 'main')
+	if (how === 'squash') {
+		sd('merge', '-q', '--squash', 'stack/a')
+		sd('commit', '-qm', 'part a (#8)')
+	} else sd('merge', '-q', '--no-ff', '-m', 'Merge #8', 'stack/a')
+	const landed = sd('rev-parse', 'HEAD')
+	sd('push', '-q', w.up, 'main')
+	const pr9: MockPr = {
+		number: 9,
+		title: 'Part b',
+		state: 'open',
+		author: 'alice',
+		headRef: 'stack/b',
+		headRepo: 'octo/app',
+		baseRef: 'main',
+		baseSha: landed,
+		headSha: b,
+		updatedAt: '2026-01-02T00:00:00Z',
+	}
+	const mock = await mockGitHub([pr9], {
+		graphql: (query) => {
+			if (query.includes('BaseRefChangedEvent'))
+				return {
+					repository: {
+						pullRequest: {
+							baseRefName: 'main',
+							timelineItems: { nodes: [{ previousRefName: 'stack/a', currentRefName: 'main', createdAt: '2026-01-02T00:00:00Z' }] },
+						},
+					},
+				}
+			if (query.includes('pullRequests(headRefName'))
+				return {
+					repository: {
+						pullRequests: {
+							nodes: [
+								{
+									number: 8,
+									headRefOid: a,
+									mergedAt: '2026-01-01T23:59:00Z',
+									mergeCommit: { oid: landed },
+									headRepository: { nameWithOwner: 'octo/app' },
+								},
+							],
+						},
+					},
+				}
+			return undefined
+		},
+	})
+	const tokens = memoryTokens()
+	await tokens.save('github', 'ghp_test')
+	const { svc } = await service(new GitHubService(tokens, { base: mock.base }))
+	const s = await svc.open(w.clone)
+	try {
+		const r = await svc.loadComparison(s.repo.id, { kind: 'target', target: { kind: 'pr', repo: 'octo/app', number: 9 } })
+		return { r, svc, a, landed, upMain: w.upMain, repoId: s.repo.id }
+	} finally {
+		await mock.close()
+	}
+}
+
+test('a PR stacked on one that was squash-merged shows only its own changes; comments are placed on GitHub’s diff', async () => {
+	const { r, svc, a, upMain, repoId } = await openRetargeted('squash')
+	const c = r.comparison
+	assert.deepEqual(
+		c.files.map((f) => f.key),
+		['stack-b.txt'],
+		'the merged lower PR’s changes are not shown again',
+	)
+	assert.equal(c.baseSha, a, 'compared with the merged PR’s last commit')
+	assert.equal(c.stackedOn?.number, 8)
+	assert.equal(c.stackedOn?.githubBaseSha, upMain, 'GitHub still diffs from the merge base')
+	assert.match(r.notice ?? '', /stacked on #8, which was squash- or rebase-merged into main/)
+	assert.equal(r.review.stackedOn?.number, 8, 'kept with the snapshot, so reopening it compares the same way')
+	const again = await svc.loadComparison(repoId, { kind: 'snapshot', reviewId: c.id })
+	assert.equal(again.comparison.stackedOn?.number, 8)
+	const hunks = (await (
+		svc as unknown as {
+			hunksFor(id: string, key: string): Promise<Array<{ lines: Array<{ oldNo: number | null; newNo: number | null }> }>>
+		}
+	).hunksFor(c.id, 'stack-b.txt'))!
+	assert.ok(
+		hunks[0].lines.some((l) => l.newNo === 1),
+		'new-side lines match GitHub’s diff',
+	)
+	assert.ok(
+		hunks.every((h) => h.lines.every((l) => l.oldNo === null)),
+		'old-side lines never match: GitHub’s left side is older code',
+	)
+})
+
+test('a PR stacked on one that landed as a merge commit keeps the usual merge-base comparison', async () => {
+	const { r, a } = await openRetargeted('merge')
+	assert.deepEqual(
+		r.comparison.files.map((f) => f.key),
+		['stack-b.txt'],
+	)
+	assert.equal(r.comparison.baseSha, a, 'the merge base already is the merged PR’s head')
+	assert.equal(r.comparison.stackedOn, undefined)
+	assert.equal(r.notice, null)
 })
 
 test('a PR that moves while loading resolves to one consistent snapshot, with a notice', async () => {
