@@ -9,7 +9,7 @@ import { ConnectionService, normaliseUrl } from '../src/main/ai/connections.ts'
 import { AiController } from '../src/main/ai/controller.ts'
 import { CredentialService, type SecretCipher } from '../src/main/ai/credentials.ts'
 import { createFakeProvider, emptyEvaluation } from '../src/main/ai/fake.ts'
-import { ProviderError } from '../src/main/ai/provider.ts'
+import { parseJson, ProviderError } from '../src/main/ai/provider.ts'
 import { REVIEW_JSON_SCHEMA } from '../src/main/ai/schema.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { apiKey } from '../src/main/validate.ts'
@@ -1078,4 +1078,34 @@ test('images: every adapter sends them after the text in its own API shape; requ
 	} finally {
 		await mock.close()
 	}
+})
+
+test('a JSON answer wrapped in a summary for people, or in a fence, is still read; text without one fails and says how it starts', () => {
+	const answer = { findings: [], limitations: [] }
+	const json = JSON.stringify(answer, null, 2)
+	assert.deepEqual(parseJson(json), answer)
+	assert.deepEqual(parseJson('```json\n' + json + '\n```'), answer)
+	// A gateway that doesn't enforce the schema: a summary, a code sample, then the answer in a fence.
+	const wrapped = [
+		'I found no problems under my rules in the three files of this request.',
+		'',
+		'- **`orders.ts`:** the new `total()` follows the existing pattern:',
+		'```ts',
+		'export function total(o: Order) { return o.lines.length }',
+		'```',
+		'',
+		'```json',
+		json,
+		'```',
+	].join('\n')
+	assert.deepEqual(parseJson(wrapped), answer)
+	// No fence: from the first "{" to the last "}".
+	assert.deepEqual(parseJson(`Here is the review: ${JSON.stringify(answer)} Thanks.`), answer)
+	assert.throws(
+		() => parseJson('I could not review this request because the excerpts were empty.'),
+		(e: unknown) =>
+			e instanceof ProviderError &&
+			e.kind === 'invalid-output' &&
+			e.message === 'The response was not valid JSON (it starts: "I could not review this request because the excerpts were em…")',
+	)
 })

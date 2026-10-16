@@ -17,6 +17,7 @@ import {
 	clip,
 	FINAL_ANSWER,
 	maxRounds,
+	parseJson,
 	ProviderError,
 	rejectsTools,
 	scrub,
@@ -182,11 +183,7 @@ export function interpretMessage(message: Message): ProviderResponse {
 		.map((b) => (b.type === 'text' ? b.text : ''))
 		.join('')
 	if (!text.trim()) throw new ProviderError('invalid-output', 'The response contained no output text')
-	try {
-		return { output: JSON.parse(text), usage }
-	} catch {
-		throw new ProviderError('invalid-output', 'The response was not valid JSON')
-	}
+	return { output: parseJson(text), usage }
 }
 
 function retryAfter(error: APIError): number | null {
