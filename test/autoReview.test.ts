@@ -7,6 +7,7 @@ import { AutoReviewer, autoVerdict, type AutoReviewDeps } from '../src/main/auto
 import { AppFail } from '../src/main/git.ts'
 import type { RepoEvent } from '../src/main/inboxWatch.ts'
 import { ReviewStore } from '../src/main/store.ts'
+import type { HeadChecks } from '../src/shared/ci.ts'
 import type { AiRun, AutoReviewRecord, Comparison, Finding, PublishPlan, Review, ReviewEvent } from '../src/shared/types.ts'
 
 const anchor = {
@@ -46,24 +47,26 @@ function review(over: Partial<Review> = {}): Review {
 }
 
 const who = { reviewer: 'model-x', viewer: 'me' }
+const green: HeadChecks = { sha: 'h1', failed: [], pending: [], passed: 3, omitted: 0, readAt: 't' }
+const ciWith = (over: Partial<HeadChecks>): HeadChecks => ({ ...green, ...over })
 
 test('verdict: approve only a complete run with nothing standing; blocking requests changes; anything else comments', () => {
-	const clean = autoVerdict(run([]), review(), [run([])], 0, who)
+	const clean = autoVerdict(run([]), review(), [run([])], 0, who, green)
 	assert.equal(clean.event, 'APPROVE')
 	assert.match(clean.body, /written and submitted automatically by AI \(model-x.*on behalf of me/s, 'the body says it was the AI')
 
 	const blocking = run([finding('f1', { severity: 'blocking' })])
-	assert.equal(autoVerdict(blocking, review(), [blocking], 1, who).event, 'REQUEST_CHANGES')
+	assert.equal(autoVerdict(blocking, review(), [blocking], 1, who, green).event, 'REQUEST_CHANGES')
 
 	const shouldFix = run([finding('f1')])
-	assert.equal(autoVerdict(shouldFix, review(), [shouldFix], 1, who).event, 'COMMENT')
+	assert.equal(autoVerdict(shouldFix, review(), [shouldFix], 1, who, green).event, 'COMMENT')
 
 	const nits = run([finding('f1', { severity: 'nit' })])
-	assert.equal(autoVerdict(nits, review(), [nits], 0, who).event, 'APPROVE', 'nits that were not posted do not stop an approval')
-	assert.equal(autoVerdict(nits, review(), [nits], 1, who).event, 'COMMENT', 'but a posted comment means a comment review')
+	assert.equal(autoVerdict(nits, review(), [nits], 0, who, green).event, 'APPROVE', 'nits that were not posted do not stop an approval')
+	assert.equal(autoVerdict(nits, review(), [nits], 1, who, green).event, 'COMMENT', 'but a posted comment means a comment review')
 
 	const partial = run([], 'partial')
-	const p = autoVerdict(partial, review(), [partial], 0, who)
+	const p = autoVerdict(partial, review(), [partial], 0, who, green)
 	assert.equal(p.event, 'COMMENT', 'files left unreviewed are never approved')
 	assert.match(p.body, /not reviewed/)
 })
@@ -71,10 +74,10 @@ test('verdict: approve only a complete run with nothing standing; blocking reque
 test('verdict: dismissed findings never count; a blocking finding the double-check doubts is a comment, not a block', () => {
 	const r = run([finding('f1', { severity: 'blocking' })])
 	const dismissed = review({ findingDecisions: { f1: { status: 'dismissed', decidedAt: 't' } } })
-	assert.equal(autoVerdict(r, dismissed, [r], 0, who).event, 'APPROVE')
+	assert.equal(autoVerdict(r, dismissed, [r], 0, who, green).event, 'APPROVE')
 
 	const doubted = run([finding('f1', { severity: 'blocking', verification: { verdict: 'wrong' } as Finding['verification'] })])
-	const v = autoVerdict(doubted, review(), [doubted], 0, who)
+	const v = autoVerdict(doubted, review(), [doubted], 0, who, green)
 	assert.equal(v.event, 'COMMENT')
 	assert.match(v.body, /1 finding not posted, left for a person to check/)
 })
@@ -144,9 +147,12 @@ async function setup(over: Partial<AutoReviewDeps> = {}, findings: Array<Finding
 			calls.push(`submit ${ev}`)
 			return { id: 'rv', url: 'https://github.com/review', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }
 		},
+		checks: async () => green,
 		reviewChanged: () => calls.push('changed'),
 		finished: (_e, r) => records.push(r),
 		waitMs: 1,
+		ciPollMs: 1,
+		ciWaitMs: 50,
 		...over,
 	}
 	const auto = new AutoReviewer(deps)
@@ -227,4 +233,61 @@ test('waits for an AI review you are running, including one started between the 
 	s.set.busy(false)
 	await s.auto.idle()
 	assert.equal(s.records[0].outcome, 'changes-requested')
+})
+
+test('verdict: CI must have finished without a failure to approve; a failure is named in a comment', () => {
+	const clean = run([])
+	const failed = autoVerdict(
+		clean,
+		review(),
+		[clean],
+		0,
+		who,
+		ciWith({
+			failed: [
+				{ name: 'unit', at: 't' },
+				{ name: 'e2e', at: null },
+			],
+		}),
+	)
+	assert.equal(failed.event, 'COMMENT')
+	assert.equal(failed.ciStopped, 'failed')
+	assert.match(failed.body, /no blocking, should-fix or question findings.*CI failed on this commit \(unit and 1 more\)/s)
+
+	const pending = autoVerdict(clean, review(), [clean], 0, who, ciWith({ pending: ['feature'] }))
+	assert.equal(pending.event, 'COMMENT')
+	assert.equal(pending.ciStopped, 'pending')
+	assert.match(pending.body, /CI had not finished/)
+
+	const unreadable = autoVerdict(clean, review(), [clean], 0, who, null)
+	assert.equal(unreadable.event, 'COMMENT', 'never approves without knowing what CI says')
+	assert.match(unreadable.body, /could not be read/)
+
+	const blocking = run([finding('f1', { severity: 'blocking' })])
+	const b = autoVerdict(blocking, review(), [blocking], 1, who, ciWith({ pending: ['feature'] }))
+	assert.equal(b.event, 'REQUEST_CHANGES')
+	assert.equal(b.ciStopped, null, 'CI only matters when it is all that stands in the way of an approval')
+})
+
+test('waits for unfinished CI before approving, and approves once it passes', async () => {
+	let reads = 0
+	const { auto, calls, records } = await setup({ checks: async () => (++reads < 3 ? ciWith({ pending: ['feature'] }) : green) }, [])
+	auto.take([event()])
+	await auto.idle()
+	assert.ok(reads >= 3, 'CI was read again while it was running')
+	assert.deepEqual(calls.slice(-1), ['submit APPROVE'])
+	assert.equal(records[0].outcome, 'approved')
+})
+
+test('CI that is still running when the wait ends, or that failed, gets a comment instead of an approval', async () => {
+	const slow = await setup({ checks: async () => ciWith({ pending: ['feature'] }) }, [])
+	slow.auto.take([event()])
+	await slow.auto.idle()
+	assert.deepEqual(slow.calls.slice(-1), ['submit COMMENT'])
+
+	const red = await setup({ checks: async () => ciWith({ failed: [{ name: 'unit', at: 't' }] }) }, [])
+	red.auto.take([event()])
+	await red.auto.idle()
+	assert.deepEqual(red.calls.slice(-1), ['submit COMMENT'])
+	assert.equal(red.records[0].outcome, 'commented')
 })

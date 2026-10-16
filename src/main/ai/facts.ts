@@ -1,4 +1,5 @@
 import { listAt, readAt } from '../git.ts'
+import { CI_FAILED, CI_PASSED } from '../../shared/ci.ts'
 import type { CommitChecks } from '../github.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { dependencyFacts } from './deps.ts'
@@ -21,9 +22,6 @@ const PROJECT_DIR = '.review/'
 const PROJECT_CONTEXT_MAX = 6000
 const MAX_DOCS = 40 // other .review/*.md files listed by title; the reviewer opens the ones it needs
 const MAX_STALE = 20
-
-const FAILED = new Set(['failure', 'error', 'timed_out', 'cancelled', 'action_required', 'startup_failure', 'stale'])
-const PASSED = new Set(['success', 'neutral', 'skipped'])
 
 /**
  * Facts the app computes or reads for the reviewer, so findings can rest on evidence instead of asking the reader to
@@ -248,9 +246,9 @@ export function ciFact(c: CommitChecks): { fact: ContextFact; summary: string } 
 		})),
 		...c.statuses.map((s) => ({ name: s.name, result: s.result, note: s.description })),
 	]
-	const failed = all.filter((x) => FAILED.has(x.result))
-	const passed = all.filter((x) => PASSED.has(x.result))
-	const pending = all.filter((x) => !FAILED.has(x.result) && !PASSED.has(x.result))
+	const failed = all.filter((x) => CI_FAILED.has(x.result))
+	const passed = all.filter((x) => CI_PASSED.has(x.result))
+	const pending = all.filter((x) => !CI_FAILED.has(x.result) && !CI_PASSED.has(x.result))
 	const head = `Reported by GitHub for the head commit ${c.sha.slice(0, 7)}. Check names and results only: they say what ran and how it ended, not what each check covers.`
 	if (!all.length) {
 		return {

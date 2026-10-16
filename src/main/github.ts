@@ -570,6 +570,7 @@ export class GitHubService {
 					name: string
 					status: string
 					conclusion: string | null
+					completed_at: string | null
 					app: { name: string } | null
 					output?: { annotations_count?: number } | null
 				}>
@@ -587,6 +588,7 @@ export class GitHubService {
 				name: r.name,
 				app: r.app?.name ?? null,
 				result: r.status === 'completed' ? (r.conclusion ?? 'neutral') : r.status,
+				completedAt: r.completed_at ?? null,
 			})),
 			runsOmitted: Math.max(0, runs.total_count - runs.check_runs.length),
 			statuses: status.statuses.map((x) => ({ name: x.context, result: x.state, description: x.description })),
@@ -1125,7 +1127,7 @@ interface RestIssueDetail {
 
 export interface CommitChecks {
 	sha: string
-	runs: Array<{ id: number; annotations: number; name: string; app: string | null; result: string }> // result: a conclusion (success, failure…) or queued / in_progress
+	runs: Array<{ id: number; annotations: number; name: string; app: string | null; result: string; completedAt?: string | null }> // result: a conclusion (success, failure…) or queued / in_progress
 	runsOmitted: number
 	statuses: Array<{ name: string; result: string; description: string | null }> // success, failure, error, pending
 }

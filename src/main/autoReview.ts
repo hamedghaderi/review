@@ -13,6 +13,7 @@ import type {
 	ReviewerChoice,
 	ReviewEvent,
 } from '../shared/types.ts'
+import type { HeadChecks } from '../shared/ci.ts'
 import { AppFail } from './git.ts'
 import type { RepoEvent } from './inboxWatch.ts'
 import type { ReviewStore } from './store.ts'
@@ -24,8 +25,10 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
 
 /**
  * What an automatic review submits. Request changes when a blocking finding stands (not dismissed, not held back and
- * not shown likely wrong by the double-check); approve only when every file was reviewed, nothing was posted and no
- * blocking, should-fix or question finding is left; otherwise comment. Dismissed findings never count.
+ * not shown likely wrong by the double-check); approve only when every file was reviewed, nothing was posted, no
+ * blocking, should-fix or question finding is left, and CI for the head commit finished without a failure (`ci` null:
+ * it couldn't be read); otherwise comment. Dismissed findings never count. `ciStopped` says when CI alone stood in the
+ * way of an approval, so the caller can wait for checks that haven't finished.
  */
 export function autoVerdict(
 	run: AiRun,
@@ -33,7 +36,8 @@ export function autoVerdict(
 	runs: Array<AiRun>,
 	posted: number,
 	who: { reviewer: string; viewer: string | null },
-): { event: ReviewEvent; body: string } {
+	ci: HeadChecks | null,
+): { event: ReviewEvent; body: string; ciStopped: 'failed' | 'pending' | 'unreadable' | null } {
 	const roots = findingRoots(runs)
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
 	const state = (f: Finding) => findingState(review, roots, f, byId)
@@ -43,7 +47,9 @@ export function autoVerdict(
 	const concerns = live.filter((f) => CONCERNS.includes(f.severity))
 	const unposted = concerns.filter((f) => state(f) === 'open').length
 	const complete = run.status === 'completed'
-	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : concerns.length || posted || !complete ? 'COMMENT' : 'APPROVE'
+	const findingsAllow = !blocking.length && !concerns.length && !posted && complete
+	const ciStopped = !findingsAllow ? null : !ci ? 'unreadable' : ci.failed.length ? 'failed' : ci.pending.length ? 'pending' : null
+	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped ? 'APPROVE' : 'COMMENT'
 	const lines = [
 		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
@@ -54,9 +60,15 @@ export function autoVerdict(
 		if (posted) parts.push(`${plural(posted, 'comment')} below.`)
 		if (unposted) parts.push(`${plural(unposted, 'finding')} not posted, left for a person to check.`)
 		if (!complete) parts.push('Some files were not reviewed, so this is not an approval.')
+		if (ci?.failed.length) {
+			const more = ci.failed.length > 1 ? ` and ${ci.failed.length - 1} more` : ''
+			parts.push(`CI failed on this commit (${ci.failed[0].name}${more}), so this is not an approval.`)
+		} else if (ciStopped === 'pending') parts.push('CI had not finished on this commit, so this is not an approval.')
+		else if (ciStopped === 'unreadable') parts.push('CI for this commit could not be read, so this is not an approval.')
+		if (findingsAllow) parts.unshift('It found no blocking, should-fix or question findings in the changed files.')
 		lines.push(parts.join(' '))
 	}
-	return { event, body: lines.join('\n\n') }
+	return { event, body: lines.join('\n\n'), ciStopped }
 }
 
 export interface AutoReviewDeps {
@@ -75,11 +87,15 @@ export interface AutoReviewDeps {
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
 	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview>
+	/** CI for the snapshot's head commit, as GitHub reports it now. */
+	checks(repoId: string, reviewId: string): Promise<HeadChecks>
 	/** The automatic review added comments to a stored review, so a window showing it can load them. */
 	reviewChanged(repoId: string, reviewId: string): void
 	/** It finished (posted, skipped or failed); tell the user. */
 	finished(event: RepoEvent, record: AutoReviewRecord): void
 	waitMs?: number
+	ciPollMs?: number // how often unfinished CI is read again before approving (default 1 minute)
+	ciWaitMs?: number // how long to wait for it (default 20 minutes)
 }
 
 const OUTCOME: Record<ReviewEvent, AutoReviewRecord['outcome']> = {
@@ -174,7 +190,17 @@ export class AutoReviewer {
 			}
 			const stored = this.d.store.read().repos[e.repoId]?.reviews[c.id]
 			if (!stored) throw new AppFail('not-found', 'The review was removed while it was being posted.')
-			const verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, { reviewer, viewer: this.d.viewer() })
+			const who = { reviewer, viewer: this.d.viewer() }
+			const readCi = () => this.d.checks(e.repoId, c.id).catch(() => null)
+			let verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, await readCi())
+			// Nothing but unfinished CI stands in the way of an approval: wait for it, then decide.
+			const until = Date.now() + (this.d.ciWaitMs ?? 20 * 60_000)
+			while (verdict.ciStopped === 'pending' && Date.now() < until) {
+				await new Promise((r) => setTimeout(r, this.d.ciPollMs ?? 60_000))
+				if (!this.d.enabled())
+					return record('skipped', `Automatic review was turned off while waiting for CI. The findings for ${label} are in the app.`)
+				verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, await readCi())
+			}
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
 				verdict.event === 'APPROVE'

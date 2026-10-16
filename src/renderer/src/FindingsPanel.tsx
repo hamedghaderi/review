@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
 	CATEGORY_LABEL,
+	droppedFindings,
 	findingState,
 	LEVEL_META,
 	RESIDUE_LABEL,
@@ -106,6 +107,7 @@ export function FindingsPanel({
 	const latest = runs[runs.length - 1] ?? null
 	const run = runs.find((r) => r.id === runId) ?? latest
 	const byId = useMemo(() => new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const))), [runs])
+	const dropped = useMemo(() => (run ? droppedFindings(run, runs, review, roots) : null), [run, runs, review, roots])
 	const order = useMemo(() => new Map(files.map((f, i) => [f.key, i])), [files])
 
 	const items = useMemo(() => {
@@ -215,6 +217,40 @@ export function FindingsPanel({
 				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
 				onStop={() => onStop(run)}
 			/>
+			{dropped && (
+				<div className="small unexplained dropped">
+					<b>
+						Not raised again: the previous run on this snapshot raised {dropped.findings.length} finding
+						{dropped.findings.length === 1 ? '' : 's'} this run didn’t
+					</b>{' '}
+					(runs vary, so check {dropped.findings.length === 1 ? 'it' : 'them'} before deciding):
+					<ul>
+						{dropped.findings.map((f) => (
+							<li key={f.id}>
+								<button
+									className="link"
+									title="Show it in the run that raised it"
+									onClick={() => {
+										setRunId(dropped.from.id)
+										setFilter(findingState(review, roots, f, byId))
+										onOpen(f)
+									}}
+								>
+									{f.title}
+								</button>{' '}
+								<span className="muted">
+									({LEVEL_META[f.severity].label.toLowerCase()},{' '}
+									<span className="mono">
+										{f.anchor.newPath ?? f.anchor.oldPath ?? f.anchor.fileKey}
+										{f.anchor.startLine !== null ? `:${f.anchor.startLine}` : ''}
+									</span>
+									)
+								</span>
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
 			{runs.length > 1 && (
 				<div className="run-picker">
 					<select value={run.id} onChange={(e) => setRunId(e.target.value)} aria-label="AI review run">

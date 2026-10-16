@@ -264,8 +264,9 @@ function AutoReview({ on, onSet }: { on: boolean; onSet(enabled: boolean): Promi
 					<span className="muted block">
 						When someone requests your review in a repository you have opened here, the AI reviews the pull request with the model or team
 						chosen for AI reviews, and submits the review on GitHub as you. Findings at the levels set to be added as comments are posted.
-						It approves when every file was reviewed and it found no blocking, should-fix or question findings, requests changes for a
-						blocking finding, and otherwise comments. You get a notification each time. Needs a token that can publish reviews.
+						It approves when every file was reviewed, it found no blocking, should-fix or question findings and CI passed (it waits up to 20
+						minutes for checks to finish), requests changes for a blocking finding, and otherwise comments. You get a notification each
+						time. Needs a token that can publish reviews.
 					</span>
 				</span>
 			</label>
