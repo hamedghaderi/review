@@ -87,6 +87,7 @@ How Review is put together: the AI review pipeline, the code layout and how revi
 | `src/main/git.ts`        | All repository reads go through here (`readAt`, `listAt`, `grepCommit`, `changesBetween`); argument arrays, no shell. Only write: fetching commits into `refs/review/keep/*`    |
 | `src/main/github.ts`     | GitHub API: PR search (REST/GraphQL), details, review activity, ETag cache, rate limits, error states                                                                           |
 | `src/main/activity.ts`   | Existing review activity: the read-only GraphQL query and REST fallback, normalised and capped                                                                                  |
+| `src/main/autoReview.ts` | Automatic review (off by default): takes new review requests from the inbox watcher, runs the AI in the background, publishes the findings and submits the verdict as you       |
 | `src/main/discussion.ts` | Places GitHub threads on a snapshot (`linemap.ts` maps lines between commits, shared with carrying comments forward)                                                            |
 | `src/main/patch.ts`      | Unified patch parser                                                                                                                                                            |
 | `src/main/service.ts`    | Repository sessions, pinned comparisons, on-demand patches, content limits                                                                                                      |
@@ -104,7 +105,7 @@ How Review is put together: the AI review pipeline, the code layout and how revi
 - Each comparison has its own review. When the target moves, the app shows a banner and keeps the old review pinned to its SHAs. Opening the update copies the comments into the new review (`src/main/carry.ts`), each with a `carried` record of the snapshot, comment and anchor it came from, and whether it is outdated. Only the main process writes that record. Viewed state and AI runs are never carried over. Earlier reviews stay available from the Snapshot selector.
 - Comment anchors store repo id, both SHAs, old and new paths, side, an inclusive source-line range and an excerpt. They never store rendered positions. AI findings use the same anchors.
 - Reviews live in `<userData>/review-store.json` (`version: 2`; version 1 files are migrated). AI provider settings are in `ai-settings.json`, encrypted keys in `ai-credentials.json`. If the file can't be read, it is renamed to `review-store.json.unreadable-<ts>` rather than overwritten.
-- Edits autosave after 800 ms, and any pending edits are flushed when the window closes. Clicking the save status in the top bar saves right away. Nothing is sent to GitHub; use "Publish to GitHub…" for that.
+- Edits autosave after 800 ms, and any pending edits are flushed when the window closes. Clicking the save status in the top bar saves right away. Nothing is sent to GitHub; use "Publish to GitHub…" for that, or turn on automatic review.
 
 ## Development
 

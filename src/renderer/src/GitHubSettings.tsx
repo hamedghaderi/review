@@ -114,6 +114,7 @@ export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRep
 						</div>
 						{status.notificationProblem && <p className="small error-text selectable">{status.notificationProblem}</p>}
 					</div>
+					<AutoReview on={status.autoReview} onSet={(enabled) => act(window.review.githubSetAutoReview(enabled))} />
 					{status.cli && (
 						<div className={`cli-box ${status.source === 'gh' ? 'on' : ''}`}>
 							<div className="cli-head">
@@ -233,6 +234,64 @@ export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRep
 					)}
 				</div>
 			</div>
+		</div>
+	)
+}
+
+/**
+ * Automatic review, off by default. Ticking the box only opens a warning: it is turned on from there, once you have read
+ * that the app will post reviews and approve pull requests as you.
+ */
+function AutoReview({ on, onSet }: { on: boolean; onSet(enabled: boolean): Promise<void> }) {
+	const [confirming, setConfirming] = useState(false)
+	const confirm = useRef<HTMLButtonElement>(null)
+	useEffect(() => {
+		if (confirming) confirm.current?.focus()
+	}, [confirming])
+	return (
+		<div className={`notify-box small ${on ? 'on' : ''}`}>
+			<label className="check">
+				<input
+					type="checkbox"
+					checked={on}
+					onChange={(e) => {
+						if (e.target.checked) setConfirming(true)
+						else void onSet(false)
+					}}
+				/>
+				<span>
+					<strong>Review requests automatically with AI</strong>
+					<span className="muted block">
+						When someone requests your review in a repository you have opened here, the AI reviews the pull request with the model or team
+						chosen for AI reviews, and submits the review on GitHub as you. Findings at the levels set to be added as comments are posted.
+						It approves when every file was reviewed and it found no blocking, should-fix or question findings, requests changes for a
+						blocking finding, and otherwise comments. You get a notification each time. Needs a token that can publish reviews.
+					</span>
+				</span>
+			</label>
+			{confirming && !on && (
+				<div className="auto-review-warn" role="alertdialog" aria-labelledby="auto-review-warn-title">
+					<p id="auto-review-warn-title">
+						<strong>Before you turn this on: the app will act as you on GitHub.</strong>
+					</p>
+					<ul>
+						<li>Reviews are written by AI and submitted under your GitHub account right away, without you reading them first.</li>
+						<li>
+							It can <strong>approve pull requests</strong>. An approval from you may be enough for a pull request to be merged.
+						</li>
+						<li>It can also request changes, which can block a pull request until it is reviewed again.</li>
+						<li>The AI can be wrong, and people will read the review as yours.</li>
+					</ul>
+					<div className="form-actions">
+						<button ref={confirm} className="btn small danger" onClick={() => void onSet(true).then(() => setConfirming(false))}>
+							Turn on automatic review
+						</button>
+						<button className="btn small" onClick={() => setConfirming(false)}>
+							Cancel
+						</button>
+					</div>
+				</div>
+			)}
 		</div>
 	)
 }

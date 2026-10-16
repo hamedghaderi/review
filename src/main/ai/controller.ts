@@ -63,7 +63,9 @@ const MAX_RUNS_PER_REVIEW = 50
  * land in a different comparison; switching comparisons cancels the run.
  */
 export class AiController {
-	private active: { handle: RunHandle; repoId: string; reviewId: string; connectionIds: Array<string> } | null = null
+	// `background`: an automatic review's label ("owner/name#12"); opening other reviews does not cancel it.
+	private active: { handle: RunHandle; repoId: string; reviewId: string; connectionIds: Array<string>; background: string | null } | null =
+		null
 	private teams: TeamSource | null = null
 	private starting = false
 	private store: ReviewStore
@@ -108,8 +110,33 @@ export class AiController {
 		return this.store.read().repos[repoId]?.aiRuns?.[reviewId] ?? []
 	}
 
-	async start(access: ComparisonAccess, reviewId: string, scope: AiScope, choice: ModelSelection | ReviewerChoice): Promise<AiRun> {
+	/** Whether a run is starting or running, so an automatic review can wait for its turn. */
+	get busy(): boolean {
+		return !!this.active || this.starting
+	}
+
+	private assertIdle(): void {
+		if (this.active?.background)
+			throw new AppFail(
+				'ai-busy',
+				`An automatic review of ${this.active.background} is running. Try again when it finishes, or cancel it from that review.`,
+			)
 		if (this.active || this.starting) throw new AppFail('ai-busy', 'An AI review is already running.')
+	}
+
+	/** The finished run, once the active run with this id ends; null when it is not the active run. */
+	whenDone(runId: string): Promise<AiRun> | null {
+		return this.active?.handle.run.id === runId ? this.active.handle.done : null
+	}
+
+	async start(
+		access: ComparisonAccess,
+		reviewId: string,
+		scope: AiScope,
+		choice: ModelSelection | ReviewerChoice,
+		options: { background?: string } = {},
+	): Promise<AiRun> {
+		this.assertIdle()
 		this.starting = true
 		const reviewer: ReviewerChoice = 'kind' in choice ? choice : { kind: 'model', selection: choice }
 		let config: RunConfig
@@ -175,6 +202,7 @@ export class AiController {
 					: undefined,
 			},
 			team ? team.members.map((m) => m.config.connectionId) : [config.connectionId],
+			options.background ?? null,
 		)
 	}
 
@@ -183,7 +211,7 @@ export class AiController {
 	 * it (same connection and model). The answers merge into the same run.
 	 */
 	async retryRules(access: ComparisonAccess, reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<AiRun> {
-		if (this.active || this.starting) throw new AppFail('ai-busy', 'An AI review is already running.')
+		this.assertIdle()
 		const { comparison } = access
 		const runs = this.runsFor(comparison.repoId, reviewId)
 		const at = runs.findIndex((r) => r.id === runId)
@@ -441,6 +469,7 @@ export class AiController {
 		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry'>,
 		options: RunnerOptions,
 		connectionIds: Array<string>,
+		background: string | null = null,
 	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
@@ -479,14 +508,15 @@ export class AiController {
 				earlier: input.retry ? (input.retry.run.earlier ?? null) : (access.earlierLimitations?.() ?? null),
 			},
 			options,
-			(run) => void this.persist(repoId, run),
+			(run) => void this.persist(repoId, background ? { ...run, auto: true } : run),
 		)
-		this.active = { handle, repoId, reviewId, connectionIds }
+		this.active = { handle, repoId, reviewId, connectionIds, background }
 		this.starting = false
 		void handle.done.finally(() => {
 			if (this.active?.handle === handle) this.active = null
 			void external?.close()
 		})
+		if (background) handle.run.auto = true
 		await this.persist(repoId, handle.run)
 		return handle.run
 	}
@@ -502,9 +532,12 @@ export class AiController {
 		return true
 	}
 
-	/** Cancels the active run unless it belongs to `reviewId`. Called whenever a repository or comparison is opened. */
+	/**
+	 * Cancels the active run unless it belongs to `reviewId`. Called whenever a repository or comparison is opened. An
+	 * automatic review runs in the background, so it keeps going; cancel it from its own review.
+	 */
 	cancelUnless(reviewId: string | null): void {
-		if (this.active && this.active.reviewId !== reviewId) this.active.handle.cancel()
+		if (this.active && !this.active.background && this.active.reviewId !== reviewId) this.active.handle.cancel()
 	}
 
 	async flush(): Promise<void> {

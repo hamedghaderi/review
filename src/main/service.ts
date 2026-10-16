@@ -13,6 +13,7 @@ import type {
 	Comparison,
 	Discussion,
 	FileLinesResult,
+	FindingLevel,
 	GitHubMapping,
 	LoadedComparison,
 	ModelSelection,
@@ -68,7 +69,7 @@ import { loadFacts } from './ai/facts.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
-import { findingRoots } from '../shared/findings.ts'
+import { autoAddFindings, findingRoots } from '../shared/findings.ts'
 import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
@@ -120,6 +121,7 @@ export class ReviewService {
 	private searching = new Map<SearchSlot, AbortController>()
 	private publisher: Publisher | null
 	private branchPrs = new Map<string, { at: number; value: BranchPr }>()
+	private unseenComments = new Map<string, Set<string>>() // review id → comments an automatic review added
 
 	constructor(store: ReviewStore, github: GitHubService | null = null) {
 		this.store = store
@@ -357,6 +359,73 @@ export class ReviewService {
 		const context = target.kind === 'target' ? this.carriedContext(repoId, c, target.from ?? null) : null
 		if (gen !== this.loadGen) throw new AppFail('cancelled', 'A newer review was opened.')
 		if (carry?.notice) notice = notice ? `${notice} ${carry.notice}` : carry.notice
+		await this.saveSnapshot(repoId, c, carry, context, true)
+		return {
+			comparison: c,
+			review: this.store.read().repos[repoId].reviews[c.id],
+			aiRuns: this.ai?.runsFor(repoId, c.id) ?? [],
+			notice,
+		}
+	}
+
+	/**
+	 * Opens a pull request for an automatic review without touching what is on screen: no open request is superseded,
+	 * no run is cancelled and the repository's active review stays as it is. Comments carry over as when you open it.
+	 */
+	async openInBackground(repoId: string, pr: { repo: string; number: number }, signal: AbortSignal): Promise<Comparison> {
+		if (!this.repos.has(repoId)) {
+			const s = this.store.read().repos[repoId]
+			if (!s) throw new AppFail('not-found', 'That repository is not known to the app. Open it first.')
+			this.repos.set(repoId, await readRepo(s.root))
+		}
+		const { data } = await this.openPr(repoId, { kind: 'pr', repo: pr.repo, number: pr.number }, signal)
+		const c = data.comparison
+		this.comparisons.set(c.id, data)
+		await this.saveSnapshot(repoId, c, await this.carry(repoId, data, null), this.carriedContext(repoId, c, null), false)
+		return c
+	}
+
+	/** Starts an automatic review's run; it keeps going when you open other reviews. */
+	startAutoAi(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.start(access, reviewId, { kind: 'all' }, choice, { background: label })
+	}
+
+	/**
+	 * Adds a finished automatic run's findings at `levels` to the stored review as comments and returns their ids. They
+	 * are kept through the window's saves until it has seen them, so a review open on screen can't drop them.
+	 */
+	async addAutoFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>> {
+		let ids: Array<string> = []
+		await this.store.update((d) => {
+			const repo = d.repos[repoId]
+			const r = repo?.reviews[reviewId]
+			const runs = repo?.aiRuns[reviewId] ?? []
+			const run = runs.find((x) => x.id === runId)
+			if (!r || !run) return
+			const res = autoAddFindings(r, run, runs, findingRoots(runs), levels)
+			if (!res.added) return
+			r.comments = res.review.comments
+			r.findingDecisions = res.review.findingDecisions
+			r.updatedAt = new Date().toISOString()
+			ids = res.commentIds
+		})
+		if (ids.length) {
+			const unseen = this.unseenComments.get(reviewId) ?? new Set()
+			for (const id of ids) unseen.add(id)
+			this.unseenComments.set(reviewId, unseen)
+		}
+		return ids
+	}
+
+	/** Stores a comparison's review (created on first open, else updated with carried comments). */
+	private async saveSnapshot(
+		repoId: string,
+		c: Comparison,
+		carry: { comments: Array<ReviewComment> } | null,
+		context: ReviewContext | null,
+		activate: boolean,
+	): Promise<void> {
 		const now = new Date().toISOString()
 		await this.store.update((d) => {
 			const s = d.repos[repoId]
@@ -392,14 +461,8 @@ export class ReviewService {
 					...(context ? { context } : {}),
 				}
 			}
-			s.activeReviewId = c.id
+			if (activate) s.activeReviewId = c.id
 		})
-		return {
-			comparison: c,
-			review: this.store.read().repos[repoId].reviews[c.id],
-			aiRuns: this.ai?.runsFor(repoId, c.id) ?? [],
-			notice,
-		}
 	}
 
 	/**
@@ -818,6 +881,13 @@ export class ReviewService {
 		const stored = this.store.read().repos[repoId]?.reviews[id]
 		if (!stored || !this.repos.has(repoId)) throw new AppFail('not-found', 'This review is not open.')
 		const next = reviewUpdate(input, stored, findingRoots(this.ai?.runsFor(repoId, id) ?? []))
+		// Comments an automatic review added that this window has not loaded yet stay; once it saves them, it owns them.
+		const unseen = this.unseenComments.get(id)
+		if (unseen) {
+			for (const c of next.comments) unseen.delete(c.id)
+			next.comments.push(...stored.comments.filter((c) => unseen.has(c.id)))
+			if (!unseen.size) this.unseenComments.delete(id)
+		}
 		for (const i of next.context?.images ?? [])
 			if (!this.images.has(i.id, i.mediaType)) throw new AppFail('invalid-input', `The image “${i.name}” is not stored; add it again.`)
 		const savedAt = new Date().toISOString()

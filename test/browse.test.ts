@@ -834,6 +834,45 @@ test('GitHub errors map to explicit states and cached results are served with th
 	}
 })
 
+test('comments an automatic review added survive a save from a window that has not loaded them yet', async () => {
+	const w = world()
+	const { svc, store } = await service(new GitHubService(memoryTokens(), { base: 'http://127.0.0.1:9' }))
+	const s = await svc.open(w.clone)
+	const loaded = await svc.loadComparison(s.repo.id, {
+		kind: 'target',
+		target: { kind: 'branch', headRef: 'refs/heads/feat/local-only', baseRef: 'refs/heads/main' },
+	})
+	const c = loaded.comparison
+	const file = c.files[0]
+	const anchor = {
+		repoId: s.repo.id,
+		baseSha: c.baseSha,
+		headSha: c.headSha,
+		fileKey: file.key,
+		oldPath: file.oldPath,
+		newPath: file.newPath,
+		side: 'new' as const,
+		startLine: 1,
+		endLine: 1,
+		excerpt: '',
+	}
+	const run = { id: 'run1', status: 'completed', findings: [{ id: 'f1', anchor, severity: 'blocking', title: 't', body: 'b' }] }
+	await store.update((d) => void (d.repos[s.repo.id].aiRuns[c.id] = [run as never]))
+	svc.attachAi({ cancelUnless() {}, runsFor: () => store.read().repos[s.repo.id].aiRuns[c.id] } as never)
+	const [added] = await svc.addAutoFindings(s.repo.id, c.id, 'run1', ['blocking'])
+	assert.ok(added)
+	const stale = { ...loaded.review, comments: [] }
+	await svc.saveReview(stale)
+	const now = () => store.read().repos[s.repo.id].reviews[c.id]
+	assert.ok(
+		now().comments.some((x) => x.id === added),
+		'kept: the window never had it',
+	)
+	await svc.saveReview(now())
+	await svc.saveReview(stale)
+	assert.ok(!now().comments.some((x) => x.id === added), 'once the window saved it, deleting it works')
+})
+
 test('browser state and GitHub repository choice persist per repository; opening a review never starts AI', async () => {
 	const w = world()
 	const gh = new GitHubService(memoryTokens(), { base: 'http://127.0.0.1:9' })

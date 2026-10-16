@@ -68,7 +68,9 @@ export class InboxWatcher {
 	private async poll(): Promise<void> {
 		const { github, store } = this.o
 		this.lastCheck = Date.now()
-		if (!github.notifications.enabled || github.status().state !== 'connected') return this.o.badge(0)
+		const notify = github.notifications.enabled
+		// Automatic review needs the same check, so it runs while either is on; only notifications show a badge.
+		if ((!notify && !github.autoReview) || github.status().state !== 'connected') return this.o.badge(0)
 		try {
 			const r = await github.watchRequests()
 			if (!r) return this.o.badge(0)
@@ -77,7 +79,7 @@ export class InboxWatcher {
 			const { events, state } = diffInbox(prev, r.prs)
 			await store.update((d) => void (d.inboxWatch = { login: r.viewer, state, at: new Date().toISOString() }))
 			const known = this.o.known()
-			this.o.badge(r.prs.filter((p) => p.requested !== false && !p.draft && known.has(p.repo.toLowerCase())).length)
+			this.o.badge(notify ? r.prs.filter((p) => p.requested !== false && !p.draft && known.has(p.repo.toLowerCase())).length : 0)
 			if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) this.o.changed?.()
 			const mine = events.flatMap((e) => {
 				const repoId = known.get(e.pr.repo.toLowerCase())

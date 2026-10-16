@@ -620,6 +620,42 @@ test('switching comparisons cancels the active run; its results stay with the or
 	assert.deepEqual(store.read().repos['/repo'].aiRuns[`${'c'.repeat(40)}..${'d'.repeat(40)}`], undefined)
 })
 
+test('an automatic review keeps running when you open other reviews, is marked auto, and blocks your runs with its name', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: null,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const provider = createFakeProvider({ delayMs: 10_000, script: () => out([finding()]) })
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	const run = await controller.start(access, s.comp.id, { kind: 'all' }, SEL, { background: 'octo/app#7' })
+	assert.equal(run.auto, true)
+	controller.cancelUnless(null)
+	controller.cancelUnless(`${'c'.repeat(40)}..${'d'.repeat(40)}`)
+	assert.ok(controller.busy, 'opening another review or repository does not cancel it')
+	await assert.rejects(controller.start(access, s.comp.id, { kind: 'all' }, SEL), /automatic review of octo\/app#7 is running/)
+	const done = controller.whenDone(run.id)!
+	assert.ok(controller.cancel(run.id), 'it can still be cancelled from its own review')
+	assert.equal((await done).status, 'cancelled')
+	await store.flush()
+	assert.equal(controller.runsFor('/repo', s.comp.id)[0].auto, true)
+})
+
 // ─── Review policy (pr-narrative reviewer rules) ───────────────────────────────
 
 test('policy: every rule must be reported; blocking needs a disproof; residue is a nit and names no author', () => {

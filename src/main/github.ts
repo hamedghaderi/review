@@ -84,6 +84,7 @@ export class GitHubService {
 	private prefs: JsonStore<GitHubPrefs> | null
 	private useCliMemory = false
 	private notifyMemory: NotificationPrefs = { enabled: true, sound: true }
+	private autoReviewMemory = false
 	private notifyProblem: string | null = null
 
 	constructor(store: TokenStore, options: { fetch?: Fetch; base?: string; cli?: CliTokenSource; dir?: string } = {}) {
@@ -91,14 +92,15 @@ export class GitHubService {
 		this.fetch = options.fetch ?? ((url, init) => fetch(url, init))
 		this.base = options.base ?? API_BASE
 		this.cli = options.cli ?? null
-		const empty = (): GitHubPrefs => ({ version: 1, useCli: false, notifications: { enabled: true, sound: true } })
+		const empty = (): GitHubPrefs => ({ version: 1, useCli: false, notifications: { enabled: true, sound: true }, autoReview: false })
 		this.prefs = options.dir
 			? new JsonStore(join(options.dir, 'github-settings.json'), empty, (raw) => {
-					const r = raw as { useCli?: unknown; notifications?: { enabled?: unknown; sound?: unknown } } | null
+					const r = raw as { useCli?: unknown; notifications?: { enabled?: unknown; sound?: unknown }; autoReview?: unknown } | null
 					return {
 						...empty(),
 						useCli: r?.useCli === true,
 						notifications: { enabled: r?.notifications?.enabled !== false, sound: r?.notifications?.sound !== false },
+						autoReview: r?.autoReview === true,
 					}
 				})
 			: null
@@ -158,6 +160,17 @@ export class GitHubService {
 		this.emit()
 	}
 
+	/** Automatic review: new review requests are reviewed by AI and the result is submitted as you. Off unless turned on. */
+	get autoReview(): boolean {
+		return this.prefs ? this.prefs.read().autoReview : this.autoReviewMemory
+	}
+
+	async setAutoReview(enabled: boolean): Promise<void> {
+		if (this.prefs) await this.prefs.update((d) => void (d.autoReview = enabled))
+		else this.autoReviewMemory = enabled
+		this.emit()
+	}
+
 	private get endpoint(): string {
 		return `github ${this.base}`
 	}
@@ -191,6 +204,7 @@ export class GitHubService {
 			writeTokenUrl: WRITE_TOKEN_URL,
 			notifications: this.notifications,
 			notificationProblem: this.notifyProblem,
+			autoReview: this.autoReview,
 		}
 	}
 
@@ -1143,6 +1157,7 @@ interface GitHubPrefs {
 	version: 1
 	useCli: boolean
 	notifications: NotificationPrefs
+	autoReview: boolean
 }
 
 const GRAPH_TTL_MS = 2 * 60_000

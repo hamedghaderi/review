@@ -252,9 +252,10 @@ export function App() {
 				const next = i < 0 ? [...runs, run] : runs.map((r) => (r.id === run.id ? run : r))
 				runsRef.current = next
 				setAiRuns(next)
-				// When a run finishes, its findings at the chosen levels go into the code as comments.
+				// When a run finishes, its findings at the chosen levels go into the code as comments. An automatic review's
+				// run is the main process's to add and publish; its comments arrive through onReviewChanged.
 				const finished = runs[i]?.status === 'running' && (run.status === 'completed' || run.status === 'partial')
-				if (!finished || !autoAddRef.current.length) return
+				if (!finished || run.auto || !autoAddRef.current.length) return
 				const current = reviewRef.current
 				if (!current || current.id !== run.reviewId) return
 				const { review: withDrafts, added } = ops.autoAddFindings(current, run, next, findingRoots(next), autoAddRef.current)
@@ -262,6 +263,27 @@ export function App() {
 				reviewRef.current = withDrafts
 				change(() => withDrafts)
 				setNotice(`Added ${added} finding${added === 1 ? '' : 's'} to the code as comments. Nothing is posted until you publish.`)
+			}),
+		[change],
+	)
+
+	// An automatic review added comments to the review on screen: merge in the ones this window doesn't have, keeping its own edits.
+	useEffect(
+		() =>
+			window.review.onReviewChanged((stored) => {
+				const current = reviewRef.current
+				if (!current || current.id !== stored.id || current.repoId !== stored.repoId) return
+				const have = new Set(current.comments.map((c) => c.id))
+				const add = stored.comments.filter((c) => !have.has(c.id))
+				if (!add.length) return
+				const findingDecisions = { ...current.findingDecisions }
+				for (const c of add) if (c.findingId) delete findingDecisions[c.findingId]
+				const next = { ...current, comments: [...current.comments, ...add], findingDecisions }
+				reviewRef.current = next
+				change(() => next)
+				setNotice(
+					`The automatic review added ${add.length} comment${add.length === 1 ? '' : 's'} and is posting ${add.length === 1 ? 'it' : 'them'} to GitHub.`,
+				)
 			}),
 		[change],
 	)
