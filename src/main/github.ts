@@ -31,7 +31,7 @@ import {
 	type RestReview,
 	type RestReviewComment,
 } from './activity.ts'
-import { AppFail } from './git.ts'
+import { AppFail, isSha } from './git.ts'
 import type { CliTokenSource } from './ghcli.ts'
 import { JsonStore } from './store.ts'
 import { join } from 'node:path'
@@ -610,6 +610,57 @@ export class GitHubService {
 		}))
 	}
 
+	// ─── Stacks ───────────────────────────────────────────────────────────────
+
+	/**
+	 * The merged pull request this one was stacked on, when GitHub retargeted it to its current base after that PR merged
+	 * (or someone changed the base by hand): the last base change that ended at the current base names the previous
+	 * base branch, and a merged pull request from that branch is the one. Null without a token or such a change. Read-only.
+	 */
+	async mergedStackParent(
+		repo: string,
+		number: number,
+		signal?: AbortSignal,
+	): Promise<{ number: number; branch: string; headSha: string; mergeCommit: string } | null> {
+		checkRepo(repo)
+		if (!(await this.token())) return null
+		const [owner, name] = repo.split('/')
+		const d = await this.graphql<{
+			repository: {
+				pullRequest: {
+					baseRefName: string
+					timelineItems: { nodes: Array<{ previousRefName?: string; currentRefName?: string; createdAt?: string } | null> }
+				} | null
+			} | null
+		}>(BASE_CHANGES_QUERY, { owner, name, number }, signal)
+		const pr = d.repository?.pullRequest
+		const change = [...(pr?.timelineItems.nodes ?? [])]
+			.reverse()
+			.find((e) => e?.previousRefName && e.currentRefName === pr?.baseRefName && e.previousRefName !== pr?.baseRefName)
+		if (!change?.previousRefName || !change.createdAt) return null
+		const p = await this.graphql<{
+			repository: {
+				pullRequests: {
+					nodes: Array<{
+						number: number
+						headRefOid: string
+						mergedAt: string | null
+						mergeCommit: { oid: string } | null
+						headRepository: { nameWithOwner: string } | null
+					} | null>
+				}
+			} | null
+		}>(MERGED_FROM_BRANCH_QUERY, { owner, name, branch: change.previousRefName }, signal)
+		// GitHub retargets when the merged branch is deleted, so the merge comes first; a minute's slack covers clock skew.
+		const before = Date.parse(change.createdAt) + 60_000
+		const parent = (p.repository?.pullRequests.nodes ?? [])
+			.filter((n) => n?.mergeCommit && n.mergedAt && Date.parse(n.mergedAt) <= before)
+			.filter((n) => n!.headRepository?.nameWithOwner.toLowerCase() === repo.toLowerCase())
+			.sort((a, b) => b!.mergedAt!.localeCompare(a!.mergedAt!))[0]
+		if (!parent || !isSha(parent.headRefOid) || !isSha(parent.mergeCommit!.oid)) return null
+		return { number: parent.number, branch: change.previousRefName, headSha: parent.headRefOid, mergeCommit: parent.mergeCommit!.oid }
+	}
+
 	// ─── Description ──────────────────────────────────────────────────────────
 
 	/**
@@ -1151,6 +1202,23 @@ const ADD_THREAD_MUTATION = `mutation($input: AddPullRequestReviewThreadInput!) 
 
 const UPDATE_COMMENT_MUTATION = `mutation($input: UpdatePullRequestReviewCommentInput!) {
   updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id url } }
+}`
+
+const BASE_CHANGES_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    baseRefName
+    timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT], last: 20) {
+      nodes { ... on BaseRefChangedEvent { previousRefName currentRefName createdAt } }
+    }
+  } }
+}`
+
+const MERGED_FROM_BRANCH_QUERY = `query($owner: String!, $name: String!, $branch: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(headRefName: $branch, states: MERGED, last: 5) {
+      nodes { number headRefOid mergedAt mergeCommit { oid } headRepository { nameWithOwner } }
+    }
+  }
 }`
 
 interface DescriptionNode {
