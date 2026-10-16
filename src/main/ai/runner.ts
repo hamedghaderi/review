@@ -569,7 +569,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						`${w.role ? `${w.role}: the` : 'The'} endpoint does not support native structured output; JSON mode was used and the output was validated against the same schema.`,
 					)
 				checkTruncation(batch, response.usage?.inputTokens ?? null, w)
-				return { ok: true, value: validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels) }
+				return {
+					ok: true,
+					value: validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads),
+				}
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return { ok: false, error: e }

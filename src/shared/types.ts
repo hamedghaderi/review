@@ -801,10 +801,23 @@ export interface Finding {
 	memberId?: string | null // the team member that raised it (team runs)
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
+	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
 	// Before prompt reviewer-2026-10-01:
 	problem?: string
 	consequence?: string
 	suggestion?: string
+}
+
+export const RAISED_OUTCOMES = ['agreed', 'rejected', 'unanswered', 'unclear'] as const
+export type RaisedOutcome = (typeof RAISED_OUTCOMES)[number]
+
+/** The model's account of a GitHub thread that raised the same problem: what was decided there and why it raises it again. */
+export interface RaisedBefore {
+	threadId: string // DiscussionThread.id
+	url: string | null // the thread on GitHub, as read during the run
+	path: string
+	outcome: RaisedOutcome
+	whyAgain: string
 }
 
 /** A message a CI tool attached to lines of the head commit (lint, type check, test failure), as GitHub reports it. */

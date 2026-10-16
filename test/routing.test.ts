@@ -63,7 +63,7 @@ const RELATED: RelatedResult = {
 const RESIDUE: Array<ReviewRule> = ['residue-1', 'residue-2', 'residue-3', 'residue-4', 'residue-5', 'residue-6']
 const TEAM: Array<{ id: string; role: string; rules: Array<ReviewRule>; window: number }> = [
 	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling'], window: 200_000 },
-	{ id: 'security', role: 'Security', rules: ['security'], window: 12_000 },
+	{ id: 'security', role: 'Security', rules: ['security'], window: 13_000 },
 	{
 		id: 'callers',
 		role: 'Callers & structure',

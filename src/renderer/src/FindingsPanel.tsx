@@ -27,7 +27,7 @@ import type {
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { discussedAt } from './discussed.ts'
-import { AlreadyDiscussed } from './Discussion.tsx'
+import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
 import { useStored } from './useStored.ts'
 
@@ -328,7 +328,8 @@ export function FindingsPanel({
 							state={state}
 							fixture={run.fixture}
 							team={run.team}
-							discussed={discussedAt(threads, f.anchor)}
+							discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
+							earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
 							selected={f.id === selectedFindingId}
 							focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
 							onOpen={() => onOpen(f)}
@@ -897,7 +898,8 @@ interface CardProps {
 	state: FindingState
 	fixture: boolean
 	team: AiRun['team']
-	discussed: Array<DiscussionThread>
+	discussed: Array<DiscussionThread> // threads on its lines, other than the one it says it raises again
+	earlier: DiscussionThread | null // the thread it says it raises again, as read now
 	selected: boolean
 	focusAsk: number | null // changes each time the question box should open and take focus
 	onOpen(): void
@@ -1058,7 +1060,8 @@ function FindingCard(p: CardProps) {
 					: ''}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}
 			</div>
-			<AlreadyDiscussed threads={discussed} />
+			{f.raisedBefore && <RaisedBeforeNote r={f.raisedBefore} thread={p.earlier} />}
+			<AlreadyDiscussed threads={discussed} unclaimed />
 			{f.body !== undefined ? (
 				<div className="finding-body">
 					<p className="finding-text selectable">{f.body}</p>

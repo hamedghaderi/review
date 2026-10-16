@@ -150,6 +150,7 @@ export function defaultScript(request: ProviderRequest): ReviewOutput | ModelAns
 			disproof: null,
 			background: null,
 			evidence: line.text.trim(),
+			raised_before: null,
 		})
 	}
 	if (findings.length) findings.push({ ...findings[0], excerpt_id: 'E-unknown', title: 'Fixture finding with an invalid reference' })

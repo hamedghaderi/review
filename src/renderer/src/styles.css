@@ -3197,6 +3197,15 @@ input.member-role {
 	color: var(--text);
 }
 
+/* A finding the AI says it raises again after a thread answered it as not a problem: read that thread first */
+.raised-note.rejected {
+	border-left-color: var(--warn-fg);
+	background: var(--warn-bg);
+}
+.raised-note > div {
+	margin-top: 2px;
+}
+
 /* Where a pull request stands on review: approved, changes requested, reviewed */
 .rv-badge {
 	flex-shrink: 0;

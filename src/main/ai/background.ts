@@ -1,4 +1,4 @@
-import { CONTEXT_LIMITS, type Discussion, type DiscussionComment, type ReviewContext } from '../../shared/types.ts'
+import { CONTEXT_LIMITS, type Discussion, type DiscussionComment, type DiscussionThread, type ReviewContext } from '../../shared/types.ts'
 import type { LinkedIssue } from '../github.ts'
 
 /**
@@ -11,7 +11,11 @@ export interface Background {
 	sections: Array<{ tag: 'DESCRIPTION' | 'NOTES' | 'ISSUES' | 'CONVERSATION'; title: string; text: string }>
 	chars: number
 	summary: string | null // for the run's coverage, e.g. "description; issue #12 (closes, 4 comments); conversation: 3 threads (1 open), 2 comments"
+	threads: Map<string, EarlierThread> // the conversation's review threads by the label they were sent under ("T1"), for findings that cite one
 }
+
+/** A review thread a finding says it raises again. */
+export type EarlierThread = Pick<DiscussionThread, 'id' | 'url' | 'path'>
 
 export const DESCRIPTION_MAX = 8000
 export const ISSUES_MAX = 10_000
@@ -84,16 +88,31 @@ function issueText(issue: LinkedIssue, budget: number): string {
 
 const visible = (c: DiscussionComment): boolean => !c.pending && !!c.body.trim()
 
-/** Open threads first (they are what is still being discussed), then the PR conversation and review summaries, newest first. */
-function conversationText(d: Discussion): { text: string; threads: number; open: number; comments: number } {
+/**
+ * Open threads first (they are what is still being discussed), then the PR conversation and review summaries, newest
+ * first. Each thread is labelled T1, T2… so a finding can say which one it raises again.
+ */
+function conversationText(d: Discussion): {
+	text: string
+	threads: number
+	open: number
+	comments: number
+	labels: Map<string, EarlierThread>
+} {
 	const threads = d.threads.filter((t) => t.comments.some(visible))
 	const open = threads.filter((t) => t.resolved !== true)
-	const blocks = [...open, ...threads.filter((t) => t.resolved === true)].map((t) => {
+	const labels = new Map<string, EarlierThread>()
+	const blocks = [...open, ...threads.filter((t) => t.resolved === true)].map((t, i) => {
+		const label = `T${i + 1}`
+		labels.set(label, { id: t.id, url: t.url, path: t.path })
 		const where = `${t.path}${t.originalLine ? `:${t.originalLine}` : ''}`
 		const state = [t.resolved === true ? 'resolved' : t.resolved === false ? 'open' : null, t.outdated ? 'outdated' : null]
 			.filter(Boolean)
 			.join(', ')
-		return [`Thread on ${where}${state ? ` (${state})` : ''}:`, ...t.comments.filter(visible).map((c) => line(c.author, c.body))].join('\n')
+		return [
+			`Thread ${label} on ${where}${state ? ` (${state})` : ''}:`,
+			...t.comments.filter(visible).map((c) => line(c.author, c.body)),
+		].join('\n')
 	})
 	const notes = [
 		...d.reviews
@@ -110,6 +129,7 @@ function conversationText(d: Discussion): { text: string; threads: number; open:
 		threads: threads.length,
 		open: open.length,
 		comments: notes.length,
+		labels,
 	}
 }
 
@@ -147,6 +167,7 @@ export function buildBackground(o: {
 }): Background {
 	const sections: Background['sections'] = []
 	const parts: Array<string> = []
+	let threads = new Map<string, EarlierThread>()
 	const description = o.description?.trim()
 	if (description) {
 		sections.push({
@@ -188,6 +209,7 @@ export function buildBackground(o: {
 	const d = o.discussion
 	if (d && d.status !== 'unavailable') {
 		const c = conversationText(d)
+		threads = c.labels
 		if (c.threads || c.comments) {
 			sections.push({
 				tag: 'CONVERSATION',
@@ -203,5 +225,6 @@ export function buildBackground(o: {
 		sections,
 		chars: sections.reduce((n, s) => n + s.title.length + s.text.length + 30, 0),
 		summary: parts.length ? parts.join('; ') : null,
+		threads,
 	}
 }

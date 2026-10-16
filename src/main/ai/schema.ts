@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { FINDING_LEVELS, REVIEW_RULES, TEST_PATTERNS } from '../../shared/types.ts'
+import { FINDING_LEVELS, RAISED_OUTCOMES, REVIEW_RULES, TEST_PATTERNS } from '../../shared/types.ts'
 
 // Runtime validation schema. Length, content and budget limits are enforced afterwards in findings.ts.
 // `default` is stripped from the wire schema (strict modes reject it); it only lets validation accept answers without the field.
@@ -48,6 +48,19 @@ export const modelFindingSchema = z.object({
 			'Plain-text context (max ~80 words) only when the finding needs a domain term, code outside the excerpts, or removed behavior. Otherwise null.',
 		),
 	evidence: z.string().describe('Verbatim source text copied from the cited lines, without line numbers or diff markers.'),
+	raised_before: z
+		.object({
+			thread_id: z.string().describe('The conversation thread that raised the same problem, e.g. "T2".'),
+			outcome: z
+				.enum(RAISED_OUTCOMES)
+				.describe(
+					'What the thread decided: "agreed" (they accepted it should change), "rejected" (they answered that it is fine, intended or not worth it), "unanswered" (no answer yet), "unclear".',
+				),
+			why_again: z.string().describe('One sentence: what is new since that thread, so this is worth raising again.'),
+		})
+		.nullable()
+		.default(null)
+		.describe('Set when a thread in the conversation already raised this problem. Otherwise null.'),
 })
 
 export const ruleEvaluationSchema = z.object({

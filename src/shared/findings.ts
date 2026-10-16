@@ -132,9 +132,9 @@ export function levelLine(f: Pick<Finding, 'severity' | 'category' | 'signature'
 }
 
 /**
- * The comment text for an accepted finding: a level label line, the body as written (result first), then the
- * disproof for blocking findings and a collapsed background, which is what a reviewer would post. "Why flagged"
- * stays in the app.
+ * The comment text for an accepted finding: a level label line, the body as written (result first), a link to the
+ * thread it follows up on, then the disproof for blocking findings and a collapsed background, which is what a
+ * reviewer would post. "Why flagged" stays in the app.
  */
 export function findingCommentBody(f: Finding): string {
 	if (f.body === undefined)
@@ -142,6 +142,7 @@ export function findingCommentBody(f: Finding): string {
 			'\n',
 		)
 	const parts = [levelLine(f), f.body]
+	if (f.raisedBefore?.url) parts.push(`Follows up on [an earlier thread](${f.raisedBefore.url}).`)
 	if (f.alsoAt?.length)
 		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
 	if (f.disproof) parts.push(`**How to check this is wrong:** ${f.disproof}`)

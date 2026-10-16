@@ -15,7 +15,7 @@ import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { reviewUpdate } from '../src/main/validate.ts'
-import { findingRoots, findingState } from '../src/shared/findings.ts'
+import { findingCommentBody, findingRoots, findingState } from '../src/shared/findings.ts'
 import {
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
@@ -134,6 +134,7 @@ function finding(over: Partial<ModelFinding> = {}): ModelFinding {
 		disproof: 'Call add(5, 3) and check it still returns 2.',
 		background: null,
 		evidence: 'return a + b',
+		raised_before: null,
 		...over,
 	}
 }
@@ -194,6 +195,44 @@ test('a valid finding maps to the correct source anchor with app-generated ids',
 		endLine: 3,
 		excerpt: '  return a + b',
 	})
+})
+
+test('a finding that raises a GitHub thread again links to it, and is rejected if it does not say what is new', () => {
+	const { comp, srcs } = sources()
+	const batch = buildContext(comp, srcs, LIMITS).batches[0]
+	const threads = new Map([['T1', { id: 'thread-1', url: 'https://github.com/acme/web/pull/7#discussion_r1', path: 'src/app.ts' }]])
+	const again = (thread_id: string, why_again: string) =>
+		finding({ title: `again ${thread_id} ${why_again.length}`, raised_before: { thread_id, outcome: 'rejected', why_again } })
+	const r = validateBatchOutput(
+		out([again('T1', ' Line 3 still adds although the reply said it subtracts. '), again('T1', '  '), again('T9', 'x'), finding()]),
+		batch,
+		comp,
+		'run-1',
+		undefined,
+		undefined,
+		threads,
+	)
+	assert.deepEqual(r.findings[0].raisedBefore, {
+		threadId: 'thread-1',
+		url: 'https://github.com/acme/web/pull/7#discussion_r1',
+		path: 'src/app.ts',
+		outcome: 'rejected',
+		whyAgain: 'Line 3 still adds although the reply said it subtracts.',
+	})
+	assert.deepEqual(
+		r.rejected.map((x) => x.reason),
+		['Raises thread src/app.ts again without saying what is new since it'],
+	)
+	// A thread id that was never sent: the finding stays, without a link.
+	assert.equal(r.findings[1].raisedBefore, undefined)
+	assert.equal(r.findings[2].raisedBefore, undefined)
+	assert.equal(
+		findingCommentBody(r.findings[0]).includes('Follows up on [an earlier thread](https://github.com/acme/web/pull/7#discussion_r1).'),
+		true,
+	)
+	// Answers from before the field existed still validate.
+	const { raised_before: _, ...old } = finding()
+	assert.equal(validateBatchOutput(out([old as ModelFinding]), batch, comp, 'run-1').findings.length, 1)
 })
 
 test('old-side anchors on modified and deleted files', () => {
@@ -830,7 +869,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-15.1')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-16.1')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {

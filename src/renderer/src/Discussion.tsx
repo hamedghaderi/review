@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ChangedFile, Discussion, DiscussionComment, DiscussionThread } from '../../shared/types.ts'
+import type { ChangedFile, Discussion, DiscussionComment, DiscussionThread, RaisedBefore, RaisedOutcome } from '../../shared/types.ts'
 import { ago } from './branches.ts'
 import { matchesThread, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
@@ -7,32 +7,111 @@ import { useStored } from './useStored.ts'
 
 const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'open', 'resolved']
 
-function who(ts: Array<DiscussionThread>): string {
-	const names = [...new Set(ts.map((t) => t.comments[0]?.author ?? 'unknown user'))]
-	return names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')
-}
-
 function count(n: number, one: string, many = `${one}s`): string {
 	return `${n} ${n === 1 ? one : many}`
 }
 
-/** "Already discussed on GitHub: 1 open thread (alice) · 1 resolved (bob)." */
-export function AlreadyDiscussed({ threads }: { threads: Array<DiscussionThread> }) {
+/** Who started each thread, each a link to it on GitHub when it has one. */
+function who(ts: Array<DiscussionThread>) {
+	const shown = ts.slice(0, 3)
+	return (
+		<>
+			{shown.map((t, i) => (
+				<span key={t.id}>
+					{i > 0 && ', '}
+					<ThreadLink t={t} />
+				</span>
+			))}
+			{ts.length > shown.length && ` and ${ts.length - shown.length} more`}
+		</>
+	)
+}
+
+function ThreadLink({ t }: { t: DiscussionThread }) {
+	const name = t.comments[0]?.author ?? 'unknown user'
+	return t.url ? (
+		<a href={t.url} target="_blank" rel="noreferrer" title="Open the thread on GitHub">
+			{name}
+		</a>
+	) : (
+		<>{name}</>
+	)
+}
+
+/**
+ * "Already discussed on GitHub: 1 open thread (alice) · 1 resolved (bob)." Each name links to its thread. `unclaimed`:
+ * on a finding, the AI didn't say it had read these threads, so the reader is told to check it isn't a repeat.
+ */
+export function AlreadyDiscussed({ threads, unclaimed = false }: { threads: Array<DiscussionThread>; unclaimed?: boolean }) {
 	if (!threads.length) return null
 	const open = threads.filter((t) => t.resolved === false)
 	const resolved = threads.filter((t) => t.resolved === true)
 	const unknown = threads.filter((t) => t.resolved === null)
 	const parts = [
-		open.length ? `${count(open.length, 'open thread')} (${who(open)})` : null,
-		resolved.length ? `${resolved.length} resolved (${who(resolved)})` : null,
-		unknown.length ? `${count(unknown.length, 'thread')} (${who(unknown)})` : null,
+		open.length ? (
+			<span key="open">
+				{count(open.length, 'open thread')} ({who(open)})
+			</span>
+		) : null,
+		resolved.length ? (
+			<span key="resolved">
+				{resolved.length} resolved ({who(resolved)})
+			</span>
+		) : null,
+		unknown.length ? (
+			<span key="unknown">
+				{count(unknown.length, 'thread')} ({who(unknown)})
+			</span>
+		) : null,
 	].filter(Boolean)
 	return (
 		<div
 			className="discussed-note small"
 			title="Shown so you can read the thread first. It doesn't change or hide anything, and a resolved thread doesn't mean the code changed."
 		>
-			<b>Already discussed on GitHub:</b> {parts.join(' · ')}.
+			<b>Already discussed on GitHub:</b> {parts.map((x, i) => [i > 0 && ' · ', x])}.
+			{unclaimed && ' The AI didn’t link these threads, so check it isn’t making the same point again.'}
+		</div>
+	)
+}
+
+const OUTCOME_TEXT: Record<RaisedOutcome, string> = {
+	agreed: 'they agreed it should change',
+	rejected: 'it was answered as not a problem',
+	unanswered: 'it has no answer yet',
+	unclear: 'it’s unclear what was decided',
+}
+
+/**
+ * The AI's own account of a GitHub thread that raised the same problem: where it is, what was decided there, and why
+ * it raises it again. `thread` is the thread as read now, when it is still there; the link saved with the run is the fallback.
+ */
+export function RaisedBeforeNote({ r, thread }: { r: RaisedBefore; thread: DiscussionThread | null }) {
+	const url = thread?.url ?? r.url
+	const where = thread?.placed?.startLine
+		? `${r.path}:${thread.placed.startLine}`
+		: thread?.originalLine
+			? `${r.path}, was line ${thread.originalLine}`
+			: r.path
+	const by = thread?.comments[0]?.author
+	return (
+		<div className={`discussed-note raised-note small ${r.outcome}`}>
+			<b>Raised before on GitHub:</b>{' '}
+			{url ? (
+				<a href={url} target="_blank" rel="noreferrer" title="Open the thread on GitHub">
+					{by ? `${by}’s thread` : 'a thread'}
+				</a>
+			) : by ? (
+				`${by}’s thread`
+			) : (
+				'a thread'
+			)}{' '}
+			on <span className="mono">{where}</span>
+			{thread && thread.resolved !== null ? ` (${thread.resolved ? 'resolved' : 'open'})` : ''}. According to the AI,{' '}
+			{OUTCOME_TEXT[r.outcome]}.
+			<div>
+				<b>Raised again because:</b> {r.whyAgain}
+			</div>
 		</div>
 	)
 }
