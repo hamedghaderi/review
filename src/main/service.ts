@@ -6,6 +6,7 @@ import type {
 	BranchPr,
 	CodeQuestion,
 	PastDecision,
+	EarlierLimitations,
 	BranchPreview,
 	BrowserState,
 	CompareTarget,
@@ -78,6 +79,7 @@ const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
 const CHANGED_LINES_LIMIT = 10_000
 const FILE_LINES_LIMIT = 8 * 1024 * 1024
 const PR_ATTEMPTS = 3
+const MAX_EARLIER_LIMITATIONS = 12
 
 function blobLines(buf: Buffer, truncated: boolean): FileLinesResult {
 	if (truncated) return { kind: 'too-large', reason: `File exceeds ${mb(FILE_LINES_LIMIT)}` }
@@ -478,6 +480,25 @@ export class ReviewService {
 			.slice(0, 80)
 	}
 
+	/**
+	 * What the newest finished run of this comparison's target (the same pull request, else the same branch) could not
+	 * settle, so the next run settles it first. Fixture runs and runs that settled everything give nothing.
+	 */
+	private earlierLimitations(repoId: string, c: Comparison): EarlierLimitations | null {
+		const repo = this.store.read().repos[repoId]
+		if (!repo) return null
+		const key = targetKey(targetOf(c))
+		const runs = Object.values(repo.reviews)
+			.filter((r) => r.id === c.id || targetKey(targetOf(r)) === key)
+			.flatMap((r) => repo.aiRuns[r.id] ?? [])
+			.filter((run) => (run.status === 'completed' || run.status === 'partial') && !run.fixture && run.finishedAt)
+			.sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!))
+		const last = runs[0]
+		return last?.limitations.length
+			? { runId: last.id, headSha: last.headSha, items: last.limitations.slice(0, MAX_EARLIER_LIMITATIONS) }
+			: null
+	}
+
 	private predecessor(repoId: string, c: Comparison, reviews: Array<Review>): Review | undefined {
 		const latest = (xs: Array<Review>) => xs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
 		const key = targetKey(targetOf(c))
@@ -853,6 +874,7 @@ export class ReviewService {
 				loadFileLines: (key) => this.loadFileLines(reviewId, key),
 				findRelated: (sources, signal) => findRelated(data.root, data.comparison.headSha, sources, signal),
 				pastDecisions: () => this.pastDecisions(repoId, data.comparison),
+				earlierLimitations: () => this.earlierLimitations(repoId, data.comparison),
 				tools: (budget, external) =>
 					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,

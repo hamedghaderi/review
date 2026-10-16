@@ -279,17 +279,19 @@ const SEVERITY_RANK: Record<string, number> = {
 	low: 6,
 }
 
-type Budget = 'defect' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue'
+type Budget = 'defect' | 'performance' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue'
 export function budgetOf(c: FindingCategory | undefined): Budget {
 	if (c === 'file-split' || c === 'over-engineered') return 'structure'
 	if (c === 'test-value') return 'tests'
 	if (c === 'misleading-name') return 'naming'
+	if (c === 'performance') return 'performance'
 	return c === 'convention' ? 'convention' : c === 'residue' ? 'residue' : 'defect'
 }
 
 /** Review-wide limits (pr-narrative §2, §2d, §2e). Separate budgets, so residue and structure never displace a defect. */
 export const BUDGETS = {
 	defect: { perFile: 3, total: 10 },
+	performance: { perFile: 2, total: 3 },
 	structure: { perFile: 2, total: 2 },
 	convention: { perFile: 3, total: 3 },
 	naming: { perFile: 2, total: 3 },
@@ -317,26 +319,23 @@ export function applyBudget(existing: Array<Finding>, incoming: Array<Finding>):
 		if (kind === 'residue' && inFile.some((x) => x.signature === f.signature))
 			reason = 'Another finding already covers this signature in this file.'
 		else if (inFile.length >= limit.perFile)
-			reason = `Over the limit of ${limit.perFile} ${label(kind)} per file; more severe ones were kept.`
-		else if (same.length >= limit.total) reason = `Over the limit of ${limit.total} ${label(kind)} per review; more severe ones were kept.`
+			reason = `Over the limit of ${limit.perFile} ${BUDGET_LABEL[kind]} per file; more severe ones were kept.`
+		else if (same.length >= limit.total)
+			reason = `Over the limit of ${limit.total} ${BUDGET_LABEL[kind]} per review; more severe ones were kept.`
 		if (reason) held.push({ ...f, heldBack: reason })
 		else kept.push(f)
 	}
 	return { kept, held }
 }
 
-function label(k: Budget): string {
-	return k === 'defect'
-		? 'line findings'
-		: k === 'structure'
-			? 'structural findings'
-			: k === 'convention'
-				? 'convention findings'
-				: k === 'naming'
-					? 'misleading-name findings'
-					: k === 'tests'
-						? 'test findings'
-						: 'residue findings'
+const BUDGET_LABEL: Record<Budget, string> = {
+	defect: 'line findings',
+	performance: 'performance findings',
+	structure: 'structural findings',
+	convention: 'convention findings',
+	naming: 'misleading-name findings',
+	tests: 'test findings',
+	residue: 'residue findings',
 }
 
 function squash(s: string): string {

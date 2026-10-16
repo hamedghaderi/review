@@ -160,3 +160,22 @@ test('risk: a change is as risky as its riskiest file', () => {
 	assert.equal(rate('README.md', 'test/app.test.ts'), 'low')
 	assert.equal(changeRisk([]), null)
 })
+
+test('risk: background jobs, status writes and locks raise a file, wherever it is', () => {
+	const got = levels([
+		edit('app/Jobs/SyncOutputs.php'),
+		edit('app/Mail/SendReceiptJob.php'),
+		edit('src/queue/consumer.ts'),
+		edit('app/Services/Orders.php', "$o->note = 'x'", "$o->update(['status' => OrderStatus::Paid])"),
+		edit('app/Services/Claim.php', '$q->first()', '$q->lockForUpdate()->first()'),
+		edit('src/ui/Badge.tsx', 'const label = a', 'const label = b'),
+		edit('src/ui/Toggle.tsx', 'if (a.status === Status.Open) x()', 'if (a.status === Status.Closed) x()'),
+	])
+	assert.match(got['app/Jobs/SyncOutputs.php'], /^high: background jobs or queues/)
+	assert.match(got['app/Mail/SendReceiptJob.php'], /^high: background jobs or queues/, 'words inside camel-case names count')
+	assert.match(got['src/queue/consumer.ts'], /^high: background jobs or queues/)
+	assert.match(got['app/Services/Orders.php'], /^high: writes a status or state field$/)
+	assert.match(got['app/Services/Claim.php'], /^high: locks, transactions or atomic updates$/)
+	assert.equal(got['src/ui/Badge.tsx'], 'medium: source code')
+	assert.equal(got['src/ui/Toggle.tsx'], 'medium: source code', 'comparing a status is not writing it')
+})

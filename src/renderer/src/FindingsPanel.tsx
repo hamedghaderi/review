@@ -62,6 +62,7 @@ export const RULE_LABEL: Record<StoredRule, string> = {
 	bug: 'Bugs and logic errors',
 	security: 'Security',
 	'error-handling': 'Missing or hidden error handling',
+	performance: 'Work that repeats per row, item or request',
 	'breaking-change': 'Breaking changes for callers',
 	'file-split': 'File takes on a second job',
 	'over-engineered': 'Machinery for requirements that do not exist',
@@ -668,6 +669,7 @@ const FACT_LABEL = {
 	dependencies: 'Dependencies',
 	structure: 'Imports',
 	decisions: 'Your earlier decisions',
+	earlier: 'Earlier run',
 } as const
 
 /** Requests that must report on a rule: the owning member's share of a team run, or every request of a single-model run. */
@@ -677,7 +679,7 @@ function requestsFor(run: AiRun, memberId: string | null | undefined): number {
 }
 
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
-	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'breaking-change'] },
+	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
 	{ title: 'Conventions', rules: ['convention', 'misleading-name'] },
 	{ title: 'Tests', rules: ['test-value'] },

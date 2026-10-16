@@ -977,7 +977,7 @@ test('review teams: saved with settings, validated, selected, run through the co
 		/Security: model "nope" is not offered by Gateway B/,
 	)
 	await connections.saveTeam({ ...team, members: [team.members[0]] })
-	assert.ok(connections.view().teams[0].issues.some((i) => /No member checks 14 rules/.test(i.message)))
+	assert.ok(connections.view().teams[0].issues.some((i) => /No member checks 15 rules/.test(i.message)))
 	await connections.saveTeam(team)
 	assert.deepEqual(
 		connections.view().teams[0].issues.map((i) => i.message),

@@ -1,4 +1,4 @@
-import type { DismissReason, PastDecision } from '../../shared/types.ts'
+import type { DismissReason, EarlierLimitations, PastDecision } from '../../shared/types.ts'
 import type { ContextFact, FileSource } from './context.ts'
 
 /**
@@ -32,4 +32,35 @@ export function decisionFacts(decisions: Array<PastDecision>, sources: Array<Fil
 		})
 	}
 	return out
+}
+
+/**
+ * What an earlier run of the same pull request or branch could not settle, told to the next run as leads to settle
+ * first. A note goes with the files it names (by path, file name or class name), else with every request.
+ */
+export function earlierFacts(earlier: EarlierLimitations | null, sources: Array<FileSource>): Array<ContextFact> {
+	if (!earlier?.items.length) return []
+	const named = (text: string, path: string): boolean => {
+		const file = path.slice(path.lastIndexOf('/') + 1)
+		const stem = file.slice(0, file.indexOf('.') > 0 ? file.indexOf('.') : undefined)
+		return text.includes(path) || text.includes(file) || (stem.length >= 4 && new RegExp(`\\b${escape(stem)}\\b`).test(text))
+	}
+	const byFiles = new Map<string, { keys: Array<string> | null; items: Array<string> }>()
+	for (const item of earlier.items) {
+		const keys = sources.filter(({ file }) => [file.newPath, file.oldPath].some((p) => p && named(item, p))).map((s) => s.file.key)
+		const group = keys.length ? keys.join('\u0000') : ''
+		const g = byFiles.get(group) ?? { keys: keys.length ? keys : null, items: [] }
+		g.items.push(item)
+		byFiles.set(group, g)
+	}
+	return [...byFiles.values()].map((g) => ({
+		kind: 'earlier' as const,
+		title: `Questions an earlier run could not settle (it reviewed commit ${earlier.headSha.slice(0, 7)})`,
+		text: g.items.map((i) => `- ${i}`).join('\n'),
+		fileKeys: g.keys,
+	}))
+}
+
+function escape(s: string): string {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

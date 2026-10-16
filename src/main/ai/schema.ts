@@ -14,6 +14,7 @@ export const modelFindingSchema = z.object({
 			'bug',
 			'security',
 			'error-handling',
+			'performance',
 			'breaking-change',
 			'file-split',
 			'over-engineered',
@@ -71,7 +72,9 @@ export const reviewOutputSchema = z.object({
 		.describe('Changed files in this request whose change you could not connect to the purpose of the change. Empty if none.'),
 	limitations: z
 		.array(z.string())
-		.describe('Places where the supplied context was insufficient to decide whether something is a problem. Empty if none.'),
+		.describe(
+			'Missing context that kept you from deciding a rule and points at no specific problem on a changed line. A suspected problem you can place on a changed line is a "question" finding instead, when that level is allowed. Empty if none.',
+		),
 	outdated_docs: z
 		.array(z.object({ doc_path: z.string(), line: z.int().nullable(), why: z.string() }))
 		.default([])
