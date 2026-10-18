@@ -13,6 +13,7 @@
 		"dist:mac": "electron-vite build && electron-builder --mac",
 		"dist:win": "electron-vite build && electron-builder --win",
 		"dist:linux": "electron-vite build && electron-builder --linux",
+		"extension:pack": "mkdir -p dist && rm -f dist/open-in-review.zip && cd extension && zip -qrX ../dist/open-in-review.zip . -x '.*'",
 		"typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
 		"test": "node --test --test-concurrency=1 test/*.test.ts",
 		"format": "prettier --write .",

@@ -20,3 +20,13 @@ The installers are not signed with an Apple Developer ID or a Windows certificat
 - **Linux**: make the file executable (`chmod +x Review-*.AppImage`) and run it.
 
 To remove the warnings, sign and notarize with an Apple Developer ID (`mac.identity` and `notarize` in `electron-builder.yml`) and a Windows code-signing certificate.
+
+## Browser extension and userscript
+
+The **Open in Review** extension (`extension/`) and the userscript (`site/open-in-review.user.js`) add a shortcut on GitHub pull request pages, Shift+R by default, that opens the review in the app through a `review-code://` link. They change separately from the app and have their own version numbers: bump `version` in `extension/manifest.json`, and `@version` in the userscript, when either changes.
+
+- **Userscript**: the website serves it, so merging to `main` publishes it. Userscript managers check its `@updateURL` and pick up a higher `@version` by themselves.
+- **Chrome Web Store**: `npm run extension:pack` writes `dist/open-in-review.zip`. Upload it in the [developer dashboard](https://chrome.google.com/webstore/devconsole) (a one-time $5 registration). The only permission is `storage`, for the shortcut setting, and the content script runs on `https://github.com/*` only. Say so in the privacy section: it reads nothing from the page except its address and sends nothing anywhere.
+- **Firefox Add-ons**: upload the same zip at [addons.mozilla.org](https://addons.mozilla.org/developers/). The add-on id is set in `browser_specific_settings` in the manifest. Keep it, or Firefox treats the upload as a different add-on.
+
+To try it without a store: Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked** → choose `extension/`. Firefox → `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → choose `extension/manifest.json`.
