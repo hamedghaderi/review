@@ -185,6 +185,18 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						>
 							<span className="ellipsis">+ New review team</span>
 						</button>
+						<button
+							className="conn-item"
+							disabled={!settings.connections.some((c) => c.status === 'connected' || c.kind === 'fixture')}
+							title="A team of personas (Clean Code, Test-driven, Pragmatic, Performance, Security, API steward), each checking the rules it cares about most"
+							onClick={() => {
+								setAdding(null)
+								setMcpPane(null)
+								setEditingTeam({ team: suggestTeam(settings, true), isNew: true })
+							}}
+						>
+							<span className="ellipsis">+ New persona team</span>
+						</button>
 						<div className="section-title add-title">MCP servers</div>
 						{mcp?.servers.map((x) => (
 							<button

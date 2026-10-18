@@ -31,6 +31,7 @@ import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
 import { useStored } from './useStored.ts'
+import { personaOf } from '../../shared/personas.ts'
 
 interface Props {
 	runs: Array<AiRun>
@@ -464,11 +465,15 @@ function RunSummary({
 				)}
 				<span
 					className="muted small ellipsis"
-					title={run.team ? run.team.members.map((m) => `${m.role}: ${m.model}`).join('\n') : `${run.providerLabel} · ${run.model}`}
+					title={
+						run.team
+							? run.team.members.map((m) => `${m.role}: ${m.model}${lensNote(m.persona)}`).join('\n')
+							: `${run.providerLabel} · ${run.model}${lensNote(run.persona)}`
+					}
 				>
 					{run.team
 						? `${run.team.name} · ${run.team.members.length} reviewers`
-						: `${run.connectionLabel ?? run.providerLabel} · ${run.model}`}
+						: `${run.connectionLabel ?? run.providerLabel} · ${run.model}${lensNote(run.persona)}`}
 				</span>
 				<span className="spacer" />
 				{run.status === 'running' && (
@@ -556,6 +561,7 @@ function RunSummary({
 							? `${run.connectionLabel} (${run.providerLabel})`
 							: run.providerLabel}{' '}
 						· {run.model}
+						{lensNote(run.persona)}
 						{run.endpoint && !run.fixture ? ` · ${run.endpoint}` : ''} · prompt {run.promptVersion} · started{' '}
 						{new Date(run.startedAt).toLocaleString()}
 						{run.finishedAt ? ` · finished ${new Date(run.finishedAt).toLocaleTimeString()}` : ''}
@@ -1315,4 +1321,9 @@ function AskBox({ focus, disabled, onBusy, onAsk, modelPicker }: AskProps) {
 			</div>
 		</div>
 	)
+}
+
+function lensNote(persona: string | null | undefined): string {
+	const p = personaOf(persona)
+	return p ? ` · ${p.name} lens` : ''
 }

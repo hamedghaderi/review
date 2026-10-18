@@ -1,9 +1,10 @@
 import { FINDING_LEVELS, REVIEW_RULES, type FindingLevel, type ReviewRule } from '../../shared/types.ts'
+import { personaOf } from '../../shared/personas.ts'
 import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-10-16.1'
+export const PROMPT_VERSION = 'reviewer-2026-10-18.1'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -236,15 +237,17 @@ const RULE_NAMES: Record<ReviewRule, string> = {
 
 /**
  * Instructions for one member of a review team: the full policy (so the rules keep their meaning and wording rules),
- * narrowed to the rules this member owns. Other members check the rest.
+ * narrowed to the rules this member owns. Other members check the rest. A persona adds its lens, also for one model
+ * that checks every rule.
  */
 export function instructionsFor(
 	rules: ReadonlyArray<ReviewRule> | null,
 	role: string | null,
 	levels: ReadonlyArray<FindingLevel> = DEFAULT_LEVELS,
 	lookups = false,
+	persona: string | null = null,
 ): string {
-	const base = reviewerInstructions(levels, lookups)
+	const base = reviewerInstructions(levels, lookups) + lensFor(persona)
 	if (!rules || rules.length === REVIEW_RULES.length) return base
 	const order = REVIEW_RULES.filter((r) => rules.includes(r))
 	return `${base}
@@ -255,6 +258,17 @@ You are one member of a review team. Other members check the other rules, so do 
 - Return "evaluation" entries for exactly these rules, in this order: ${order.join(', ')}. Leave out every other rule.
 - Still ask the five questions, but only to decide findings under your rules. Report "unexplained_files" only if "file-split" or "over-engineered" is among your rules; otherwise return it empty.
 - The limits still apply to what you report.`
+}
+
+// The lens only directs attention: the rules, limits, body style and output format above stay exactly as they are.
+function lensFor(id: string | null): string {
+	const p = personaOf(id)
+	if (!p) return ''
+	return `
+
+# Your lens (${p.name})
+This lens says where to look harder and how carefully. It adds no rules, changes no limit or severity, and changes nothing in "Writing the body": a finding still needs a rule above and the evidence it asks for, and the body never mentions the lens. Where the lens and the rules seem to differ, the rules win. If your assignment leaves out a rule it names, skip that part.
+${p.brief}`
 }
 
 /** Background on intent (description, linked issues, conversation), each fenced so its text can't close the fence. */

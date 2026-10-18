@@ -3,6 +3,7 @@ import type { AiRun, AiScope, AiSettingsView, ChangedFile, ReviewerChoice } from
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { personaOf, REVIEW_PERSONAS, type PersonaId } from '../../shared/personas.ts'
 
 interface Props {
 	settings: AiSettingsView | null
@@ -10,7 +11,7 @@ interface Props {
 	activeRun: AiRun | null
 	currentFile: ChangedFile | null
 	fileCount: number
-	onStart(scope: AiScope, passes: boolean): void
+	onStart(scope: AiScope, passes: boolean, persona: PersonaId | null): void
 	onCancel(): void
 }
 
@@ -21,6 +22,7 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 	const [open, setOpen] = useState(false)
 	const [scope, setScope] = useState<'file' | 'all'>('all')
 	const [passes, setPasses] = useState(readPasses)
+	const [persona, setPersona] = useState(readPersona)
 	const ref = useRef<HTMLDivElement>(null)
 	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
 
@@ -153,6 +155,24 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 								/>
 								<span>Focused passes</span>
 							</label>
+							<label className="option lens" title={lensTitle(persona)}>
+								<span>Lens</span>
+								<select
+									value={persona ?? ''}
+									onChange={(e) => {
+										const id = personaOf(e.target.value)?.id ?? null
+										setPersona(id as PersonaId | null)
+										savePersona(id)
+									}}
+								>
+									<option value="">None</option>
+									{REVIEW_PERSONAS.map((p) => (
+										<option key={p.id} value={p.id}>
+											{p.name}
+										</option>
+									))}
+								</select>
+							</label>
 						</>
 					)}
 					<details className="run-info small">
@@ -206,6 +226,7 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 								onStart(
 									effectiveScope === 'file' && currentFile ? { kind: 'file', fileKey: currentFile.key } : { kind: 'all' },
 									!team && passes,
+									team ? null : persona,
 								)
 							}}
 						>
@@ -227,6 +248,32 @@ function readPasses(): boolean {
 	} catch {
 		return false
 	}
+}
+
+// The lens is remembered the same way; an id from an older version that no longer exists reads as none.
+const PERSONA_KEY = 'review.persona'
+
+function readPersona(): PersonaId | null {
+	try {
+		return (personaOf(localStorage.getItem(PERSONA_KEY))?.id ?? null) as PersonaId | null
+	} catch {
+		return null
+	}
+}
+
+function savePersona(id: string | null): void {
+	try {
+		localStorage.setItem(PERSONA_KEY, id ?? '')
+	} catch {
+		// Not remembered; the run still uses the current choice.
+	}
+}
+
+function lensTitle(id: PersonaId | null): string {
+	const p = personaOf(id)
+	return p
+		? `${p.summary}\nInspired by ${p.inspiredBy}. The model still checks every rule; the lens only says where to look harder.`
+		: 'Review with a persona’s focus. It adds no rules: the model still checks every rule and only looks harder where the lens says.'
 }
 
 function savePasses(on: boolean): void {

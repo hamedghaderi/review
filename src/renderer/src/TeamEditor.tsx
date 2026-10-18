@@ -9,6 +9,7 @@ import {
 	type TeamMember,
 } from '../../shared/types.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
+import { personaOf, REVIEW_PERSONAS, type PersonaId } from '../../shared/personas.ts'
 
 // Model names that suit each default role; models are filled in by `suggestTeam`.
 const HINTS: Record<string, RegExp> = {
@@ -19,27 +20,55 @@ const HINTS: Record<string, RegExp> = {
 }
 
 /** Roles a new team starts with. Each rule belongs to exactly one role. */
-const DEFAULT_ROLES: Array<{ role: string; rules: Array<ReviewRule>; hint: RegExp }> = DEFAULT_TEAM_ROLES.map((r) => ({
+const DEFAULT_ROLES: Array<StartingRole> = DEFAULT_TEAM_ROLES.map((r) => ({
 	role: r.role,
 	rules: [...r.rules],
 	hint: HINTS[r.id],
 }))
 
+// Each persona takes the hint of the default role whose rules it shares.
+const PERSONA_HINTS: Record<PersonaId, RegExp> = {
+	'clean-code': HINTS.callers,
+	'test-driven': HINTS.tests,
+	pragmatic: HINTS.defects,
+	performance: HINTS.defects,
+	security: HINTS.security,
+	'api-steward': HINTS.callers,
+}
+
+/** The persona team: one member per persona, each with the rules it owns, so every rule is checked once. */
+const PERSONA_ROLES: Array<StartingRole> = REVIEW_PERSONAS.map((p) => ({
+	role: p.name,
+	rules: [...p.rules],
+	hint: PERSONA_HINTS[p.id],
+	persona: p.id,
+}))
+
+interface StartingRole {
+	role: string
+	rules: Array<ReviewRule>
+	hint: RegExp
+	persona?: PersonaId
+}
+
 function usable(c: ConnectionView): boolean {
 	return c.status === 'connected' || c.status === 'testing' || c.kind === 'fixture'
 }
 
-/** A starting team: four roles, each given a connected model whose name fits the role, else the current model. */
-export function suggestTeam(settings: AiSettingsView): ReviewTeam {
+/**
+ * A starting team: four roles (or one per persona), each given a connected model whose name fits the role, else the
+ * current model.
+ */
+export function suggestTeam(settings: AiSettingsView, personas = false): ReviewTeam {
 	const options = settings.connections.filter(usable).flatMap((c) => c.models.map((m) => ({ connectionId: c.id, modelId: m.id })))
 	const fallback = settings.selection ?? options[0] ?? { connectionId: '', modelId: '' }
 	const used = new Set<string>()
-	const members: Array<TeamMember> = DEFAULT_ROLES.map((r) => {
+	const members: Array<TeamMember> = (personas ? PERSONA_ROLES : DEFAULT_ROLES).map((r) => {
 		const pick = options.find((o) => r.hint.test(o.modelId) && !used.has(o.modelId)) ?? fallback
 		used.add(pick.modelId)
-		return { id: crypto.randomUUID(), role: r.role, rules: r.rules, ...pick }
+		return { id: crypto.randomUUID(), role: r.role, rules: r.rules, ...(r.persona ? { persona: r.persona } : {}), ...pick }
 	})
-	return { id: crypto.randomUUID(), name: 'Review team', members }
+	return { id: crypto.randomUUID(), name: personas ? 'Persona team' : 'Review team', members }
 }
 
 interface Props {
@@ -75,6 +104,12 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 					: { ...m, rules: m.rules.filter((r) => r !== rule) },
 			),
 		}))
+
+	// A role still named after its old lens (or never renamed) follows the new one; a name you typed stays.
+	const setPersona = (m: TeamMember, id: PersonaId | null): void => {
+		const named = !m.role.trim() || /^Reviewer \d+$/.test(m.role) || m.role === personaOf(m.persona)?.name
+		set(m.id, { persona: id, ...(named && id ? { role: personaOf(id)!.name } : {}) })
+	}
 
 	const removeMember = (id: string): void => setTeam((t) => ({ ...t, members: t.members.filter((m) => m.id !== id) }))
 	const addMember = (): void =>
@@ -153,6 +188,22 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 								✕
 							</button>
 						</div>
+						<label className="member-lens small" title={personaOf(m.persona)?.summary ?? 'No lens: the reviewer checks its rules evenly.'}>
+							<span className="muted">Lens</span>
+							<select
+								value={m.persona ?? ''}
+								onChange={(e) => setPersona(m, (personaOf(e.target.value)?.id ?? null) as PersonaId | null)}
+								aria-label={`Lens for ${m.role}`}
+							>
+								<option value="">None</option>
+								{REVIEW_PERSONAS.map((p) => (
+									<option key={p.id} value={p.id}>
+										{p.name}
+									</option>
+								))}
+							</select>
+							{m.persona && <span className="muted ellipsis">Inspired by {personaOf(m.persona)?.inspiredBy}</span>}
+						</label>
 						<div className="member-rules small">
 							{m.rules.length === 0 ? (
 								<span className="warn-text">No rules yet. Assign some below, or remove this reviewer.</span>

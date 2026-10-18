@@ -20,6 +20,7 @@ import type {
 	ReviewLimits,
 	ReviewRule,
 } from '../shared/types.ts'
+import { PERSONA_IDS } from '../shared/personas.ts'
 import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
@@ -456,6 +457,7 @@ export function reviewerChoice(v: unknown): ReviewerChoice {
 			kind: 'model',
 			selection: modelSelection(o.selection),
 			...(o.passes === undefined ? {} : { passes: bool(o.passes, 'focused passes setting') }),
+			...(o.persona == null ? {} : { persona: oneOf(o.persona, PERSONA_IDS, 'persona') }),
 		}
 	if (o.kind === 'team') return { kind: 'team', teamId: connectionId(o.teamId) }
 	bad('reviewer')
@@ -478,6 +480,7 @@ export function reviewTeam(v: unknown): ReviewTeam {
 				connectionId: connectionId(x.connectionId),
 				modelId: modelId(x.modelId),
 				rules: [...new Set(rules)],
+				...(x.persona == null ? {} : { persona: oneOf(x.persona, PERSONA_IDS, 'persona') }),
 			}
 		}),
 	}

@@ -18,6 +18,7 @@ import {
 	type EarlierLimitations,
 	type ReviewContext,
 } from '../../shared/types.ts'
+import type { PersonaId } from '../../shared/personas.ts'
 import { AppFail } from '../git.ts'
 import type { ReviewStore } from '../store.ts'
 import type { RunConfig } from './connections.ts'
@@ -143,7 +144,13 @@ export class AiController {
 		let team: {
 			id: string
 			name: string
-			members: Array<{ id: string; role: string; rules: ReviewTeam['members'][number]['rules']; config: RunConfig }>
+			members: Array<{
+				id: string
+				role: string
+				rules: ReviewTeam['members'][number]['rules']
+				persona: PersonaId | null
+				config: RunConfig
+			}>
 		} | null = null
 		try {
 			if (reviewer.kind === 'model') {
@@ -153,7 +160,13 @@ export class AiController {
 					team = {
 						id: 'focused-passes',
 						name: 'Focused passes',
-						members: DEFAULT_TEAM_ROLES.map((r) => ({ id: r.id, role: r.role, rules: [...r.rules], config })),
+						members: DEFAULT_TEAM_ROLES.map((r) => ({
+							id: r.id,
+							role: r.role,
+							rules: [...r.rules],
+							persona: reviewer.persona ?? null,
+							config,
+						})),
 					}
 			} else {
 				if (!this.teams) throw new AppFail('ai-unavailable', 'Review teams are not available.')
@@ -167,6 +180,7 @@ export class AiController {
 							id: m.id,
 							role: m.role,
 							rules: m.rules,
+							persona: m.persona ?? null,
 							config: await this.resolveRun({ connectionId: m.connectionId, modelId: m.modelId }),
 						})
 					} catch (e) {
@@ -187,6 +201,7 @@ export class AiController {
 			{ scope, previousFindings: this.runsFor(access.comparison.repoId, reviewId).flatMap((r) => r.findings) },
 			{
 				...this.runOptions(config),
+				persona: reviewer.kind === 'model' ? (reviewer.persona ?? null) : null,
 				team: team
 					? {
 							id: team.id,
@@ -195,6 +210,7 @@ export class AiController {
 								id: m.id,
 								role: m.role,
 								rules: m.rules,
+								persona: m.persona,
 								provider: m.config.provider,
 								provenance: { connectionId: m.config.connectionId, connectionLabel: m.config.connectionLabel, endpoint: m.config.endpoint },
 							})),

@@ -1,4 +1,5 @@
 import type { HeadChecks } from './ci.ts'
+import type { PersonaId } from './personas.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -698,6 +699,7 @@ export interface TeamMember {
 	connectionId: string
 	modelId: string
 	rules: Array<ReviewRule>
+	persona?: PersonaId | null // a lens on its rules (personas.ts); absent on members saved before personas
 }
 
 export interface ReviewTeam {
@@ -711,12 +713,12 @@ export interface ReviewTeamView extends ReviewTeam {
 	issues: Array<{ memberId: string | null; message: string }>
 }
 
-/** What a run uses: one model for all rules, or a team. */
 /**
  * What a run uses: one model for all rules, or a team. `passes` runs one model as the four default roles, each a
- * separate pass over only the files its rules apply to.
+ * separate pass over only the files its rules apply to. `persona` reviews with that lens (every pass, with passes).
  */
-export type ReviewerChoice = { kind: 'model'; selection: ModelSelection; passes?: boolean } | { kind: 'team'; teamId: string }
+export type ReviewerChoice =
+	{ kind: 'model'; selection: ModelSelection; passes?: boolean; persona?: PersonaId | null } | { kind: 'team'; teamId: string }
 
 /** The roles a new team starts with, and the passes of a focused-pass run. Each rule belongs to exactly one role. */
 export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> = [
@@ -743,6 +745,7 @@ export interface RunMember {
 	provider: string
 	model: string
 	rules: Array<ReviewRule>
+	persona?: PersonaId | null // absent on runs before personas
 	status: 'running' | 'completed' | 'failed' | 'cancelled'
 	requestsDone: number
 	requestsFailed: number
@@ -1016,6 +1019,7 @@ export interface AiRun {
 	usage: AiUsage | null
 	evaluation?: Array<RuleEvaluation> // since reviewer-2026-10-01
 	team?: { id: string; name: string; members: Array<RunMember> } | null // set when the run used a review team
+	persona?: PersonaId | null // single-model runs: the lens the model reviewed with
 	levels?: Array<FindingLevel> // levels the reviewer was allowed to use; absent on older runs (the first three)
 	unexplained?: Array<{ fileKey: string; why: string }> // changed files the reviewer could not connect to the change's purpose
 	outdatedDocs?: Array<OutdatedDoc> // project docs (.review/*.md) the change makes wrong without updating them
