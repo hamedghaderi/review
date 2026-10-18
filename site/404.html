@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Open in Review</title>
+		<meta name="robots" content="noindex" />
+		<meta name="theme-color" content="#0d0c14" />
+		<!-- GitHub Pages serves this page for every unknown path, so links and assets are absolute. -->
+		<link rel="icon" type="image/png" href="/img/favicon.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
+			rel="stylesheet"
+		/>
+		<link rel="stylesheet" href="/tokens.css" />
+		<link rel="stylesheet" href="/style.css" />
+	</head>
+	<body>
+		<nav class="pill" aria-label="Main">
+			<a class="pill__brand" href="/">
+				<img src="/img/icon.png" alt="" width="22" height="22" />
+				<span>Review</span>
+			</a>
+			<a class="pill__link" href="https://github.com/hamedghaderi/review">GitHub</a>
+			<a class="btn btn--primary btn--sm" href="/#download">Download</a>
+		</nav>
+
+		<main id="main" class="handoff">
+			<div class="handoff__card" id="pr" hidden>
+				<p class="handoff__eyebrow">Opening in Review</p>
+				<h1 class="handoff__title" id="pr-title"></h1>
+				<p>Your browser may ask whether to open Review. The review opens in your clone of the repository.</p>
+				<div class="handoff__actions">
+					<a class="btn btn--primary" id="pr-open">Open in Review</a>
+					<a class="btn btn--ghost" id="pr-back">Back to the pull request</a>
+				</div>
+				<p class="handoff__note">Nothing happened? <a href="/#download">Download Review</a> and open this page again.</p>
+				<p class="handoff__note">
+					Skip this page next time: drag
+					<a class="handoff__bookmarklet" id="bookmarklet" title="Drag to your bookmarks bar">Open in Review</a>
+					to your bookmarks bar and click it on any GitHub pull request.
+				</p>
+			</div>
+
+			<div class="handoff__card" id="missing" hidden>
+				<p class="handoff__eyebrow">404</p>
+				<h1 class="handoff__title">Page not found</h1>
+				<p>To open a GitHub pull request in Review, put <code>review-code.dev</code> in place of <code>github.com</code> in its address.</p>
+				<div class="handoff__actions">
+					<a class="btn btn--primary" href="/">Go to the home page</a>
+				</div>
+			</div>
+		</main>
+
+		<script>
+			// Same shape as src/shared/link.ts: /<owner>/<repo>/pull/<n>, optionally followed by a tab such as /files.
+			const m = /^\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})\/pull\/([1-9]\d{0,9})(?:\/[A-Za-z0-9/_-]*)?\/?$/.exec(
+				location.pathname,
+			)
+			if (m && m[2] !== '.' && m[2] !== '..') {
+				const [, owner, repo, number] = m
+				const link = `review-code://open/${owner}/${repo}/pull/${number}`
+				document.title = `Open ${owner}/${repo}#${number} in Review`
+				document.getElementById('pr-title').textContent = `${owner}/${repo}#${number}`
+				document.getElementById('pr-open').href = link
+				document.getElementById('pr-back').href = `https://github.com/${owner}/${repo}/pull/${number}`
+				document.getElementById('bookmarklet').href =
+					"javascript:(()=>{const m=/^\\/([^/]+)\\/([^/]+)\\/pull\\/(\\d+)/.exec(location.pathname);if(location.hostname==='github.com'&&m)location.href='review-code://open/'+m[1]+'/'+m[2]+'/pull/'+m[3];else alert('Open a GitHub pull request first.')})()"
+				document.getElementById('pr').hidden = false
+				location.href = link
+			} else {
+				document.getElementById('missing').hidden = false
+			}
+		</script>
+	</body>
+</html>

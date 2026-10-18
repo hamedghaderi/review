@@ -4619,3 +4619,15 @@ button.stack-row:hover {
 .md-body .desc-image {
 	font-size: 0.9em;
 }
+
+/* A pull request link waiting for its repository's clone */
+.link-notice {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+}
+.link-notice > span {
+	flex: 1;
+	min-width: 0;
+}

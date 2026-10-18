@@ -11,6 +11,10 @@ files:
   - '!**/*.map'
 # Nothing is updated automatically: installers are shared by hand.
 publish: null
+# Pull request links from a browser: review-code://open/<owner>/<repo>/pull/<n> (src/shared/link.ts).
+protocols:
+  - name: Review pull request link
+    schemes: [review-code]
 
 mac:
   target:

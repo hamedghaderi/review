@@ -18,6 +18,7 @@ import type {
 	FindingLevel,
 	GitHubStatus,
 	PrReviewState,
+	LinkOpen,
 	LoadedComparison,
 	ModelSelection,
 	RepoSession,
@@ -121,6 +122,10 @@ export function App() {
 	const [repoError, setRepoError] = useState<AppError | null>(null)
 	const [tabs, setTabs] = useState<Array<RepoTab>>([])
 	const [tabError, setTabError] = useState<string | null>(null)
+	// A pull request link whose repository has no clone in the app yet, and why the last pick did not match it.
+	const [linkWaiting, setLinkWaiting] = useState<{ link: LinkOpen; note: string | null } | null>(null)
+	// The review a link opened: its Run AI review dialog opens once, so starting a run is still your click.
+	const [runPromptFor, setRunPromptFor] = useState<string | null>(null)
 	const [busy, setBusy] = useState<string | null>('Restoring last review…')
 	const [loaded, setLoaded] = useState<LoadedComparison | null>(null)
 	const [compareError, setCompareError] = useState<AppError | null>(null)
@@ -411,9 +416,15 @@ export function App() {
 		[flushBrowser, openReview, setView],
 	)
 
+	// A link that started the app is taken after the last session is back, so restoring it can't replace the link's review.
+	const takeLinkRef = useRef<() => Promise<void>>(async () => {})
 	useEffect(() => {
-		void window.review.restoreLast().then(openSession)
+		void window.review
+			.restoreLast()
+			.then(openSession)
+			.then(() => takeLinkRef.current())
 	}, [openSession])
+	useEffect(() => window.review.onLinkOpen(() => void takeLinkRef.current()), [])
 
 	const sessionRepoRef = useRef<string | null>(null)
 	sessionRepoRef.current = session?.repo.id ?? null
@@ -480,6 +491,40 @@ export function App() {
 		setBusy('Opening repository…')
 		await openSession(await window.review.openRepository())
 		setBusy(null)
+	}
+
+	/** Opens a linked pull request's review in the clone that maps to its repository, with the Run dialog ready. */
+	const openLink = async (link: LinkOpen): Promise<void> => {
+		if (!link.repoId) {
+			setLinkWaiting({ link, note: null })
+			return
+		}
+		setLinkWaiting(null)
+		if (!(await switchRepo(link.repoId))) return
+		void window.review.markPrSeen(link.repoId, link.number)
+		if (await openReview(link.repoId, { kind: 'target', target: { kind: 'pr', repo: link.repo, number: link.number } }))
+			setRunPromptFor(comparisonIdRef.current)
+	}
+	takeLinkRef.current = async () => {
+		const r = await window.review.takeLink()
+		if (r.ok && r.value) await openLink(r.value)
+	}
+
+	// Picks the clone for a waiting link; a folder that maps to another GitHub repository keeps the link waiting.
+	const openLinkClone = async (link: LinkOpen): Promise<void> => {
+		await persist()
+		setBusy('Opening repository…')
+		const r = await window.review.openRepository()
+		await openSession(r)
+		setBusy(null)
+		if (!r.ok || !r.value) return
+		const repos = [r.value.github.selected, ...r.value.github.candidates.map((c) => c.repo)]
+		if (repos.some((x) => x?.toLowerCase() === link.repo.toLowerCase())) await openLink({ ...link, repoId: r.value.repo.id })
+		else
+			setLinkWaiting({
+				link,
+				note: r.value.github.selected ? `That folder is a clone of ${r.value.github.selected}.` : 'That folder has no GitHub remote.',
+			})
 	}
 
 	const chooseSnapshot = async (reviewId: string): Promise<void> => {
@@ -1019,6 +1064,20 @@ export function App() {
 					onDismissError={() => setTabError(null)}
 				/>
 			)}
+			{linkWaiting && (
+				<div className="notice link-notice" role="status">
+					<span>
+						{linkWaiting.note ? `${linkWaiting.note} ` : ''}To review {linkWaiting.link.repo}#{linkWaiting.link.number}, open your clone of{' '}
+						{linkWaiting.link.repo}.
+					</span>
+					<button className="btn small" onClick={() => void openLinkClone(linkWaiting.link)}>
+						Open clone…
+					</button>
+					<button className="btn small ghost" onClick={() => setLinkWaiting(null)} aria-label="Dismiss">
+						✕
+					</button>
+				</div>
+			)}
 			<header className="header">
 				<div className="hctx">
 					{!repo && (
@@ -1100,6 +1159,8 @@ export function App() {
 									activeRun={activeRun}
 									currentFile={file}
 									fileCount={comparison.files.length}
+									openNow={runPromptFor === comparison.id}
+									onOpened={() => setRunPromptFor(null)}
 									onStart={(scope, passes, persona) => void startAi(scope, passes, persona)}
 									onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
 								/>

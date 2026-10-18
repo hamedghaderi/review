@@ -39,6 +39,12 @@ const api: ReviewApi = {
 	repoTabs: () => ipcRenderer.invoke(IPC.repoTabs),
 	addContextImage: (name, bytes) => ipcRenderer.invoke(IPC.addContextImage, name, bytes),
 	contextImage: (id, mediaType) => ipcRenderer.invoke(IPC.contextImage, id, mediaType),
+	takeLink: () => ipcRenderer.invoke(IPC.takeLink),
+	onLinkOpen: (handler) => {
+		const listener = (): void => handler()
+		ipcRenderer.on(IPC.linkOpen, listener)
+		return () => ipcRenderer.removeListener(IPC.linkOpen, listener)
+	},
 	onInboxOpen: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, target: InboxOpen): void => handler(target)
 		ipcRenderer.on(IPC.inboxOpen, listener)
