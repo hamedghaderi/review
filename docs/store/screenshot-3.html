@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Screenshot 3: options</title>
+		<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="shots.css" />
+		<style>
+			.text {
+				position: absolute;
+				left: 80px;
+				top: 200px;
+				width: 470px;
+			}
+			.panel {
+				position: absolute;
+				left: 640px;
+				top: 230px;
+				width: 520px;
+				height: 300px;
+				background: #17151f;
+			}
+			.panel iframe {
+				display: block;
+				width: 100%;
+				height: 100%;
+				border: 0;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="text">
+			<p class="eyebrow"><img src="../../site/img/icon.png" alt="" />Open in Review</p>
+			<h1>Choose your own shortcut</h1>
+			<p>It stays out of the way while you type in a comment box, and asks only for github.com.</p>
+		</div>
+		<!-- The extension's real options page, with its storage stubbed. Needs --allow-file-access-from-files. -->
+		<div class="shot panel"><iframe id="options" title="Options"></iframe></div>
+		<script>
+			const frame = document.getElementById('options')
+			Promise.all([
+				fetch('../../extension/options.html').then((r) => r.text()),
+				fetch('../../extension/options.js').then((r) => r.text()),
+			]).then(([html, js]) => {
+				const stub = `window.chrome={storage:{sync:{get:(d,cb)=>cb(d),set:(v,cb)=>cb&&cb()}}};`
+				frame.srcdoc = html
+					.replace('<script src="options.js"><\/script>', `<script>${stub}${js}<\/script>`)
+					.replace('color-scheme: light dark;', 'color-scheme: dark;')
+					.replace('</head>', '<style>html { zoom: 1.35 }</style></head>')
+			})
+		</script>
+	</body>
+</html>
