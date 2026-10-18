@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Small promo tile</title>
+		<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="shots.css" />
+		<style>
+			.tile-inner {
+				position: absolute;
+				inset: 0;
+				display: grid;
+				align-content: center;
+				padding: 0 36px;
+			}
+			.eyebrow {
+				margin-bottom: 14px;
+				font-size: 26px;
+			}
+			.eyebrow img {
+				width: 44px;
+				height: 44px;
+			}
+			p {
+				font-size: 16px;
+			}
+			.keys {
+				margin-top: 22px;
+				gap: 10px;
+			}
+			kbd {
+				min-width: 52px;
+				height: 52px;
+				padding: 0 10px;
+				border-radius: 10px;
+				border-bottom-width: 4px;
+				font-size: 24px;
+			}
+		</style>
+	</head>
+	<body class="tile">
+		<div class="tile-inner">
+			<p class="eyebrow"><img src="../../site/img/icon.png" alt="" />Open in Review</p>
+			<p>GitHub pull requests, one shortcut away from your local review.</p>
+			<div class="keys"><kbd>⇧</kbd><kbd>R</kbd></div>
+		</div>
+	</body>
+</html>

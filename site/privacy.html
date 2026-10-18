@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Privacy</title>
+		<meta
+			name="description"
+			content="What the Open in Review browser extension, the userscript and the review-code.dev hand-off page do with your data."
+		/>
+		<meta name="theme-color" content="#0d0c14" />
+		<link rel="icon" type="image/png" href="/img/favicon.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap"
+			rel="stylesheet"
+		/>
+		<link rel="stylesheet" href="/tokens.css" />
+		<link rel="stylesheet" href="/style.css" />
+	</head>
+	<body>
+		<nav class="pill" aria-label="Main">
+			<a class="pill__brand" href="/">
+				<img src="/img/icon.png" alt="" width="22" height="22" />
+				<span>Review</span>
+			</a>
+			<a class="pill__link" href="https://github.com/hamedghaderi/review">GitHub</a>
+			<a class="btn btn--primary btn--sm" href="/#download">Download</a>
+		</nav>
+
+		<main id="main" class="prose">
+			<p class="handoff__eyebrow">Last updated 18 October 2026</p>
+			<h1>Privacy</h1>
+			<p>
+				This page covers the <strong>Open in Review</strong> browser extension, the Open in Review userscript, and the hand-off page on
+				review-code.dev that opens pull requests in the app. In short: they read the address of the GitHub page you're on when you ask them
+				to, hand it to the Review app on your computer, and send nothing anywhere.
+			</p>
+
+			<h2>The browser extension</h2>
+			<ul>
+				<li>
+					<strong>What it reads.</strong> It runs only on pages under <code>https://github.com/</code>. When you press its shortcut, it
+					reads the address of the current page. If that is a pull request, it takes the owner, repository name and pull request number from
+					it. It never reads the page's content, your GitHub account, your cookies or anything you type.
+				</li>
+				<li>
+					<strong>What it does with it.</strong> It opens a <code>review-code://</code> link with that owner, repository and number. Your
+					browser hands the link to the Review app installed on your computer, usually after asking you. Nothing goes over the network.
+				</li>
+				<li>
+					<strong>What it stores.</strong> Only the shortcut you choose in its options, in your browser's extension storage. If you turned
+					on your browser's sync, the browser syncs that setting with your browser account, like any other extension setting.
+				</li>
+				<li>
+					<strong>What it doesn't do.</strong> It makes no network requests. It has no analytics, tracking, ads or remote code. It collects
+					no personal data, and so sells or shares none.
+				</li>
+			</ul>
+
+			<h2>The userscript</h2>
+			<p>
+				The userscript does the same as the extension, with the shortcut written into the script. It stores nothing. Your userscript manager
+				(for example Tampermonkey or Violentmonkey) checks <code>review-code.dev</code> for new versions of it.
+			</p>
+
+			<h2>The hand-off page</h2>
+			<p>
+				When you open a pull request's address on <code>review-code.dev</code> instead of <code>github.com</code>, the page reads that
+				address in your browser and opens the same <code>review-code://</code> link. It has no analytics or cookies. The site is hosted on
+				GitHub Pages and loads its fonts from Google Fonts, so GitHub and Google receive the usual request information (such as your IP
+				address) when you visit any page of the site, under their own privacy policies.
+			</p>
+
+			<h2>The Review app</h2>
+			<p>
+				The app keeps your reviews on your computer. It talks to GitHub, and to an AI provider only if you connect one; the
+				<a href="https://github.com/hamedghaderi/review/blob/main/docs/guide.md">user guide</a> describes what it sends and when.
+			</p>
+
+			<h2>Questions</h2>
+			<p>
+				Open an issue on <a href="https://github.com/hamedghaderi/review/issues">GitHub</a>. The extension and the userscript are open
+				source, in the same repository, so you can read exactly what they do.
+			</p>
+		</main>
+	</body>
+</html>

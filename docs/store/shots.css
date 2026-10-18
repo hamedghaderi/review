@@ -1,0 +1,74 @@
+/* Store images for the Open in Review extension. Each page is one image; see docs/store-listing.md to render them. */
+@import url('../../site/tokens.css');
+
+html,
+body {
+	margin: 0;
+	overflow: hidden;
+}
+body {
+	position: relative;
+	width: 1280px;
+	height: 800px;
+	background:
+		radial-gradient(60% 70% at 85% 10%, var(--color-bloom), transparent 70%),
+		radial-gradient(50% 60% at 0% 100%, var(--color-bloom-2), transparent 70%), var(--color-paper);
+	color: var(--color-ink-2);
+	font: 400 22px/1.5 var(--font-body);
+	-webkit-font-smoothing: antialiased;
+}
+body.tile {
+	width: 440px;
+	height: 280px;
+}
+.eyebrow {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 0 0 20px;
+	color: var(--color-ink);
+	font: 600 22px/1 var(--font-display);
+}
+.eyebrow img {
+	width: 36px;
+	height: 36px;
+}
+h1 {
+	margin: 0 0 20px;
+	color: var(--color-ink);
+	font: 600 60px/1.05 var(--font-display);
+	letter-spacing: -0.04em;
+}
+p {
+	margin: 0;
+	max-width: 30ch;
+}
+.keys {
+	display: flex;
+	gap: 14px;
+	margin-top: 40px;
+}
+kbd {
+	display: grid;
+	place-items: center;
+	min-width: 88px;
+	height: 88px;
+	padding: 0 18px;
+	box-sizing: border-box;
+	border: 1px solid var(--color-rule-2);
+	border-bottom-width: 5px;
+	border-radius: 16px;
+	background: var(--color-paper-3);
+	color: var(--color-ink);
+	font: 500 40px/1 var(--font-display);
+}
+.shot {
+	border: 1px solid var(--color-rule-2);
+	border-radius: 14px;
+	box-shadow: 0 30px 80px var(--color-shadow);
+	overflow: hidden;
+}
+.shot img {
+	display: block;
+	width: 100%;
+}
