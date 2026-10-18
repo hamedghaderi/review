@@ -18,6 +18,7 @@ import {
 	type EarlierLimitations,
 	type ReviewContext,
 } from '../../shared/types.ts'
+import type { PersonaId } from '../../shared/personas.ts'
 import type { LinkedIssue } from '../github.ts'
 import type { RequestImage } from './provider.ts'
 import type { ContextBatch, ContextLimits, ContextPackage, FileSource } from './context.ts'
@@ -55,6 +56,7 @@ export interface RunnerOptions {
 	backoffMs: (attempt: number, error: ProviderError) => number
 	/** A review team: each member checks only its rules, all members run in parallel, results merge into one run. */
 	team?: { id: string; name: string; members: Array<TeamRunMember> }
+	persona?: PersonaId | null // single-model runs: the lens to review with; members carry their own
 	levels?: Array<FindingLevel> // the severity levels the reviewer may use (settings)
 }
 
@@ -63,6 +65,7 @@ export interface TeamRunMember {
 	role: string
 	provider: ReviewProvider
 	rules: Array<ReviewRule>
+	persona?: PersonaId | null
 	provenance: { connectionId: string; connectionLabel: string; endpoint: string }
 }
 
@@ -177,6 +180,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				evaluation: REVIEW_RULES.map((rule) => ({ rule, requests: 0, answered: [], nearMisses: [], why: [], checkedBy: null })),
 				unexplained: [],
 				team: null,
+				...(options.persona && !options.team ? { persona: options.persona } : {}),
 				levels,
 				earlier: input.earlier ?? null,
 			}
@@ -195,7 +199,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					role: m.role,
 					provider: m.provider,
 					rules: REVIEW_RULES.filter((r) => m.rules.includes(r)),
-					instructions: instructionsFor(m.rules, m.role, levels, lookups),
+					instructions: instructionsFor(m.rules, m.role, levels, lookups, m.persona ?? null),
 					stopped: false,
 					member: {
 						id: m.id,
@@ -205,6 +209,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						provider: m.provider.id,
 						model: m.provider.model,
 						rules: REVIEW_RULES.filter((r) => m.rules.includes(r)),
+						...(m.persona ? { persona: m.persona } : {}),
 						status: 'running',
 						requestsDone: 0,
 						requestsFailed: 0,
@@ -219,7 +224,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						role: null,
 						provider,
 						rules: [...REVIEW_RULES],
-						instructions: instructionsFor(null, null, levels, lookups),
+						instructions: instructionsFor(null, null, levels, lookups, options.persona ?? null),
 						member: null,
 						stopped: false,
 					},
@@ -983,7 +988,13 @@ function retryWorkers(
 				role: member?.role ?? null,
 				provider,
 				rules: g.rules,
-				instructions: instructionsFor(g.rules, member?.role ?? null, levelsOf(run), lookups),
+				instructions: instructionsFor(
+					g.rules,
+					member?.role ?? null,
+					levelsOf(run),
+					lookups,
+					(member ? member.persona : run.persona) ?? null,
+				),
 				member,
 				stopped: false,
 				retryBatches: g.batches,

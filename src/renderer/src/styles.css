@@ -1999,6 +1999,17 @@ a.ic-state:hover {
 	flex-direction: column;
 	gap: 2px;
 }
+.popover .option.lens {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 6px;
+	font-size: 12px;
+}
+.popover .option.lens select {
+	flex: 1;
+	min-width: 0;
+}
 .limits-note {
 	margin-top: 10px;
 }
@@ -3028,6 +3039,13 @@ input.member-role {
 	padding: 0 8px;
 	font-weight: 600;
 	user-select: text;
+}
+.member-lens {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	margin-bottom: 6px;
 }
 .member-rules {
 	display: flex;

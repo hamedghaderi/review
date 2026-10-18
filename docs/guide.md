@@ -206,6 +206,27 @@ Every rule must have exactly one reviewer before a team can be saved. Pick a tea
 
 **Focused passes** gets the same split without building a team: with a single model chosen, tick **Focused passes** in the Run dialog and the model runs once per default role (Defects, Security, Callers & structure, Tests & leftover code), each pass with only its rules and its files. The run is recorded and shown like a team run named "Focused passes". It uses more tokens than one pass, though less than four, because each pass reads only its files. The checkbox is remembered on this computer.
 
+### Personas (lenses)
+
+A persona is a lens on the same 16 rules, in the spirit of a well-known way of reviewing code. It tells the model where to look harder and how strict to be about evidence. It adds no rules and changes no limit, level or wording rule, so a Clean Code lens still never comments on function length or naming taste. Where the lens and the rules seem to differ, the rules win, and a finding never mentions the lens.
+
+| Persona     | Inspired by                                              | Rules it owns in a persona team                               |
+| ----------- | -------------------------------------------------------- | ------------------------------------------------------------- |
+| Clean Code  | Robert C. Martin (Uncle Bob), _Clean Code_               | File split, over-engineering, misleading names, leftover code |
+| Test-driven | Kent Beck, _Test-Driven Development_                     | Test value                                                    |
+| Pragmatic   | Andrew Hunt and David Thomas, _The Pragmatic Programmer_ | Bugs, missing or hidden error handling                        |
+| Performance | Donald Knuth on premature optimization                   | Performance                                                   |
+| Security    | The OWASP Top 10                                         | Security                                                      |
+| API steward | Hyrum's Law                                              | Breaking changes, conventions                                 |
+
+There are three ways to use them:
+
+- **One model with a lens**: pick a **Lens** in the Run dialog. The model still checks every rule and looks harder where the lens says. It works with **Focused passes** too, and then every pass uses it. The choice is remembered on this computer, like the checkbox. Automatic reviews don't use it.
+- **A persona team**: **+ New persona team** under **Settings → AI providers** starts a team with one member per persona, each owning the rules in the table, so every rule is checked once. Edit it like any team.
+- **A lens on any team member**: each member in the team editor has a **Lens**. Picking one renames a member whose name you haven't changed.
+
+The names are approaches, not people. That matters because a team's name appears in what an automatic review posts. Each run records its lens, and the Findings panel shows it next to the model. The persona texts are in `src/shared/personas.ts`.
+
 How a team run works:
 
 - Every member gets the full review policy plus an assignment naming only its rules. Answers outside those rules are rejected, and each member must report on each of its rules.

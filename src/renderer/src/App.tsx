@@ -42,6 +42,7 @@ import { ReviewBadge } from './PrReview.tsx'
 import { PanelBoundary } from './PanelBoundary.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
 import { stackGuide } from '../../shared/prStack.ts'
+import type { PersonaId } from '../../shared/personas.ts'
 import { StackControl } from './Stack.tsx'
 import { CommentsPanel } from './CommentsPanel.tsx'
 import { DescriptionPanel } from './DescriptionPanel.tsx'
@@ -736,12 +737,16 @@ export function App() {
 		else setAiError(r.error.message)
 	}
 
-	const startAi = async (scope: AiScope, passes = false): Promise<void> => {
+	const startAi = async (scope: AiScope, passes = false, persona: PersonaId | null = null): Promise<void> => {
 		if (!comparison || !reviewer) return
 		await persist()
 		setAiError(null)
 		setRightTab('findings')
-		const r = await window.review.startAiReview(comparison.id, scope, reviewer.kind === 'model' ? { ...reviewer, passes } : reviewer)
+		const r = await window.review.startAiReview(
+			comparison.id,
+			scope,
+			reviewer.kind === 'model' ? { ...reviewer, passes, persona } : reviewer,
+		)
 		if (!r.ok) setAiError(r.error.message)
 		else if (comparisonIdRef.current === r.value.reviewId)
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
@@ -1095,7 +1100,7 @@ export function App() {
 									activeRun={activeRun}
 									currentFile={file}
 									fileCount={comparison.files.length}
-									onStart={(scope, passes) => void startAi(scope, passes)}
+									onStart={(scope, passes, persona) => void startAi(scope, passes, persona)}
 									onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
 								/>
 							)}

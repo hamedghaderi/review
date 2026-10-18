@@ -18,6 +18,7 @@ import { reviewUpdate } from '../src/main/validate.ts'
 import { findingCommentBody, findingRoots, findingState } from '../src/shared/findings.ts'
 import {
 	DEFAULT_TEAM_ROLES,
+	REVIEW_RULES,
 	type AiRun,
 	type ChangedFile,
 	type Comparison,
@@ -872,7 +873,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-16.1')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-10-18.1')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -1273,6 +1274,70 @@ test('team run: members check only their rules, in parallel, and merge into one 
 	)
 	assert.equal(run.coverage.batchesTotal, 3)
 	assert.ok(run.team!.members.every((m) => (m.usage?.inputTokens ?? 0) > 0))
+})
+
+test('personas: together they own every rule once, and a lens adds to the policy without replacing it', async () => {
+	const { instructionsFor } = await import('../src/main/ai/prompt.ts')
+	const { REVIEW_PERSONAS } = await import('../src/shared/personas.ts')
+	const owned = REVIEW_PERSONAS.flatMap((p) => p.rules)
+	assert.deepEqual([...owned].sort(), [...REVIEW_RULES].sort(), 'a persona team checks every rule exactly once')
+	const lens = instructionsFor(null, null, undefined, false, 'clean-code')
+	assert.ok(lens.startsWith(REVIEWER_INSTRUCTIONS), 'the full policy comes first, unchanged')
+	assert.match(lens, /# Your lens \(Clean Code\)\nThis lens says where to look harder/)
+	assert.match(lens, /It adds no rules/)
+	assert.doesNotMatch(lens, /Your assignment/, 'one model with a lens still checks every rule')
+	assert.equal(instructionsFor(null, null, undefined, false, 'no-such-persona'), REVIEWER_INSTRUCTIONS)
+	// On a team member the lens comes before the assignment, which narrows it to the member's rules.
+	const member = instructionsFor(['security'], 'Security', undefined, false, 'security')
+	assert.ok(member.indexOf('# Your lens (Security)') < member.indexOf('# Your assignment (Security)'))
+})
+
+test('a single-model run with a lens sends it with every request, records it, and keeps it on retry', async () => {
+	const s = sources()
+	const input = {
+		reviewId: s.comp.id,
+		comparison: s.comp,
+		scope: { kind: 'all' as const },
+		loadSources: async () => s.srcs,
+		previousFindings: [],
+	}
+	const first = await startRun(
+		input,
+		{
+			...options(createFakeProvider({ script: () => new ProviderError('server', 'server error (529)') }), { maxAttempts: 1 }),
+			persona: 'test-driven',
+		},
+		() => {},
+	).done
+	assert.equal(first.status, 'failed')
+	assert.equal(first.persona, 'test-driven')
+	const seen: Array<string> = []
+	const provider = createFakeProvider({
+		script: (req) => {
+			seen.push(req.instructions)
+			return { findings: [], evaluation: emptyEvaluation(), unexplained_files: [], limitations: [] }
+		},
+	})
+	// The retry is not given the lens again: it comes from the run being retried.
+	const retried = await startRun(
+		{ ...input, retry: { run: first, rules: [...REVIEW_RULES], providers: new Map([[null, provider]]) } },
+		options(provider),
+		() => {},
+	).done
+	assert.equal(retried.persona, 'test-driven')
+	assert.ok(seen.length > 0 && seen.every((x) => x.includes('# Your lens (Test-driven)')))
+	const { reviewerChoice, reviewTeam } = await import('../src/main/validate.ts')
+	const id = '00000000-0000-4000-8000-000000000001'
+	assert.deepEqual(reviewerChoice({ kind: 'model', selection: { connectionId: id, modelId: 'm' }, persona: 'pragmatic' }), {
+		kind: 'model',
+		selection: { connectionId: id, modelId: 'm' },
+		persona: 'pragmatic',
+	})
+	assert.throws(() => reviewerChoice({ kind: 'model', selection: { connectionId: id, modelId: 'm' }, persona: 'uncle-bob' }))
+	const member = { id, role: 'Clean Code', connectionId: id, modelId: 'm', rules: ['bug'] }
+	assert.equal(reviewTeam({ id, name: 'T', members: [{ ...member, persona: 'clean-code' }] }).members[0].persona, 'clean-code')
+	assert.equal(reviewTeam({ id, name: 'T', members: [member] }).members[0].persona, undefined)
+	assert.throws(() => reviewTeam({ id, name: 'T', members: [{ ...member, persona: 'nobody' }] }))
 })
 
 test('team run: a failing member marks its rules and files as not checked, others still count', async () => {
