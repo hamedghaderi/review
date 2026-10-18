@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Open in Review</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #1f1d2b;
+				--muted: #6b6880;
+				--rule: #d9d6e6;
+				--accent: #6d4aff;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #17151f;
+					--fg: #eeecf5;
+					--muted: #9d99b0;
+					--rule: #34303f;
+					--accent: #a78bff;
+				}
+			}
+			body {
+				margin: 0;
+				padding: 16px;
+				min-width: 320px;
+				background: var(--bg);
+				color: var(--fg);
+				font:
+					14px/1.5 system-ui,
+					sans-serif;
+			}
+			p {
+				margin: 0 0 12px;
+			}
+			.row {
+				display: flex;
+				gap: 8px;
+				align-items: center;
+				flex-wrap: wrap;
+			}
+			#shortcut {
+				min-width: 140px;
+				padding: 6px 10px;
+				border: 1px solid var(--rule);
+				border-radius: 6px;
+				background: transparent;
+				color: inherit;
+				font: inherit;
+				text-align: center;
+				cursor: pointer;
+			}
+			#shortcut:focus {
+				outline: 2px solid var(--accent);
+				outline-offset: 1px;
+			}
+			button.link {
+				border: 0;
+				background: none;
+				color: var(--accent);
+				font: inherit;
+				cursor: pointer;
+				padding: 0;
+			}
+			.muted {
+				color: var(--muted);
+				font-size: 13px;
+			}
+		</style>
+	</head>
+	<body>
+		<p>On a GitHub pull request, press the shortcut to open its review in the Review app.</p>
+		<div class="row">
+			<span>Shortcut</span>
+			<button id="shortcut" type="button" title="Click, then press the keys you want"></button>
+			<button id="reset" class="link" type="button">Reset to Shift+R</button>
+		</div>
+		<p class="muted" id="hint" aria-live="polite">Click the shortcut, then press the keys you want. Esc cancels.</p>
+		<p class="muted">The shortcut does nothing while you type in a comment box or any other field.</p>
+		<script src="options.js"></script>
+	</body>
+</html>
