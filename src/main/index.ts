@@ -27,6 +27,7 @@ import { InboxWatcher, type RepoEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
+import { LINK_SCHEME, linkInArgs, parsePrLink, type PrLink } from '../shared/link.ts'
 import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
 import {
 	apiKey,
@@ -84,6 +85,36 @@ const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icons/
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL
 const rendererFile = join(__dirname, '../renderer/index.html')
+
+// Pull request links from a browser (review-code://open/owner/repo/pull/n). One instance handles them all: a second
+// launch (Windows and Linux pass the link on its command line) hands its link over and quits.
+const primary = app.requestSingleInstanceLock()
+let pendingLink: PrLink | null = null
+if (!primary) app.quit()
+else {
+	app.on('second-instance', (_e, argv) => {
+		const link = linkInArgs(argv)
+		if (link) receiveLink(link)
+		else if (app.isReady()) focusWindow(() => {})
+	})
+	// macOS delivers links as events, the first one possibly before the app is ready.
+	app.on('open-url', (e, url) => {
+		e.preventDefault()
+		receiveLink(url)
+	})
+	receiveLink(linkInArgs(process.argv))
+	// Installers register the scheme too; a development build would register the bare Electron binary instead.
+	if (app.isPackaged) app.setAsDefaultProtocolClient(LINK_SCHEME)
+}
+
+/** Keeps the newest valid link for the window to take; anything else that arrives under the scheme is ignored. */
+function receiveLink(raw: string | null): void {
+	const link = raw ? parsePrLink(raw) : null
+	if (!link) return
+	pendingLink = link
+	// Before the window exists, the renderer takes the link when it starts.
+	if (app.isReady()) focusWindow((w) => w.webContents.send(IPC.linkOpen))
+}
 
 function trustedSender(e: IpcMainInvokeEvent): boolean {
 	if (!win || e.sender !== win.webContents || !e.senderFrame || e.senderFrame !== win.webContents.mainFrame) return false
@@ -176,6 +207,11 @@ function registerIpc(): void {
 	handle(IPC.openKnownRepo, (repoId: unknown) => service.openKnown(str(repoId, 'repository')))
 	handle(IPC.closeRepoTab, (repoId: unknown) => service.closeTab(str(repoId, 'repository')))
 	handle(IPC.repoTabs, async () => service.tabs())
+	handle(IPC.takeLink, async () => {
+		const link = pendingLink
+		pendingLink = null
+		return link ? { ...link, repoId: service.knownGitHubRepos().get(link.repo.toLowerCase()) ?? null } : null
+	})
 	handle(IPC.addContextImage, (name: unknown, bytes: unknown) => {
 		if (!(bytes instanceof Uint8Array)) throw new AppFail('invalid-input', 'Invalid image.')
 		return service.addContextImage(typeof name === 'string' ? name : 'image', bytes)
@@ -382,6 +418,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+	if (!primary) return
 	if (devIcon && process.platform === 'darwin') app.dock?.setIcon(devIcon)
 	const dir = app.getPath('userData')
 	store = ReviewStore.in(dir)

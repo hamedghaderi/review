@@ -247,6 +247,13 @@ export interface InboxOpen {
 	number: number
 }
 
+/** A `review-code://` link to a pull request, with the clone that maps to its repository (null when none does). */
+export interface LinkOpen {
+	repoId: string | null
+	repo: string // "owner/name"
+	number: number
+}
+
 /** What an automatic review of one pull request head did. */
 export interface AutoReviewRecord {
 	head: string // the head commit it was started for
@@ -1248,6 +1255,8 @@ export const IPC = {
 	contextImage: 'context:image',
 	repoTabs: 'repo:tabs',
 	inboxOpen: 'inbox:open',
+	takeLink: 'link:take',
+	linkOpen: 'link:open',
 	inboxChanged: 'inbox:changed',
 	reviewChanged: 'review:changed',
 	githubSetRepo: 'gh:repo-set',
@@ -1353,6 +1362,10 @@ export interface ReviewApi {
 	/** The repository tabs, re-read when review requests change. */
 	repoTabs(): Promise<Result<Array<RepoTab>>>
 	onInboxOpen(handler: (target: InboxOpen) => void): () => void
+	/** The pull request link the app was last opened with, once: later calls return null until another link arrives. */
+	takeLink(): Promise<Result<LinkOpen | null>>
+	/** A link arrived while the window was open; call `takeLink` to read it. */
+	onLinkOpen(handler: () => void): () => void
 	/** Your review requests or reviewed pull requests changed on GitHub (seen by the background check). */
 	onInboxChanged(handler: () => void): () => void
 	/** An automatic review added comments to a stored review; a window showing it merges them in. */

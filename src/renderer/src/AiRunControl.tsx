@@ -11,12 +11,14 @@ interface Props {
 	activeRun: AiRun | null
 	currentFile: ChangedFile | null
 	fileCount: number
+	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
+	onOpened?(): void
 	onStart(scope: AiScope, passes: boolean, persona: PersonaId | null): void
 	onCancel(): void
 }
 
 /** Header control: opens a confirmation popover showing scope, provider and model; nothing is sent before "Start". */
-export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileCount, onStart, onCancel }: Props) {
+export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileCount, openNow, onOpened, onStart, onCancel }: Props) {
 	const selection = reviewer.kind === 'model' ? reviewer.selection : null
 	const team = reviewer.kind === 'team' ? settings?.teams.find((t) => t.id === reviewer.teamId) : undefined
 	const [open, setOpen] = useState(false)
@@ -27,11 +29,24 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
 
 	// The header clips overflow, so the popover is positioned against the viewport.
-	function toggle(): void {
+	function place(): void {
 		const rect = ref.current?.getBoundingClientRect()
 		if (rect) setAnchor({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) })
+	}
+	function toggle(): void {
+		place()
 		setOpen((x) => !x)
 	}
+
+	const running = activeRun?.status === 'running'
+	useEffect(() => {
+		if (!openNow) return
+		if (!running && fileCount > 0) {
+			place()
+			setOpen(true)
+		}
+		onOpened?.()
+	}, [openNow, running, fileCount, onOpened])
 
 	useEffect(() => {
 		if (!open) return

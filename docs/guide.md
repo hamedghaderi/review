@@ -52,6 +52,14 @@ When a closed or merged PR's commits can't be fetched any more, or its recorded 
 
 Each review is pinned to its snapshot. While a review is open, the app checks the target (every 15 s for branches, locally; every 2 min for PRs, through the API) and shows **Update available**. Opening the update starts a new snapshot, and your comments carry over to it (see [Carrying comments forward](#carrying-comments-forward)). Findings and viewed files stay with the old snapshot, which keeps its own comments too and is still reachable from the Snapshot selector or **Recent reviews**. Opening a review never starts an AI review.
 
+### Opening a pull request from GitHub
+
+On any pull request page on GitHub, put `review-code.dev` in place of `github.com` in the address (`github.com/owner/repo/pull/58` becomes `review-code.dev/owner/repo/pull/58`). The page hands the pull request to the app with a `review-code://open/owner/repo/pull/58` link; your browser may ask once whether to open Review. The same page has a bookmarklet you can drag to your bookmarks bar, which does it in one click on any pull request.
+
+The app switches to your clone of that repository, opens the pull request's review the same way **Open review** does, and opens the **Run AI review** dialog. The review only starts when you click **Start review**, because anyone can put such a link in a comment or an email. A link carries only the repository and number. The app ignores anything else under the scheme, including links with extra options. If no clone of the repository is open in Review yet, a notice asks you to open it. A folder that is a clone of another repository leaves the link waiting.
+
+Only one copy of the app runs: opening it again (or a link, which on Windows and Linux starts a second copy) brings the open window forward. The installers register the scheme; a development build (`npm run dev`) doesn't, since it would register the bare Electron binary.
+
 ### Carrying comments forward
 
 When you open a newer snapshot with **Review update** / **Fetch and review update**, or go from a branch review to its PR with **Open PR review**, each comment is copied into the new snapshot:
