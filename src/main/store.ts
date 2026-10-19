@@ -14,6 +14,8 @@ export interface StoreData {
 	// `prs` (absent in older files) is what the start page lists, so it shows at launch before the first check.
 	inboxWatch?: { login: string | null; state: WatchState; at: string; prs?: Array<WatchedPr> }
 	mutedRepos?: Array<string> // GitHub repositories ("owner/name", lower case) that do not notify or count
+	appClones?: Record<string, { repo: string; at: string }> // folders the app cloned itself, by real path: deletable here
+	cloneParent?: string // the folder last chosen for a clone, where the folder picker starts next time
 	skippedVersion?: string // a release you chose not to be told about again
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
@@ -135,6 +137,8 @@ export function migrate(raw: unknown): StoreData {
 		...(typeof d.skippedVersion === 'string' ? { skippedVersion: d.skippedVersion } : {}),
 		...(d.autoReviews ? { autoReviews: d.autoReviews } : {}),
 		...(Array.isArray(d.mutedRepos) ? { mutedRepos: d.mutedRepos } : {}),
+		...(d.appClones && typeof d.appClones === 'object' ? { appClones: d.appClones } : {}),
+		...(typeof d.cloneParent === 'string' ? { cloneParent: d.cloneParent } : {}),
 	}
 }
 

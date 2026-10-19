@@ -83,7 +83,7 @@ export class InboxWatcher {
 			const known = this.o.known()
 			const muted = new Set(store.read().mutedRepos ?? [])
 			const isMuted = (repo: string): boolean => muted.has(repo.toLowerCase())
-			this.o.badge(notify ? homeCount(r.prs.map((p) => ({ ...p, repoId: null, muted: isMuted(p.repo) }))) : 0)
+			this.o.badge(notify ? homeCount(r.prs.map((p) => ({ ...p, repoId: null, muted: isMuted(p.repo), appClone: false }))) : 0)
 			if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) this.o.changed?.()
 			const loud = events.filter((e) => !isMuted(e.pr.repo)).map((e) => ({ ...e, repoId: known.get(e.pr.repo.toLowerCase()) ?? null }))
 			if (loud.length) this.o.notify(loud)

@@ -56,12 +56,17 @@ export function Home(props: {
 	onRefresh(): Promise<void>
 	onConnect(): void
 	onOpenRepo(): void
+	onDeleteClone(repoId: string): void
+	onManageClones(): void
 }) {
 	const { inbox } = props
 	const prs = useMemo(() => inbox?.prs ?? [], [inbox])
 	const [repo, setRepo] = useState<string | null>(null) // lower case; null: all repositories
 	const [muted, setMuted] = useStored<'hide' | 'show'>('home.muted', 'hide', ['hide', 'show'])
 	const [refreshing, setRefreshing] = useState(false)
+	// How many clones the app made, for the button that lists them (with Delete) in Settings · GitHub.
+	const [clones, setClones] = useState(0)
+	useEffect(() => void window.review.appClones().then((r) => r.ok && setClones(r.value.length)), [inbox])
 	const refresh = useCallback(async () => {
 		setRefreshing(true)
 		await props.onRefresh().finally(() => setRefreshing(false))
@@ -69,15 +74,15 @@ export function Home(props: {
 
 	// Every repository with something listed, the most waiting first, for the filter.
 	const repos = useMemo(() => {
-		const by = new Map<string, { name: string; muted: boolean; prs: Array<HomePr> }>()
+		const by = new Map<string, { name: string; muted: boolean; clone: string | null; prs: Array<HomePr> }>()
 		for (const p of prs) {
 			const key = p.repo.toLowerCase()
-			const r = by.get(key) ?? { name: p.repo, muted: p.muted, prs: [] }
+			const r = by.get(key) ?? { name: p.repo, muted: p.muted, clone: p.appClone ? p.repoId : null, prs: [] }
 			r.prs.push(p)
 			by.set(key, r)
 		}
 		return [...by.entries()]
-			.map(([key, r]) => ({ key, name: r.name, muted: r.muted, count: homeCount(r.prs) }))
+			.map(([key, r]) => ({ key, name: r.name, muted: r.muted, clone: r.clone, count: homeCount(r.prs) }))
 			.sort((a, b) => Number(a.muted) - Number(b.muted) || b.count - a.count || a.key.localeCompare(b.key))
 	}, [prs])
 	const chosen = repos.find((r) => r.key === repo) ?? null
@@ -114,6 +119,15 @@ export function Home(props: {
 					<span className="muted small" title={new Date(inbox.at).toLocaleString()}>
 						Checked {ago(inbox.at)}
 					</span>
+				)}
+				{clones > 0 && (
+					<button
+						className="btn small ghost"
+						onClick={props.onManageClones}
+						title="The clones the app made for you, with their size; delete them there"
+					>
+						Clones ({clones})
+					</button>
 				)}
 				<button className="btn small" onClick={() => void refresh()} disabled={refreshing}>
 					{refreshing ? 'Checking…' : 'Check now'}
@@ -154,6 +168,15 @@ export function Home(props: {
 								Show muted ({mutedRepos})
 							</label>
 						)
+					)}
+					{chosen?.clone && (
+						<button
+							className="btn small ghost danger"
+							onClick={() => props.onDeleteClone(chosen.clone!)}
+							title="Move the clone the app made for this repository to the Trash. You can clone it again from any of its pull requests."
+						>
+							Delete clone
+						</button>
 					)}
 					{!props.notifications && <span className="muted small">Notifications are off, so these are not announced.</span>}
 				</div>

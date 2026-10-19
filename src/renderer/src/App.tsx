@@ -126,6 +126,7 @@ export function App() {
 	const [tabError, setTabError] = useState<string | null>(null)
 	// A pull request link whose repository has no clone in the app yet, and why the last pick did not match it.
 	// A pull request to open once you pick its clone; `prompt`: it came from a link, so the Run dialog opens with it.
+	const [cloning, setCloning] = useState<string | null>(null) // "owner/name" the app is cloning into its own folder
 	const [linkWaiting, setLinkWaiting] = useState<{ link: LinkOpen & { prompt: boolean }; note: string | null } | null>(null)
 	// The review a link opened: its Run AI review dialog opens once, so starting a run is still your click.
 	const [runPromptFor, setRunPromptFor] = useState<string | null>(null)
@@ -146,7 +147,7 @@ export function App() {
 	const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null)
 	const [updateProgress, setUpdateProgress] = useState<number | null>(null) // while downloading
 	const [updateError, setUpdateError] = useState<string | null>(null)
-	const [githubOpen, setGithubOpen] = useState(false)
+	const [githubOpen, setGithubOpen] = useState<boolean | 'clones'>(false) // 'clones': opened at the app's clones
 	// The start page: every pull request waiting for you, in every repository. Shown at launch when nothing is restored.
 	const [home, setHome] = useState(false)
 	const [paletteOpen, setPaletteOpen] = useState(false)
@@ -482,11 +483,16 @@ export function App() {
 			setTabError(r.error.message)
 			return
 		}
-		const at = tabs.findIndex((t) => t.id === repoId)
-		setTabs(r.value)
+		await leaveRepo(repoId, r.value, active)
+	}
+
+	/** After a repository's tab is gone: the tabs left, and if it was on screen, its neighbour or Home. */
+	const leaveRepo = async (repoId: string, left: Array<RepoTab>, active: boolean): Promise<void> => {
+		const at = tabsRef.current.findIndex((t) => t.id === repoId)
+		setTabs(left)
 		setTabError(null)
 		if (!active) return
-		const next = r.value[Math.min(Math.max(at, 0), r.value.length - 1)]
+		const next = left[Math.min(Math.max(at, 0), left.length - 1)]
 		if (next && (await switchRepo(next.id))) return
 		setHome(true)
 		comparisonIdRef.current = null
@@ -497,6 +503,20 @@ export function App() {
 		setAiRuns([])
 		setCompareError(null)
 		setRepoError(null)
+	}
+
+	/** Deletes one of the app's own clones (the main process asks first). Returns whether it was deleted. */
+	const deleteAppClone = async (repoId: string): Promise<boolean> => {
+		const active = sessionRepoRef.current === repoId
+		const r = await window.review.deleteAppClone(repoId)
+		if (!r.ok) {
+			setTabError(r.error.message)
+			return false
+		}
+		if (!r.value.deleted) return false
+		await leaveRepo(repoId, r.value.tabs, active)
+		void refreshHomeInbox()
+		return true
 	}
 	const tabsRef = useRef(tabs)
 	tabsRef.current = tabs
@@ -549,6 +569,29 @@ export function App() {
 		const r = await window.review.refreshHome()
 		if (r.ok) setHomeInbox(r.value)
 	}
+	// Re-reads what the last check saw (no GitHub request), e.g. after a clone is deleted.
+	const refreshHomeInbox = async (): Promise<void> => {
+		const r = await window.review.homeInbox()
+		if (r.ok) setHomeInbox(r.value)
+	}
+
+	// Clones a waiting link's repository into the app's own folder (the first time), then opens the pull request there.
+	const openAppClone = async (link: LinkOpen & { prompt: boolean }): Promise<void> => {
+		const parent = await window.review.chooseCloneFolder(link.repo)
+		if (!parent.ok) return setLinkWaiting({ link, note: parent.error.message })
+		if (!parent.value) return
+		await persist()
+		setLinkWaiting(null)
+		setCloning(link.repo)
+		const r = await window.review.openGitHubClone(link.repo, parent.value).finally(() => setCloning(null))
+		if (!r.ok) {
+			setLinkWaiting({ link, note: `Could not clone it: ${r.error.message}` })
+			return
+		}
+		await openSession(r)
+		if ((await openPr({ ...link, repoId: r.value.repo.id }, link.prompt)) && link.prompt) setRunPromptFor(comparisonIdRef.current)
+	}
+
 	const chooseSnapshot = async (reviewId: string): Promise<void> => {
 		if (!session) return
 		await openReview(session.repo.id, { kind: 'snapshot', reviewId })
@@ -1095,14 +1138,28 @@ export function App() {
 				onOpen={() => void openRepo()}
 				onDismissError={() => setTabError(null)}
 			/>
+			{cloning && (
+				<div className="notice link-notice" role="status">
+					<span>
+						<span className="spinner" aria-hidden /> Cloning {cloning}… The first time can take a few minutes for a large repository.
+					</span>
+				</div>
+			)}
 			{linkWaiting && (
 				<div className="notice link-notice" role="status">
 					<span>
 						{linkWaiting.note ? `${linkWaiting.note} ` : ''}To review {linkWaiting.link.repo}#{linkWaiting.link.number}, open your clone of{' '}
-						{linkWaiting.link.repo}.
+						{linkWaiting.link.repo}, or let the app clone it.
 					</span>
 					<button className="btn small" onClick={() => void openLinkClone(linkWaiting.link)}>
 						Open clone…
+					</button>
+					<button
+						className="btn small"
+						onClick={() => void openAppClone(linkWaiting.link)}
+						title="The app keeps its own partial clone in its data folder: file contents download as they are read. The first time can take a few minutes for a large repository. A clone you open yourself is used instead whenever there is one."
+					>
+						Clone for me
 					</button>
 					<button className="btn small ghost" onClick={() => setLinkWaiting(null)} aria-label="Dismiss">
 						✕
@@ -1454,6 +1511,8 @@ export function App() {
 						onRefresh={refreshHome}
 						onConnect={() => setGithubOpen(true)}
 						onOpenRepo={() => void openRepo()}
+						onDeleteClone={(repoId) => void deleteAppClone(repoId)}
+						onManageClones={() => setGithubOpen('clones')}
 					/>
 				</main>
 			) : (
@@ -1755,6 +1814,8 @@ export function App() {
 						const r = await window.review.githubSetRepo(session.repo.id, repo)
 						if (r.ok) setSession({ ...session, github: r.value })
 					}}
+					onDeleteClone={deleteAppClone}
+					focus={githubOpen === 'clones' ? 'clones' : null}
 				/>
 			)}
 			{publishOpen && session && comparison?.pr && github && (

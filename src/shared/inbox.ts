@@ -65,7 +65,7 @@ export function waitsForYou(pr: WatchedPr): boolean {
 }
 
 /** A watched pull request on the start page, with the clone it maps to (null: none opened yet) and whether its repository is muted. */
-export type HomePr = WatchedPr & { repoId: string | null; muted: boolean }
+export type HomePr = WatchedPr & { repoId: string | null; muted: boolean; appClone: boolean }
 
 export interface HomeInbox {
 	state: 'ready' | 'disconnected' // disconnected: no GitHub account, so nothing is checked

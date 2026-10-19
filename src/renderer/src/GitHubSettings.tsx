@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { GifStatus, GitHubMapping, GitHubStatus } from '../../shared/types.ts'
+import type { AppClone, GifStatus, GitHubMapping, GitHubStatus } from '../../shared/types.ts'
 
 interface Props {
 	status: GitHubStatus
@@ -7,6 +7,8 @@ interface Props {
 	onClose(): void
 	onStatus(s: GitHubStatus): void
 	onChooseRepo(repo: string): void
+	onDeleteClone(repoId: string): Promise<boolean>
+	focus?: 'clones' | null // opened to manage the app's clones: scrolled to that list
 }
 
 const STATE_TEXT: Record<GitHubStatus['state'], string> = {
@@ -18,7 +20,7 @@ const STATE_TEXT: Record<GitHubStatus['state'], string> = {
 }
 
 /** Settings · GitHub: a read-only personal access token for the API, and which repository's pull requests to browse. */
-export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRepo }: Props) {
+export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRepo, onDeleteClone, focus = null }: Props) {
 	const [token, setToken] = useState('')
 	const [persist, setPersist] = useState(status.storage.secure)
 	const [error, setError] = useState<string | null>(null)
@@ -214,6 +216,8 @@ export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRep
 						</p>
 					)}
 
+					<AppClones onDelete={onDeleteClone} scrollTo={focus === 'clones'} />
+
 					<GiphyKey />
 
 					{mapping && mapping.candidates.length > 0 && (
@@ -367,6 +371,73 @@ function GiphyKey() {
 					<span className="muted small">{status.key === 'session' ? 'Kept for this session only.' : 'Stored encrypted.'}</span>
 				</div>
 			)}
+		</>
+	)
+}
+
+function size(bytes: number | null): string {
+	if (bytes === null) return 'size unknown'
+	const units = ['B', 'KB', 'MB', 'GB']
+	let n = bytes
+	let u = 0
+	while (n >= 1024 && u < units.length - 1) {
+		n /= 1024
+		u++
+	}
+	return `${n < 10 && u > 0 ? n.toFixed(1) : Math.round(n)} ${units[u]}`
+}
+
+/** The clones the app made for repositories you had no clone of, each deletable (to the Trash, after asking). */
+function AppClones({ onDelete, scrollTo }: { onDelete(repoId: string): Promise<boolean>; scrollTo: boolean }) {
+	const [clones, setClones] = useState<Array<AppClone> | null>(null)
+	const [error, setError] = useState<string | null>(null)
+	const head = useRef<HTMLHeadingElement>(null)
+	const shown = clones !== null
+	useEffect(() => {
+		if (scrollTo && shown) head.current?.scrollIntoView({ block: 'start' })
+	}, [scrollTo, shown])
+	const load = (): void =>
+		void window.review.appClones().then((r) => {
+			if (r.ok) setClones(r.value)
+			else setError(r.error.message)
+		})
+	useEffect(load, [])
+	if (!clones?.length && !error) return null
+	return (
+		<>
+			<h3 ref={head}>Clones made by the app</h3>
+			<p className="muted small">
+				Made with “Clone for me” for repositories you had no clone of. Deleting one moves its folder to the Trash, and the app forgets its
+				reviews.
+			</p>
+			{error && <p className="small error-text">{error}</p>}
+			<ul className="clone-list">
+				{clones?.map((c) => (
+					<li key={c.root}>
+						<div className="clone-info">
+							<span className="mono">{c.repo}</span>
+							<span className="muted small ellipsis" title={c.root}>
+								{c.root} · {c.missing ? 'folder missing' : size(c.bytes)}
+							</span>
+						</div>
+						{!c.missing && (
+							<button className="btn small ghost" onClick={() => void window.review.revealAppClone(c.repoId)}>
+								Show in folder
+							</button>
+						)}
+						<button
+							className="btn small danger"
+							onClick={() =>
+								void onDelete(c.repoId).then((deleted) => {
+									if (deleted) load()
+								})
+							}
+						>
+							Delete
+						</button>
+					</li>
+				))}
+			</ul>
 		</>
 	)
 }
