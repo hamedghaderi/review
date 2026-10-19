@@ -575,6 +575,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	type BatchOutcome = { ok: true; value: ReturnType<typeof validateBatchOutput> } | { ok: false; error: Error }
 
 	async function runBatch(batch: ContextBatch, w: Worker): Promise<BatchOutcome> {
+		let reasked = false
 		for (let attempt = 0; ; attempt++) {
 			const budget = lookups ? lookupBudget(batch, w) : null
 			const tools = budget && input.tools ? input.tools(budget, external !== null) : undefined
@@ -607,6 +608,13 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				if (sendImages && (e.kind === 'bad-request' || e.kind === 'model-unavailable' || e.kind === 'unsupported')) {
 					w.imagesRejected = true
 					notice(`${w.role ? `${w.role}: the` : 'The'} model did not accept images, so its requests were sent without them: ${e.message}`)
+					attempt--
+					continue
+				}
+				// A model that ignored the schema usually follows it on a second try. Once per request: each is a whole review.
+				if (e.kind === 'invalid-output' && !reasked) {
+					reasked = true
+					notice(`${w.role ? `${w.role}: an` : 'An'} answer did not match the findings schema, so it was asked again: ${e.message}`)
 					attempt--
 					continue
 				}
