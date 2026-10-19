@@ -249,6 +249,16 @@ export interface InboxOpen {
 	number: number
 }
 
+/** A folder the app cloned itself; it can be deleted from the app. */
+export interface AppClone {
+	repoId: string
+	repo: string // "owner/name"
+	root: string
+	at: string // when it was cloned
+	bytes: number | null // size on disk; null while unknown
+	missing: boolean // the folder is gone (deleted outside the app); deleting only forgets it
+}
+
 /** A `review-code://` link to a pull request, with the clone that maps to its repository (null when none does). */
 export interface LinkOpen {
 	repoId: string | null
@@ -1264,6 +1274,11 @@ export const IPC = {
 	homeInbox: 'inbox:home',
 	refreshHome: 'inbox:home-refresh',
 	setRepoMuted: 'inbox:mute',
+	openGitHubClone: 'repo:open-github-clone',
+	chooseCloneFolder: 'repo:choose-clone-folder',
+	appClones: 'repo:app-clones',
+	deleteAppClone: 'repo:delete-app-clone',
+	revealAppClone: 'repo:reveal-app-clone',
 	reviewChanged: 'review:changed',
 	githubSetRepo: 'gh:repo-set',
 	searchPrs: 'gh:search',
@@ -1363,6 +1378,22 @@ export interface ReviewApi {
 	setRepoMuted(repo: string, muted: boolean): Promise<Result<HomeInbox>>
 	/** Records that you looked at a pull request, so the Inbox stops calling it new. */
 	markPrSeen(repoId: string, number: number): Promise<Result<boolean>>
+	/** Asks where to clone a GitHub repository ("owner/name"); null when cancelled. The clone goes in <folder>/<name>. */
+	chooseCloneFolder(repo: string): Promise<Result<string | null>>
+	/**
+	 * Clones a GitHub repository ("owner/name") into the folder just chosen with `chooseCloneFolder` (a partial clone,
+	 * with the GitHub token), then opens it like any other. A clone the app already knows is opened instead.
+	 */
+	openGitHubClone(repo: string, parent: string): Promise<Result<RepoSession>>
+	/** The folders the app cloned itself, with their size on disk. */
+	appClones(): Promise<Result<Array<AppClone>>>
+	/**
+	 * Deletes one of the app's own clones after asking: the folder moves to the Trash, and the app forgets the repository
+	 * with its reviews. `deleted` is false when you cancel. Returns the tabs left.
+	 */
+	deleteAppClone(repoId: string): Promise<Result<{ deleted: boolean; tabs: Array<RepoTab> }>>
+	/** Shows one of the app's own clones in the file manager. */
+	revealAppClone(repoId: string): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */
 	openKnownRepo(repoId: string): Promise<Result<RepoSession>>
 	/** Closes a repository's tab. Its reviews stay stored and its review requests keep notifying. Returns the tabs left. */

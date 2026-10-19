@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { realpath } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { basename, join, sep } from 'node:path'
 import { parseGitHubRemote } from '../shared/prQuery.ts'
 import type { AppError, BranchRef, ChangedFile, Comparison, ErrorCode, FileStatus, RemoteInfo, RepoInfo } from '../shared/types.ts'
 
@@ -52,16 +52,93 @@ export const env: NodeJS.ProcessEnv = {
 	LANG: 'C',
 }
 
+/**
+ * The app's own clones (see `cloneGitHub`) authenticate with the app's GitHub token, since a partial clone fetches file
+ * contents on any later read. The token reaches Git only through the environment of commands run inside those folders:
+ * it is never written to a clone's config, and repositories you cloned yourself never get it.
+ */
+let managed: { roots: Set<string>; header: () => string | null; base: string } | null = null
+
+/** `base` is where repositories are cloned from: GitHub, except in tests. */
+export function setManagedClones(header: () => string | null, base = 'https://github.com'): void {
+	managed = { roots: managed?.roots ?? new Set(), header, base }
+}
+
+/** The folders the app cloned itself (absolute, real paths). */
+export function setAppCloneRoots(roots: Iterable<string>): void {
+	if (managed) managed.roots = new Set(roots)
+}
+
+/** Whether `path` is one of the app's own clones, or inside one. */
+export function isManagedClone(path: string): boolean {
+	if (!managed) return false
+	for (const root of managed.roots) if (path === root || path.startsWith(root + sep)) return true
+	return false
+}
+
+function envFor(cwd: string, appClone: boolean): NodeJS.ProcessEnv {
+	const header = appClone || isManagedClone(cwd) ? (managed?.header() ?? null) : null
+	if (!header) return env
+	return { ...env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraHeader', GIT_CONFIG_VALUE_0: header }
+}
+
+/**
+ * Clones a GitHub repository ("owner/name") into `parent`/name for the app: a partial clone (file contents download
+ * when read) of the default branch, with only the top-level files checked out. Reviews fetch their pull request's
+ * commits into it like any other clone. A folder there that is already a Git clone is used as it is (`created` false).
+ */
+export async function cloneGitHub(repo: string, parent: string, signal?: AbortSignal): Promise<{ root: string; created: boolean }> {
+	const m = managed
+	if (!m) throw new AppFail('git-failed', 'The app cannot clone repositories here.')
+	const [owner, name] = repo.split('/')
+	if (!owner || !name || name === '.' || name === '..') throw new AppFail('invalid-input', 'Invalid GitHub repository.')
+	const dest = join(parent, name)
+	const exists = (p: string) =>
+		stat(p).then(
+			() => true,
+			() => false,
+		)
+	if (await exists(join(dest, '.git'))) return { root: dest, created: false }
+	if (await exists(dest)) throw new AppFail('invalid-input', `${dest} already exists and is not a Git clone. Choose another folder.`)
+	await mkdir(parent, { recursive: true })
+	// Cloned beside its final place and moved there when complete, so an interrupted clone is never mistaken for one.
+	const partial = `${dest}.partial-${process.pid}-${Date.now()}`
+	const r = await git(
+		parent,
+		[
+			'-c',
+			'gc.auto=0',
+			'clone',
+			'--quiet',
+			'--filter=blob:none',
+			'--single-branch',
+			'--no-tags',
+			'--sparse',
+			'--end-of-options',
+			`${m.base}/${repo}.git`,
+			partial,
+		],
+		1024 * 1024,
+		{ signal, timeoutMs: 60 * 60_000, appClone: true },
+	)
+	if (r.code !== 0) {
+		await rm(partial, { recursive: true, force: true })
+		throw fetchError(`${m.base}/${repo}.git`, r.stderr, true)
+	}
+	await rename(partial, dest)
+	return { root: await realpath(dest), created: true }
+}
+
 export function git(
 	cwd: string,
 	args: Array<string>,
 	maxBytes = 256 * 1024 * 1024,
-	options: { signal?: AbortSignal; timeoutMs?: number } = {},
+	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean } = {},
 ): Promise<GitOutput> {
 	return new Promise((resolve, reject) => {
 		const child = spawn('git', [...GLOBAL_ARGS, ...args], {
 			cwd,
-			env,
+			env: envFor(cwd, !!options.appClone),
 			shell: false,
 			windowsHide: true,
 			signal: options.signal,
@@ -393,7 +470,7 @@ export async function ensureCommits(
 			1024 * 1024,
 			{ signal, timeoutMs: 180_000 },
 		)
-		if (r.code !== 0) throw fetchError(remote, r.stderr)
+		if (r.code !== 0) throw fetchError(remote, r.stderr, isManagedClone(root))
 	}
 	for (const s of shas) {
 		if (missing.includes(s)) continue
@@ -409,12 +486,17 @@ export async function ensureCommits(
 
 export class ObjectUnavailable extends AppFail {}
 
-function fetchError(remote: string, stderr: string): AppFail {
+function fetchError(remote: string, stderr: string, appClone = false): AppFail {
 	const msg = stderr.trim().split('\n').slice(-3).join(' ')
 	if (/not our ref|couldn't find remote ref|no such remote ref|unadvertised object|did not send all necessary objects/i.test(stderr))
 		return new ObjectUnavailable('pr-unavailable', `The remote no longer has a commit this review needs (${msg}).`)
 	if (/could not resolve host|network is unreachable|connection timed out|operation timed out|connection refused/i.test(stderr))
 		return new AppFail('offline', `Git could not reach ${remote}: ${msg}`)
+	if (appClone && /authentication failed|could not read username|repository not found|access denied|403/i.test(stderr))
+		return new AppFail(
+			'fetch-failed',
+			`GitHub refused the app's own clone of ${remote} (${msg}). It uses the app's GitHub token, which needs read access to the repository's contents.`,
+		)
 	if (/authentication failed|permission denied|could not read username|repository not found|access denied|403/i.test(stderr))
 		return new AppFail(
 			'fetch-failed',

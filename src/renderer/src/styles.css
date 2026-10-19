@@ -4736,3 +4736,25 @@ button.stack-row:hover {
 	justify-content: center;
 	text-align: center;
 }
+
+/* Settings: clones the app made. */
+.clone-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.clone-list li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 0;
+}
+.clone-list li + li {
+	border-top: 1px solid var(--border);
+}
+.clone-info {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+}
