@@ -163,6 +163,10 @@ export function prepareChange(sources: Array<FileSource>, limits: ContextLimits,
 
 	for (const source of sources) {
 		const { file, patch } = source
+		if (file.submodule) {
+			files.push({ fileKey: file.key, state: 'not-reviewable', reason: 'Submodule: it points at a commit in another repository' })
+			continue
+		}
 		if (patch.kind === 'binary') {
 			files.push({ fileKey: file.key, state: 'not-reviewable', reason: 'Binary file' })
 			continue

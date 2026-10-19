@@ -308,6 +308,7 @@ export interface ChangedFile {
 	deletions: number | null
 	binary: boolean
 	similarity: number | null
+	submodule?: boolean // a submodule's commit moved: it points into another repository, so there is no content here
 }
 
 export interface Comparison {
