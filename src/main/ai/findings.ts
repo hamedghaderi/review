@@ -16,7 +16,8 @@ import {
 import type { EarlierThread } from './background.ts'
 import type { ContextBatch, ContextExcerpt } from './context.ts'
 import { DEFAULT_LEVELS, residueLevel } from './prompt.ts'
-import { reviewOutputSchema, type ModelFinding } from './schema.ts'
+import type { z } from 'zod'
+import { modelFindingSchema, reviewEnvelopeSchema, type ModelFinding } from './schema.ts'
 
 const TEXT_LIMITS = {
 	title: 200,
@@ -57,13 +58,17 @@ export function validateBatchOutput(
 	levels: ReadonlyArray<FindingLevel> = DEFAULT_LEVELS,
 	threads: ReadonlyMap<string, EarlierThread> = new Map(),
 ): ValidatedBatch {
-	const parsed = reviewOutputSchema.safeParse(output)
-	if (!parsed.success)
-		throw new InvalidOutputError(`Output does not match the findings schema: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
+	const parsed = reviewEnvelopeSchema.safeParse(output)
+	if (!parsed.success) throw new InvalidOutputError(`Output does not match the findings schema: ${issueText(parsed.error)}`)
 	const excerpts = new Map(batch.excerpts.map((e) => [e.id, e]))
 	const findings: Array<Finding> = []
 	const rejected: Array<RejectedFinding> = []
-	const items = parsed.data.findings
+	const items: Array<ModelFinding> = []
+	for (const raw of parsed.data.findings) {
+		const f = modelFindingSchema.safeParse(raw)
+		if (f.success) items.push(f.data)
+		else rejected.push(reject(raw, `Malformed finding (${issueText(f.error)})`))
+	}
 	if (items.length > MAX_FINDINGS_PER_BATCH) {
 		for (const f of items.slice(MAX_FINDINGS_PER_BATCH))
 			rejected.push(reject(f, `More than ${MAX_FINDINGS_PER_BATCH} findings in one response`))
@@ -142,8 +147,16 @@ function raisedBefore(f: ModelFinding, threads: ReadonlyMap<string, EarlierThrea
 	return { threadId: t.id, url: t.url, path: t.path, outcome: b.outcome, whyAgain: clip(why, TEXT_LIMITS.whyAgain), settled: t.settled }
 }
 
-function reject(f: ModelFinding, reason: string): RejectedFinding {
-	return { title: clip(String(f.title ?? ''), TEXT_LIMITS.title), excerptId: clip(String(f.excerpt_id ?? ''), 40), reason }
+function reject(f: unknown, reason: string): RejectedFinding {
+	const o = (f && typeof f === 'object' ? f : {}) as { title?: unknown; excerpt_id?: unknown }
+	return { title: clip(String(o.title ?? ''), TEXT_LIMITS.title), excerptId: clip(String(o.excerpt_id ?? ''), 40), reason }
+}
+
+/** The first problem with where it is, e.g. "evaluation.2.near_misses.0.line: Invalid input: expected number, received undefined". */
+function issueText(error: z.ZodError): string {
+	const issue = error.issues[0]
+	if (!issue) return 'unknown'
+	return issue.path.length ? `${issue.path.join('.')}: ${issue.message}` : issue.message
 }
 
 function clip(s: string, n: number): string {

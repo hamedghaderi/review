@@ -3,6 +3,8 @@ import { FINDING_LEVELS, RAISED_OUTCOMES, REVIEW_RULES, TEST_PATTERNS } from '..
 
 // Runtime validation schema. Length, content and budget limits are enforced afterwards in findings.ts.
 // `default` is stripped from the wire schema (strict modes reject it); it only lets validation accept answers without the field.
+// Endpoints that don't enforce the schema (JSON mode, some gateways) drop fields, so a missing null or empty list is
+// read as one rather than failing the whole answer.
 export const modelFindingSchema = z.object({
 	excerpt_id: z.string().describe('Identifier of the supplied excerpt that contains the problem, e.g. "E3".'),
 	file_path: z.string().describe('Path of the file on the chosen side, exactly as shown in the excerpt header.'),
@@ -24,10 +26,11 @@ export const modelFindingSchema = z.object({
 			'residue',
 		])
 		.describe('The one rule this finding falls under.'),
-	signature: z.int().nullable().describe('For category "residue": the signature number 1-6. Otherwise null.'),
+	signature: z.int().nullable().default(null).describe('For category "residue": the signature number 1-6. Otherwise null.'),
 	test_pattern: z
 		.enum(TEST_PATTERNS)
 		.nullable()
+		.default(null)
 		.describe('For category "test-value": how the test fails to protect what it claims. Otherwise null.'),
 	severity: z.enum(FINDING_LEVELS).describe('One of the levels the instructions allow.'),
 	title: z.string().describe('Concise summary, at most about 12 words.'),
@@ -40,10 +43,12 @@ export const modelFindingSchema = z.object({
 	disproof: z
 		.string()
 		.nullable()
+		.default(null)
 		.describe('For severity "blocking": the smallest concrete check that would prove this concern false. Otherwise null.'),
 	background: z
 		.string()
 		.nullable()
+		.default(null)
 		.describe(
 			'Plain-text context (max ~80 words) only when the finding needs a domain term, code outside the excerpts, or removed behavior. Otherwise null.',
 		),
@@ -68,31 +73,37 @@ export const ruleEvaluationSchema = z.object({
 	near_misses: z
 		.array(
 			z.object({
-				excerpt_id: z.string().nullable(),
-				line: z.int().nullable(),
+				excerpt_id: z.string().nullable().default(null),
+				line: z.int().nullable().default(null),
 				note: z.string().describe('What you saw and did not report, in one sentence.'),
 			}),
 		)
+		.default([])
 		.describe('Cases you looked at under this rule and did not report. Empty if none.'),
 	why: z.string().describe('One sentence: why nothing more was reported under this rule ("none observed" is fine).'),
 })
 
 export const reviewOutputSchema = z.object({
-	findings: z.array(modelFindingSchema),
+	findings: z.array(modelFindingSchema).default([]),
 	evaluation: z.array(ruleEvaluationSchema).describe('Exactly one entry for every rule, in the order given, even when nothing was found.'),
 	unexplained_files: z
 		.array(z.object({ file_path: z.string(), why: z.string() }))
+		.default([])
 		.describe('Changed files in this request whose change you could not connect to the purpose of the change. Empty if none.'),
 	limitations: z
 		.array(z.string())
+		.default([])
 		.describe(
 			'Missing context that kept you from deciding a rule and points at no specific problem on a changed line. A suspected problem you can place on a changed line is a "question" finding instead, when that level is allowed. Empty if none.',
 		),
 	outdated_docs: z
-		.array(z.object({ doc_path: z.string(), line: z.int().nullable(), why: z.string() }))
+		.array(z.object({ doc_path: z.string(), line: z.int().nullable().default(null), why: z.string() }))
 		.default([])
 		.describe('Project docs (.review/*.md) that this change makes wrong without updating them. Empty if none.'),
 })
+
+/** The answer with each finding left unchecked, so one malformed finding is rejected on its own instead of failing the rest. */
+export const reviewEnvelopeSchema = reviewOutputSchema.extend({ findings: z.array(z.unknown()).default([]) })
 
 export type ModelFinding = z.infer<typeof modelFindingSchema>
 export type ReviewOutput = z.input<typeof reviewOutputSchema> // outdated_docs may be missing from older or partial answers

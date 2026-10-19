@@ -373,7 +373,7 @@ test('partial coverage: one batch fails after retries, the other succeeds', asyn
 	assert.ok(provider.calls >= 1 + 3, 'transient failures are retried up to maxAttempts')
 })
 
-test('auth failures are not retried and stop the run; refusals and invalid output are not retried', async () => {
+test('auth failures are not retried and stop the run; refusals are not retried; invalid output is asked again once', async () => {
 	const auth = runWith(() => new ProviderError('auth', 'OpenAI rejected the API key (401). Check OPENAI_API_KEY.'))
 	const a = await auth.handle.done
 	assert.equal(a.status, 'failed')
@@ -384,9 +384,34 @@ test('auth failures are not retried and stop the run; refusals and invalid outpu
 	const invalid = runWith(() => ({ findings: [{ bogus: true }], limitations: [] }) as unknown as ReviewOutput)
 	const i = await invalid.handle.done
 	assert.equal(i.status, 'failed')
-	assert.equal(invalid.provider.calls, 1)
-	assert.ok(i.errors[0].includes('does not match the findings schema'))
+	assert.equal(invalid.provider.calls, 2)
+	assert.ok(i.errors[0].includes('does not match the findings schema: evaluation:'), 'names the field')
 	assert.equal(i.findings.length, 0)
+	// A model that ignores the schema once usually follows it the second time.
+	let calls = 0
+	const second = runWith(() => (++calls === 1 ? ({ findings: [] } as unknown as ReviewOutput) : out([finding()])))
+	const s2 = await second.handle.done
+	assert.equal(s2.status, 'completed')
+	assert.equal(s2.findings.length, 1)
+	assert.ok(s2.notices?.some((l) => l.includes('asked again')))
+})
+
+test('a malformed finding is rejected on its own; missing nulls and empty lists are read as such', async () => {
+	const { signature: _s, test_pattern: _t, disproof: _d, background: _b, ...bare } = finding()
+	const { start_line: _l, ...lineless } = finding({ title: 'No line' })
+	const { unexplained_files: _u, limitations: _lim, ...rest } = out([])
+	const { handle, provider } = runWith(() => ({ ...rest, findings: [bare, lineless] }) as unknown as ReviewOutput)
+	const run = await handle.done
+	assert.equal(provider.calls, 1)
+	assert.equal(run.status, 'completed')
+	assert.deepEqual(
+		run.findings.map((f) => f.title),
+		['Addition replaces subtraction'],
+	)
+	assert.deepEqual(
+		run.rejected.map((r) => [r.title, r.reason]),
+		[['No line', 'Malformed finding (start_line: Invalid input: expected number, received undefined)']],
+	)
 })
 
 test('cancellation aborts in-flight requests and ignores late responses', async () => {
