@@ -452,6 +452,7 @@ export async function changesBetween(
 }
 
 const ZERO = /^0+$/
+const GITLINK = '160000'
 
 export function parseChanges(raw: string, numstat: string): Pick<ComparisonData, 'blobs'> & { files: Array<ChangedFile> } {
 	const files: Array<ChangedFile> = []
@@ -460,7 +461,7 @@ export function parseChanges(raw: string, numstat: string): Pick<ComparisonData,
 	for (let i = 0; i < r.length; i++) {
 		const meta = r[i]
 		if (!meta.startsWith(':')) continue
-		const [, , oldBlob, newBlob, statusField] = meta.slice(1).split(' ')
+		const [oldMode, newMode, oldBlob, newBlob, statusField] = meta.slice(1).split(' ')
 		const letter = statusField[0]
 		const score = statusField.length > 1 ? Number(statusField.slice(1)) : null
 		let oldPath: string | null = r[++i]
@@ -470,8 +471,21 @@ export function parseChanges(raw: string, numstat: string): Pick<ComparisonData,
 		if (status === 'added') oldPath = null
 		if (status === 'deleted') newPath = null
 		const key = (newPath ?? oldPath) as string
-		files.push({ key, status, oldPath, newPath, additions: null, deletions: null, binary: false, similarity: score })
-		blobs.set(key, { oldBlob: ZERO.test(oldBlob) ? null : oldBlob, newBlob: ZERO.test(newBlob) ? null : newBlob })
+		// A gitlink's id is a commit in the submodule's repository, never an object here, so it is not kept as a blob.
+		const submodule = oldMode === GITLINK || newMode === GITLINK
+		files.push({
+			key,
+			status,
+			oldPath,
+			newPath,
+			additions: null,
+			deletions: null,
+			binary: false,
+			similarity: score,
+			...(submodule ? { submodule } : {}),
+		})
+		const blob = (id: string, mode: string): string | null => (ZERO.test(id) || mode === GITLINK ? null : id)
+		blobs.set(key, { oldBlob: blob(oldBlob, oldMode), newBlob: blob(newBlob, newMode) })
 	}
 	// numstat -z: "a\td\tpath\0" or, for renames, "a\td\t\0old\0new\0". Same order as --raw.
 	const n = numstat.split('\0')
