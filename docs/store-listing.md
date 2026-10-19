@@ -38,6 +38,7 @@ Copy and paste for the Chrome Web Store and Firefox Add-ons. Submit after the Re
 | Store icon 128×128 | `extension/icons/128.png`                                             |
 | Screenshots        | `screenshot-1.png`, `screenshot-2.png`, `screenshot-3.png` (1280×800) |
 | Small promo tile   | `promo-tile.png` (440×280)                                            |
+| Marquee promo tile | `marquee-tile.png` (1400×560, optional)                               |
 
 **Privacy practices tab:**
 
@@ -72,4 +73,6 @@ for n in screenshot-1 screenshot-2 screenshot-3; do
 done
 "$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=1 --virtual-time-budget=5000 \
   --window-size=440,280 --screenshot="$PWD/promo-tile.png" "file://$PWD/promo-tile.html"
+"$CHROME" --headless=new --hide-scrollbars --force-device-scale-factor=1 --virtual-time-budget=5000 \
+  --window-size=1400,560 --screenshot="$PWD/marquee-tile.png" "file://$PWD/marquee-tile.html"
 ```

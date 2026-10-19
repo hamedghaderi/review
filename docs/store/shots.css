@@ -72,3 +72,7 @@ kbd {
 	display: block;
 	width: 100%;
 }
+body.marquee {
+	width: 1400px;
+	height: 560px;
+}
