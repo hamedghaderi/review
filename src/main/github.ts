@@ -503,12 +503,42 @@ export class GitHubService {
 					baseRef: n.baseRefName,
 					crossRepo: n.isCrossRepository,
 					updatedAt: n.updatedAt,
+					collects: false,
 				})
 			}
-			if (!prs.pageInfo.hasNextPage) return { nodes, truncated: false, fetchedAt: new Date().toISOString() }
+			if (!prs.pageInfo.hasNextPage) return this.withCollectors(owner, name, nodes, false, signal)
 			after = prs.pageInfo.endCursor
 		}
-		return { nodes, truncated: true, fetchedAt: new Date().toISOString() }
+		return this.withCollectors(owner, name, nodes, true, signal)
+	}
+
+	/**
+	 * Marks the PRs whose head branch has already had a PR merged into it. A stack and an integration branch look the
+	 * same while open; only the integration branch takes merges before it merges itself. One query, only when some
+	 * open PR is based on another's head.
+	 */
+	private async withCollectors(
+		owner: string,
+		name: string,
+		nodes: Array<PrGraphNode>,
+		truncated: boolean,
+		signal?: AbortSignal,
+	): Promise<PrGraph> {
+		const bases = new Set(nodes.map((n) => n.baseRef))
+		const heads = [...new Set(nodes.filter((n) => !n.crossRepo && bases.has(n.headRef)).map((n) => n.headRef))].slice(0, COLLECTOR_MAX)
+		if (heads.length) {
+			const vars = heads.map((_, i) => `$b${i}: String!`).join(', ')
+			const fields = heads.map((_, i) => `b${i}: pullRequests(baseRefName: $b${i}, states: MERGED, first: 1) { totalCount }`).join('\n')
+			const query = `query($owner: String!, $name: String!, ${vars}) {\n  rateLimit { remaining limit resetAt }\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`
+			const data = await this.graphql<{ repository: Record<string, { totalCount: number }> | null }>(
+				query,
+				{ owner, name, ...Object.fromEntries(heads.map((h, i) => [`b${i}`, h])) },
+				signal,
+			)
+			const collecting = new Set(heads.filter((_, i) => (data.repository?.[`b${i}`]?.totalCount ?? 0) > 0))
+			for (const n of nodes) n.collects = !n.crossRepo && collecting.has(n.headRef)
+		}
+		return { nodes, truncated, fetchedAt: new Date().toISOString() }
 	}
 
 	/** Pull requests in `repo` whose head is `owner:branch`, in any state. */
@@ -1376,6 +1406,7 @@ interface GitHubPrefs {
 }
 
 const GRAPH_TTL_MS = 2 * 60_000
+const COLLECTOR_MAX = 100 // stack parents checked for merged PRs, in one query
 const GRAPH_MAX_PAGES = 10 // 1,000 open pull requests
 
 const GRAPH_QUERY = `query($owner: String!, $name: String!, $after: String) {

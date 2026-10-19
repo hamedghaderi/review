@@ -5,7 +5,7 @@ import type { AppError, BranchRef, InboxStatus, PrFilter, PrSummary, RepoInfo, R
 import { ago, defaultBaseFor, matchBranches } from './branches.ts'
 import { ReviewBadge } from './PrReview.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
-import { isStackBase, isStackStart, mergeFirstTitle, stackPosition } from './Stack.tsx'
+import { isStackBase, isStackStart, mergeFirstTitle, mergeLabel, stackPosition } from './Stack.tsx'
 import { stackGuide, type StackGuide } from '../../shared/prStack.ts'
 
 interface Props {
@@ -529,7 +529,7 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 				)}
 				{guide && isStackBase(guide, pr.number) && (
 					<span className="pill small-pill stack-base" title={mergeFirstTitle(guide, pr.number)}>
-						Merge first
+						{mergeLabel(guide)}
 					</span>
 				)}
 				{pr.state === 'draft' && <span className="pill small-pill">Draft</span>}
