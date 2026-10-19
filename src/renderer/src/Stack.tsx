@@ -50,12 +50,19 @@ export function isStackStart(g: StackGuide, number: number): boolean {
 export function StackList({ guide, current, onPick }: { guide: StackGuide; current: number; onPick(n: PrGraphNode): void }) {
 	// Said once when every PR is a draft, rather than on every row.
 	const allDraft = guide.members.every((m) => m.node.draft)
+	// Under an integration branch, PRs stacked on another PR wait for it: only the indent would say so otherwise.
+	const waits = guide.collects
+		? guide.members
+				.filter((m) => m.parent !== null && m.parent !== guide.bottom.node.number)
+				.map((m) => `#${m.node.number} waits for #${m.parent}`)
+		: []
 	return (
 		<div className="stack-list">
 			<div className="stack-list-head muted small">
 				{guide.collects
 					? `Review and merge in this order: the PRs on #${guide.bottom.node.number} merge into it first, then it merges${guide.base ? ` into ${guide.base}` : ''} last.`
 					: `Review bottom up: each PR's changes build on the one below. Merge #${guide.bottom.node.number}${guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.`}
+				{waits.length ? ` ${waits.join('; ')}.` : ''}
 				{allDraft ? ' All are drafts.' : ''}
 			</div>
 			<ol>
