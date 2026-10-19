@@ -76,7 +76,7 @@ import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { autoAddFindings, findingRoots } from '../shared/findings.ts'
 import { screenFinding } from '../shared/screen.ts'
-import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
+import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiScope, anchor, reviewUpdate } from './validate.ts'
@@ -871,6 +871,41 @@ export class ReviewService {
 			return inbox ? [{ ...pr, inbox }] : []
 		})
 		return { ...page, items: sortInbox(items), total: items.length }
+	}
+
+	/**
+	 * Every pull request waiting for you, in every repository, from the background check's last look. Reads only the
+	 * store, so it is free to call often.
+	 */
+	homeInbox(): HomeInbox {
+		const d = this.store.read()
+		const gh = this.github
+		if (!gh || gh.status().state !== 'connected') return { state: 'disconnected', at: null, prs: [] }
+		const watch = d.inboxWatch
+		const login = gh.status().login
+		// Another account's last look says nothing about this one.
+		if (!watch?.prs || (login && watch.login && watch.login.toLowerCase() !== login.toLowerCase()))
+			return { state: 'ready', at: null, prs: [] }
+		const known = this.knownGitHubRepos()
+		const muted = new Set(d.mutedRepos ?? [])
+		return {
+			state: 'ready',
+			at: watch.at,
+			prs: watch.prs.filter(waitsForYou).map((p) => ({
+				...p,
+				repoId: known.get(p.repo.toLowerCase()) ?? null,
+				muted: muted.has(p.repo.toLowerCase()),
+			})),
+		}
+	}
+
+	async setRepoMuted(repo: string, muted: boolean): Promise<HomeInbox> {
+		const key = repo.toLowerCase()
+		await this.store.update((d) => {
+			const rest = (d.mutedRepos ?? []).filter((r) => r !== key)
+			d.mutedRepos = muted ? [...rest, key] : rest
+		})
+		return this.homeInbox()
 	}
 
 	async markPrSeen(repoId: string, number: number): Promise<boolean> {

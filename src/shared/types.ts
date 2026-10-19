@@ -1,4 +1,5 @@
 import type { HeadChecks } from './ci.ts'
+import type { HomeInbox } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
 export type Side = 'old' | 'new'
 
@@ -243,7 +244,7 @@ export interface PrDescription {
 
 /** Sent to the window when a review-request notification is clicked. */
 export interface InboxOpen {
-	repoId: string
+	repoId: string | null // null: no clone of the repository has been opened yet
 	repo: string // "owner/name"
 	number: number
 }
@@ -1260,6 +1261,9 @@ export const IPC = {
 	takeLink: 'link:take',
 	linkOpen: 'link:open',
 	inboxChanged: 'inbox:changed',
+	homeInbox: 'inbox:home',
+	refreshHome: 'inbox:home-refresh',
+	setRepoMuted: 'inbox:mute',
 	reviewChanged: 'review:changed',
 	githubSetRepo: 'gh:repo-set',
 	searchPrs: 'gh:search',
@@ -1351,6 +1355,12 @@ export interface ReviewApi {
 	githubTestNotification(): Promise<Result<GitHubStatus>>
 	/** Turns automatic review on or off: new review requests are reviewed by AI and submitted on GitHub as you, approvals included. */
 	githubSetAutoReview(enabled: boolean): Promise<Result<GitHubStatus>>
+	/** Every pull request waiting for your review, in every repository, as the background check last saw them. */
+	homeInbox(): Promise<Result<HomeInbox>>
+	/** Checks GitHub now, then returns the start page's pull requests. */
+	refreshHome(): Promise<Result<HomeInbox>>
+	/** Mutes a GitHub repository ("owner/name"): its pull requests stop notifying and counting, but stay listed. */
+	setRepoMuted(repo: string, muted: boolean): Promise<Result<HomeInbox>>
 	/** Records that you looked at a pull request, so the Inbox stops calling it new. */
 	markPrSeen(repoId: string, number: number): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */

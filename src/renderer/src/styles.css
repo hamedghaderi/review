@@ -4631,3 +4631,108 @@ button.stack-row:hover {
 	flex: 1;
 	min-width: 0;
 }
+
+/* The start page: pull requests waiting for you, in every repository. */
+.repo-tab.home-tab {
+	flex-shrink: 0;
+	min-width: 0;
+}
+.repo-tab.home-tab .repo-tab-name {
+	padding-right: 10px;
+}
+.repo-tab.home-tab .repo-tab-count {
+	margin-left: -6px;
+	margin-right: 6px;
+}
+.home-body {
+	overflow-y: auto;
+}
+.home {
+	width: 100%;
+	max-width: 880px;
+	margin: 0 auto;
+	padding: 24px 16px 48px;
+}
+.home-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 16px;
+}
+.home-head h1 {
+	margin: 0;
+	font-size: 20px;
+	font-weight: 600;
+}
+.home-total {
+	min-width: 22px;
+	padding: 1px 7px;
+	border-radius: 11px;
+	background: var(--accent);
+	color: var(--accent-text);
+	font-size: 12px;
+	font-weight: 600;
+	text-align: center;
+}
+.home-note {
+	margin: 0 0 16px;
+}
+.home-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+.home-filter {
+	max-width: 320px;
+}
+.home-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+}
+.home-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	overflow: hidden;
+}
+.home-list li + li {
+	border-top: 1px solid var(--border);
+}
+.home-list li.muted-row {
+	opacity: 0.6;
+}
+.home-row {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	width: 100%;
+	min-width: 0;
+	padding: 8px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--text);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.home-row:hover {
+	background: var(--hover);
+}
+.home-row:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+/* One width for every status, so titles line up down the list. */
+.home-status {
+	flex-shrink: 0;
+	min-width: 104px;
+	justify-content: center;
+	text-align: center;
+}

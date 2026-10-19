@@ -1,16 +1,19 @@
-import { diffInbox, type InboxEvent } from '../shared/inbox.ts'
+import { diffInbox, homeCount, type InboxEvent } from '../shared/inbox.ts'
 import type { GitHubService } from './github.ts'
 import type { ReviewStore } from './store.ts'
 
 export type RepoEvent = InboxEvent & { repoId: string }
+/** A change in any repository; `repoId` is null when no clone of it has been opened in the app. */
+export type WatchEvent = InboxEvent & { repoId: string | null }
 
 export interface InboxWatcherOptions {
 	github: GitHubService
 	store: ReviewStore
 	/** GitHub repositories ("owner/name", lower case) of repositories opened in the app → their ids. */
 	known(): Map<string, string>
-	notify(events: Array<RepoEvent>): void
-	/** Open, non-draft requests in known repositories (0 clears the badge). */
+	/** Changes in every repository that is not muted, whether or not it was opened in the app. */
+	notify(events: Array<WatchEvent>): void
+	/** Pull requests waiting for you in repositories that are not muted, as the start page counts them (0 clears the badge). */
 	badge(count: number): void
 	/** The requests or reviewed pull requests changed since the last check, so open lists can reload. */
 	changed?(): void
@@ -20,8 +23,8 @@ export interface InboxWatcherOptions {
 /**
  * Checks your review requests and reviewed pull requests on GitHub every minute and reports what changed: a new
  * request, a request after you already reviewed, a draft marked ready, or new commits on one you reviewed. The last state is stored, so changes made while the app was closed
- * are reported at the next start. Every repository is tracked (one search covers them all), but only repositories
- * opened in the app notify, so opening a repository for the first time does not announce its existing requests.
+ * are reported at the next start. Every repository is tracked (one search covers them all) and notifies unless muted,
+ * whether or not it was opened in the app. It runs whenever GitHub is connected, since the start page lists what it saw.
  */
 export class InboxWatcher {
 	private timer: ReturnType<typeof setTimeout> | null = null
@@ -69,23 +72,21 @@ export class InboxWatcher {
 		const { github, store } = this.o
 		this.lastCheck = Date.now()
 		const notify = github.notifications.enabled
-		// Automatic review needs the same check, so it runs while either is on; only notifications show a badge.
-		if ((!notify && !github.autoReview) || github.status().state !== 'connected') return this.o.badge(0)
+		if (github.status().state !== 'connected') return this.o.badge(0)
 		try {
 			const r = await github.watchRequests()
 			if (!r) return this.o.badge(0)
 			const saved = store.read().inboxWatch
 			const prev = saved && saved.login === r.viewer ? saved.state : null
 			const { events, state } = diffInbox(prev, r.prs)
-			await store.update((d) => void (d.inboxWatch = { login: r.viewer, state, at: new Date().toISOString() }))
+			await store.update((d) => void (d.inboxWatch = { login: r.viewer, state, at: new Date().toISOString(), prs: r.prs }))
 			const known = this.o.known()
-			this.o.badge(notify ? r.prs.filter((p) => p.requested !== false && !p.draft && known.has(p.repo.toLowerCase())).length : 0)
+			const muted = new Set(store.read().mutedRepos ?? [])
+			const isMuted = (repo: string): boolean => muted.has(repo.toLowerCase())
+			this.o.badge(notify ? homeCount(r.prs.map((p) => ({ ...p, repoId: null, muted: isMuted(p.repo) }))) : 0)
 			if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) this.o.changed?.()
-			const mine = events.flatMap((e) => {
-				const repoId = known.get(e.pr.repo.toLowerCase())
-				return repoId ? [{ ...e, repoId }] : []
-			})
-			if (mine.length) this.o.notify(mine)
+			const loud = events.filter((e) => !isMuted(e.pr.repo)).map((e) => ({ ...e, repoId: known.get(e.pr.repo.toLowerCase()) ?? null }))
+			if (loud.length) this.o.notify(loud)
 		} catch (e) {
 			// Offline, rate-limited or a revoked token: try again at the next interval; the status shows the cause.
 			console.warn('[inbox] could not check review requests:', e instanceof Error ? e.message : e)
