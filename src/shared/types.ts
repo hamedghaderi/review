@@ -139,6 +139,7 @@ export interface PrGraphNode {
 	baseRef: string
 	crossRepo: boolean // head is in a fork, so no PR in this repository can be based on it
 	updatedAt: string
+	collects: boolean // PRs have been merged into its head branch: the PRs on it merge into it, then it merges
 }
 
 export interface PrGraph {

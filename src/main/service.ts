@@ -778,8 +778,9 @@ export class ReviewService {
 			if (target.kind === 'pr') {
 				const d = await this.requireGitHub().detail(target.repo, target.number)
 				const head = d.headSha !== stored.headSha
-				const base = !!stored.pr && d.baseSha !== stored.pr.baseSha
-				const summary = head ? `New head ${d.headSha.slice(0, 7)}` : base ? `Base moved to ${d.baseSha.slice(0, 7)}` : null
+				// The base branch's tip moving (a busy main) leaves merge-base..head as it was; only a retarget changes the diff.
+				const base = !!stored.pr && (d.baseRef ?? '') !== stored.pr.baseRef
+				const summary = head ? `New head ${d.headSha.slice(0, 7)}` : base ? `Retargeted to ${d.baseRef}` : null
 				return { repo: null, changed: head || base, summary, error: null }
 			}
 			const repo = await this.reread(repoId)

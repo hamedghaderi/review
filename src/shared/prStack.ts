@@ -143,6 +143,7 @@ export interface StackGuide {
 	members: Array<StackMember> // the whole stack, bottom first: depth-first, PRs on the same parent in number order
 	index: number // where the PR asked about sits in `members`
 	bottom: StackMember // the PR every other one is built on, directly or not: it merges first, the rest wait for it
+	collects: boolean // the bottom is an integration branch: the PRs on it merge into it first, and it merges last
 	next: StackMember | null // the lowest PR that needs you, drafts only when no ready PR does: where to start, or go next
 }
 
@@ -178,6 +179,7 @@ export function stackGuide(graph: PrGraph, number: number, mine: ReadonlyMap<num
 		members,
 		index: members.findIndex((m) => m.node.number === number),
 		bottom: members[0],
+		collects: root.collects,
 		// Drafts wait for ready PRs; a stack that is all drafts still has a place to start.
 		next: members.find((m) => m.mine === 'needs-you' && !m.node.draft) ?? members.find((m) => m.mine === 'needs-you') ?? null,
 	}

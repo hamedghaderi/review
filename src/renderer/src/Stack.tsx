@@ -15,14 +15,24 @@ export function stackPosition(g: StackGuide): string {
 	return `${g.index + 1}/${g.members.length}`
 }
 
-/** Whether `number` is the bottom of its stack: every other PR is built on it, so it merges first. */
+/** Whether `number` is the bottom of its stack: every other PR is built on it, so it merges first (or last, when it collects them). */
 export function isStackBase(g: StackGuide, number: number): boolean {
 	return g.bottom.node.number === number
 }
 
-/** The "Merge first" tooltip, from the bottom PR's side or from a PR built on it. */
+/** The bottom PR's pill: "Merge first", or "Merge last" when the PRs on it merge into its branch. */
+export function mergeLabel(g: StackGuide): string {
+	return g.collects ? 'Merge last' : 'Merge first'
+}
+
+/** The merge-order tooltip, from the bottom PR's side or from a PR built on it. */
 export function mergeFirstTitle(g: StackGuide, number: number): string {
 	const into = g.base ? ` into ${g.base}` : ''
+	const bottom = g.bottom.node.number
+	if (g.collects)
+		return isStackBase(g, number)
+			? `PRs have already been merged into this PR's branch, so it collects the PRs on it: merge those into it first, then this one${into}.`
+			: `#${bottom} collects the PRs on it: merge this one into #${bottom}'s branch first, then #${bottom}${into}. You can still review this one now.`
 	return isStackBase(g, number)
 		? `Every other PR in this stack is built on this one: merge it${into} first. You can still review the others in any order.`
 		: `This stack is built on #${g.bottom.node.number}: merge that${into} first, then the rest. You can still review this one now.`
@@ -43,8 +53,10 @@ export function StackList({ guide, current, onPick }: { guide: StackGuide; curre
 	return (
 		<div className="stack-list">
 			<div className="stack-list-head muted small">
-				Review bottom up: each PR's changes build on the one below. Merge #{guide.bottom.node.number}
-				{guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.
+				Review bottom up: each PR's changes build on the one below.{' '}
+				{guide.collects
+					? `The PRs on #${guide.bottom.node.number} merge into it first; it merges${guide.base ? ` into ${guide.base}` : ''} last.`
+					: `Merge #${guide.bottom.node.number}${guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.`}
 				{allDraft ? ' All are drafts.' : ''}
 			</div>
 			<ol>
@@ -56,7 +68,7 @@ export function StackList({ guide, current, onPick }: { guide: StackGuide; curre
 						draft={m.node.draft && !allDraft}
 						current={m.node.number === current}
 						next={guide.next === m}
-						base={guide.bottom === m ? mergeFirstTitle(guide, m.node.number) : null}
+						base={guide.bottom === m ? { label: mergeLabel(guide), title: mergeFirstTitle(guide, m.node.number) } : null}
 						onPick={onPick}
 					/>
 				))}
@@ -79,7 +91,7 @@ function StackItem({
 	draft: boolean
 	current: boolean
 	next: boolean
-	base: string | null // the "Merge first" tooltip on the bottom PR
+	base: { label: string; title: string } | null // the merge-order pill on the bottom PR
 	onPick(n: PrGraphNode): void
 }) {
 	const body = (
@@ -90,8 +102,8 @@ function StackItem({
 			<span className="mono stack-num">#{m.node.number}</span>
 			<span className="ellipsis stack-title">{m.node.title}</span>
 			{base && (
-				<span className="pill small-pill stack-base" title={base}>
-					Merge first
+				<span className="pill small-pill stack-base" title={base.title}>
+					{base.label}
 				</span>
 			)}
 			{draft && <span className="muted small">draft</span>}
@@ -165,7 +177,7 @@ export function StackControl({ guide, number, onOpen }: { guide: StackGuide; num
 			</button>
 			{isStackBase(guide, number) && (
 				<span className="pill small-pill stack-base nowrap" title={mergeFirstTitle(guide, number)}>
-					Merge first
+					{mergeLabel(guide)}
 				</span>
 			)}
 			{next && (

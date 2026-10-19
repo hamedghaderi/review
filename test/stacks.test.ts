@@ -15,6 +15,7 @@ const node = (number: number, headRef: string, baseRef: string, over: Partial<Pr
 	baseRef,
 	crossRepo: false,
 	updatedAt: '2026-10-01T00:00:00Z',
+	collects: false,
 	...over,
 })
 
@@ -177,6 +178,71 @@ test('the open-PR graph is read page by page, cached, and not read without a tok
 	assert.equal(g.truncated, false)
 	await gh.openPrGraph('O/R')
 	assert.equal(calls.length, 2, 'served from the cache')
+})
+
+test('a PR whose branch has had PRs merged into it collects the PRs on it; one query, only for stack parents', async () => {
+	const queries: Array<{ query: string; variables: Record<string, unknown> }> = []
+	const pr = (number: number, headRefName: string, baseRefName: string, isCrossRepository = false) => ({
+		number,
+		title: `PR ${number}`,
+		url: `u${number}`,
+		isDraft: false,
+		updatedAt: '2026-10-01T00:00:00Z',
+		author: { login: 'a' },
+		headRefName,
+		baseRefName,
+		isCrossRepository,
+	})
+	const gh = new GitHubService(tokens(), {
+		base: 'http://gh.test',
+		fetch: async (url, init) => {
+			if (url.endsWith('/user')) return Response.json({ login: 'me' })
+			const req = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> }
+			queries.push(req)
+			const rateLimit = { remaining: 4999, limit: 5000, resetAt: '2026-10-01T01:00:00Z' }
+			if (req.query.includes('states: OPEN'))
+				return Response.json({
+					data: {
+						rateLimit,
+						repository: {
+							pullRequests: {
+								pageInfo: { hasNextPage: false, endCursor: null },
+								nodes: [
+									pr(1, 'integration', 'main'),
+									pr(2, 'part', 'integration'),
+									pr(3, 'stack', 'main'),
+									pr(4, 'top', 'stack'),
+									pr(5, 'lonely', 'main'),
+								],
+							},
+						},
+					},
+				})
+			// Only `integration` has had a PR merged into it.
+			const counts = Object.fromEntries(
+				Object.entries(req.variables)
+					.filter(([k]) => /^b\d+$/.test(k))
+					.map(([k, ref]) => [k, { totalCount: ref === 'integration' ? 1 : 0 }]),
+			)
+			return Response.json({ data: { rateLimit, repository: counts } })
+		},
+	})
+	await gh.setToken('t', false)
+	const g = (await gh.openPrGraph('o/r'))!
+	assert.equal(queries.length, 2)
+	assert.deepEqual(
+		Object.entries(queries[1].variables)
+			.filter(([k]) => k.startsWith('b'))
+			.map(([, v]) => v),
+		['integration', 'stack'],
+		'only branches another open PR is based on, passed as variables',
+	)
+	assert.deepEqual(
+		g.nodes.filter((n) => n.collects).map((n) => n.number),
+		[1],
+	)
+	assert.equal(stackGuide(g, 2, null)?.collects, true, 'the PR on it merges into it first')
+	assert.equal(stackGuide(g, 4, null)?.collects, false, 'an ordinary stack: the bottom merges first')
 })
 
 test('stack guide: the whole stack bottom up from any member, where it sits, and the lowest PR that needs you', () => {

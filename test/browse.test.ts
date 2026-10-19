@@ -563,6 +563,23 @@ test('fork PR opens at merge-base(base, head)..head without touching the checkou
 		assert.equal(store.read().repos[s.repo.id].reviews[c.id].pr!.number, 7)
 		assert.ok(!mock.seen.some((x) => x.url.includes('/merge')), 'never asks for the synthetic merge commit')
 
+		// The base branch moving on leaves the diff as it was; retargeting the PR does not.
+		for (const [change, expected] of [
+			[{ baseSha: w.base }, null],
+			[{ baseRef: 'release' }, 'Retargeted to release'],
+		] as const) {
+			const moved = await mockGitHub([{ ...PR7(w), ...change }])
+			try {
+				const svcMoved = new ReviewService(store, new GitHubService(memoryTokens(), { base: moved.base }))
+				const sMoved = await svcMoved.open(w.clone)
+				const probe = await svcMoved.probeTarget(sMoved.repo.id, c.id)
+				assert.equal(probe.changed, expected !== null)
+				assert.equal(probe.summary, expected)
+			} finally {
+				await moved.close()
+			}
+		}
+
 		// A new push shows "update available"; the old snapshot and its comments stay put.
 		const sd = runner(w.seed)
 		sd('checkout', '-q', 'feat/login')
