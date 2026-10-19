@@ -245,6 +245,39 @@ test('a PR whose branch has had PRs merged into it collects the PRs on it; one q
 	assert.equal(stackGuide(g, 4, null)?.collects, false, 'an ordinary stack: the bottom merges first')
 })
 
+test('stack guide: an integration branch comes after the PRs on it, which keep their own stacking order', () => {
+	const g: PrGraph = {
+		truncated: false,
+		fetchedAt: '2026-10-01T00:00:00Z',
+		nodes: [
+			node(1, 'integration', 'main', { collects: true }),
+			node(2, 'email', 'integration'),
+			node(3, 'exports', 'email'),
+			node(4, 'folder', 'integration'),
+		],
+	}
+	const guide = stackGuide(
+		g,
+		1,
+		new Map<number, MyReview>([
+			[1, 'needs-you'],
+			[3, 'needs-you'],
+		]),
+	)!
+	assert.deepEqual(
+		guide.members.map((m) => [m.node.number, m.depth]),
+		[
+			[2, 0],
+			[3, 1],
+			[4, 0],
+			[1, 0],
+		],
+	)
+	assert.equal(guide.index, 3, 'the integration PR is last')
+	assert.equal(guide.bottom.node.number, 1, 'still the PR the others are built on')
+	assert.equal(guide.next?.node.number, 3, 'start with a PR that merges into it')
+})
+
 test('stack guide: the whole stack bottom up from any member, where it sits, and the lowest PR that needs you', () => {
 	const mine = new Map<number, MyReview>([
 		[1, 'approved'],

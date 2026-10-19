@@ -140,7 +140,7 @@ export interface StackMember {
 
 export interface StackGuide {
 	base: string | null // the branch the bottom of the stack targets
-	members: Array<StackMember> // the whole stack, bottom first: depth-first, PRs on the same parent in number order
+	members: Array<StackMember> // the whole stack, bottom first (last when it collects): depth-first, same parent in number order
 	index: number // where the PR asked about sits in `members`
 	bottom: StackMember // the PR every other one is built on, directly or not: it merges first, the rest wait for it
 	collects: boolean // the bottom is an integration branch: the PRs on it merge into it first, and it merges last
@@ -174,13 +174,16 @@ export function stackGuide(graph: PrGraph, number: number, mine: ReadonlyMap<num
 	}
 	walk(root, 0, null)
 	if (members.length < 2) return null
+	const bottom = members[0]
+	// An integration branch takes the PRs on it before it merges, so it comes last; they keep their own stacking order.
+	const ordered = root.collects ? [...members.slice(1).map((m) => ({ ...m, depth: m.depth - 1 })), bottom] : members
 	return {
 		base: root.baseRef,
-		members,
-		index: members.findIndex((m) => m.node.number === number),
-		bottom: members[0],
+		members: ordered,
+		index: ordered.findIndex((m) => m.node.number === number),
+		bottom,
 		collects: root.collects,
 		// Drafts wait for ready PRs; a stack that is all drafts still has a place to start.
-		next: members.find((m) => m.mine === 'needs-you' && !m.node.draft) ?? members.find((m) => m.mine === 'needs-you') ?? null,
+		next: ordered.find((m) => m.mine === 'needs-you' && !m.node.draft) ?? ordered.find((m) => m.mine === 'needs-you') ?? null,
 	}
 }

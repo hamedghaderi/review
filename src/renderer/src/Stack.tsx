@@ -10,7 +10,7 @@ const MINE: Record<MyReview, { label: string; title: string }> = {
 	commented: { label: 'You commented', title: 'You reviewed it without approving; no new commits since' },
 }
 
-/** "2/6", for rows and pills: where a PR sits in its stack, counted from the bottom. */
+/** "2/6", for rows and pills: where a PR sits in its stack, in review order. */
 export function stackPosition(g: StackGuide): string {
 	return `${g.index + 1}/${g.members.length}`
 }
@@ -53,10 +53,9 @@ export function StackList({ guide, current, onPick }: { guide: StackGuide; curre
 	return (
 		<div className="stack-list">
 			<div className="stack-list-head muted small">
-				Review bottom up: each PR's changes build on the one below.{' '}
 				{guide.collects
-					? `The PRs on #${guide.bottom.node.number} merge into it first; it merges${guide.base ? ` into ${guide.base}` : ''} last.`
-					: `Merge #${guide.bottom.node.number}${guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.`}
+					? `Review and merge in this order: the PRs on #${guide.bottom.node.number} merge into it first, then it merges${guide.base ? ` into ${guide.base}` : ''} last.`
+					: `Review bottom up: each PR's changes build on the one below. Merge #${guide.bottom.node.number}${guide.base ? ` into ${guide.base}` : ''} first; the rest wait for it.`}
 				{allDraft ? ' All are drafts.' : ''}
 			</div>
 			<ol>
@@ -184,7 +183,7 @@ export function StackControl({ guide, number, onOpen }: { guide: StackGuide; num
 				<button
 					className={`btn small ${below ? 'stack-first' : ''}`}
 					onClick={() => onOpen(next.node.number)}
-					title={`${next.node.title}\n${below ? 'A PR below this one still needs your review; it is easier to follow from the bottom up.' : 'The next PR in this stack that needs your review.'}`}
+					title={`${next.node.title}\n${below ? (guide.collects ? 'A PR that merges into this one still needs your review; it is easier to follow before this one.' : 'A PR below this one still needs your review; it is easier to follow from the bottom up.') : 'The next PR in this stack that needs your review.'}`}
 				>
 					{below ? `Review #${next.node.number} first ↓` : `Next: #${next.node.number} →`}
 				</button>
