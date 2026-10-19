@@ -62,6 +62,8 @@ import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { Home, useHomeInbox } from './Home.tsx'
+import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
 
@@ -123,7 +125,9 @@ export function App() {
 	const [tabs, setTabs] = useState<Array<RepoTab>>([])
 	const [tabError, setTabError] = useState<string | null>(null)
 	// A pull request link whose repository has no clone in the app yet, and why the last pick did not match it.
-	const [linkWaiting, setLinkWaiting] = useState<{ link: LinkOpen; note: string | null } | null>(null)
+	// A pull request to open once you pick its clone; `prompt`: it came from a link, so the Run dialog opens with it.
+	const [cloning, setCloning] = useState<string | null>(null) // "owner/name" the app is cloning into its own folder
+	const [linkWaiting, setLinkWaiting] = useState<{ link: LinkOpen & { prompt: boolean }; note: string | null } | null>(null)
 	// The review a link opened: its Run AI review dialog opens once, so starting a run is still your click.
 	const [runPromptFor, setRunPromptFor] = useState<string | null>(null)
 	const [busy, setBusy] = useState<string | null>('Restoring last review…')
@@ -143,7 +147,9 @@ export function App() {
 	const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null)
 	const [updateProgress, setUpdateProgress] = useState<number | null>(null) // while downloading
 	const [updateError, setUpdateError] = useState<string | null>(null)
-	const [githubOpen, setGithubOpen] = useState(false)
+	const [githubOpen, setGithubOpen] = useState<boolean | 'clones'>(false) // 'clones': opened at the app's clones
+	// The start page: every pull request waiting for you, in every repository. Shown at launch when nothing is restored.
+	const [home, setHome] = useState(false)
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
@@ -421,7 +427,10 @@ export function App() {
 	useEffect(() => {
 		void window.review
 			.restoreLast()
-			.then(openSession)
+			.then(async (r) => {
+				await openSession(r)
+				if (!r.ok || !r.value) setHome(true)
+			})
 			.then(() => takeLinkRef.current())
 	}, [openSession])
 	useEffect(() => window.review.onLinkOpen(() => void takeLinkRef.current()), [])
@@ -446,16 +455,24 @@ export function App() {
 		[openSession, persist],
 	)
 
-	// A clicked review-request notification opens that PR's review, switching to its repository first if needed.
-	useEffect(
-		() =>
-			window.review.onInboxOpen(async (t) => {
-				if (!(await switchRepo(t.repoId))) return
-				void window.review.markPrSeen(t.repoId, t.number)
-				await openReview(t.repoId, { kind: 'target', target: { kind: 'pr', repo: t.repo, number: t.number } })
-			}),
+	/** Opens a pull request's review in the clone that maps to its repository; without one, asks for the clone first. */
+	const openPr = useCallback(
+		async (link: LinkOpen, prompt = false): Promise<boolean> => {
+			if (!link.repoId) {
+				setLinkWaiting({ link: { ...link, prompt }, note: null })
+				return false
+			}
+			setLinkWaiting(null)
+			if (!(await switchRepo(link.repoId))) return false
+			setHome(false)
+			void window.review.markPrSeen(link.repoId, link.number)
+			return !!(await openReview(link.repoId, { kind: 'target', target: { kind: 'pr', repo: link.repo, number: link.number } }))
+		},
 		[switchRepo, openReview],
 	)
+
+	// A clicked review-request notification opens that PR's review, switching to its repository first if needed.
+	useEffect(() => window.review.onInboxOpen((t) => void openPr({ repoId: t.repoId, repo: t.repo, number: t.number })), [openPr])
 
 	/** Closes a repository tab. Closing the one on screen moves to its neighbour, or to the empty state if it was the last. */
 	const closeTab = async (repoId: string): Promise<void> => {
@@ -466,12 +483,18 @@ export function App() {
 			setTabError(r.error.message)
 			return
 		}
-		const at = tabs.findIndex((t) => t.id === repoId)
-		setTabs(r.value)
+		await leaveRepo(repoId, r.value, active)
+	}
+
+	/** After a repository's tab is gone: the tabs left, and if it was on screen, its neighbour or Home. */
+	const leaveRepo = async (repoId: string, left: Array<RepoTab>, active: boolean): Promise<void> => {
+		const at = tabsRef.current.findIndex((t) => t.id === repoId)
+		setTabs(left)
 		setTabError(null)
 		if (!active) return
-		const next = r.value[Math.min(Math.max(at, 0), r.value.length - 1)]
+		const next = left[Math.min(Math.max(at, 0), left.length - 1)]
 		if (next && (await switchRepo(next.id))) return
+		setHome(true)
 		comparisonIdRef.current = null
 		setSession(null)
 		setBrowser(null)
@@ -481,6 +504,20 @@ export function App() {
 		setCompareError(null)
 		setRepoError(null)
 	}
+
+	/** Deletes one of the app's own clones (the main process asks first). Returns whether it was deleted. */
+	const deleteAppClone = async (repoId: string): Promise<boolean> => {
+		const active = sessionRepoRef.current === repoId
+		const r = await window.review.deleteAppClone(repoId)
+		if (!r.ok) {
+			setTabError(r.error.message)
+			return false
+		}
+		if (!r.value.deleted) return false
+		await leaveRepo(repoId, r.value.tabs, active)
+		void refreshHomeInbox()
+		return true
+	}
 	const tabsRef = useRef(tabs)
 	tabsRef.current = tabs
 	const switchRepoRef = useRef(switchRepo)
@@ -489,21 +526,15 @@ export function App() {
 	const openRepo = async (): Promise<void> => {
 		await persist()
 		setBusy('Opening repository…')
-		await openSession(await window.review.openRepository())
+		const r = await window.review.openRepository()
+		await openSession(r)
 		setBusy(null)
+		if (r.ok && r.value) setHome(false)
 	}
 
 	/** Opens a linked pull request's review in the clone that maps to its repository, with the Run dialog ready. */
 	const openLink = async (link: LinkOpen): Promise<void> => {
-		if (!link.repoId) {
-			setLinkWaiting({ link, note: null })
-			return
-		}
-		setLinkWaiting(null)
-		if (!(await switchRepo(link.repoId))) return
-		void window.review.markPrSeen(link.repoId, link.number)
-		if (await openReview(link.repoId, { kind: 'target', target: { kind: 'pr', repo: link.repo, number: link.number } }))
-			setRunPromptFor(comparisonIdRef.current)
+		if (await openPr(link, true)) setRunPromptFor(comparisonIdRef.current)
 	}
 	takeLinkRef.current = async () => {
 		const r = await window.review.takeLink()
@@ -511,7 +542,7 @@ export function App() {
 	}
 
 	// Picks the clone for a waiting link; a folder that maps to another GitHub repository keeps the link waiting.
-	const openLinkClone = async (link: LinkOpen): Promise<void> => {
+	const openLinkClone = async (link: LinkOpen & { prompt: boolean }): Promise<void> => {
 		await persist()
 		setBusy('Opening repository…')
 		const r = await window.review.openRepository()
@@ -519,12 +550,46 @@ export function App() {
 		setBusy(null)
 		if (!r.ok || !r.value) return
 		const repos = [r.value.github.selected, ...r.value.github.candidates.map((c) => c.repo)]
-		if (repos.some((x) => x?.toLowerCase() === link.repo.toLowerCase())) await openLink({ ...link, repoId: r.value.repo.id })
-		else
+		if (repos.some((x) => x?.toLowerCase() === link.repo.toLowerCase())) {
+			if ((await openPr({ ...link, repoId: r.value.repo.id }, link.prompt)) && link.prompt) setRunPromptFor(comparisonIdRef.current)
+		} else
 			setLinkWaiting({
 				link,
 				note: r.value.github.selected ? `That folder is a clone of ${r.value.github.selected}.` : 'That folder has no GitHub remote.',
 			})
+	}
+
+	const [homeInbox, setHomeInbox] = useHomeInbox(true, github?.state)
+	const openFromHome = (pr: HomePr): Promise<boolean> => openPr({ repoId: pr.repoId, repo: pr.repo, number: pr.number })
+	const muteRepo = async (repo: string, muted: boolean): Promise<void> => {
+		const r = await window.review.setRepoMuted(repo, muted)
+		if (r.ok) setHomeInbox(r.value)
+	}
+	const refreshHome = async (): Promise<void> => {
+		const r = await window.review.refreshHome()
+		if (r.ok) setHomeInbox(r.value)
+	}
+	// Re-reads what the last check saw (no GitHub request), e.g. after a clone is deleted.
+	const refreshHomeInbox = async (): Promise<void> => {
+		const r = await window.review.homeInbox()
+		if (r.ok) setHomeInbox(r.value)
+	}
+
+	// Clones a waiting link's repository into the app's own folder (the first time), then opens the pull request there.
+	const openAppClone = async (link: LinkOpen & { prompt: boolean }): Promise<void> => {
+		const parent = await window.review.chooseCloneFolder(link.repo)
+		if (!parent.ok) return setLinkWaiting({ link, note: parent.error.message })
+		if (!parent.value) return
+		await persist()
+		setLinkWaiting(null)
+		setCloning(link.repo)
+		const r = await window.review.openGitHubClone(link.repo, parent.value).finally(() => setCloning(null))
+		if (!r.ok) {
+			setLinkWaiting({ link, note: `Could not clone it: ${r.error.message}` })
+			return
+		}
+		await openSession(r)
+		if ((await openPr({ ...link, repoId: r.value.repo.id }, link.prompt)) && link.prompt) setRunPromptFor(comparisonIdRef.current)
 	}
 
 	const chooseSnapshot = async (reviewId: string): Promise<void> => {
@@ -645,7 +710,7 @@ export function App() {
 		}
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Global shortcuts: Cmd/Ctrl+, settings, Cmd/Ctrl+P quick open, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible
+	// Global shortcuts: Cmd/Ctrl+, settings, Cmd/Ctrl+P quick open, Cmd/Ctrl+0 Home, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible
 	// search unless typing somewhere.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
@@ -654,6 +719,11 @@ export function App() {
 			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ',') {
 				e.preventDefault()
 				setSettingsOpen({ team: null })
+				return
+			}
+			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === '0') {
+				e.preventDefault()
+				setHome(true)
 				return
 			}
 			if (!sessionRef.current) return
@@ -666,6 +736,7 @@ export function App() {
 				const tab = e.key === '9' ? list[list.length - 1] : list[Number(e.key) - 1]
 				if (!tab) return
 				e.preventDefault()
+				setHome(false)
 				void switchRepoRef.current(tab.id)
 			} else if (
 				e.key === '/' &&
@@ -1053,293 +1124,327 @@ export function App() {
 
 	return (
 		<div className="app">
-			{tabs.length > 0 && (
-				<RepoTabs
-					tabs={tabs}
-					activeId={session?.repo.id ?? null}
-					error={tabError}
-					onSelect={(id) => void switchRepo(id)}
-					onClose={(id) => void closeTab(id)}
-					onOpen={() => void openRepo()}
-					onDismissError={() => setTabError(null)}
-				/>
+			<RepoTabs
+				tabs={tabs}
+				activeId={home ? null : (session?.repo.id ?? null)}
+				home={{ on: home, count: homeInbox ? homeCount(homeInbox.prs) : 0 }}
+				error={tabError}
+				onHome={() => setHome(true)}
+				onSelect={(id) => {
+					setHome(false)
+					void switchRepo(id)
+				}}
+				onClose={(id) => void closeTab(id)}
+				onOpen={() => void openRepo()}
+				onDismissError={() => setTabError(null)}
+			/>
+			{cloning && (
+				<div className="notice link-notice" role="status">
+					<span>
+						<span className="spinner" aria-hidden /> Cloning {cloning}… The first time can take a few minutes for a large repository.
+					</span>
+				</div>
 			)}
 			{linkWaiting && (
 				<div className="notice link-notice" role="status">
 					<span>
 						{linkWaiting.note ? `${linkWaiting.note} ` : ''}To review {linkWaiting.link.repo}#{linkWaiting.link.number}, open your clone of{' '}
-						{linkWaiting.link.repo}.
+						{linkWaiting.link.repo}, or let the app clone it.
 					</span>
 					<button className="btn small" onClick={() => void openLinkClone(linkWaiting.link)}>
 						Open clone…
+					</button>
+					<button
+						className="btn small"
+						onClick={() => void openAppClone(linkWaiting.link)}
+						title="The app keeps its own partial clone in its data folder: file contents download as they are read. The first time can take a few minutes for a large repository. A clone you open yourself is used instead whenever there is one."
+					>
+						Clone for me
 					</button>
 					<button className="btn small ghost" onClick={() => setLinkWaiting(null)} aria-label="Dismiss">
 						✕
 					</button>
 				</div>
 			)}
-			<header className="header">
-				<div className="hctx">
-					{!repo && (
-						<button className="btn repo-btn" onClick={() => void openRepo()}>
-							<span className="ellipsis">Open repository</span>
-						</button>
-					)}
-					{repo && session && browser && (
-						<>
-							<div className="seg view-switch" role="tablist" aria-label="Workspace">
-								<button
-									role="tab"
-									aria-selected={view === 'browse'}
-									className={view === 'browse' ? 'on' : ''}
-									onClick={() => void backToBrowser()}
-								>
-									Browse
+			{!home && (
+				<>
+					<header className="header">
+						<div className="hctx">
+							{!repo && (
+								<button className="btn repo-btn" onClick={() => void openRepo()}>
+									<span className="ellipsis">Open repository</span>
 								</button>
-								<button
-									role="tab"
-									aria-selected={view === 'review'}
-									className={view === 'review' ? 'on' : ''}
-									disabled={!comparison}
-									onClick={() => setView('review')}
-									title={comparison ? undefined : 'Open a review from the browser first'}
-								>
-									Review
-								</button>
-							</div>
-							{view === 'browse' && (
-								<span
-									className="hfield shrink checked-out"
-									title={`Checked out: ${repo.branch ?? 'detached HEAD'}. Opening a review never changes it.`}
-								>
-									<span className="muted">Checked out</span>
-									<span className="mono ellipsis">{repo.branch ?? `detached HEAD${repo.headSha ? ` @ ${short(repo.headSha)}` : ''}`}</span>
-								</span>
 							)}
-						</>
-					)}
-				</div>
-				<div className="hactions">
-					{session && (
-						<button
-							className="btn ghost icon"
-							onClick={() => setPaletteOpen(true)}
-							title="Go to a pull request or branch (⌘P / Ctrl+P)"
-							aria-label="Go to"
-						>
-							<svg
-								width="15"
-								height="15"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-								strokeLinecap="round"
-								aria-hidden="true"
+							{repo && session && browser && (
+								<>
+									<div className="seg view-switch" role="tablist" aria-label="Workspace">
+										<button
+											role="tab"
+											aria-selected={view === 'browse'}
+											className={view === 'browse' ? 'on' : ''}
+											onClick={() => void backToBrowser()}
+										>
+											Browse
+										</button>
+										<button
+											role="tab"
+											aria-selected={view === 'review'}
+											className={view === 'review' ? 'on' : ''}
+											disabled={!comparison}
+											onClick={() => setView('review')}
+											title={comparison ? undefined : 'Open a review from the browser first'}
+										>
+											Review
+										</button>
+									</div>
+									{view === 'browse' && (
+										<span
+											className="hfield shrink checked-out"
+											title={`Checked out: ${repo.branch ?? 'detached HEAD'}. Opening a review never changes it.`}
+										>
+											<span className="muted">Checked out</span>
+											<span className="mono ellipsis">
+												{repo.branch ?? `detached HEAD${repo.headSha ? ` @ ${short(repo.headSha)}` : ''}`}
+											</span>
+										</span>
+									)}
+								</>
+							)}
+						</div>
+						<div className="hactions">
+							{session && (
+								<button
+									className="btn ghost icon"
+									onClick={() => setPaletteOpen(true)}
+									title="Go to a pull request or branch (⌘P / Ctrl+P)"
+									aria-label="Go to"
+								>
+									<svg
+										width="15"
+										height="15"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										strokeWidth="2"
+										strokeLinecap="round"
+										aria-hidden="true"
+									>
+										<circle cx="11" cy="11" r="7" />
+										<path d="m20 20-3.5-3.5" />
+									</svg>
+								</button>
+							)}
+							{view === 'review' && comparison && review && (
+								<div className="hgroup ai-group">
+									<ModelPicker
+										settings={aiSettings}
+										selection={aiSelection}
+										disabled={activeRun !== null}
+										onSelect={(sel) => void selectModel(sel)}
+										onSelectTeam={(id) => void selectTeam(id)}
+										onManage={(team) => setSettingsOpen({ team: team ?? null })}
+									/>
+									{reviewer && (
+										<AiRunControl
+											settings={aiSettings}
+											reviewer={reviewer}
+											activeRun={activeRun}
+											currentFile={file}
+											fileCount={comparison.files.length}
+											openNow={runPromptFor === comparison.id}
+											onOpened={() => setRunPromptFor(null)}
+											onStart={(scope, passes, persona) => void startAi(scope, passes, persona)}
+											onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
+										/>
+									)}
+								</div>
+							)}
+							{view === 'review' && review && (
+								<>
+									<button
+										className={`btn ghost small save-status ${save.kind === 'error' ? 'error' : 'muted'}`}
+										onClick={() => {
+											dirtyRef.current = true
+											void persist()
+										}}
+										disabled={save.kind === 'saving'}
+										title={saveTitle}
+									>
+										<span role="status" aria-live="polite">
+											{saveLabel}
+										</span>
+									</button>
+									{comparison?.pr ? (
+										<button
+											className="btn primary"
+											onClick={() => setPublishOpen(true)}
+											title={
+												unsent
+													? `Send your ${unsent} unsent comment${unsent === 1 ? '' : 's'} to a pending review on GitHub, then submit it when you're ready.`
+													: 'Nothing new to send. Open to submit your pending review on GitHub, or see what was published.'
+											}
+										>
+											Publish
+										</button>
+									) : (
+										!branchPr.data?.prs.length && (
+											<button
+												className="btn"
+												disabled
+												title={
+													!session?.github.selected
+														? 'Publishing needs a GitHub remote and a pull request.'
+														: branchPr.error
+															? `This is a branch review, and its pull request couldn’t be looked up: ${lookupProblem(branchPr.error)}`
+															: 'This is a branch review, and no pull request was found for this branch. Publishing works on pull request reviews.'
+												}
+											>
+												Publish
+											</button>
+										)
+									)}
+								</>
+							)}
+							<span className="divider" />
+							<button
+								className={`btn ghost icon settings-btn gh-status ${github?.state ?? 'checking'}`}
+								onClick={() => setGithubOpen(true)}
+								title={`${githubStatusText(github)}\nClick for GitHub settings.`}
+								aria-label={`GitHub settings. ${githubStatusText(github)}`}
 							>
-								<circle cx="11" cy="11" r="7" />
-								<path d="m20 20-3.5-3.5" />
-							</svg>
-						</button>
-					)}
-					{view === 'review' && comparison && review && (
-						<div className="hgroup ai-group">
-							<ModelPicker
-								settings={aiSettings}
-								selection={aiSelection}
-								disabled={activeRun !== null}
-								onSelect={(sel) => void selectModel(sel)}
-								onSelectTeam={(id) => void selectTeam(id)}
-								onManage={(team) => setSettingsOpen({ team: team ?? null })}
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+									<path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+								</svg>
+								<span className="gh-dot" aria-hidden="true" />
+							</button>
+							<button
+								className="btn ghost icon settings-btn"
+								onClick={() => setSettingsOpen({ team: null })}
+								title={`Settings · AI providers (${MOD_KEY},)`}
+								aria-label="Settings"
+							>
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+									<circle cx="12" cy="12" r="3" />
+								</svg>
+							</button>
+						</div>
+					</header>
+					{view === 'review' && comparison && repo && (
+						<div className="target-bar">
+							<TargetLabel
+								comparison={comparison}
+								author={comparison.pr?.author ?? (prReview?.id === comparison.id ? prReview.author : null)}
 							/>
-							{reviewer && (
-								<AiRunControl
-									settings={aiSettings}
-									reviewer={reviewer}
-									activeRun={activeRun}
-									currentFile={file}
-									fileCount={comparison.files.length}
-									openNow={runPromptFor === comparison.id}
-									onOpened={() => setRunPromptFor(null)}
-									onStart={(scope, passes, persona) => void startAi(scope, passes, persona)}
-									onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
+							{comparison.pr && prReview?.id === comparison.id && (
+								<ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />
+							)}
+							{guide && comparison.pr && session && (
+								<StackControl
+									guide={guide}
+									number={comparison.pr.number}
+									onOpen={(n) =>
+										void openReview(session.repo.id, { kind: 'target', target: { kind: 'pr', repo: comparison.pr!.repo, number: n } })
+									}
 								/>
+							)}
+							{snapshotsForTarget.length > 1 && (
+								<label
+									className="hfield shrink snapshot-pick"
+									title="Earlier snapshots of this target stay pinned to their original commits"
+								>
+									<span className="muted">Snapshot</span>
+									<select value={comparison.id} onChange={(e) => void chooseSnapshot(e.target.value)}>
+										{snapshotsForTarget.map((s) => (
+											<option key={s.id} value={s.id}>
+												{short(s.headSha)} · {new Date(s.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+												{s.comments ? ` · ${s.comments} comment${s.comments === 1 ? '' : 's'}` : ''}
+											</option>
+										))}
+									</select>
+								</label>
+							)}
+							{repo.uncommitted > 0 && (
+								<span className="pill warn" title="Only committed changes are reviewed. Working-tree and staged changes are not included.">
+									{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'} excluded
+								</span>
 							)}
 						</div>
 					)}
-					{view === 'review' && review && (
-						<>
-							<button
-								className={`btn ghost small save-status ${save.kind === 'error' ? 'error' : 'muted'}`}
-								onClick={() => {
-									dirtyRef.current = true
-									void persist()
-								}}
-								disabled={save.kind === 'saving'}
-								title={saveTitle}
-							>
-								<span role="status" aria-live="polite">
-									{saveLabel}
-								</span>
-							</button>
-							{comparison?.pr ? (
-								<button
-									className="btn primary"
-									onClick={() => setPublishOpen(true)}
-									title={
-										unsent
-											? `Send your ${unsent} unsent comment${unsent === 1 ? '' : 's'} to a pending review on GitHub, then submit it when you're ready.`
-											: 'Nothing new to send. Open to submit your pending review on GitHub, or see what was published.'
-									}
-								>
-									Publish
-								</button>
-							) : (
-								!branchPr.data?.prs.length && (
-									<button
-										className="btn"
-										disabled
-										title={
-											!session?.github.selected
-												? 'Publishing needs a GitHub remote and a pull request.'
-												: branchPr.error
-													? `This is a branch review, and its pull request couldn’t be looked up: ${lookupProblem(branchPr.error)}`
-													: 'This is a branch review, and no pull request was found for this branch. Publishing works on pull request reviews.'
-										}
-									>
-										Publish
-									</button>
-								)
-							)}
-						</>
-					)}
-					<span className="divider" />
-					<button
-						className={`btn ghost icon settings-btn gh-status ${github?.state ?? 'checking'}`}
-						onClick={() => setGithubOpen(true)}
-						title={`${githubStatusText(github)}\nClick for GitHub settings.`}
-						aria-label={`GitHub settings. ${githubStatusText(github)}`}
-					>
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-							<path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
-						</svg>
-						<span className="gh-dot" aria-hidden="true" />
-					</button>
-					<button
-						className="btn ghost icon settings-btn"
-						onClick={() => setSettingsOpen({ team: null })}
-						title={`Settings · AI providers (${MOD_KEY},)`}
-						aria-label="Settings"
-					>
-						<svg
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							aria-hidden="true"
-						>
-							<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-							<circle cx="12" cy="12" r="3" />
-						</svg>
-					</button>
-				</div>
-			</header>
-			{view === 'review' && comparison && repo && (
-				<div className="target-bar">
-					<TargetLabel
-						comparison={comparison}
-						author={comparison.pr?.author ?? (prReview?.id === comparison.id ? prReview.author : null)}
-					/>
-					{comparison.pr && prReview?.id === comparison.id && <ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />}
-					{guide && comparison.pr && session && (
-						<StackControl
-							guide={guide}
-							number={comparison.pr.number}
-							onOpen={(n) =>
-								void openReview(session.repo.id, { kind: 'target', target: { kind: 'pr', repo: comparison.pr!.repo, number: n } })
-							}
-						/>
-					)}
-					{snapshotsForTarget.length > 1 && (
-						<label className="hfield shrink snapshot-pick" title="Earlier snapshots of this target stay pinned to their original commits">
-							<span className="muted">Snapshot</span>
-							<select value={comparison.id} onChange={(e) => void chooseSnapshot(e.target.value)}>
-								{snapshotsForTarget.map((s) => (
-									<option key={s.id} value={s.id}>
-										{short(s.headSha)} · {new Date(s.updatedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-										{s.comments ? ` · ${s.comments} comment${s.comments === 1 ? '' : 's'}` : ''}
-									</option>
-								))}
-							</select>
-						</label>
-					)}
-					{repo.uncommitted > 0 && (
-						<span className="pill warn" title="Only committed changes are reviewed. Working-tree and staged changes are not included.">
-							{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'} excluded
-						</span>
-					)}
-				</div>
-			)}
 
-			{view === 'review' && update && comparison && (
-				<div className="banner" role="status">
-					<span>
-						Update available: {update.summary}. Your comments carry over to the update, and those whose lines changed are marked outdated.
-						This snapshot ({short(comparison.baseSha)}…{short(comparison.headSha)}) keeps its own comments, findings and viewed files.
-					</span>
-					<button className="btn small primary" onClick={() => void loadLatest()} disabled={!!busy}>
-						{comparison.pr ? 'Fetch and review update' : 'Review update'}
-					</button>
-				</div>
-			)}
-			{view === 'review' && comparison && !comparison.pr && branchPr.error && (
-				<div className="banner" role="status">
-					<span>
-						This is a <strong>branch review</strong>, so it can’t be published. To publish, open the branch’s pull request as a review; but{' '}
-						{isAuthProblem(branchPr.error)
-							? 'this repository needs a GitHub token to list its pull requests.'
-							: lookupProblem(branchPr.error)}
-					</span>
-					{isAuthProblem(branchPr.error) && (
-						<button className="btn small primary" onClick={() => setGithubOpen(true)}>
-							Connect GitHub
+					{view === 'review' && update && comparison && (
+						<div className="banner" role="status">
+							<span>
+								Update available: {update.summary}. Your comments carry over to the update, and those whose lines changed are marked
+								outdated. This snapshot ({short(comparison.baseSha)}…{short(comparison.headSha)}) keeps its own comments, findings and
+								viewed files.
+							</span>
+							<button className="btn small primary" onClick={() => void loadLatest()} disabled={!!busy}>
+								{comparison.pr ? 'Fetch and review update' : 'Review update'}
+							</button>
+						</div>
+					)}
+					{view === 'review' && comparison && !comparison.pr && branchPr.error && (
+						<div className="banner" role="status">
+							<span>
+								This is a <strong>branch review</strong>, so it can’t be published. To publish, open the branch’s pull request as a review;
+								but{' '}
+								{isAuthProblem(branchPr.error)
+									? 'this repository needs a GitHub token to list its pull requests.'
+									: lookupProblem(branchPr.error)}
+							</span>
+							{isAuthProblem(branchPr.error) && (
+								<button className="btn small primary" onClick={() => setGithubOpen(true)}>
+									Connect GitHub
+								</button>
+							)}
+						</div>
+					)}
+					{view === 'review' && comparison && !comparison.pr && branchPr.data?.prs[0] && (
+						<div className="banner" role="status">
+							<span>
+								This branch has a pull request. Open it as a pull request review to publish comments to GitHub. Your comments carry over,
+								and this branch review keeps its own copy.
+							</span>
+							<BranchPrHint data={branchPr.data} error={null} opening={!!busy} onOpen={openBranchPr} />
+						</div>
+					)}
+					{view === 'review' &&
+						comparison?.pr &&
+						!publishOpen &&
+						pendingReview?.reviewId === comparison.id &&
+						pendingReview.comments > 0 && (
+							<div className="banner" role="status">
+								<span>
+									Your review on GitHub is <strong>still pending</strong>: {pendingReview.comments} comment
+									{pendingReview.comments === 1 ? '' : 's'} only you can see. Submit it to share{' '}
+									{pendingReview.comments === 1 ? 'it' : 'them'} with the author.
+								</span>
+								<span className="spacer" />
+								<button className="btn small primary" onClick={() => setPublishOpen(true)}>
+									Submit review…
+								</button>
+								<button className="btn small ghost" onClick={() => setPendingReview(null)} aria-label="Dismiss">
+									✕
+								</button>
+							</div>
+						)}
+					{view === 'review' && notice && (
+						<button className="banner notice-banner" onClick={() => setNotice(null)} title="Dismiss">
+							{notice} ✕
 						</button>
 					)}
-				</div>
-			)}
-			{view === 'review' && comparison && !comparison.pr && branchPr.data?.prs[0] && (
-				<div className="banner" role="status">
-					<span>
-						This branch has a pull request. Open it as a pull request review to publish comments to GitHub. Your comments carry over, and
-						this branch review keeps its own copy.
-					</span>
-					<BranchPrHint data={branchPr.data} error={null} opening={!!busy} onOpen={openBranchPr} />
-				</div>
-			)}
-			{view === 'review' && comparison?.pr && !publishOpen && pendingReview?.reviewId === comparison.id && pendingReview.comments > 0 && (
-				<div className="banner" role="status">
-					<span>
-						Your review on GitHub is <strong>still pending</strong>: {pendingReview.comments} comment
-						{pendingReview.comments === 1 ? '' : 's'} only you can see. Submit it to share {pendingReview.comments === 1 ? 'it' : 'them'}{' '}
-						with the author.
-					</span>
-					<span className="spacer" />
-					<button className="btn small primary" onClick={() => setPublishOpen(true)}>
-						Submit review…
-					</button>
-					<button className="btn small ghost" onClick={() => setPendingReview(null)} aria-label="Dismiss">
-						✕
-					</button>
-				</div>
-			)}
-			{view === 'review' && notice && (
-				<button className="banner notice-banner" onClick={() => setNotice(null)} title="Dismiss">
-					{notice} ✕
-				</button>
+				</>
 			)}
 			{appUpdate && (
 				<div className={`banner${updateError ? ' error-banner' : ''}`} role={updateError ? 'alert' : 'status'}>
@@ -1396,292 +1501,308 @@ export function App() {
 				</div>
 			)}
 
-			<main className="body">
-				{session && browser && (
-					<div className="workspace" hidden={view !== 'browse'}>
-						<Browser
-							key={session.repo.id}
-							ref={browserRef}
-							repo={repo ?? session.repo}
-							state={browser}
-							github={github}
-							mapping={session.github}
-							reviews={session.reviews}
-							opening={opening !== null}
-							onState={updateBrowser}
-							onOpen={(t) => void openReview(session.repo.id, { kind: 'target', target: t })}
-							onOpenSnapshot={(id) => void chooseSnapshot(id)}
-							onConnectGitHub={() => setGithubOpen(true)}
-							onRefreshRepo={() => void refreshSession(session.repo.id)}
-						/>
-						{opening && (
-							<div className="opening-overlay" role="status">
-								<span className="spinner" aria-hidden /> {busy}
-								<button className="btn small" onClick={() => void window.review.cancelOpen()}>
-									Cancel
-								</button>
-							</div>
-						)}
-					</div>
-				)}
-				{session && view === 'browse' ? null : busy && !comparison ? (
-					<div className="empty">{busy}</div>
-				) : repoError && !session ? (
-					<ErrorState error={repoError} onOpen={() => void openRepo()} />
-				) : !session ? (
-					<div className="empty">
-						<h1>Review</h1>
-						<p className="muted">Open a local Git repository to review its committed branch changes.</p>
-						<button className="btn primary" onClick={() => void openRepo()}>
-							Open repository
-						</button>
-					</div>
-				) : compareError ? (
-					<ErrorState error={compareError} onOpen={() => void backToBrowser()} openLabel="Back to browser" />
-				) : comparison && review ? (
-					<>
-						{repoError && (
-							<button className="notice floating" onClick={() => setRepoError(null)} title="Dismiss">
-								{repoError.message} ✕
-							</button>
-						)}
-						<aside className="side left" style={{ width: left.width }}>
-							<FileTree
-								files={comparison.files}
-								selected={selected}
-								viewed={viewed}
-								commented={commented}
-								onSelect={selectFile}
-								onToggleViewed={(k) => change((r) => ops.setViewed(r, k, !viewed.has(k)))}
-								onNextUnreviewed={nextUnreviewed}
+			{home ? (
+				<main className="body home-body">
+					<Home
+						inbox={homeInbox}
+						notifications={!!github?.notifications.enabled}
+						onOpen={(pr) => void openFromHome(pr)}
+						onMute={(repo, muted) => void muteRepo(repo, muted)}
+						onRefresh={refreshHome}
+						onConnect={() => setGithubOpen(true)}
+						onOpenRepo={() => void openRepo()}
+						onDeleteClone={(repoId) => void deleteAppClone(repoId)}
+						onManageClones={() => setGithubOpen('clones')}
+					/>
+				</main>
+			) : (
+				<main className="body">
+					{session && browser && (
+						<div className="workspace" hidden={view !== 'browse'}>
+							<Browser
+								key={session.repo.id}
+								ref={browserRef}
+								repo={repo ?? session.repo}
+								state={browser}
+								github={github}
+								mapping={session.github}
+								reviews={session.reviews}
+								opening={opening !== null}
+								onState={updateBrowser}
+								onOpen={(t) => void openReview(session.repo.id, { kind: 'target', target: t })}
+								onOpenSnapshot={(id) => void chooseSnapshot(id)}
+								onConnectGitHub={() => setGithubOpen(true)}
+								onRefreshRepo={() => void refreshSession(session.repo.id)}
 							/>
-						</aside>
-						<Splitter onPointerDown={left.start(1)} />
-						<section className="center">
-							{comparison.files.length === 0 ? (
-								<div className="empty">
-									<h2>No committed changes</h2>
-									<p className="muted">{emptyReason(comparison)}</p>
-									{repo && repo.uncommitted > 0 && (
-										<p className="muted">
-											{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} excluded. Review only reads commits,
-											so commit the work (for example on a feature branch) to review it here.
-										</p>
-									)}
-									<p className="muted">
-										<button className="link" onClick={() => void backToBrowser()}>
-											Back to browser
-										</button>{' '}
-										to pick a different base branch or target.
-									</p>
+							{opening && (
+								<div className="opening-overlay" role="status">
+									<span className="spinner" aria-hidden /> {busy}
+									<button className="btn small" onClick={() => void window.review.cancelOpen()}>
+										Cancel
+									</button>
 								</div>
-							) : outside ? (
-								<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
-							) : file ? (
-								<DiffView
-									key={`${comparison.id}:${file.key}`}
-									comparison={comparison}
-									file={file}
-									viewed={viewed.has(file.key)}
-									comments={fileComments}
-									drafts={fileDrafts}
-									activeDraftId={activeDraftId}
-									reveal={reveal}
-									highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
-									threads={fileThreads}
-									published={published}
-									questions={fileQuestions}
-									asking={asking}
-									askDisabled={askDisabled}
-									askModel={aiSettings?.questionModel?.modelId ?? null}
-									askModelPicker={askModelPicker}
-									onAskCode={askCode}
-									onDeleteQuestion={(id) => void deleteQuestion(id)}
-									discussed={discussed}
-									onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
-									onStartDraft={(a) => {
-										const res = ops.startDraft(review, a, activeDraftId)
-										change(() => res.review)
-										setActiveDraftId(res.id)
-									}}
-									onUpdateDraft={(id, patch) => change((r) => ops.updateDraft(r, id, patch))}
-									onActivateDraft={(id) => {
-										const cur = review.drafts.find((d) => d.id === activeDraftId)
-										if (cur && cur.id !== id && ops.isBlank(cur)) change((r) => ops.discardDraft(r, cur.id))
-										setActiveDraftId(id)
-									}}
-									onSubmitDraft={(id) => {
-										change((r) => ops.submitDraft(r, id))
-										setActiveDraftId(null)
-									}}
-									onDiscardDraft={(id) => {
-										change((r) => ops.discardDraft(r, id))
-										if (id === activeDraftId) setActiveDraftId(null)
-									}}
-									onEditComment={(cid) => {
-										const res = ops.editComment(review, cid)
-										if (!res.id) return
-										change(() => res.review)
-										setActiveDraftId(res.id)
-									}}
-									onDeleteComment={(cid) => {
-										if (!window.confirm('Delete this comment?')) return
-										change((r) => ops.deleteComment(r, cid))
-									}}
-									onShowFinding={showFinding}
-									onReply={
-										comparison.pr
-											? async (threadId, body, resolve) => {
-													const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, resolve)
-													if (!r.ok) return r.error.message
-													loadDiscussion(session.repo.id, comparison.id)
-													return null
-												}
-											: undefined
-									}
-									onLookup={(r) => void lookup(r)}
-									placeRef={placeRef}
+							)}
+						</div>
+					)}
+					{session && view === 'browse' ? null : busy && !comparison ? (
+						<div className="empty">{busy}</div>
+					) : repoError && !session ? (
+						<ErrorState error={repoError} onOpen={() => void openRepo()} />
+					) : !session ? (
+						<div className="empty">
+							<h1>Review</h1>
+							<p className="muted">Open a local Git repository to review its committed branch changes.</p>
+							<button className="btn primary" onClick={() => void openRepo()}>
+								Open repository
+							</button>
+						</div>
+					) : compareError ? (
+						<ErrorState error={compareError} onOpen={() => void backToBrowser()} openLabel="Back to browser" />
+					) : comparison && review ? (
+						<>
+							{repoError && (
+								<button className="notice floating" onClick={() => setRepoError(null)} title="Dismiss">
+									{repoError.message} ✕
+								</button>
+							)}
+							<aside className="side left" style={{ width: left.width }}>
+								<FileTree
+									files={comparison.files}
+									selected={selected}
+									viewed={viewed}
+									commented={commented}
+									onSelect={selectFile}
+									onToggleViewed={(k) => change((r) => ops.setViewed(r, k, !viewed.has(k)))}
+									onNextUnreviewed={nextUnreviewed}
 								/>
-							) : (
-								<div className="empty muted">Select a file.</div>
-							)}
-						</section>
-						<Splitter onPointerDown={right.start(-1)} />
-						<aside className="side right" style={{ width: right.width }}>
-							<div className="panel-title tabs" role="tablist">
-								<button
-									role="tab"
-									aria-selected={rightTab === 'comments'}
-									className={rightTab === 'comments' ? 'on' : ''}
-									onClick={() => setRightTab('comments')}
-								>
-									My comments <span className="count">{review.comments.length}</span>
-								</button>
-								<button
-									role="tab"
-									aria-selected={rightTab === 'findings'}
-									className={rightTab === 'findings' ? 'on' : ''}
-									onClick={() => setRightTab('findings')}
-								>
-									Findings <span className="count">{aiRuns[aiRuns.length - 1]?.findings.length ?? 0}</span>
-									{activeRun && <AiOrb activity="reasoning" size={14} label="AI review running" />}
-								</button>
-								{isPrReview && (
-									<button
-										role="tab"
-										aria-selected={rightTab === 'description'}
-										className={rightTab === 'description' ? 'on' : ''}
-										onClick={() => setRightTab('description')}
-										title="The pull request description, as GitHub shows it; edit it here"
-									>
-										Description
-									</button>
-								)}
-								{isPrReview && (
-									<button
-										role="tab"
-										aria-selected={rightTab === 'github'}
-										className={rightTab === 'github' ? 'on' : ''}
-										onClick={() => setRightTab('github')}
-										title="Existing review threads, reviews and conversation on GitHub (read-only)"
-									>
-										GitHub <span className="count">{threads.filter((t) => t.resolved !== true).length}</span>
-										{current?.loading && <span className="spinner small" aria-label="loading" />}
-									</button>
-								)}
-								<button
-									role="tab"
-									aria-selected={rightTab === 'context'}
-									className={rightTab === 'context' ? 'on' : ''}
-									onClick={() => setRightTab('context')}
-									title="Notes and files you give the AI reviewer"
-								>
-									Context
-									{!!review.context && (
-										<span className="count">
-											{review.context.files.length + (review.context.images?.length ?? 0) + (review.context.notes.trim() ? 1 : 0)}
-										</span>
-									)}
-								</button>
-							</div>
-							{aiError && (
-								<button className="notice" onClick={() => setAiError(null)} title="Dismiss">
-									{aiError} ✕
-								</button>
-							)}
-							<PanelBoundary resetKey={`${comparison?.id ?? ''}|${rightTab}`}>
-								{rightTab === 'context' ? (
-									<ContextPanel
-										context={review.context ?? null}
-										isPr={isPrReview}
-										onNotes={(notes) => change((r) => ops.setContextNotes(r, notes))}
-										onAddFiles={(f) => change((r) => ops.addContextFiles(r, f))}
-										onRemoveFile={(id) => change((r) => ops.removeContextFile(r, id))}
-										onAddImages={(i) => change((r) => ops.addContextImages(r, i))}
-										onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
-									/>
-								) : rightTab === 'description' && isPrReview && session && comparison ? (
-									<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => setGithubOpen(true)} />
-								) : rightTab === 'github' && isPrReview ? (
-									<DiscussionPanel
-										discussion={current?.value ?? null}
-										loading={!!current?.loading}
-										files={files}
-										onRefresh={() => session && comparison && loadDiscussion(session.repo.id, comparison.id)}
-										onOpen={openThread}
-										onConnect={() => setGithubOpen(true)}
-									/>
-								) : rightTab === 'comments' || rightTab === 'github' || rightTab === 'description' ? (
-									<CommentsPanel
-										comments={review.comments}
-										drafts={review.drafts}
-										files={files}
-										unsent={isPrReview ? ops.unsentIds(review) : null}
-										replied={
-											isPrReview
-												? new Set(
-														review.comments
-															.filter((c) => {
-																const t = ownThread(threads, ownIds(c.id))
-																return !!t && hasReply(t)
-															})
-															.map((c) => c.id),
-													)
-												: null
+							</aside>
+							<Splitter onPointerDown={left.start(1)} />
+							<section className="center">
+								{comparison.files.length === 0 ? (
+									<div className="empty">
+										<h2>No committed changes</h2>
+										<p className="muted">{emptyReason(comparison)}</p>
+										{repo && repo.uncommitted > 0 && (
+											<p className="muted">
+												{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} excluded. Review only reads commits,
+												so commit the work (for example on a feature branch) to review it here.
+											</p>
+										)}
+										<p className="muted">
+											<button className="link" onClick={() => void backToBrowser()}>
+												Back to browser
+											</button>{' '}
+											to pick a different base branch or target.
+										</p>
+									</div>
+								) : outside ? (
+									<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
+								) : file ? (
+									<DiffView
+										key={`${comparison.id}:${file.key}`}
+										comparison={comparison}
+										file={file}
+										viewed={viewed.has(file.key)}
+										comments={fileComments}
+										drafts={fileDrafts}
+										activeDraftId={activeDraftId}
+										reveal={reveal}
+										highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
+										threads={fileThreads}
+										published={published}
+										questions={fileQuestions}
+										asking={asking}
+										askDisabled={askDisabled}
+										askModel={aiSettings?.questionModel?.modelId ?? null}
+										askModelPicker={askModelPicker}
+										onAskCode={askCode}
+										onDeleteQuestion={(id) => void deleteQuestion(id)}
+										discussed={discussed}
+										onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
+										onStartDraft={(a) => {
+											const res = ops.startDraft(review, a, activeDraftId)
+											change(() => res.review)
+											setActiveDraftId(res.id)
+										}}
+										onUpdateDraft={(id, patch) => change((r) => ops.updateDraft(r, id, patch))}
+										onActivateDraft={(id) => {
+											const cur = review.drafts.find((d) => d.id === activeDraftId)
+											if (cur && cur.id !== id && ops.isBlank(cur)) change((r) => ops.discardDraft(r, cur.id))
+											setActiveDraftId(id)
+										}}
+										onSubmitDraft={(id) => {
+											change((r) => ops.submitDraft(r, id))
+											setActiveDraftId(null)
+										}}
+										onDiscardDraft={(id) => {
+											change((r) => ops.discardDraft(r, id))
+											if (id === activeDraftId) setActiveDraftId(null)
+										}}
+										onEditComment={(cid) => {
+											const res = ops.editComment(review, cid)
+											if (!res.id) return
+											change(() => res.review)
+											setActiveDraftId(res.id)
+										}}
+										onDeleteComment={(cid) => {
+											if (!window.confirm('Delete this comment?')) return
+											change((r) => ops.deleteComment(r, cid))
+										}}
+										onShowFinding={showFinding}
+										onReply={
+											comparison.pr
+												? async (threadId, body, resolve) => {
+														const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, resolve)
+														if (!r.ok) return r.error.message
+														loadDiscussion(session.repo.id, comparison.id)
+														return null
+													}
+												: undefined
 										}
-										onOpen={openItem}
+										onLookup={(r) => void lookup(r)}
+										placeRef={placeRef}
 									/>
 								) : (
-									<FindingsPanel
-										runs={aiRuns}
-										review={review}
-										roots={roots}
-										files={files}
-										aiProblem={aiProblem}
-										threads={threads}
-										selectedFindingId={selectedFinding?.id ?? null}
-										askFocus={askFocus}
-										onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
-										onStop={(run) => void window.review.cancelAiReview(run.id)}
-										onOpen={openFinding}
-										onAccept={acceptFinding}
-										onAsk={askFinding}
-										askModelPicker={askModelPicker}
-										onDismiss={(f, reason) => {
-											change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))
-											if (selectedFinding?.id === f.id) setSelectedFinding(null)
-										}}
-										onNote={(f, note) => change((r) => ops.setDismissNote(r, f.id, note))}
-										onRestore={(f) => change((r) => ops.setFindingDecision(r, f.id, 'open'))}
-									/>
+									<div className="empty muted">Select a file.</div>
 								)}
-							</PanelBoundary>
-						</aside>
-					</>
-				) : (
-					<div className="empty">{busy ?? 'Loading…'}</div>
-				)}
-			</main>
+							</section>
+							<Splitter onPointerDown={right.start(-1)} />
+							<aside className="side right" style={{ width: right.width }}>
+								<div className="panel-title tabs" role="tablist">
+									<button
+										role="tab"
+										aria-selected={rightTab === 'comments'}
+										className={rightTab === 'comments' ? 'on' : ''}
+										onClick={() => setRightTab('comments')}
+									>
+										My comments <span className="count">{review.comments.length}</span>
+									</button>
+									<button
+										role="tab"
+										aria-selected={rightTab === 'findings'}
+										className={rightTab === 'findings' ? 'on' : ''}
+										onClick={() => setRightTab('findings')}
+									>
+										Findings <span className="count">{aiRuns[aiRuns.length - 1]?.findings.length ?? 0}</span>
+										{activeRun && <AiOrb activity="reasoning" size={14} label="AI review running" />}
+									</button>
+									{isPrReview && (
+										<button
+											role="tab"
+											aria-selected={rightTab === 'description'}
+											className={rightTab === 'description' ? 'on' : ''}
+											onClick={() => setRightTab('description')}
+											title="The pull request description, as GitHub shows it; edit it here"
+										>
+											Description
+										</button>
+									)}
+									{isPrReview && (
+										<button
+											role="tab"
+											aria-selected={rightTab === 'github'}
+											className={rightTab === 'github' ? 'on' : ''}
+											onClick={() => setRightTab('github')}
+											title="Existing review threads, reviews and conversation on GitHub (read-only)"
+										>
+											GitHub <span className="count">{threads.filter((t) => t.resolved !== true).length}</span>
+											{current?.loading && <span className="spinner small" aria-label="loading" />}
+										</button>
+									)}
+									<button
+										role="tab"
+										aria-selected={rightTab === 'context'}
+										className={rightTab === 'context' ? 'on' : ''}
+										onClick={() => setRightTab('context')}
+										title="Notes and files you give the AI reviewer"
+									>
+										Context
+										{!!review.context && (
+											<span className="count">
+												{review.context.files.length + (review.context.images?.length ?? 0) + (review.context.notes.trim() ? 1 : 0)}
+											</span>
+										)}
+									</button>
+								</div>
+								{aiError && (
+									<button className="notice" onClick={() => setAiError(null)} title="Dismiss">
+										{aiError} ✕
+									</button>
+								)}
+								<PanelBoundary resetKey={`${comparison?.id ?? ''}|${rightTab}`}>
+									{rightTab === 'context' ? (
+										<ContextPanel
+											context={review.context ?? null}
+											isPr={isPrReview}
+											onNotes={(notes) => change((r) => ops.setContextNotes(r, notes))}
+											onAddFiles={(f) => change((r) => ops.addContextFiles(r, f))}
+											onRemoveFile={(id) => change((r) => ops.removeContextFile(r, id))}
+											onAddImages={(i) => change((r) => ops.addContextImages(r, i))}
+											onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
+										/>
+									) : rightTab === 'description' && isPrReview && session && comparison ? (
+										<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => setGithubOpen(true)} />
+									) : rightTab === 'github' && isPrReview ? (
+										<DiscussionPanel
+											discussion={current?.value ?? null}
+											loading={!!current?.loading}
+											files={files}
+											onRefresh={() => session && comparison && loadDiscussion(session.repo.id, comparison.id)}
+											onOpen={openThread}
+											onConnect={() => setGithubOpen(true)}
+										/>
+									) : rightTab === 'comments' || rightTab === 'github' || rightTab === 'description' ? (
+										<CommentsPanel
+											comments={review.comments}
+											drafts={review.drafts}
+											files={files}
+											unsent={isPrReview ? ops.unsentIds(review) : null}
+											replied={
+												isPrReview
+													? new Set(
+															review.comments
+																.filter((c) => {
+																	const t = ownThread(threads, ownIds(c.id))
+																	return !!t && hasReply(t)
+																})
+																.map((c) => c.id),
+														)
+													: null
+											}
+											onOpen={openItem}
+										/>
+									) : (
+										<FindingsPanel
+											runs={aiRuns}
+											review={review}
+											roots={roots}
+											files={files}
+											aiProblem={aiProblem}
+											threads={threads}
+											selectedFindingId={selectedFinding?.id ?? null}
+											askFocus={askFocus}
+											onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
+											onStop={(run) => void window.review.cancelAiReview(run.id)}
+											onOpen={openFinding}
+											onAccept={acceptFinding}
+											onAsk={askFinding}
+											askModelPicker={askModelPicker}
+											onDismiss={(f, reason) => {
+												change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))
+												if (selectedFinding?.id === f.id) setSelectedFinding(null)
+											}}
+											onNote={(f, note) => change((r) => ops.setDismissNote(r, f.id, note))}
+											onRestore={(f) => change((r) => ops.setFindingDecision(r, f.id, 'open'))}
+										/>
+									)}
+								</PanelBoundary>
+							</aside>
+						</>
+					) : (
+						<div className="empty">{busy ?? 'Loading…'}</div>
+					)}
+				</main>
+			)}
 			{githubOpen && github && (
 				<GitHubSettings
 					status={github}
@@ -1693,6 +1814,8 @@ export function App() {
 						const r = await window.review.githubSetRepo(session.repo.id, repo)
 						if (r.ok) setSession({ ...session, github: r.value })
 					}}
+					onDeleteClone={deleteAppClone}
+					focus={githubOpen === 'clones' ? 'clones' : null}
 				/>
 			)}
 			{publishOpen && session && comparison?.pr && github && (
@@ -1751,7 +1874,9 @@ export function App() {
 function RepoTabs(props: {
 	tabs: Array<RepoTab>
 	activeId: string | null
+	home: { on: boolean; count: number }
 	error: string | null
+	onHome(): void
 	onSelect(id: string): void
 	onClose(id: string): void
 	onOpen(): void
@@ -1765,7 +1890,7 @@ function RepoTabs(props: {
 		const el = nav.current
 		if (el && el.contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'tab')
 			el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
-	}, [activeId])
+	}, [activeId, props.home.on])
 	const label = (t: RepoTab): string => {
 		if (tabs.filter((x) => x.name === t.name).length < 2) return t.name
 		const parent = t.root.split(/[\\/]/).slice(-2, -1)[0]
@@ -1774,6 +1899,23 @@ function RepoTabs(props: {
 	return (
 		<nav className="repo-tabs" aria-label="Repositories" ref={nav}>
 			<div className="repo-tab-list" role="tablist">
+				<div className={`repo-tab home-tab${props.home.on ? ' on' : ''}`}>
+					<button
+						role="tab"
+						aria-selected={props.home.on}
+						className="repo-tab-name"
+						aria-label={props.home.count ? `Home, ${props.home.count} waiting for you` : 'Home'}
+						title={`Pull requests waiting for you in all repositories\n${mod}0`}
+						onClick={props.onHome}
+					>
+						Home
+					</button>
+					{props.home.count > 0 && (
+						<span className="repo-tab-count" title={`${props.home.count} waiting for you`}>
+							{props.home.count}
+						</span>
+					)}
+				</div>
 				{tabs.map((t, i) => (
 					<div key={t.id} className={`repo-tab${t.id === activeId ? ' on' : ''}`}>
 						<button

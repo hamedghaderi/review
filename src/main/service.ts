@@ -1,6 +1,7 @@
-import { stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
+	AppClone,
 	AiRun,
 	AiScope,
 	BranchPr,
@@ -44,11 +45,14 @@ import type {
 import {
 	aheadBehind,
 	AppFail,
+	cloneGitHub,
 	compareBranches,
 	compareSnapshot,
 	ensureCommits,
 	findRoot,
 	isAncestor,
+	isManagedClone,
+	setAppCloneRoots,
 	mergeBase,
 	ObjectUnavailable,
 	readAt,
@@ -76,7 +80,7 @@ import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { autoAddFindings, findingRoots } from '../shared/findings.ts'
 import { screenFinding } from '../shared/screen.ts'
-import { inboxStatus, requestCount, sortInbox, type WatchedPr } from '../shared/inbox.ts'
+import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiScope, anchor, reviewUpdate } from './validate.ts'
@@ -363,11 +367,76 @@ export class ReviewService {
 	/** GitHub repositories ("owner/name", lower case) of every repository opened in the app, mapped to their ids. */
 	knownGitHubRepos(): Map<string, string> {
 		const out = new Map<string, string>()
-		for (const s of Object.values(this.store.read().repos)) {
+		const repos = Object.values(this.store.read().repos)
+		// A clone you opened yourself wins over the app's own clone of the same repository.
+		for (const s of [...repos.filter((r) => isManagedClone(r.root)), ...repos.filter((r) => !isManagedClone(r.root))]) {
 			const gh = s.githubRepo ?? s.githubResolved
 			if (gh) out.set(gh.toLowerCase(), s.repoId)
 		}
 		return out
+	}
+
+	/**
+	 * Opens a GitHub repository ("owner/name") without a clone of your own: the app clones it into `parent`/name (with
+	 * the GitHub token, for private repositories), remembers the clone as its own so it can be deleted here, and opens it
+	 * like any other. A clone the app already knows is opened instead.
+	 */
+	async openGitHubClone(repo: string, parent: string, signal?: AbortSignal): Promise<RepoSession> {
+		const known = this.knownGitHubRepos().get(repo.toLowerCase())
+		if (known) return this.openKnown(known)
+		const { root, created } = await cloneGitHub(repo, parent, signal)
+		await this.store.update((d) => {
+			d.cloneParent = parent
+			if (created) (d.appClones ??= {})[root] = { repo, at: new Date().toISOString() }
+		})
+		setAppCloneRoots(Object.keys(this.store.read().appClones ?? {}))
+		return this.open(root)
+	}
+
+	/** The folders the app cloned itself, with their size on disk. */
+	async appClones(): Promise<Array<AppClone>> {
+		const d = this.store.read()
+		const byRoot = new Map(Object.values(d.repos).map((r) => [r.root, r.repoId]))
+		return Promise.all(
+			Object.entries(d.appClones ?? {}).map(async ([root, c]) => ({
+				repoId: byRoot.get(root) ?? root,
+				repo: c.repo,
+				root,
+				at: c.at,
+				missing: !(await exists(root)),
+				bytes: await folderSize(root).catch(() => null),
+			})),
+		)
+	}
+
+	/**
+	 * Deletes one of the app's own clones: `trash` moves the folder to the Trash first, so nothing is forgotten if that
+	 * fails; then the app forgets the repository, with its reviews. Folders you cloned yourself are never deleted.
+	 */
+	async deleteAppClone(repoId: string, trash: (path: string) => Promise<void>): Promise<Array<RepoTab>> {
+		const d = this.store.read()
+		const root = d.repos[repoId]?.root ?? repoId
+		if (!d.appClones?.[root]) throw new AppFail('invalid-input', 'That folder was not cloned by the app, so it is not deleted here.')
+		// Already gone (deleted by hand): there is nothing to move, only the app's record of it to forget.
+		if (await exists(root)) await trash(root)
+		this.repos.delete(repoId)
+		await this.store.update((d) => {
+			delete d.repos[repoId]
+			delete d.appClones![root]
+			d.openRepoIds = (d.openRepoIds ?? []).filter((id) => id !== repoId)
+			if (d.lastRepoId === repoId) d.lastRepoId = d.openRepoIds[0] ?? null
+		})
+		setAppCloneRoots(Object.keys(this.store.read().appClones ?? {}))
+		return this.tabs()
+	}
+
+	/** One of the app's own clones: its folder, GitHub repository, and whether the folder is still there. */
+	async appCloneOf(repoId: string): Promise<{ root: string; repo: string; missing: boolean }> {
+		const d = this.store.read()
+		const root = d.repos[repoId]?.root ?? repoId
+		const c = d.appClones?.[root]
+		if (!c) throw new AppFail('not-found', 'That folder was not cloned by the app.')
+		return { root, repo: c.repo, missing: !(await exists(root)) }
 	}
 
 	async restoreLast(): Promise<RepoSession | null> {
@@ -873,6 +942,42 @@ export class ReviewService {
 		return { ...page, items: sortInbox(items), total: items.length }
 	}
 
+	/**
+	 * Every pull request waiting for you, in every repository, from the background check's last look. Reads only the
+	 * store, so it is free to call often.
+	 */
+	homeInbox(): HomeInbox {
+		const d = this.store.read()
+		const gh = this.github
+		if (!gh || gh.status().state !== 'connected') return { state: 'disconnected', at: null, prs: [] }
+		const watch = d.inboxWatch
+		const login = gh.status().login
+		// Another account's last look says nothing about this one.
+		if (!watch?.prs || (login && watch.login && watch.login.toLowerCase() !== login.toLowerCase()))
+			return { state: 'ready', at: null, prs: [] }
+		const known = this.knownGitHubRepos()
+		const muted = new Set(d.mutedRepos ?? [])
+		return {
+			state: 'ready',
+			at: watch.at,
+			prs: watch.prs.filter(waitsForYou).map((p) => ({
+				...p,
+				repoId: known.get(p.repo.toLowerCase()) ?? null,
+				muted: muted.has(p.repo.toLowerCase()),
+				appClone: isManagedClone(d.repos[known.get(p.repo.toLowerCase()) ?? '']?.root ?? ''),
+			})),
+		}
+	}
+
+	async setRepoMuted(repo: string, muted: boolean): Promise<HomeInbox> {
+		const key = repo.toLowerCase()
+		await this.store.update((d) => {
+			const rest = (d.mutedRepos ?? []).filter((r) => r !== key)
+			d.mutedRepos = muted ? [...rest, key] : rest
+		})
+		return this.homeInbox()
+	}
+
 	async markPrSeen(repoId: string, number: number): Promise<boolean> {
 		if (!this.store.read().repos[repoId]) throw new AppFail('not-found', 'That repository is not open.')
 		await this.store.update((d) => {
@@ -1266,4 +1371,21 @@ export function myReviewsIn(prs: ReadonlyArray<WatchedPr>, repo: string): Record
 		else if (p.reviewed) out[p.number] = p.verdict === 'approved' || p.verdict === 'changes-requested' ? p.verdict : 'commented'
 	}
 	return out
+}
+
+function exists(path: string): Promise<boolean> {
+	return stat(path).then(
+		() => true,
+		() => false,
+	)
+}
+
+/** Bytes in a folder and everything under it; links are counted, not followed. */
+async function folderSize(dir: string): Promise<number> {
+	let total = 0
+	for (const e of await readdir(dir, { withFileTypes: true })) {
+		const p = join(dir, e.name)
+		total += e.isDirectory() ? await folderSize(p) : (await lstat(p)).size
+	}
+	return total
 }

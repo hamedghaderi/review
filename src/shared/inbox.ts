@@ -46,6 +46,7 @@ export interface WatchedPr {
 	head?: string | null // head commit
 	stale?: boolean // your latest review is on an older commit than `head`
 	verdict?: ReviewVerdict | null // what your latest review said; absent on older stored state
+	updatedAt?: string // absent on older stored state
 }
 
 // Keyed by "owner/name#number". `head` is absent in state written before new commits were watched.
@@ -58,7 +59,26 @@ export interface InboxEvent {
 
 export const watchKey = (pr: { repo: string; number: number }): string => `${pr.repo.toLowerCase()}#${pr.number}`
 
-/** Open, non-draft pull requests in a GitHub repository ("owner/name") that request your review, as the dock badge counts them. */
+/** Your review is wanted: it is requested, or there are new commits since you reviewed. The same rule as "Needs you". */
+export function waitsForYou(pr: WatchedPr): boolean {
+	return pr.requested !== false || !!pr.stale
+}
+
+/** A watched pull request on the start page, with the clone it maps to (null: none opened yet) and whether its repository is muted. */
+export type HomePr = WatchedPr & { repoId: string | null; muted: boolean; appClone: boolean }
+
+export interface HomeInbox {
+	state: 'ready' | 'disconnected' // disconnected: no GitHub account, so nothing is checked
+	at: string | null // when the background check last ran; null before the first one
+	prs: Array<HomePr> // every pull request waiting for you, in every repository, drafts included
+}
+
+/** What the start page and the dock badge count: waiting for you, not a draft, in a repository you have not muted. */
+export function homeCount(prs: ReadonlyArray<HomePr>): number {
+	return prs.filter((p) => waitsForYou(p) && !p.draft && !p.muted).length
+}
+
+/** Open, non-draft pull requests in a GitHub repository ("owner/name") that request your review, as the repository tab counts them. */
 export function requestCount(state: WatchState, repo: string): number {
 	const prefix = `${repo.toLowerCase()}#`
 	return Object.entries(state).filter(([key, s]) => key.startsWith(prefix) && s.requested !== false && !s.draft).length

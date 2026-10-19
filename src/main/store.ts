@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AiRun, AutoReviewRecord, BrowserState, Review } from '../shared/types.ts'
-import type { WatchState } from '../shared/inbox.ts'
+import type { WatchedPr, WatchState } from '../shared/inbox.ts'
 
 export const STORE_VERSION = 2
 
@@ -11,7 +11,11 @@ export interface StoreData {
 	repos: Record<string, RepoState>
 	openRepoIds?: Array<string> // the repository tabs, in order; absent in older files
 	// The review requests seen at the last check, so notifications report only what changed (also across restarts).
-	inboxWatch?: { login: string | null; state: WatchState; at: string }
+	// `prs` (absent in older files) is what the start page lists, so it shows at launch before the first check.
+	inboxWatch?: { login: string | null; state: WatchState; at: string; prs?: Array<WatchedPr> }
+	mutedRepos?: Array<string> // GitHub repositories ("owner/name", lower case) that do not notify or count
+	appClones?: Record<string, { repo: string; at: string }> // folders the app cloned itself, by real path: deletable here
+	cloneParent?: string // the folder last chosen for a clone, where the folder picker starts next time
 	skippedVersion?: string // a release you chose not to be told about again
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
@@ -132,6 +136,9 @@ export function migrate(raw: unknown): StoreData {
 		...(d.inboxWatch ? { inboxWatch: d.inboxWatch } : {}),
 		...(typeof d.skippedVersion === 'string' ? { skippedVersion: d.skippedVersion } : {}),
 		...(d.autoReviews ? { autoReviews: d.autoReviews } : {}),
+		...(Array.isArray(d.mutedRepos) ? { mutedRepos: d.mutedRepos } : {}),
+		...(d.appClones && typeof d.appClones === 'object' ? { appClones: d.appClones } : {}),
+		...(typeof d.cloneParent === 'string' ? { cloneParent: d.cloneParent } : {}),
 	}
 }
 

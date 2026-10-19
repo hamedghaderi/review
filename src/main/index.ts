@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -19,11 +19,11 @@ import { ConnectionService } from './ai/connections.ts'
 import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
-import { AppFail } from './git.ts'
+import { AppFail, setAppCloneRoots, setManagedClones } from './git.ts'
 import { ghCli } from './ghcli.ts'
 import { GitHubService } from './github.ts'
 import { AutoReviewer } from './autoReview.ts'
-import { InboxWatcher, type RepoEvent } from './inboxWatch.ts'
+import { InboxWatcher, type RepoEvent, type WatchEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
@@ -136,6 +136,14 @@ function handle<A extends Array<unknown>, T>(channel: string, fn: (...args: A) =
 	})
 }
 
+// The header Git uses for the app's own clones, kept only in memory and following the GitHub connection.
+let cloneAuth: string | null = null
+// The folder last picked for a clone; cloning goes only there.
+let chosenCloneParent: string | null = null
+async function refreshCloneAuth(): Promise<void> {
+	cloneAuth = await github.gitAuthHeader()
+}
+
 function registerIpc(): void {
 	handle(IPC.openRepository, async () => {
 		const r = await dialog.showOpenDialog(win!, { title: 'Open repository', properties: ['openDirectory'] })
@@ -207,6 +215,57 @@ function registerIpc(): void {
 	handle(IPC.openKnownRepo, (repoId: unknown) => service.openKnown(str(repoId, 'repository')))
 	handle(IPC.closeRepoTab, (repoId: unknown) => service.closeTab(str(repoId, 'repository')))
 	handle(IPC.repoTabs, async () => service.tabs())
+	handle(IPC.chooseCloneFolder, async (repo: unknown) => {
+		const name = githubRepo(repo)
+		const r = await dialog.showOpenDialog(win!, {
+			title: `Clone ${name}`,
+			message: `Choose a folder. The clone goes in a new “${name.split('/')[1]}” folder inside it.`,
+			buttonLabel: 'Clone here',
+			defaultPath: store.read().cloneParent ?? app.getPath('home'),
+			properties: ['openDirectory', 'createDirectory'],
+		})
+		if (r.canceled || !r.filePaths[0]) return null
+		chosenCloneParent = await realpath(r.filePaths[0])
+		return chosenCloneParent
+	})
+	handle(IPC.openGitHubClone, async (repo: unknown, parent: unknown) => {
+		const name = githubRepo(repo)
+		// Only ever where you just chose in the folder picker.
+		if (typeof parent !== 'string' || parent !== chosenCloneParent)
+			throw new AppFail('invalid-input', 'Choose the folder to clone into first.')
+		await refreshCloneAuth()
+		return service.openGitHubClone(name, parent)
+	})
+	handle(IPC.appClones, () => service.appClones())
+	handle(IPC.deleteAppClone, async (repoId: unknown) => {
+		const id = str(repoId, 'repository')
+		const { root, repo, missing } = await service.appCloneOf(id)
+		const forget = 'The app also forgets this repository and its reviews, including comments you have not published.'
+		const { response } = await dialog.showMessageBox(win!, {
+			type: 'warning',
+			buttons: [missing ? 'Forget it' : 'Move to Trash', 'Cancel'],
+			defaultId: 1,
+			cancelId: 1,
+			message: `Delete the app's clone of ${repo}?`,
+			detail: missing ? `${root} is already gone. ${forget}` : `${root} moves to the Trash. ${forget}`,
+		})
+		if (response !== 0) return { deleted: false, tabs: service.tabs() }
+		return { deleted: true, tabs: await service.deleteAppClone(id, (p) => shell.trashItem(p)) }
+	})
+	handle(IPC.revealAppClone, async (repoId: unknown) => {
+		shell.showItemInFolder((await service.appCloneOf(str(repoId, 'repository'))).root)
+		return true
+	})
+	handle(IPC.homeInbox, async () => service.homeInbox())
+	handle(IPC.refreshHome, async () => {
+		await watcher.check()
+		return service.homeInbox()
+	})
+	handle(IPC.setRepoMuted, async (repo: unknown, muted: unknown) => {
+		const home = await service.setRepoMuted(githubRepo(repo), bool(muted, 'muted'))
+		void watcher.check() // the badge follows
+		return home
+	})
 	handle(IPC.takeLink, async () => {
 		const link = pendingLink
 		pendingLink = null
@@ -436,6 +495,10 @@ app.whenReady().then(async () => {
 		connected = s.state === 'connected'
 	})
 	void github.verify()
+	setManagedClones(() => cloneAuth)
+	setAppCloneRoots(Object.keys(store.read().appClones ?? {}))
+	github.onChange(() => void refreshCloneAuth())
+	void refreshCloneAuth()
 	service = new ReviewService(store, github)
 	watcher = new InboxWatcher({
 		github,
@@ -443,7 +506,8 @@ app.whenReady().then(async () => {
 		known: () => service.knownGitHubRepos(),
 		notify: (events) => {
 			if (github.notifications.enabled) showNotifications(events)
-			autoReviewer.take(events)
+			// Automatic review works in a clone, so only repositories opened in the app take part.
+			autoReviewer.take(events.filter((e): e is RepoEvent => e.repoId !== null))
 		},
 		badge: (n) => app.setBadgeCount(n),
 		changed: () => {
@@ -607,14 +671,14 @@ app.on('window-all-closed', () => {
 // Electron drops a notification's click handler once the object is garbage collected, so shown ones are kept here.
 const shown = new Set<Notification>()
 
-const EVENT_TITLE: Record<RepoEvent['kind'], string> = {
+const EVENT_TITLE: Record<WatchEvent['kind'], string> = {
 	requested: 'Review requested',
 	're-requested': 'Review requested again',
 	ready: 'Ready for review',
 	updated: 'New commits since your review',
 }
 
-function showNotifications(events: Array<RepoEvent>): void {
+function showNotifications(events: Array<WatchEvent>): void {
 	const silent = !github.notifications.sound
 	// A burst (e.g. after the app was closed for a while) becomes one summary instead of a stack of banners.
 	const batches =

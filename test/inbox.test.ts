@@ -3,9 +3,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { diffInbox, inboxStatus, requestCount, sortInbox, type WatchedPr } from '../src/shared/inbox.ts'
+import { diffInbox, homeCount, inboxStatus, requestCount, sortInbox, type WatchedPr } from '../src/shared/inbox.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
-import { InboxWatcher, type RepoEvent } from '../src/main/inboxWatch.ts'
+import { InboxWatcher, type WatchEvent } from '../src/main/inboxWatch.ts'
+import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import type { CredentialStorageInfo, PrSummary, PrReviewer } from '../src/shared/types.ts'
 
@@ -184,14 +185,14 @@ test('the Inbox combines requested and reviewed PRs; a team request counts as re
 	assert.equal(page.items[1].review!.reviewers[0].stale, true, 'reviewed on an older commit')
 })
 
-test('the watcher notifies only for repositories opened in the app, and remembers what it saw across restarts', async () => {
+test('the watcher notifies for every repository unless muted, and remembers what it saw across restarts', async () => {
 	let open = [node(1, 'octo/app'), node(2, 'other/repo')]
 	const { gh } = fakeGitHub(() => open)
 	await gh.setToken('t', false)
 	const dir = mkdtempSync(join(tmpdir(), 'inbox-'))
 	const store = ReviewStore.in(dir)
 	await store.load()
-	const notified: Array<RepoEvent> = []
+	const notified: Array<WatchEvent> = []
 	const badges: Array<number> = []
 	const make = (s: ReviewStore) =>
 		new InboxWatcher({
@@ -202,18 +203,27 @@ test('the watcher notifies only for repositories opened in the app, and remember
 			badge: (n) => badges.push(n),
 		})
 	const watcher = make(store)
-	await watcher.check()
-	assert.deepEqual(notified, [], 'first check is a baseline')
-	assert.deepEqual(badges, [1], 'badge counts only repositories opened in the app')
-	open = [...open, node(3, 'octo/app'), node(4, 'other/repo'), node(5, 'octo/app', true)]
-	await watcher.check()
-	watcher.stop()
+	try {
+		await watcher.check()
+		assert.deepEqual(notified, [], 'first check is a baseline')
+		assert.deepEqual(badges, [2], 'badge counts every repository, opened in the app or not')
+		open = [...open, node(3, 'octo/app'), node(4, 'other/repo'), node(5, 'octo/app', true)]
+		await watcher.check()
+	} finally {
+		watcher.stop()
+	}
 	assert.deepEqual(
 		notified.map((e) => [e.kind, e.pr.number, e.repoId]),
 		[
 			['requested', 3, 'repo-1'],
+			['requested', 4, null], // no clone opened yet: clicking it asks for one
 			['re-requested', 5, 'repo-1'],
 		],
+	)
+	assert.deepEqual(
+		store.read().inboxWatch?.prs?.map((p) => p.number),
+		[1, 2, 3, 4, 5],
+		'kept for the start page',
 	)
 	await store.flush()
 
@@ -223,20 +233,30 @@ test('the watcher notifies only for repositories opened in the app, and remember
 	open = [...open, node(6, 'octo/app')]
 	notified.length = 0
 	const later = make(reopened)
-	await later.check()
-	later.stop()
+	await later.check().finally(() => later.stop())
 	assert.deepEqual(
 		notified.map((e) => e.pr.number),
 		[6],
 	)
 
-	await gh.setNotifications({ enabled: false, sound: true })
+	// A muted repository neither notifies nor counts.
+	await reopened.update((d) => void (d.mutedRepos = ['other/repo']))
+	open = [...open, node(8, 'other/repo'), node(9, 'octo/app')]
 	notified.length = 0
+	const muted = make(reopened)
+	await muted.check().finally(() => muted.stop())
+	assert.deepEqual(
+		notified.map((e) => e.pr.number),
+		[9],
+	)
+	assert.equal(badges.at(-1), 5, '#1, #3, #5, #6 and #9 in octo/app')
+
+	// Notifications off: still checked for the start page (and automatic review, which decides for itself), no badge.
+	await gh.setNotifications({ enabled: false, sound: true })
 	open = [...open, node(7, 'octo/app')]
 	const off = make(reopened)
-	await off.check()
-	off.stop()
-	assert.deepEqual(notified, [], 'turned off: no checks, no notifications')
+	await off.check().finally(() => off.stop())
+	assert.ok(reopened.read().inboxWatch?.prs?.some((p) => p.number === 7))
 	assert.equal(badges.at(-1), 0, 'and the badge is cleared')
 })
 
@@ -246,7 +266,7 @@ test('the watcher reports new commits on a PR you reviewed, and tells open lists
 	await gh.setToken('t', false)
 	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'inbox-')))
 	await store.load()
-	const notified: Array<RepoEvent> = []
+	const notified: Array<WatchEvent> = []
 	const badges: Array<number> = []
 	let changes = 0
 	const watcher = new InboxWatcher({
@@ -270,7 +290,7 @@ test('the watcher reports new commits on a PR you reviewed, and tells open lists
 		[['updated', 9, 'repo-1']],
 	)
 	assert.equal(changes, 2)
-	assert.deepEqual(badges, [0, 0, 0], 'the badge counts requests only')
+	assert.deepEqual(badges, [1, 1, 1], 'new commits since your review count, as on the start page')
 })
 
 test('tab request count: open, non-draft requests in that repository only, as the dock badge counts them', () => {
@@ -284,4 +304,51 @@ test('tab request count: open, non-draft requests in that repository only, as th
 	assert.equal(requestCount(state, 'Acme/Web'), 2)
 	assert.equal(requestCount(state, 'acme/website'), 1)
 	assert.equal(requestCount(state, 'acme/api'), 0)
+})
+
+test('the start page lists what waits for you in every repository, with its clone and whether it is muted', async () => {
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'inbox-')))
+	await store.load()
+	let login = 'me'
+	const gh = { status: () => ({ state: 'connected', login }) } as unknown as GitHubService
+	const svc = new ReviewService(store, gh)
+	assert.deepEqual(svc.homeInbox(), { state: 'ready', at: null, prs: [] }, 'before the first check')
+	await store.update((d) => {
+		d.repos['repo-1'] = {
+			repoId: 'repo-1',
+			root: '/x/app',
+			selectedBase: null,
+			activeReviewId: null,
+			reviews: {},
+			aiRuns: {},
+			githubResolved: 'Octo/App',
+		}
+		d.inboxWatch = {
+			login: 'me',
+			state: {},
+			at: '2026-10-19T10:00:00Z',
+			prs: [
+				w(1, { repo: 'octo/app' }),
+				w(2, { repo: 'other/repo', draft: true }),
+				w(3, { repo: 'octo/app', reviewed: true, requested: false, stale: true }), // new commits since your review
+				w(4, { repo: 'octo/app', reviewed: true, requested: false }), // reviewed, nothing new: not waiting
+			],
+		}
+	})
+	const home = svc.homeInbox()
+	assert.deepEqual(
+		home.prs.map((p) => [p.number, p.repoId, p.muted]),
+		[
+			[1, 'repo-1', false],
+			[2, null, false],
+			[3, 'repo-1', false],
+		],
+	)
+	assert.equal(homeCount(home.prs), 2, 'drafts are listed, not counted')
+	const muted = await svc.setRepoMuted('Octo/App', true)
+	assert.deepEqual(store.read().mutedRepos, ['octo/app'])
+	assert.equal(homeCount(muted.prs), 0)
+	assert.equal((await svc.setRepoMuted('octo/app', false)).prs[0].muted, false)
+	login = 'someone-else'
+	assert.deepEqual(svc.homeInbox().prs, [], "another account's last look is not shown")
 })

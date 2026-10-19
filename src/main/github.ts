@@ -269,6 +269,12 @@ export class GitHubService {
 		this.graphs.clear()
 	}
 
+	/** The header Git sends to github.com for the app's own clones; null without a token. Never stored anywhere. */
+	async gitAuthHeader(): Promise<string | null> {
+		const t = await this.token().catch(() => null)
+		return t ? `Authorization: Basic ${Buffer.from(`x-access-token:${t}`).toString('base64')}` : null
+	}
+
 	private async token(): Promise<string | null> {
 		const src = this.source()
 		if (src === 'app') {
@@ -430,6 +436,7 @@ export class GitHubService {
 				head: n.headRefOid ?? null,
 				stale: !!mine?.stale,
 				verdict: mine?.verdict ?? null,
+				updatedAt: n.updatedAt,
 			}
 		}
 		const prs = new Map<string, WatchedPr>()
