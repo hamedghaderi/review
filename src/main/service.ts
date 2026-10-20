@@ -87,7 +87,8 @@ import { loadFacts } from './ai/facts.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
-import { tallyChecks, type HeadChecks } from '../shared/ci.ts'
+import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
+import { readBaseChecks, type BaseChecks } from './baseCi.ts'
 import { autoAddFindings, findingRoots } from '../shared/findings.ts'
 import { screenFinding } from '../shared/screen.ts'
 import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
@@ -145,6 +146,7 @@ export class ReviewService {
 	private publisher: Publisher | null
 	private branchPrs = new Map<string, { at: number; value: BranchPr }>()
 	private unseenComments = new Map<string, Set<string>>() // review id → comments an automatic review added
+	private baseCi = new Map<string, BaseChecks | null>() // "repo@merge base" → its control, once every check there has finished
 
 	constructor(store: ReviewStore, github: GitHubService | null = null) {
 		this.store = store
@@ -239,8 +241,29 @@ export class ReviewService {
 	 */
 	async headChecks(repoId: string, reviewId: string): Promise<HeadChecks> {
 		const pr = this.openPrOf(repoId, reviewId)
-		const head = this.store.read().repos[repoId].reviews[reviewId].headSha
-		return tallyChecks(await this.requireGitHub().checks(pr.repo, head))
+		const { headSha, baseSha } = this.store.read().repos[repoId].reviews[reviewId]
+		const gh = this.requireGitHub()
+		const [head, base] = await Promise.all([
+			gh.checks(pr.repo, headSha),
+			// Failures are shown without the comparison when the base can't be read; never hidden.
+			this.baseChecks(this.repo(repoId).root, pr.repo, baseSha).catch(() => null),
+		])
+		return tallyChecks(head, base)
+	}
+
+	/**
+	 * The CI a head failure is compared with (see readBaseChecks). Kept once every check there has finished, since it
+	 * can't change after that; read again otherwise.
+	 */
+	private async baseChecks(root: string, repo: string, mergeBase: string, signal?: AbortSignal): Promise<BaseChecks | null> {
+		const key = `${repo}@${mergeBase}`
+		if (this.baseCi.has(key)) return this.baseCi.get(key)!
+		const gh = this.requireGitHub()
+		const found = await readBaseChecks(root, mergeBase, (sha) => gh.checks(repo, sha, signal), signal)
+		const settled = (r: string) => CI_FAILED.has(r) || CI_PASSED.has(r)
+		if (found && found.checks.runs.every((r) => settled(r.result)) && found.checks.statuses.every((x) => settled(x.result)))
+			this.baseCi.set(key, found)
+		return found
 	}
 
 	/** The open PR review's description, read from GitHub each time (it can change without a new commit). */
@@ -1388,6 +1411,7 @@ export class ReviewService {
 						sources,
 						checks: gh && repo ? () => gh.checks(repo, c.headSha, signal) : null,
 						annotations: gh && repo ? (id) => gh.annotations(repo, id, signal) : null,
+						baseChecks: gh && repo ? () => this.baseChecks(data.root, repo, c.baseSha, signal) : null,
 						signal,
 					})
 				},

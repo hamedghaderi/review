@@ -45,8 +45,9 @@ export function supportFor(f: Finding, ev: EvidenceIndex): Array<FindingSupport>
 	if (a.side === 'new' && a.newPath && a.startLine !== null) {
 		const end = a.endLine ?? a.startLine
 		const hits = ev.annotations.filter((x) => x.path === a.newPath && x.startLine <= end + NEAR && x.endLine >= a.startLine! - NEAR)
+		// A message the base had at the same place was there before the change, so it says nothing about this finding.
 		for (const x of hits.slice(0, MAX_CI_PER_FINDING))
-			out.push({ source: 'ci', strength: x.level === 'notice' ? 'context' : 'flags', text: describe(x) })
+			out.push({ source: 'ci', strength: x.level === 'notice' || x.atBase ? 'context' : 'flags', text: describe(x) })
 	}
 	if (ev.importers) {
 		const path = a.newPath ?? a.oldPath
@@ -74,7 +75,7 @@ export function supportFor(f: Finding, ev: EvidenceIndex): Array<FindingSupport>
 /** CI failures and warnings on lines this change added that no finding is near: problems the review may have missed. */
 export function uncoveredCi(findings: Array<Finding>, ev: EvidenceIndex): Array<CiAnnotation> {
 	return ev.annotations
-		.filter((x) => x.level !== 'notice')
+		.filter((x) => x.level !== 'notice' && !x.atBase)
 		.filter((x) => {
 			const lines = ev.changedLines.get(x.path)
 			if (!lines) return false
@@ -111,7 +112,8 @@ export function annotationFacts(annotations: Array<CiAnnotation>, sources: Array
 function describe(x: CiAnnotation): string {
 	const lines = x.endLine !== x.startLine ? `lines ${x.startLine}-${x.endLine}` : `line ${x.startLine}`
 	const msg = `${x.title ? `${x.title}: ` : ''}${x.message}`.replace(/\s+/g, ' ').trim()
-	return `${x.check} (${x.level}) at ${lines}: ${msg.length > 300 ? `${msg.slice(0, 299)}…` : msg}`
+	const old = x.atBase ? ` (also at ${x.atBase.slice(0, 7)} before this change, on the same lines)` : ''
+	return `${x.check} (${x.level}) at ${lines}${old}: ${msg.length > 300 ? `${msg.slice(0, 299)}…` : msg}`
 }
 
 function list(xs: Array<string>): string {

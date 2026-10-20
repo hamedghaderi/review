@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppError, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
-import type { HeadChecks } from '../../shared/ci.ts'
+import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
+
+const oldCount = (ci: HeadChecks): number => ci.failed.filter((f) => f.atBase === 'fails').length
 import { ago } from './branches.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
@@ -568,18 +570,35 @@ function ItemBody({ label, body, tag, url }: { label: string; body: string; tag:
 	)
 }
 
-/** "1 check failed on this commit (Unit tests, 18 s ago) and 3 haven’t finished." */
+/**
+ * "1 check failed on this commit (Unit tests, 18 s ago), 1 more fails at base abc1234 too (Lint) and 3 haven’t
+ * finished." Failures the base has too are listed apart, never left out.
+ */
 function ciWarning(ci: HeadChecks): string {
 	const parts: Array<string> = []
-	if (ci.failed.length) {
-		const first = ci.failed[0]
-		const more = ci.failed.length > 1 ? ` and ${ci.failed.length - 1} more` : ''
+	const fresh = ci.failed.filter((f) => f.atBase !== 'fails')
+	const old = ci.failed.filter((f) => f.atBase === 'fails')
+	const names = (xs: HeadChecks['failed'], when: boolean) =>
+		`${xs[0].name}${when && xs[0].at ? `, ${ago(xs[0].at)}` : ''}${xs.length > 1 ? ` and ${xs.length - 1} more` : ''}`
+	if (fresh.length) parts.push(`${fresh.length} check${fresh.length === 1 ? '' : 's'} failed on this commit (${names(fresh, true)})`)
+	if (old.length) {
+		const at = baseLabel(ci.base!)
 		parts.push(
-			`${ci.failed.length} check${ci.failed.length === 1 ? '' : 's'} failed on this commit (${first.name}${first.at ? `, ${ago(first.at)}` : ''}${more})`,
+			fresh.length
+				? `${old.length} more ${old.length === 1 ? 'fails' : 'fail'} at ${at} too (${names(old, false)})`
+				: `${old.length} check${old.length === 1 ? '' : 's'} failed on this commit, but ${old.length === 1 ? 'it fails' : 'they fail'} at ${at} too (${names(old, false)})`,
 		)
 	}
 	if (ci.pending.length) parts.push(`${ci.pending.length} ${ci.pending.length === 1 ? 'hasn’t' : 'haven’t'} finished`)
-	return `${parts.join(' and ')}.`
+	return `${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]}.`
+}
+
+/** "✕ Lint: also fails at base abc1234" for the tooltip. */
+function failedLine(f: HeadChecks['failed'][number], ci: HeadChecks): string {
+	const at = ci.base
+		? ` (${f.atBase === 'fails' ? 'also fails' : f.atBase === 'passes' ? 'passes' : 'no result'} at ${baseLabel(ci.base)})`
+		: ''
+	return `✕ ${f.name}${at}`
 }
 
 /** What CI says about the snapshot's head commit, next to the verdict. */
@@ -609,13 +628,13 @@ function CiLine({
 	return (
 		<p
 			className={`small ci-line ${warn ? 'warn-text' : 'muted'}`}
-			title={[...ci.failed.map((f) => `✕ ${f.name}`), ...ci.pending.map((n) => `◌ ${n}`)].join('\n')}
+			title={[...ci.failed.map((f) => failedLine(f, ci)), ...ci.pending.map((n) => `◌ ${n}`)].join('\n')}
 		>
 			CI on <span className="mono">{ci.sha.slice(0, 7)}</span>:{' '}
 			{total === 0
 				? 'no checks reported'
 				: [
-						ci.failed.length ? `✕ ${ci.failed.length} failed` : null,
+						ci.failed.length ? `✕ ${ci.failed.length} failed${oldCount(ci) ? ` (${oldCount(ci)} also at base)` : ''}` : null,
 						ci.pending.length ? `◌ ${ci.pending.length} not finished` : null,
 						ci.passed ? `✓ ${ci.passed} passed` : null,
 					]

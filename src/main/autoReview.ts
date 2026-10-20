@@ -14,7 +14,7 @@ import type {
 	ReviewerChoice,
 	ReviewEvent,
 } from '../shared/types.ts'
-import type { HeadChecks } from '../shared/ci.ts'
+import { baseLabel, type HeadChecks } from '../shared/ci.ts'
 import { AppFail } from './git.ts'
 import type { RepoEvent } from './inboxWatch.ts'
 import type { ReviewStore } from './store.ts'
@@ -72,7 +72,14 @@ export function autoVerdict(
 		if (!complete) parts.push('Some files were not reviewed, so this is not an approval.')
 		if (ci?.failed.length) {
 			const more = ci.failed.length > 1 ? ` and ${ci.failed.length - 1} more` : ''
-			parts.push(`CI failed on this commit (${ci.failed[0].name}${more}), so this is not an approval.`)
+			// A failure the base has too still stops an approval, but the author should know it isn't theirs.
+			const old = ci.base ? ci.failed.filter((f) => f.atBase === 'fails').length : 0
+			const also = !old
+				? ''
+				: old === ci.failed.length
+					? ` ${old === 1 ? 'It also fails' : 'They all also fail'} at ${baseLabel(ci.base!)}, so this change didn't cause ${old === 1 ? 'it' : 'them'}.`
+					: ` ${plural(old, 'of them also fails', 'of them also fail')} at ${baseLabel(ci.base!)}.`
+			parts.push(`CI failed on this commit (${ci.failed[0].name}${more}), so this is not an approval.${also}`)
 		} else if (ciStopped === 'pending') parts.push('CI had not finished on this commit, so this is not an approval.')
 		else if (ciStopped === 'unreadable') parts.push('CI for this commit could not be read, so this is not an approval.')
 		if (findingsAllow) parts.unshift('It found no blocking, should-fix or question findings in the changed files.')
