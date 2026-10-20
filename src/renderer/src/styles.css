@@ -2985,6 +2985,17 @@ h3.small-h {
 	border-color: var(--danger);
 	color: var(--danger);
 }
+.check-row.skipped {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 1px 0;
+	min-width: 0;
+	color: var(--text-2);
+}
+.check-row.skipped .check-icon {
+	border-style: dashed;
+}
 .check-retry {
 	flex-shrink: 0;
 	padding: 0 6px;

@@ -13,7 +13,7 @@ interface Props {
 	fileCount: number
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
 	onOpened?(): void
-	onStart(scope: AiScope, passes: boolean, persona: PersonaId | null): void
+	onStart(scope: AiScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
 	onCancel(): void
 }
 
@@ -24,6 +24,8 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 	const [open, setOpen] = useState(false)
 	const [scope, setScope] = useState<'file' | 'all'>('all')
 	const [passes, setPasses] = useState(readPasses)
+	// Not remembered: a partial review should never be the default without anyone noticing.
+	const [bugsOnly, setBugsOnly] = useState(false)
 	const [persona, setPersona] = useState(readPersona)
 	const ref = useRef<HTMLDivElement>(null)
 	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
@@ -170,6 +172,13 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 								/>
 								<span>Focused passes</span>
 							</label>
+							<label
+								className="option passes"
+								title="Check only bugs and security, skipping conventions, naming, leftover code and test value. Uses fewer tokens; the other rules show as not checked. Applies to this run only."
+							>
+								<input type="checkbox" checked={bugsOnly} onChange={(e) => setBugsOnly(e.target.checked)} />
+								<span>Bugs &amp; security only</span>
+							</label>
 							<label className="option lens" title={lensTitle(persona)}>
 								<span>Lens</span>
 								<select
@@ -241,6 +250,7 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 								onStart(
 									effectiveScope === 'file' && currentFile ? { kind: 'file', fileKey: currentFile.key } : { kind: 'all' },
 									!team && passes,
+									!team && bugsOnly,
 									team ? null : persona,
 								)
 							}}

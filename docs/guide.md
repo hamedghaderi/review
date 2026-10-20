@@ -216,6 +216,8 @@ Every rule must have exactly one reviewer before a team can be saved. Pick a tea
 
 **Focused passes** gets the same split without building a team: with a single model chosen, tick **Focused passes** in the Run dialog and the model runs once per default role (Defects, Security, Callers & structure, Tests & leftover code), each pass with only its rules and its files. The run is recorded and shown like a team run named "Focused passes". It uses more tokens than one pass, though less than four, because each pass reads only its files. The checkbox is remembered on this computer.
 
+**Bugs & security only** is for a quick check: tick it in the Run dialog and the model checks only the bug and security rules, on only the files those rules apply to. With **Focused passes** also ticked, just the Defects and Security passes run, each with only that rule. The Findings panel lists the other rules as "not checked". The checkbox applies to one run and is not remembered, so a full review stays the default.
+
 ### Personas (lenses)
 
 A persona is a lens on the same 16 rules, in the spirit of a well-known way of reviewing code. It tells the model where to look harder and how strict to be about evidence. It adds no rules and changes no limit, level or wording rule, so a Clean Code lens still never comments on function length or naming taste. Where the lens and the rules seem to differ, the rules win, and a finding never mentions the lens.

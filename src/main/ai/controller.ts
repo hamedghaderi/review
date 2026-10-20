@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+	BUGS_ONLY_RULES,
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
 	type AiScope,
@@ -156,11 +157,18 @@ export class AiController {
 			if (reviewer.kind === 'model') {
 				config = await this.resolveRun(reviewer.selection)
 				// Focused passes: the same model as each default role, so every pass gets only its rules and files.
-				if (reviewer.passes)
+				// Bugs only: one pass (or the passes that own them) with just those rules, so only they are asked and shown.
+				const only = reviewer.bugsOnly ? BUGS_ONLY_RULES : null
+				const roles = reviewer.passes
+					? DEFAULT_TEAM_ROLES.map((r) => ({ ...r, rules: r.rules.filter((x) => !only || only.includes(x)) })).filter((r) => r.rules.length)
+					: only
+						? [{ id: 'bugs-only', role: 'Bugs & security', rules: only }]
+						: []
+				if (roles.length)
 					team = {
-						id: 'focused-passes',
-						name: 'Focused passes',
-						members: DEFAULT_TEAM_ROLES.map((r) => ({
+						id: only ? 'bugs-only' : 'focused-passes',
+						name: only ? (reviewer.passes ? 'Bugs & security, focused passes' : 'Bugs & security only') : 'Focused passes',
+						members: roles.map((r) => ({
 							id: r.id,
 							role: r.role,
 							rules: [...r.rules],
