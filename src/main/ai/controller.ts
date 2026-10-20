@@ -18,6 +18,8 @@ import {
 	type PastDecision,
 	type EarlierLimitations,
 	type ReviewContext,
+	type FindingLevel,
+	REVIEW_RULES,
 } from '../../shared/types.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import { AppFail } from '../git.ts'
@@ -27,6 +29,8 @@ import type { FileSource } from './context.ts'
 import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
+import { DEFAULT_LEVELS, PROMPT_VERSION } from './prompt.ts'
+import type { ReviewerPrint } from './incremental.ts'
 import { buildAskRequest, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { RequestImage } from './provider.ts'
@@ -69,6 +73,7 @@ export class AiController {
 	private active: { handle: RunHandle; repoId: string; reviewId: string; connectionIds: Array<string>; background: string | null } | null =
 		null
 	private teams: TeamSource | null = null
+	private levels: (() => Array<FindingLevel>) | null = null
 	private starting = false
 	private store: ReviewStore
 	private resolveRun: RunConfigSource
@@ -108,6 +113,42 @@ export class AiController {
 		this.teams = teams
 	}
 
+	attachLevels(levels: () => Array<FindingLevel>): void {
+		this.levels = levels
+	}
+
+	/**
+	 * Who would review with `choice`, without resolving credentials, to tell whether an earlier run's results can be
+	 * carried into it. Null when the choice can't be used (the team is gone).
+	 */
+	reviewerPrint(choice: ReviewerChoice): ReviewerPrint | null {
+		const levels = this.levels?.() ?? DEFAULT_LEVELS
+		if (choice.kind === 'model') {
+			const { connectionId, modelId } = choice.selection
+			const persona = choice.persona ?? null
+			const roles = passRoles(choice)
+			return {
+				promptVersion: PROMPT_VERSION,
+				levels,
+				workers: roles.length
+					? roles.map((r) => ({ connectionId, model: modelId, persona, rules: [...r.rules] }))
+					: [{ connectionId, model: modelId, persona, rules: [...REVIEW_RULES] }],
+			}
+		}
+		let team: ReviewTeam
+		try {
+			if (!this.teams) return null
+			team = this.teams(choice.teamId)
+		} catch {
+			return null
+		}
+		return {
+			promptVersion: PROMPT_VERSION,
+			levels,
+			workers: team.members.map((m) => ({ connectionId: m.connectionId, model: m.modelId, persona: m.persona ?? null, rules: m.rules })),
+		}
+	}
+
 	runsFor(repoId: string, reviewId: string): Array<AiRun> {
 		return this.store.read().repos[repoId]?.aiRuns?.[reviewId] ?? []
 	}
@@ -136,7 +177,7 @@ export class AiController {
 		reviewId: string,
 		scope: AiScope,
 		choice: ModelSelection | ReviewerChoice,
-		options: { background?: string } = {},
+		options: { background?: string; carried?: RunInput['carried'] } = {},
 	): Promise<AiRun> {
 		this.assertIdle()
 		this.starting = true
@@ -156,14 +197,8 @@ export class AiController {
 		try {
 			if (reviewer.kind === 'model') {
 				config = await this.resolveRun(reviewer.selection)
-				// Focused passes: the same model as each default role, so every pass gets only its rules and files.
-				// Bugs only: one pass (or the passes that own them) with just those rules, so only they are asked and shown.
+				const roles = passRoles(reviewer)
 				const only = reviewer.bugsOnly ? BUGS_ONLY_RULES : null
-				const roles = reviewer.passes
-					? DEFAULT_TEAM_ROLES.map((r) => ({ ...r, rules: r.rules.filter((x) => !only || only.includes(x)) })).filter((r) => r.rules.length)
-					: only
-						? [{ id: 'bugs-only', role: 'Bugs & security', rules: only }]
-						: []
 				if (roles.length)
 					team = {
 						id: only ? 'bugs-only' : 'focused-passes',
@@ -206,7 +241,11 @@ export class AiController {
 		return this.launch(
 			access,
 			reviewId,
-			{ scope, previousFindings: this.runsFor(access.comparison.repoId, reviewId).flatMap((r) => r.findings) },
+			{
+				scope,
+				previousFindings: this.runsFor(access.comparison.repoId, reviewId).flatMap((r) => r.findings),
+				carried: options.carried ?? null,
+			},
 			{
 				...this.runOptions(config),
 				persona: reviewer.kind === 'model' ? (reviewer.persona ?? null) : null,
@@ -490,7 +529,7 @@ export class AiController {
 	private async launch(
 		access: ComparisonAccess,
 		reviewId: string,
-		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry'>,
+		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry' | 'carried'>,
 		options: RunnerOptions,
 		connectionIds: Array<string>,
 		background: string | null = null,
@@ -605,6 +644,22 @@ export class AiController {
 			.then(() => this.notify(run))
 			.catch((e) => console.error('[ai] could not persist run', e instanceof Error ? e.message : e))
 	}
+}
+
+/**
+ * The passes one model runs as. Focused passes: the same model as each default role, so every pass gets only its rules
+ * and files. Bugs only: one pass (or the passes that own them) with just those rules, so only they are asked and shown.
+ * None: one request set with every rule.
+ */
+function passRoles(
+	reviewer: Extract<ReviewerChoice, { kind: 'model' }>,
+): Array<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> {
+	const only = reviewer.bugsOnly ? BUGS_ONLY_RULES : null
+	return reviewer.passes
+		? DEFAULT_TEAM_ROLES.map((r) => ({ ...r, rules: r.rules.filter((x) => !only || only.includes(x)) })).filter((r) => r.rules.length)
+		: only
+			? [{ id: 'bugs-only', role: 'Bugs & security', rules: only }]
+			: []
 }
 
 async function loadSources(access: ComparisonAccess, keys: Array<string>): Promise<Array<FileSource>> {

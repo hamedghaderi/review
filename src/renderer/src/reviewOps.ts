@@ -94,7 +94,7 @@ export function acceptFinding(
 	f: Finding,
 	roots: Map<string, string>,
 ): { review: Review; draftId: string | null; commentId: string | null; created: boolean } {
-	const link = findingLink(r, roots, f.id)
+	const link = findingLink(r, roots, f.id, f.carried?.comment ?? null)
 	if (link) return { review: r, draftId: link.draft?.id ?? null, commentId: link.comment?.id ?? null, created: false }
 	const d: CommentDraft = {
 		id: crypto.randomUUID(),

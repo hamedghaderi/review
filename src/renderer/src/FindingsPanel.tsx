@@ -260,8 +260,14 @@ export function FindingsPanel({
 							<option key={r.id} value={r.id}>
 								{i === 0 ? 'Latest · ' : ''}
 								{new Date(r.startedAt).toLocaleString()} ·{' '}
-								{r.scope.kind === 'all' ? 'all files' : r.scope.kind === 'files' ? `${r.scope.fileKeys.length} files` : 'one file'} ·{' '}
-								{r.status}
+								{r.carriedFrom && r.scope.kind === 'files'
+									? `${r.scope.fileKeys.length} changed since ${r.carriedFrom.headSha.slice(0, 7)}`
+									: r.scope.kind === 'all'
+										? 'all files'
+										: r.scope.kind === 'files'
+											? `${r.scope.fileKeys.length} files`
+											: 'one file'}{' '}
+								· {r.status}
 							</option>
 						))}
 					</select>
@@ -453,6 +459,7 @@ function RunSummary({
 }) {
 	const files = run.coverage.files
 	const reviewed = files.filter((f) => f.state === 'reviewed').length
+	const carried = files.filter((f) => f.state === 'carried').length
 	const partial = files.filter((f) => f.state === 'partial').length
 	const notReviewed = files.filter((f) => f.state === 'skipped' || f.state === 'failed' || f.state === 'cancelled' || f.state === 'pending')
 	const notReviewable = files.filter((f) => f.state === 'not-reviewable')
@@ -493,6 +500,7 @@ function RunSummary({
 			</div>
 			<div className="small">
 				<b>Coverage:</b> {reviewed} of {files.length} file{files.length === 1 ? '' : 's'} fully reviewed
+				{carried ? `, ${carried} carried from the run on ${run.carriedFrom?.headSha.slice(0, 7) ?? 'an earlier snapshot'}` : ''}
 				{partial ? `, ${partial} partly` : ''}
 				{notReviewed.length ? `, ${notReviewed.length} not reviewed` : ''}
 				{notReviewable.length ? `, ${notReviewable.length} not reviewable` : ''}
@@ -623,7 +631,7 @@ function RunSummary({
 					{(notReviewed.length > 0 || partial > 0 || notReviewable.length > 0) && (
 						<Details title="Files not fully reviewed">
 							{files
-								.filter((f) => f.state !== 'reviewed')
+								.filter((f) => f.state !== 'reviewed' && f.state !== 'carried')
 								.map((f) => (
 									<li key={f.fileKey}>
 										<span className="mono">{f.fileKey}</span> — {f.state}
@@ -1081,6 +1089,7 @@ function FindingCard(p: CardProps) {
 					? `, also ${f.alsoBy.map((id) => team.members.find((m) => m.id === id)?.role ?? 'another reviewer').join(', ')}`
 					: ''}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}
+				{f.carried ? ` · carried from the run on ${f.carried.from.headSha.slice(0, 7)}, the file's diff is unchanged` : ''}
 			</div>
 			{p.screened.length > 0 && (
 				<div className="discussed-note raised-note rejected small" title="Automatic review doesn't post a finding like this.">

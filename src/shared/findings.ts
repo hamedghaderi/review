@@ -1,4 +1,15 @@
-import type { AiRun, CommentDraft, Finding, FindingCategory, FindingLevel, Review, ReviewComment, Severity, TestPattern } from './types.ts'
+import type {
+	AiRun,
+	CommentDraft,
+	Finding,
+	FindingCategory,
+	FindingDecision,
+	FindingLevel,
+	Review,
+	ReviewComment,
+	Severity,
+	TestPattern,
+} from './types.ts'
 
 export type FindingState = 'open' | 'accepted' | 'dismissed'
 
@@ -24,31 +35,55 @@ export interface FindingLink {
 	draft: CommentDraft | null
 }
 
-/** The comment or new draft created from this finding (or an equivalent one from another run). */
-export function findingLink(review: Review, roots: Map<string, string>, findingId: string): FindingLink | null {
+/**
+ * The comment or new draft created from this finding (or an equivalent one from another run). `carried`: the origin id
+ * of the comment made from a carried finding in the earlier review, which came along as a plain comment.
+ */
+export function findingLink(
+	review: Review,
+	roots: Map<string, string>,
+	findingId: string,
+	carried: string | null = null,
+): FindingLink | null {
 	const root = roots.get(findingId) ?? findingId
 	const sameRoot = (id: string | null): boolean => id !== null && (roots.get(id) ?? id) === root
-	const comment = review.comments.find((c) => sameRoot(c.findingId)) ?? null
+	const comment =
+		review.comments.find((c) => sameRoot(c.findingId) || (carried !== null && (c.carried?.originId ?? c.id) === carried)) ?? null
 	const draft = review.drafts.find((d) => d.commentId === null && sameRoot(d.findingId)) ?? null
 	return comment || draft ? { comment, draft } : null
 }
 
-/**
- * Accepted = a linked comment/draft exists. Otherwise the most specific decision wins: this finding's own, then
- * the one recorded on the finding it repeats.
- */
-export function findingState(review: Review, roots: Map<string, string>, finding: Finding, byId: Map<string, Finding>): FindingState {
-	if (findingLink(review, roots, finding.id)) return 'accepted'
-	let cur: Finding | undefined = finding
+/** The finding and the earlier ones it repeats, newest first. */
+function repeats(finding: Finding, byId: Map<string, Finding>): Array<Finding> {
+	const out: Array<Finding> = []
 	const seen = new Set<string>()
-	while (cur && !seen.has(cur.id)) {
+	for (let cur: Finding | undefined = finding; cur && !seen.has(cur.id); cur = cur.repeatOf ? byId.get(cur.repeatOf) : undefined) {
 		seen.add(cur.id)
-		const d = review.findingDecisions[cur.id]
-		if (d?.status === 'dismissed') return 'dismissed'
-		if (d?.status === 'open') return 'open'
-		cur = cur.repeatOf ? byId.get(cur.repeatOf) : undefined
+		out.push(cur)
 	}
-	return 'open'
+	return out
+}
+
+/**
+ * The most specific decision on a finding: its own, then the one recorded on the finding it repeats. A carried finding
+ * falls back on the decision it had in the earlier review.
+ */
+export function findingDecision(review: Review, finding: Finding, byId: Map<string, Finding>): Omit<FindingDecision, 'history'> | null {
+	for (const cur of repeats(finding, byId)) {
+		const d = review.findingDecisions[cur.id] ?? cur.carried?.decision
+		if (d?.status === 'dismissed' || d?.status === 'open') {
+			const { history: _, ...rest } = d as FindingDecision
+			return rest
+		}
+	}
+	return null
+}
+
+/** Accepted = a linked comment/draft exists. Otherwise the most specific decision wins (see findingDecision). */
+export function findingState(review: Review, roots: Map<string, string>, finding: Finding, byId: Map<string, Finding>): FindingState {
+	const carried = repeats(finding, byId).find((f) => f.carried?.comment)?.carried?.comment ?? null
+	if (findingLink(review, roots, finding.id, carried)) return 'accepted'
+	return findingDecision(review, finding, byId)?.status === 'dismissed' ? 'dismissed' : 'open'
 }
 
 /** How each level is shown in the app and in posted comments. */

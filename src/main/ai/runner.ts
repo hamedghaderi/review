@@ -4,6 +4,7 @@ import {
 	type AiRun,
 	type AiScope,
 	type AiUsage,
+	type CarriedRun,
 	type Comparison,
 	type Discussion,
 	type FileCoverage,
@@ -116,6 +117,8 @@ export interface RunInput {
 	 * `providers` holds each owning reviewer's provider, by member id (null for a single-model run); `options.team` is ignored.
 	 */
 	retry?: { run: AiRun; rules: Array<ReviewRule>; providers: ReadonlyMap<string | null, ReviewProvider> }
+	/** An incremental run: the files not sent because an earlier run reviewed the same diff, and that run's findings on them. */
+	carried?: { from: CarriedRun; files: Array<FileCoverage>; findings: Array<Finding> } | null
 }
 
 export interface RunHandle {
@@ -146,6 +149,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	// A retry double-checks the new blocking findings it brings if the original run double-checked its own.
 	const verify = retry ? retry.run.limitsUsed?.verify === true : options.limits.verify !== false
 	const grouping = options.limits.groupDuplicates === true
+	// Files an earlier run reviewed with the same diff: listed to the reviewer as such, never sent.
+	const carriedKeys = new Set(
+		(retry ? retry.run.coverage.files : (input.carried?.files ?? [])).filter((f) => f.state === 'carried').map((f) => f.fileKey),
+	)
 	const controller = new AbortController()
 	const now = (): string => new Date().toISOString()
 	const run: AiRun = retry
@@ -183,6 +190,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				...(options.persona && !options.team ? { persona: options.persona } : {}),
 				levels,
 				earlier: input.earlier ?? null,
+				...(input.carried ? { carriedFrom: input.carried.from } : {}),
 			}
 	const description = input.comparison.pr?.body?.trim() || null
 	const images = input.images ?? []
@@ -359,6 +367,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					allFacts,
 					risk,
 					files && { fileKeys: files, label: w.role },
+					carriedKeys,
 				)
 			}
 			const pkgs = workers.map((w) => w.pkg!)
@@ -475,6 +484,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				allFacts,
 				risk,
 				files && { fileKeys: files, label: w.role },
+				carriedKeys,
 			)
 			const before = shared ? run.coverage.supplied : run.coverage.supplied.filter((x) => (x.memberId ?? null) === w.id)
 			const strip = (xs: Array<SuppliedExcerpt>): string => JSON.stringify(xs.map(({ memberId: _m, ...x }) => x))
@@ -890,6 +900,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				f.reason = cancelled ? 'Cancelled before this file was reviewed' : (f.reason ?? 'Not reviewed')
 			}
 		}
+		// Carried results are added last, so this run's own findings are never grouped with them or counted against its limits.
+		if (input.carried) {
+			run.coverage.files.push(...input.carried.files.filter((f) => !run.coverage.files.some((x) => x.fileKey === f.fileKey)))
+			run.findings.push(...input.carried.findings.map((f) => ({ ...f, runId: run.id })))
+		}
 		if (!cancelled) run.status = overallStatus(run.coverage.files, pkg, run.errors)
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		run.finishedAt = now()
@@ -1034,14 +1049,14 @@ export function answeredRequests(run: AiRun, e: RuleEvaluation): Array<number> |
 	return answered.length === e.requests ? answered : null
 }
 
-/** completed = every reviewable file in scope was fully reviewed; partial = some were; failed = none were. */
+/** completed = every reviewable file in scope was fully reviewed (or carried); partial = some were; failed = none were. */
 export function overallStatus(files: Array<FileCoverage>, pkg: ContextPackage | null, errors: Array<string>): AiRun['status'] {
 	if (!pkg) return 'failed'
 	const reviewable = files.filter((f) => f.state !== 'not-reviewable')
-	const reviewed = reviewable.filter((f) => f.state === 'reviewed' || f.state === 'partial')
+	const reviewed = reviewable.filter((f) => f.state === 'reviewed' || f.state === 'carried' || f.state === 'partial')
 	if (reviewable.length === 0) return errors.length ? 'failed' : 'completed'
 	if (reviewed.length === 0) return 'failed'
-	return reviewable.every((f) => f.state === 'reviewed') && errors.length === 0 ? 'completed' : 'partial'
+	return reviewable.every((f) => f.state === 'reviewed' || f.state === 'carried') && errors.length === 0 ? 'completed' : 'partial'
 }
 
 function emptyUsage(): AiUsage {

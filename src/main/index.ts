@@ -341,6 +341,9 @@ function registerIpc(): void {
 		connections.checkChoice(choice)
 		return service.startAi(comparisonId(reviewId), scope, choice)
 	})
+	handle(IPC.aiIncremental, async (reviewId: unknown, reviewer: unknown) =>
+		service.incrementalOffer(comparisonId(reviewId), reviewerChoice(reviewer)),
+	)
 	handle(IPC.aiCancel, async (runId: unknown) => ai.cancel(str(runId, 'run id', 64)))
 	handle(IPC.gifStatus, async () => giphy.status())
 	handle(IPC.gifSetKey, (key: unknown, persist: unknown) => giphy.setKey(str(key, 'GIPHY API key', 200), bool(persist, 'remember setting')))
@@ -539,6 +542,7 @@ app.whenReady().then(async () => {
 	app.on('browser-window-focus', () => void connections.refreshModels(MODELS_MAX_AGE_MS))
 	await ai.recoverInterrupted()
 	ai.attachTeams((id) => connections.team(id))
+	ai.attachLevels(() => connections.view().levels.enabled)
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()
