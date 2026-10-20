@@ -11,6 +11,7 @@ import {
 	type PatchResult,
 	type RecheckedFile,
 	type Review,
+	type ReviewLimits,
 	type ReviewRule,
 } from '../../shared/types.ts'
 import { NOT_NAMES } from '../symbols.ts'
@@ -24,15 +25,28 @@ import { wantedNames } from './related.ts'
  * when both of its blob ids are, so a carried finding keeps its lines; only its commits change.
  */
 
+/** The run limits that decide how deep a file is reviewed, beyond who reviews it. */
+export type ReviewDepth = Pick<ReviewLimits, 'relatedCode' | 'lookups' | 'verify'>
+
+const DEPTH_LABEL: Record<keyof ReviewDepth, string> = {
+	lookups: 'lookups',
+	relatedCode: 'related code',
+	verify: 'double-checking of blocking findings',
+}
+
 /** Who reviews and how, as far as it decides what a run can find. Two runs with the same one can share results. */
 export interface ReviewerPrint {
 	promptVersion: string
 	levels: Array<FindingLevel>
 	workers: Array<{ connectionId: string | null; model: string; persona: string | null; rules: Array<ReviewRule> }>
+	depth?: ReviewDepth | null // absent: not known, and not compared
 }
 
 export function runPrint(run: AiRun): ReviewerPrint {
+	const l = run.limitsUsed
 	return {
+		// A setting a run doesn't record was on: each was on by default when it was added.
+		depth: l ? { relatedCode: l.relatedCode !== false, lookups: l.lookups !== false, verify: l.verify !== false } : null,
 		promptVersion: run.promptVersion,
 		levels: run.levels ?? ['blocking', 'should_fix', 'pre_existing'],
 		workers: run.team
@@ -50,6 +64,14 @@ export function trustGap(earlier: AiRun, next: ReviewerPrint): string | null {
 	if (key(was.levels) !== key(next.levels)) return `The finding levels changed since the run on ${at}.`
 	const workers = (p: ReviewerPrint) => key(p.workers.map((w) => ({ ...w, rules: [...w.rules].sort() })))
 	if (workers(was) !== workers(next)) return `The run on ${at} used a different model, team or set of rules.`
+	// Carried coverage would claim a deeper review than the earlier run gave; turning one off still carries.
+	const deeper =
+		was.depth && next.depth ? (Object.keys(DEPTH_LABEL) as Array<keyof ReviewDepth>).filter((k) => next.depth![k] && !was.depth![k]) : []
+	if (deeper.length) {
+		const names = deeper.map((k) => DEPTH_LABEL[k])
+		const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]
+		return `The run on ${at} had ${list} turned off, and ${names.length === 1 ? 'it is' : 'they are'} on now.`
+	}
 	return null
 }
 

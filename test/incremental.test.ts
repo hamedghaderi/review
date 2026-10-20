@@ -248,3 +248,36 @@ test('an unchanged file whose added lines use a name whose definition changed is
 	assert.deepEqual(run.rechecked, sig.recheck)
 	assert.match(inputs.join('\n'), /added lines use `computeTotal`, whose definition changed since the run on \w{7} in a\.ts/)
 })
+
+test('a setting that makes the review deeper, off for the earlier run and on now, stops carrying; turning one off still carries', async () => {
+	const { w, svc, ai, repoId } = await setup()
+	// The fixture's runs have related code and double-checking off, and lookups on.
+	let limits = {
+		contextLines: 5,
+		maxBatchChars: 100_000,
+		maxRunChars: 1_000_000,
+		relatedCode: false,
+		lookups: true,
+		verify: false,
+		groupDuplicates: false,
+	}
+	ai.attachModels({ info: () => null, limits: () => limits, label: () => 'Fixture' })
+	const v1 = await svc.loadComparison(repoId, { kind: 'target', target })
+	const first = await finished(ai, await svc.startAi(v1.comparison.id, { kind: 'all' }, MODEL))
+	assert.equal(first.status, 'completed', first.errors.join('; '))
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'a.ts': w.file('a', 2) }, 'v2')
+	w.run('checkout', '-q', 'main')
+	const v2 = await svc.loadComparison(repoId, { kind: 'target', target, from: v1.comparison.id })
+
+	assert.equal((await svc.incrementalOffer(v2.comparison.id, MODEL))?.refused, null, 'the same settings carry')
+
+	limits = { ...limits, relatedCode: true, verify: true }
+	assert.match(
+		(await svc.incrementalOffer(v2.comparison.id, MODEL))?.refused ?? '',
+		/had related code and double-checking of blocking findings turned off, and they are on now/,
+	)
+
+	limits = { ...limits, relatedCode: false, verify: false, lookups: false }
+	assert.equal((await svc.incrementalOffer(v2.comparison.id, MODEL))?.refused, null, 'a shallower review can build on a deeper one')
+})

@@ -246,6 +246,8 @@ export class AiController {
 	 */
 	reviewerPrint(choice: ReviewerChoice): ReviewerPrint | null {
 		const levels = this.levels?.() ?? DEFAULT_LEVELS
+		const l = this.models?.limits()
+		const depth = l ? { relatedCode: l.relatedCode !== false, lookups: l.lookups !== false, verify: l.verify !== false } : null
 		if (choice.kind === 'model') {
 			const { connectionId, modelId } = choice.selection
 			const persona = choice.persona ?? null
@@ -253,6 +255,7 @@ export class AiController {
 			return {
 				promptVersion: PROMPT_VERSION,
 				levels,
+				depth,
 				workers: roles.length
 					? roles.map((r) => ({ connectionId, model: modelId, persona, rules: [...r.rules] }))
 					: [{ connectionId, model: modelId, persona, rules: [...REVIEW_RULES] }],
@@ -268,6 +271,7 @@ export class AiController {
 		return {
 			promptVersion: PROMPT_VERSION,
 			levels,
+			depth,
 			workers: team.members.map((m) => ({ connectionId: m.connectionId, model: m.modelId, persona: m.persona ?? null, rules: m.rules })),
 		}
 	}
