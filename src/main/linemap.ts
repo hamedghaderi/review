@@ -9,6 +9,7 @@ export type PathMove = { path: string | null; oldBlob: string | null; newBlob: s
 interface Hunk0 {
 	oldStart: number
 	oldCount: number
+	newStart: number
 	newCount: number
 }
 
@@ -58,6 +59,28 @@ export class Mapper {
 		return { start: start + delta, end: end + delta }
 	}
 
+	/**
+	 * Where the range is about in the later commit, following lines that changed: an edge inside a changed region moves
+	 * to the edge of what replaced it. Used to match findings, never to place comments.
+	 */
+	async near(m: PathMove, start: number, end: number): Promise<{ start: number; end: number }> {
+		if (!m.oldBlob || !m.newBlob || m.oldBlob === m.newBlob) return { start, end }
+		const hunks = await this.diff(m.oldBlob, m.newBlob)
+		if (!hunks) return { start, end }
+		const at = (line: number, edge: 'start' | 'end'): number => {
+			let delta = 0
+			for (const h of hunks) {
+				if (h.oldCount && h.oldStart <= line && line <= h.oldStart + h.oldCount - 1)
+					return Math.max(1, edge === 'start' ? h.newStart : h.newStart + Math.max(h.newCount, 1) - 1)
+				if (h.oldCount ? h.oldStart + h.oldCount - 1 < line : h.oldStart < line) delta += h.newCount - h.oldCount
+				else break
+			}
+			return line + delta
+		}
+		const s = at(start, 'start')
+		return { start: s, end: Math.max(s, at(end, 'end')) }
+	}
+
 	/** Changed regions between two blobs (`-U0`), or null for a binary change. */
 	private diff(a: string, b: string): Promise<Array<Hunk0> | null> {
 		const key = `${a}:${b}`
@@ -66,11 +89,12 @@ export class Mapper {
 			p = git(this.root, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-U0', a, b]).then((r) => {
 				if (r.code !== 0 && r.code !== 1) throw new AppFail('git-failed', `git diff failed: ${r.stderr.trim()}`)
 				const out: Array<Hunk0> = []
-				for (const m of r.stdout.toString('utf8').matchAll(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@/gm))
+				for (const m of r.stdout.toString('utf8').matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm))
 					out.push({
 						oldStart: Number(m[1]),
 						oldCount: m[2] === undefined ? 1 : Number(m[2]),
-						newCount: m[3] === undefined ? 1 : Number(m[3]),
+						newStart: Number(m[3]),
+						newCount: m[4] === undefined ? 1 : Number(m[4]),
 					})
 				return out.length ? out : null
 			})

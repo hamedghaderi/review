@@ -5,11 +5,13 @@ import {
 	CATEGORY_LABEL,
 	droppedFindings,
 	findingState,
+	historyCounts,
 	LEVEL_META,
 	RESIDUE_LABEL,
 	SEVERITY_ORDER,
 	TEST_PATTERN_LABEL,
 	type FindingState,
+	type HistoryCounts,
 } from '../../shared/findings.ts'
 import { changeRisk, DISMISS_REASONS, REVIEW_RULES } from '../../shared/types.ts'
 import type {
@@ -122,6 +124,7 @@ export function FindingsPanel({
 	const run = runs.find((r) => r.id === runId) ?? latest
 	const byId = useMemo(() => new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const))), [runs])
 	const dropped = useMemo(() => (run ? droppedFindings(run, runs, review, roots) : null), [run, runs, review, roots])
+	const since = useMemo(() => (run ? historyCounts(review, run, runs, roots) : null), [run, runs, review, roots])
 	const order = useMemo(() => new Map(files.map((f, i) => [f.key, i])), [files])
 
 	const items = useMemo(() => {
@@ -234,6 +237,7 @@ export function FindingsPanel({
 		<div className="comments findings-scroll">
 			<RunSummary
 				run={run}
+				since={since}
 				showDetails={showDetails}
 				onToggleDetails={() => setShowDetails((x) => !x)}
 				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
@@ -474,14 +478,41 @@ function RiskLine({ files }: { files: AiRun['coverage']['files'] }) {
 	)
 }
 
+/** "Since 1a2b3c4: 3 probably fixed, 2 new, 5 still present", leaving out what is zero. */
+function SinceLine({ since, history }: { since: HistoryCounts; history: NonNullable<AiRun['history']> }) {
+	const parts = [
+		since.fixed && `${since.fixed} probably fixed`,
+		since.fresh && `${since.fresh} new`,
+		since.present && `${since.present} still present`,
+		since.dismissed && `${since.dismissed} dismissed`,
+		since.notSeen && `${since.notSeen} not seen this time`,
+	].filter(Boolean)
+	const at = history.from.headSha.slice(0, 7)
+	return (
+		<div
+			className="small"
+			title="Compared with the newest finished run on an earlier snapshot. Probably fixed: its lines changed and this run didn’t raise it again, which the model can also miss."
+		>
+			<b>Since {at}:</b> {parts.length ? parts.join(', ') : 'no findings then or now'}
+			{history.rewritten
+				? '. The commits were rewritten since then (a force-push), so lines were matched head to head.'
+				: history.baseMoved
+					? '. The base moved since then.'
+					: ''}
+		</div>
+	)
+}
+
 function RunSummary({
 	run,
+	since,
 	showDetails,
 	onToggleDetails,
 	onRetryRules,
 	onStop,
 }: {
 	run: AiRun
+	since: HistoryCounts | null
 	showDetails: boolean
 	onToggleDetails(): void
 	onRetryRules: ((rules: Array<ReviewRule>) => void) | null
@@ -544,6 +575,7 @@ function RunSummary({
 				{run.merged ? ` · ${run.merged.findings} grouped with another as the same problem` : ''}
 				{run.rejected.length ? ` · ${run.rejected.length} rejected by validation` : ''}
 			</div>
+			{since && run.history && <SinceLine since={since} history={run.history} />}
 			{(run.rechecked ?? []).length > 0 && (
 				<div className="small">
 					<b>Reviewed again, diff unchanged:</b>{' '}

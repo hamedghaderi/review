@@ -13,9 +13,9 @@ import {
 	type Review,
 	type ReviewRule,
 } from '../../shared/types.ts'
-import { findingDecision, findingLink, findingRoots } from '../../shared/findings.ts'
 import { NOT_NAMES } from '../symbols.ts'
 import type { ContextFact, FileSource } from './context.ts'
+import { earlierState } from './history.ts'
 import { wantedNames } from './related.ts'
 
 /**
@@ -121,11 +121,8 @@ export function carryFindings(
 	const keys = new Set(files.filter((f) => f.state === 'carried').map((f) => f.fileKey))
 	const mine = earlier.findings.filter((f) => keys.has(f.anchor.fileKey))
 	const ids = new Set(mine.map((f) => f.id))
-	const roots = findingRoots(runs)
-	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+	const state = earlierState(review, runs)
 	return mine.map((f) => {
-		const link = findingLink(review, roots, f.id, f.carried?.comment ?? null)
-		const linked = link?.comment ? (link.comment.carried?.originId ?? link.comment.id) : null
 		const kept = !f.mergedInto || ids.has(f.mergedInto)
 		return {
 			...f,
@@ -134,7 +131,7 @@ export function carryFindings(
 			mergedInto: kept ? (f.mergedInto ?? null) : null,
 			mergedReason: kept ? (f.mergedReason ?? null) : null,
 			...(f.alsoAt ? { alsoAt: f.alsoAt.filter((x) => ids.has(x.findingId)) } : {}),
-			carried: { from: f.carried?.from ?? origin, decision: findingDecision(review, f, byId), comment: linked },
+			carried: { from: f.carried?.from ?? origin, ...state(f) },
 		}
 	})
 }

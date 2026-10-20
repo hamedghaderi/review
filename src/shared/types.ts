@@ -896,6 +896,7 @@ export interface Finding {
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
 	carried?: CarriedFinding | null // copied from an earlier snapshot's run because its file's diff did not change
+	previous?: PreviousFinding | null // the same finding in the earlier snapshot the run compared with (see FindingHistory)
 	// Before prompt reviewer-2026-10-01:
 	problem?: string
 	consequence?: string
@@ -970,6 +971,39 @@ export interface CarriedFinding {
 	from: CarriedRun
 	decision: Omit<FindingDecision, 'history'> | null
 	comment: string | null // CarriedFrom.originId of the comment made from it, which was carried in as a plain comment
+}
+
+/** The same finding in an earlier snapshot of the pull request or branch, and what was decided on it there. */
+export interface PreviousFinding {
+	from: CarriedRun // the run that raised it there
+	findingId: string
+	decision: Omit<FindingDecision, 'history'> | null
+	comment: string | null // CarriedFrom.originId of the comment made from it, which was carried in as a plain comment
+	seen: Array<CarriedRun> // every earlier snapshot it was raised in, oldest first
+}
+
+/**
+ * How a run's findings compare with the newest finished run on an earlier snapshot of the same pull request or branch.
+ * A finding of the run is new without `previous` and still present with it; `gone` holds the earlier run's findings
+ * this run did not raise again. Dismissed ones are left out: the decision on them stands.
+ */
+export interface FindingHistory {
+	from: CarriedRun
+	baseMoved: boolean // the base commit is not the same (a rebase, or the base branch moved)
+	rewritten: boolean // the earlier head is not an ancestor of this one (a force-push)
+	gone: Array<GoneFinding>
+}
+
+/**
+ * fixed: its lines changed or went away and the run, which checked its rule on the file, did not raise it again. It is
+ * shown as "probably fixed": the model may have missed it. not-seen: not raised again, but nothing shows it was fixed.
+ */
+export interface GoneFinding {
+	finding: Finding // as it was in the earlier snapshot
+	state: 'fixed' | 'not-seen'
+	why: string
+	decision: Omit<FindingDecision, 'history'> | null
+	comment: string | null // as on PreviousFinding
 }
 
 // The accepted comment is linked through `findingId` on the draft/comment itself. 'open' overrides a decision
@@ -1252,6 +1286,7 @@ export interface AiRun {
 	auto?: boolean // started by automatic review: its findings are added and published by the main process, not the window
 	carriedFrom?: CarriedRun | null // an incremental run: the earlier run whose results it carries for unchanged files
 	rechecked?: Array<RecheckedFile> // an incremental run: unchanged files it reviewed again, and why
+	history?: FindingHistory | null // compared with the newest finished run on an earlier snapshot, when there is one
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
