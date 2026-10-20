@@ -1,6 +1,7 @@
 import { listAt, readAt } from '../git.ts'
-import { CI_FAILED, CI_PASSED } from '../../shared/ci.ts'
+import { baseLabel, CI_FAILED, CI_PASSED, compareChecks } from '../../shared/ci.ts'
 import type { CommitChecks } from '../github.ts'
+import { markPreExisting, type BaseChecks } from '../baseCi.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { dependencyFacts } from './deps.ts'
 import { annotationFacts } from './evidence.ts'
@@ -26,7 +27,8 @@ const MAX_STALE = 20
 /**
  * Facts the app computes or reads for the reviewer, so findings can rest on evidence instead of asking the reader to
  * go and check: the project context file, dependency range checks for manifest and lock file changes, and the CI
- * results for the head commit. Any part may be missing; a failure becomes a note, never a failed run.
+ * results for the head commit, compared with the base's. Any part may be missing; a failure becomes a note, never a
+ * failed run.
  */
 export async function loadFacts(o: {
 	root: string
@@ -35,6 +37,7 @@ export async function loadFacts(o: {
 	sources: Array<FileSource>
 	checks: (() => Promise<CommitChecks>) | null // null: no GitHub repository for this review
 	annotations?: ((runId: number) => Promise<Array<Omit<CiAnnotation, 'check'>>>) | null
+	baseChecks?: (() => Promise<BaseChecks | null>) | null // the merge base's CI (see readBaseChecks)
 	signal?: AbortSignal
 }): Promise<FactsResult> {
 	const out: FactsResult = { facts: [], notes: [], summary: [], annotations: [] }
@@ -74,10 +77,20 @@ export async function loadFacts(o: {
 	if (o.checks) {
 		try {
 			const c = await o.checks()
-			const f = ciFact(c)
+			let base: BaseChecks | null = null
+			try {
+				base = (await o.baseChecks?.()) ?? null
+			} catch (e) {
+				if (o.signal?.aborted) throw e
+				out.notes.push(
+					`CI of the base commit could not be read, so failures are not compared with it: ${e instanceof Error ? e.message : String(e)}`,
+				)
+			}
+			const f = ciFact(c, base)
 			out.facts.push(f.fact)
 			out.summary.push({ kind: 'ci', text: f.summary })
-			if (o.annotations) await readAnnotations(c, o.annotations, o.sources, out, o.signal)
+			if (o.annotations)
+				await readAnnotations(c, o.annotations, o.sources, out, o.signal, base && { root: o.root, headSha: o.headSha, base })
 		} catch (e) {
 			if (o.signal?.aborted) throw e
 			// A branch that was never pushed: GitHub has no record of the commit, which is "no evidence", not a failure.
@@ -102,6 +115,7 @@ async function readAnnotations(
 	sources: Array<FileSource>,
 	out: FactsResult,
 	signal?: AbortSignal,
+	control: { root: string; headSha: string; base: BaseChecks } | null = null,
 ): Promise<void> {
 	const changed = new Set(sources.flatMap((s) => (s.file.newPath ? [s.file.newPath] : [])))
 	const runs = c.runs.filter((r) => r.annotations > 0)
@@ -115,12 +129,23 @@ async function readAnnotations(
 	}
 	if (runs.length > MAX_ANNOTATED_RUNS)
 		out.notes.push(`Only the CI annotations of the first ${MAX_ANNOTATED_RUNS} of ${runs.length} annotated checks were read.`)
+	if (control && out.annotations.length) {
+		try {
+			const marked = await markPreExisting(control.root, control.headSha, out.annotations, control.base, fetch)
+			out.annotations = marked.annotations
+			out.notes.push(...marked.notes)
+		} catch (e) {
+			if (signal?.aborted) throw e
+			out.notes.push(`CI annotations could not be compared with the base commit: ${e instanceof Error ? e.message : String(e)}`)
+		}
+	}
 	out.facts.push(...annotationFacts(out.annotations, sources))
 	if (out.annotations.length) {
 		const failures = out.annotations.filter((a) => a.level === 'failure').length
+		const old = out.annotations.filter((a) => a.atBase).length
 		out.summary.push({
 			kind: 'ci',
-			text: `${out.annotations.length} CI annotation${out.annotations.length === 1 ? '' : 's'} on changed files (${failures} failure${failures === 1 ? '' : 's'}).`,
+			text: `${out.annotations.length} CI annotation${out.annotations.length === 1 ? '' : 's'} on changed files (${failures} failure${failures === 1 ? '' : 's'}${old ? `; ${old} also at the base commit` : ''}).`,
 		})
 	}
 }
@@ -237,19 +262,25 @@ function escape(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function ciFact(c: CommitChecks): { fact: ContextFact; summary: string } {
+/** `base`: the control the failures are compared with, when one with finished CI was found. */
+export function ciFact(c: CommitChecks, base: BaseChecks | null = null): { fact: ContextFact; summary: string } {
+	const at = compareChecks(base?.checks ?? null)
 	const all = [
 		...c.runs.map((r) => ({
 			name: r.app && r.app !== 'GitHub Actions' ? `${r.name} (${r.app})` : r.name,
 			result: r.result,
 			note: null as string | null,
+			atBase: at.run(r),
 		})),
-		...c.statuses.map((s) => ({ name: s.name, result: s.result, note: s.description })),
+		...c.statuses.map((s) => ({ name: s.name, result: s.result, note: s.description, atBase: at.status(s) })),
 	]
 	const failed = all.filter((x) => CI_FAILED.has(x.result))
 	const passed = all.filter((x) => CI_PASSED.has(x.result))
 	const pending = all.filter((x) => !CI_FAILED.has(x.result) && !CI_PASSED.has(x.result))
-	const head = `Reported by GitHub for the head commit ${c.sha.slice(0, 7)}. Check names and results only: they say what ran and how it ended, not what each check covers.`
+	const control = base
+		? ` Each failure is compared with the same check on ${baseLabel(base.control)}: one that also fails there fails without this change, so it is not evidence against the change; one that passes there started failing with it.`
+		: ''
+	const head = `Reported by GitHub for the head commit ${c.sha.slice(0, 7)}. Check names and results only: they say what ran and how it ended, not what each check covers.${control}`
 	if (!all.length) {
 		return {
 			fact: {
@@ -261,10 +292,17 @@ export function ciFact(c: CommitChecks): { fact: ContextFact; summary: string } 
 			summary: 'No CI checks reported for the head commit.',
 		}
 	}
-	const line = (x: (typeof all)[number]) => `- ${x.name}: ${x.result}${x.note ? ` (${x.note.slice(0, 120)})` : ''}`
+	const mark = (x: (typeof all)[number]): string =>
+		!base || !CI_FAILED.has(x.result) || !x.atBase
+			? ''
+			: x.atBase === 'fails'
+				? `, also fails at ${base.control.sha.slice(0, 7)}`
+				: `, passes at ${base.control.sha.slice(0, 7)}`
+	const line = (x: (typeof all)[number]) => `- ${x.name}: ${x.result}${mark(x)}${x.note ? ` (${x.note.slice(0, 120)})` : ''}`
 	const lines = [...failed, ...pending, ...passed].slice(0, 60).map(line)
 	if (all.length > 60 || c.runsOmitted) lines.push(`… ${all.length - Math.min(all.length, 60) + c.runsOmitted} more not listed`)
-	const summary = `${failed.length} failed, ${pending.length} not finished, ${passed.length} passed`
+	const old = failed.filter((x) => x.atBase === 'fails').length
+	const summary = `${failed.length} failed${old ? ` (${old} also at the base commit)` : ''}, ${pending.length} not finished, ${passed.length} passed`
 	return {
 		fact: { kind: 'ci', title: 'CI results', text: `${head}\n${lines.join('\n')}\nOverall: ${summary}.`, fileKeys: null },
 		summary: `CI for the head commit: ${summary}.`,

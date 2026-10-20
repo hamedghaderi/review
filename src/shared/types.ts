@@ -925,6 +925,7 @@ export interface CiAnnotation {
 	level: 'failure' | 'warning' | 'notice'
 	title: string | null
 	message: string
+	atBase?: string | null // the same message on the same unchanged lines at this base commit: it was there before the change
 }
 
 /** A test that should fail on the head commit while the finding holds. Shown to copy; never written to disk or run. */
