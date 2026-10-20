@@ -144,7 +144,7 @@ test('the controller estimates from model details alone: no provider is built an
 		},
 		() => {},
 	)
-	controller.attachModels({ info: () => ({ limits: MODEL, price: PRICE }), limits: () => LIMITS })
+	controller.attachModels({ info: () => ({ limits: MODEL, price: PRICE }), limits: () => LIMITS, label: () => 'Gateway' })
 	const source = (k: string) => sources.find((s) => s.file.key === k)!
 	const access = {
 		comparison: comp,

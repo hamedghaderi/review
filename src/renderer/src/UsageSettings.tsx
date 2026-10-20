@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react'
 import { costCaveat, formatCost, formatTokens as tokens } from '../../shared/cost.ts'
-import type { UsageGroup, UsageKind, UsagePeriod, UsageSummary, UsageTotals } from '../../shared/types.ts'
+import type {
+	BudgetSettings,
+	BudgetView,
+	ConnectionView,
+	SpendTotals,
+	UsageGroup,
+	UsageKind,
+	UsagePeriod,
+	UsageSummary,
+	UsageTotals,
+} from '../../shared/types.ts'
 
 const KIND_LABEL: Record<UsageKind, string> = {
 	review: 'Review runs',
@@ -75,7 +85,163 @@ function Rows({
 }
 
 /** Settings → AI providers → Usage: what AI requests cost, from the usage history. */
-export function UsageSettings() {
+type Draft = { perRun: string; daily: string; monthly: string; connections: Record<string, { daily: string; monthly: string }> }
+
+const field = (x: number | null): string => (x === null ? '' : String(x))
+const amount = (x: string): number | null | undefined => {
+	if (!x.trim()) return null
+	const n = Number(x)
+	return Number.isFinite(n) && n >= 0 ? n : undefined // undefined: not a valid amount
+}
+
+function toDraft(b: BudgetSettings): Draft {
+	return {
+		perRun: field(b.perRun),
+		daily: field(b.daily),
+		monthly: field(b.monthly),
+		connections: Object.fromEntries(
+			Object.entries(b.connections).map(([id, c]) => [id, { daily: field(c.daily), monthly: field(c.monthly) }]),
+		),
+	}
+}
+
+function fromDraft(d: Draft): BudgetSettings | null {
+	const all = [d.perRun, d.daily, d.monthly, ...Object.values(d.connections).flatMap((c) => [c.daily, c.monthly])]
+	if (all.some((x) => amount(x) === undefined)) return null
+	const connections: BudgetSettings['connections'] = {}
+	for (const [id, c] of Object.entries(d.connections)) {
+		const daily = amount(c.daily) ?? null
+		const monthly = amount(c.monthly) ?? null
+		if (daily !== null || monthly !== null) connections[id] = { daily, monthly }
+	}
+	return { perRun: amount(d.perRun) ?? null, daily: amount(d.daily) ?? null, monthly: amount(d.monthly) ?? null, connections }
+}
+
+function Spend({ t }: { t: SpendTotals | undefined }) {
+	if (!t || (t.usd === 0 && !t.inputTokens)) return <span className="muted">nothing spent</span>
+	return (
+		<span className="muted" title={t.unpriced ? 'Some requests had no price, so this is a lower bound.' : undefined}>
+			{t.unpriced ? 'at least ' : ''}${t.usd.toFixed(2)} spent · {tokens(t.inputTokens)} in, {tokens(t.outputTokens)} out
+		</span>
+	)
+}
+
+/** Spending limits: a run stops at its own; reaching a daily or monthly one pauses automatic reviews and asks before a run. */
+function Budgets({ connections }: { connections: Array<ConnectionView> }) {
+	const [view, setView] = useState<BudgetView | null>(null)
+	const [draft, setDraft] = useState<Draft | null>(null)
+	const [error, setError] = useState<string | null>(null)
+	const [saved, setSaved] = useState(false)
+	useEffect(() => {
+		void window.review.aiBudget().then((r) => {
+			if (!r.ok) return setError(r.error.message)
+			setView(r.value)
+			setDraft(toDraft(r.value.budgets))
+		})
+	}, [])
+	if (!view || !draft) return error ? <div className="error-text small">{error}</div> : null
+	const next = fromDraft(draft)
+	const input = (value: string, set: (v: string) => void, label: string) => (
+		<input
+			className={`budget-input${amount(value) === undefined ? ' invalid' : ''}`}
+			inputMode="decimal"
+			value={value}
+			placeholder="No limit"
+			aria-label={label}
+			onChange={(e) => {
+				setSaved(false)
+				set(e.target.value)
+			}}
+		/>
+	)
+	const conn = (id: string) => draft.connections[id] ?? { daily: '', monthly: '' }
+	const setConn = (id: string, key: 'daily' | 'monthly', v: string) =>
+		setDraft({ ...draft, connections: { ...draft.connections, [id]: { ...conn(id), [key]: v } } })
+	return (
+		<form
+			className="budgets"
+			onSubmit={async (e) => {
+				e.preventDefault()
+				if (!next) return
+				const r = await window.review.setBudgets(next)
+				if (!r.ok) return setError(r.error.message)
+				setError(null)
+				setView(r.value)
+				setDraft(toDraft(r.value.budgets))
+				setSaved(true)
+			}}
+		>
+			<div className="section-title">Budgets</div>
+			<div className="muted small">
+				In US dollars, counted from the usage history in local time. A run stops at its budget: requests under way finish, and the files it
+				didn’t reach are marked skipped. When a daily or monthly budget is reached, automatic reviews wait until it allows them again, and a
+				review you start asks first. Requests without a price aren’t counted, so with gateways or custom endpoints set prices for your
+				models.
+			</div>
+			{view.paused.length > 0 && (
+				<div className="notice small" role="status">
+					Automatic reviews waiting for a budget: {view.paused.map((p) => p.label).join(', ')}.
+				</div>
+			)}
+			{view.over.length > 0 && <div className="notice small">{view.over.join(' ')}</div>}
+			<table className="level-table usage-table budget-table">
+				<thead>
+					<tr>
+						<th>Budget</th>
+						<th>Limit</th>
+						<th>So far</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td>Each run</td>
+						<td>{input(draft.perRun, (v) => setDraft({ ...draft, perRun: v }), 'Budget for each run')}</td>
+						<td className="muted">Stops the run</td>
+					</tr>
+					<tr>
+						<td>Each day</td>
+						<td>{input(draft.daily, (v) => setDraft({ ...draft, daily: v }), 'Daily budget')}</td>
+						<td>
+							<Spend t={view.today} />
+						</td>
+					</tr>
+					<tr>
+						<td>Each month</td>
+						<td>{input(draft.monthly, (v) => setDraft({ ...draft, monthly: v }), 'Monthly budget')}</td>
+						<td>
+							<Spend t={view.month} />
+						</td>
+					</tr>
+					{connections.flatMap((c) => [
+						<tr key={`${c.id}-d`}>
+							<td className="ellipsis">{c.label}, each day</td>
+							<td>{input(conn(c.id).daily, (v) => setConn(c.id, 'daily', v), `${c.label} daily budget`)}</td>
+							<td>
+								<Spend t={view.today.connections[c.id]} />
+							</td>
+						</tr>,
+						<tr key={`${c.id}-m`}>
+							<td className="ellipsis">{c.label}, each month</td>
+							<td>{input(conn(c.id).monthly, (v) => setConn(c.id, 'monthly', v), `${c.label} monthly budget`)}</td>
+							<td>
+								<Spend t={view.month.connections[c.id]} />
+							</td>
+						</tr>,
+					])}
+				</tbody>
+			</table>
+			{error && <div className="error-text small">{error}</div>}
+			<div className="form-actions">
+				<button type="submit" className="btn small primary" disabled={!next}>
+					Save budgets
+				</button>
+				{saved && <span className="muted small">Saved.</span>}
+			</div>
+		</form>
+	)
+}
+
+export function UsageSettings({ connections }: { connections: Array<ConnectionView> }) {
 	const [by, setBy] = useState<UsagePeriod>('day')
 	const [summary, setSummary] = useState<UsageSummary | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -112,6 +278,7 @@ export function UsageSettings() {
 				from your reviews, so deleting a review keeps its usage. A cost uses the price the request was sent with. It reads “at least” when
 				some requests had no price or reported no usage.
 			</div>
+			<Budgets connections={connections} />
 			{error && <div className="error-text small">{error}</div>}
 			{!s ? (
 				!error && <div className="muted small">Loading…</div>

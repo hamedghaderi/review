@@ -62,6 +62,11 @@ export interface RunnerOptions {
 	team?: { id: string; name: string; members: Array<TeamRunMember> }
 	persona?: PersonaId | null // single-model runs: the lens to review with; members carry their own
 	levels?: Array<FindingLevel> // the severity levels the reviewer may use (settings)
+	/**
+	 * The most this run (or retry) may cost, in US dollars, and what it says when it gets there. Once reached, requests in
+	 * flight finish, no new ones are sent, and the files not reached are skipped with `reason`.
+	 */
+	budget?: { usd: number; reason: string } | null
 }
 
 export interface TeamRunMember {
@@ -264,6 +269,9 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		toolChars = lookups ? JSON.stringify(TOOL_DEFINITIONS).length + (external ? JSON.stringify(external.definitions).length : 0) : 0
 	}
 	let settled = false
+	// A retry is measured from what the run had already cost.
+	const costBefore = run.cost?.usd ?? 0
+	let overBudget: string | null = null
 	let evidence: EvidenceIndex | null = null // CI messages and test imports that findings are checked against
 	const emit = (): void => {
 		if (!settled) onUpdate(structuredClone(run))
@@ -678,7 +686,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 * are and says so. Retries skip it: grouping again could fold findings someone already acted on.
 	 */
 	async function mergeDuplicates(): Promise<void> {
-		if (!grouping || retry || controller.signal.aborted || run.status !== 'running') return
+		if (!grouping || retry || overBudget || controller.signal.aborted || run.status !== 'running') return
 		const open = run.findings.filter((f) => !f.heldBack && !f.mergedInto)
 		if (open.length < 2) return
 		const w = [...workers]
@@ -729,7 +737,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 * Runs after every review request is answered, so the run is still 'running' meanwhile.
 	 */
 	async function verifyBlocking(): Promise<void> {
-		if (!verify || controller.signal.aborted || run.status !== 'running') return
+		if (!verify || overBudget || controller.signal.aborted || run.status !== 'running') return
 		const todo = run.findings
 			.filter((f) => f.severity === 'blocking' && !f.heldBack && !f.mergedInto && !f.verification)
 			.flatMap((f) => {
@@ -746,7 +754,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		progress.total += queue.length
 		emit()
 		const next = async (): Promise<void> => {
-			for (let item = queue.shift(); item && !controller.signal.aborted; item = queue.shift()) {
+			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const result = await verifyOne(item.f, item.w, item.checker)
 				if (controller.signal.aborted || run.status !== 'running') return
 				item.f.verification = result
@@ -873,6 +881,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const price = w.provider.price ?? null
 		run.cost = addCost(run.cost ?? null, u, price)
 		if (w.member) w.member.cost = addCost(w.member.cost ?? null, u, price)
+		const budget = options.budget
+		if (budget && !overBudget && run.cost.usd - costBefore >= budget.usd) {
+			overBudget = budget.reason
+			for (const x of workers) x.stopped = true
+			notice(`${budget.reason}, so no more requests were sent. Requests already under way were finished.`)
+		}
 		if (!u) return
 		const targets = [(run.usage ??= emptyUsage()), ...(w.member ? [(w.member.usage ??= emptyUsage())] : [])]
 		for (const t of targets) {
@@ -911,7 +925,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const cancelled = run.status === 'cancelled'
 		for (const w of workers) if (w.member?.status === 'running') w.member.status = cancelled ? 'cancelled' : 'failed'
 		for (const f of run.coverage.files) {
-			if (f.state === 'pending') {
+			if (f.state === 'pending' && overBudget && !cancelled) {
+				// Some of its requests were answered before the budget ran out.
+				f.state = Object.values(fileResults[f.fileKey] ?? {}).includes('reviewed') ? 'partial' : 'skipped'
+				f.reason = `${overBudget} before this file was ${f.state === 'partial' ? 'fully ' : ''}reviewed`
+			} else if (f.state === 'pending') {
 				f.state = cancelled ? 'cancelled' : 'failed'
 				f.reason = cancelled ? 'Cancelled before this file was reviewed' : (f.reason ?? 'Not reviewed')
 			}

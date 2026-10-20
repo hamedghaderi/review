@@ -44,7 +44,7 @@ export function estimateRun(
 		return fitted ? [{ r, limits: fitted.limits }] : []
 	})
 	const empty = { low: 0, high: 0 }
-	if (!fits.length) return { requests: 0, files: 0, inputTokens: empty, outputTokens: empty, cost: null, notes }
+	if (!fits.length) return { requests: 0, files: 0, inputTokens: empty, outputTokens: empty, cost: null, notes, over: [] }
 	// As in the run: excerpts are cut once to fit the smallest reviewer, then each packs its own requests.
 	const tight = fits.reduce((a, b) => (b.limits.maxBatchChars < a.limits.maxBatchChars ? b : a))
 	const prepared = prepareChange(sources, tight.limits, [])
@@ -104,5 +104,6 @@ export function estimateRun(
 		outputTokens: total.output,
 		cost: total.priced ? { low: total.low, high: total.high, estimated: total.estimated, unpriced: total.unpriced } : null,
 		notes,
+		over: [],
 	}
 }

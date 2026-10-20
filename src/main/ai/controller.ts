@@ -49,6 +49,7 @@ import { outputBudget, type ModelLimits } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
+import type { BudgetCheck } from './budget.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
@@ -58,6 +59,11 @@ export type TeamSource = (teamId: string) => ReviewTeam
 export interface ModelSource {
 	info(selection: ModelSelection): { limits: ModelLimits; price: PricedModel | null } | null
 	limits(): ReviewLimits
+	label(connectionId: string): string
+}
+/** Where a run on these connections stands against the budgets (see checkBudget). */
+export interface BudgetSource {
+	check(connections: Array<{ id: string; label: string }>, ignoreCaps?: boolean): BudgetCheck
 }
 
 export interface ComparisonAccess {
@@ -99,6 +105,7 @@ export class AiController {
 	private levels: (() => Array<FindingLevel>) | null = null
 	private usage: UsageLog | null = null
 	private models: ModelSource | null = null
+	private budget: BudgetSource | null = null
 	private onDemandBusy = new Set<string>() // "verify:<finding id>" and "test:<finding id>" requests under way
 	private starting = false
 	private store: ReviewStore
@@ -151,6 +158,10 @@ export class AiController {
 		this.models = models
 	}
 
+	attachBudget(budget: BudgetSource): void {
+		this.budget = budget
+	}
+
 	/**
 	 * What a run with `choice` over `scope` would send and cost, from its requests packed as the run packs them. Reads
 	 * only the diff and the files it changes: no related code, CI results, conversation or credentials.
@@ -197,7 +208,12 @@ export class AiController {
 		}
 		const keys =
 			scope.kind === 'file' ? [scope.fileKey] : scope.kind === 'files' ? scope.fileKeys : access.comparison.files.map((f) => f.key)
-		return estimateRun(access.comparison, await loadSources(access, keys), limits, reviewers, carried)
+		const estimate = estimateRun(access.comparison, await loadSources(access, keys), limits, reviewers, carried)
+		const connections = [...new Map(members.map((m) => [m.selection.connectionId, m.selection])).keys()].map((id) => ({
+			id,
+			label: this.models!.label(id),
+		}))
+		return { ...estimate, over: this.budget?.check(connections).over ?? [] }
 	}
 
 	/** A fixed configuration whose provider books every response to the usage history. */
@@ -275,7 +291,8 @@ export class AiController {
 		reviewId: string,
 		scope: AiScope,
 		choice: ModelSelection | ReviewerChoice,
-		options: { background?: string; carried?: RunInput['carried'] } = {},
+		// overBudget: you were told a daily or monthly budget is reached and chose to start anyway.
+		options: { background?: string; carried?: RunInput['carried']; overBudget?: boolean } = {},
 	): Promise<AiRun> {
 		this.assertIdle()
 		this.starting = true
@@ -336,6 +353,12 @@ export class AiController {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
 		}
+		const used = team ? team.members.map((m) => m.config) : [config]
+		const budget = this.budget?.check(connectionsOf(used), options.overBudget === true) ?? null
+		if (budget?.over.length && !options.overBudget) {
+			this.starting = false
+			throw new AppFail('over-budget', budget.over.join(' '))
+		}
 		return this.launch(
 			access,
 			reviewId,
@@ -346,6 +369,7 @@ export class AiController {
 			},
 			{
 				...this.runOptions(config),
+				budget: budget?.limit ?? null,
 				persona: reviewer.kind === 'model' ? (reviewer.persona ?? null) : null,
 				team: team
 					? {
@@ -436,7 +460,8 @@ export class AiController {
 				previousFindings: runs.slice(0, at).flatMap((r) => r.findings),
 				retry: { run, rules: wanted, providers: new Map([...configs].map(([id, c]) => [id, c.provider])) },
 			},
-			this.runOptions(first),
+			// A retry only stops at the per-run budget: a daily or monthly cap already reached would stop it at its first answer.
+			{ ...this.runOptions(first), budget: this.budget?.check(connectionsOf([...configs.values()]), true).limit ?? null },
 			[...new Set([...configs.values()].map((c) => c.connectionId))],
 		)
 	}
@@ -899,6 +924,11 @@ export class AiController {
  * and files. Bugs only: one pass (or the passes that own them) with just those rules, so only they are asked and shown.
  * None: one request set with every rule.
  */
+/** Each connection a run uses, once. */
+function connectionsOf(configs: Array<RunConfig>): Array<{ id: string; label: string }> {
+	return [...new Map(configs.map((c) => [c.connectionId, { id: c.connectionId, label: c.connectionLabel }])).values()]
+}
+
 function passRoles(
 	reviewer: Extract<ReviewerChoice, { kind: 'model' }>,
 ): Array<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> {

@@ -291,3 +291,41 @@ test('CI that is still running when the wait ends, or that failed, gets a commen
 	assert.deepEqual(red.calls.slice(-1), ['submit COMMENT'])
 	assert.equal(red.records[0].outcome, 'commented')
 })
+
+test('a budget pauses an automatic review: told once, taken again later, and reviewed once the budget allows', async () => {
+	let over = true
+	const { auto, store, calls, records } = await setup({
+		start: async () => {
+			calls.push('start')
+			if (over) throw new AppFail('over-budget', "$5.00 spent: today's budget of $5.00 is reached.")
+			await store.update((d) => void (d.repos.r.aiRuns['b..h1'] = [run([])]))
+			return run([], 'running')
+		},
+	})
+	auto.take([event()])
+	await auto.idle()
+	assert.equal(records.length, 1)
+	assert.equal(records[0].outcome, 'paused')
+	assert.match(records[0].message, /paused: \$5.00 spent: today's budget/)
+	const saved = store.read().autoReviews?.['octo/app#7']
+	assert.equal(saved?.head, '', 'the head is not marked reviewed')
+	assert.equal(saved?.waiting?.pr.number, 7)
+
+	auto.resumePaused()
+	await auto.idle()
+	assert.equal(calls.filter((c) => c === 'start').length, 2)
+	assert.equal(records.length, 1, 'still over: not told again')
+
+	over = false
+	auto.resumePaused()
+	await auto.idle()
+	assert.notEqual(records.at(-1)?.outcome, 'paused')
+	assert.ok(
+		calls.some((c) => c.startsWith('submit')),
+		'reviewed and submitted once the budget allowed',
+	)
+	assert.equal(store.read().autoReviews?.['octo/app#7']?.waiting, undefined)
+	auto.resumePaused()
+	await auto.idle()
+	assert.equal(calls.filter((c) => c === 'start').length, 3, 'nothing is waiting any more')
+})

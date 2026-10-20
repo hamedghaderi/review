@@ -854,16 +854,22 @@ export function App() {
 		else setAiError(r.error.message)
 	}
 
-	const startAi = async (scope: AiStartScope, passes = false, bugsOnly = false, persona: PersonaId | null = null): Promise<void> => {
+	const startAi = async (
+		scope: AiStartScope,
+		passes = false,
+		bugsOnly = false,
+		persona: PersonaId | null = null,
+		overBudget = false,
+	): Promise<void> => {
 		if (!comparison || !reviewer) return
 		await persist()
 		setAiError(null)
 		setRightTab('findings')
-		const r = await window.review.startAiReview(
-			comparison.id,
-			scope,
-			reviewer.kind === 'model' ? { ...reviewer, passes, bugsOnly, persona } : reviewer,
-		)
+		const choice = reviewer.kind === 'model' ? { ...reviewer, passes, bugsOnly, persona } : reviewer
+		let r = await window.review.startAiReview(comparison.id, scope, choice, overBudget)
+		// A budget was reached after the dialog showed the estimate: ask, as the dialog would have.
+		if (!r.ok && r.error.code === 'over-budget' && window.confirm(`${r.error.message}\n\nStart this review anyway?`))
+			r = await window.review.startAiReview(comparison.id, scope, choice, true)
 		if (!r.ok) setAiError(r.error.message)
 		else if (comparisonIdRef.current === r.value.reviewId)
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
@@ -1321,7 +1327,7 @@ export function App() {
 											loadEstimate={loadEstimate}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
-											onStart={(scope, passes, bugsOnly, persona) => void startAi(scope, passes, bugsOnly, persona)}
+											onStart={(scope, passes, bugsOnly, persona, overBudget) => void startAi(scope, passes, bugsOnly, persona, overBudget)}
 											onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
 										/>
 									)}
