@@ -284,6 +284,17 @@ export function verdictOf(v: Pick<FindingVerification, 'verdict' | 'unread'>): F
 	return v.verdict === 'holds' && v.unread?.length ? 'unsure' : v.verdict
 }
 
+/**
+ * Whether the model that raised `f` also double-checked it: a single-model run, a team whose members share a model, or
+ * Verify with the same model. Compared by model id, whatever the connection. A check that failed checked nothing.
+ */
+export function checkedBySameModel(run: Pick<AiRun, 'model' | 'team'>, f: Pick<Finding, 'memberId' | 'verification'>): boolean {
+	const v = f.verification
+	if (!v || v.error) return false
+	const raiser = run.team ? run.team.members.find((m) => m.id === f.memberId)?.model : run.model
+	return v.model === raiser
+}
+
 /** "cites src/cart.ts:88, which it never read", or two or more of them. */
 export function unreadText(unread: Array<string>): string {
 	const shown = unread.slice(0, 3)

@@ -430,7 +430,7 @@ export function PublishDialog({
 												{blocking.open} blocking finding{blocking.open === 1 ? ' is' : 's are'} not decided yet
 												{blocking.openHolds || blocking.openWrong
 													? ` (double-check: ${[
-															blocking.openHolds ? `${blocking.openHolds} hold${blocking.openHolds === 1 ? 's' : ''}` : null,
+															blocking.openHolds ? `${blocking.openHolds} not disproved` : null,
 															blocking.openWrong ? `${blocking.openWrong} likely wrong` : null,
 														]
 															.filter(Boolean)

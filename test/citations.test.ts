@@ -3,8 +3,8 @@ import { test } from 'node:test'
 import { Seen, seenInBatch, unreadRefs } from '../src/main/ai/citations.ts'
 import type { ContextBatch } from '../src/main/ai/context.ts'
 import { shownLines } from '../src/main/ai/lookup.ts'
-import { blockingSummary, unreadSummary, unreadText, verdictOf } from '../src/shared/findings.ts'
-import type { AiRun, Finding, Review } from '../src/shared/types.ts'
+import { blockingSummary, checkedBySameModel, unreadSummary, unreadText, verdictOf } from '../src/shared/findings.ts'
+import type { AiRun, Finding, FindingVerification, Review, RunMember } from '../src/shared/types.ts'
 
 test('a cited line counts as read within 3 lines of what was seen; a range needs every line; a bare path needs any line', () => {
 	const seen = new Seen().add('src/cart.ts', 80, 100).add('src/checkout.ts', 4, 4)
@@ -83,4 +83,33 @@ test('a "holds" on unread lines is counted as not settled; the summary splits by
 	const review = { comments: [], drafts: [], findingDecisions: {} } as unknown as Review
 	const s = blockingSummary(review, [run], new Map())
 	assert.equal(s.openHolds, 1, 'only the check that read what it cites')
+})
+
+test('a double-check is flagged when the model that raised the finding also checked it', () => {
+	const v = (model: string, over: Partial<FindingVerification> = {}): FindingVerification => ({
+		verdict: 'holds',
+		reason: '',
+		level: null,
+		checked: [],
+		model,
+		...over,
+	})
+	const single = { model: 'm1', team: null }
+	assert.equal(checkedBySameModel(single, { verification: v('m1') }), true)
+	assert.equal(checkedBySameModel(single, { verification: v('m2', { onDemand: true }) }), false, 'Verify with another model')
+	assert.equal(checkedBySameModel(single, { verification: v('m1', { error: true }) }), false, 'a failed check checked nothing')
+	assert.equal(checkedBySameModel(single, {}), false)
+
+	const member = (id: string, model: string) => ({ id, model }) as RunMember
+	const team = {
+		model: 'team',
+		team: { id: 't', name: 'T', members: [member('bugs', 'm1'), member('security', 'm1'), member('style', 'm2')] },
+	}
+	assert.equal(
+		checkedBySameModel(team, { memberId: 'bugs', verification: v('m1', { memberId: 'security' }) }),
+		true,
+		'members share a model',
+	)
+	assert.equal(checkedBySameModel(team, { memberId: 'bugs', verification: v('m2', { memberId: 'style' }) }), false)
+	assert.equal(checkedBySameModel(team, { memberId: 'gone', verification: v('m1') }), false, 'an unknown raiser is not claimed')
 })
