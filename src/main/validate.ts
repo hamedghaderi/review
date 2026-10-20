@@ -1,5 +1,6 @@
 import type {
 	AiScope,
+	AiStartScope,
 	McpServerInput,
 	Anchor,
 	BrowserState,
@@ -353,6 +354,11 @@ export function checkFindingLinks(comments: Array<ReviewComment>, drafts: Array<
 		if (linked.has(root)) bad('draft finding link (finding added twice)')
 		linked.add(root)
 	}
+}
+
+/** A scope, or only the files changed since the last finished run (the service works out which). */
+export function aiStartScope(v: unknown, fileKeys: ReadonlySet<string>): AiStartScope {
+	return obj(v, 'AI review scope').kind === 'changed' ? { kind: 'changed' } : aiScope(v, fileKeys)
 }
 
 export function aiScope(v: unknown, fileKeys: ReadonlySet<string>): AiScope {

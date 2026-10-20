@@ -3,7 +3,8 @@ import { blockingSummary, findingRoots } from '../../shared/findings.ts'
 import type {
 	AiRun,
 	AiSettingsView,
-	AiScope,
+	AiStartScope,
+	IncrementalOffer,
 	Anchor,
 	AppError,
 	AppUpdate,
@@ -854,7 +855,7 @@ export function App() {
 		else setAiError(r.error.message)
 	}
 
-	const startAi = async (scope: AiScope, passes = false, bugsOnly = false, persona: PersonaId | null = null): Promise<void> => {
+	const startAi = async (scope: AiStartScope, passes = false, bugsOnly = false, persona: PersonaId | null = null): Promise<void> => {
 		if (!comparison || !reviewer) return
 		await persist()
 		setAiError(null)
@@ -868,6 +869,19 @@ export function App() {
 		else if (comparisonIdRef.current === r.value.reviewId)
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
 	}
+
+	// Asked when the run dialog opens; a newly finished run can change the answer, so it is part of the key.
+	const comparisonKey = comparison?.id ?? null
+	const finishedRuns = aiRuns.filter((r) => r.status !== 'running').length
+	const loadOffer = useCallback(
+		async (choice: ReviewerChoice): Promise<IncrementalOffer | null> => {
+			if (!comparisonKey) return null
+			const r = await window.review.incrementalOffer(comparisonKey, choice)
+			return r.ok ? r.value : null
+		},
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[comparisonKey, finishedRuns],
+	)
 
 	const retryRules = async (run: AiRun, rules: Array<ReviewRule>): Promise<void> => {
 		if (!comparison) return
@@ -1253,6 +1267,7 @@ export function App() {
 											currentFile={file}
 											fileCount={comparison.files.length}
 											unviewed={unviewedKeys}
+											loadOffer={loadOffer}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
 											onStart={(scope, passes, bugsOnly, persona) => void startAi(scope, passes, bugsOnly, persona)}

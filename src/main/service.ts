@@ -3,7 +3,10 @@ import { basename, join } from 'node:path'
 import type {
 	AppClone,
 	AiRun,
-	AiScope,
+	CarriedRun,
+	FileCoverage,
+	Finding,
+	IncrementalOffer,
 	BranchPr,
 	CodeQuestion,
 	PastDecision,
@@ -47,6 +50,7 @@ import {
 	AppFail,
 	cloneGitHub,
 	compareBranches,
+	changesBetween,
 	compareSnapshot,
 	ensureCommits,
 	findRoot,
@@ -83,7 +87,8 @@ import { screenFinding } from '../shared/screen.ts'
 import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
-import { aiScope, anchor, reviewUpdate } from './validate.ts'
+import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
+import { carryFindings, planIncremental, trustGap } from './ai/incremental.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
 const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
@@ -1129,8 +1134,67 @@ export class ReviewService {
 
 	async startAi(reviewId: string, scopeInput: unknown, selection: ModelSelection | ReviewerChoice): Promise<AiRun> {
 		const { ai, access } = this.aiAccess(reviewId)
-		const scope: AiScope = aiScope(scopeInput, new Set(access.comparison.files.map((f) => f.key)))
-		return ai.start(access, reviewId, scope, selection)
+		const scope = aiStartScope(scopeInput, new Set(access.comparison.files.map((f) => f.key)))
+		if (scope.kind !== 'changed') return ai.start(access, reviewId, scope, selection)
+		const choice: ReviewerChoice = 'kind' in selection ? selection : { kind: 'model', selection }
+		const plan = await this.incrementalPlan(reviewId, choice)
+		// The offer was made when the dialog opened; a run that finished since, or a changed setting, can withdraw it.
+		if (!plan || plan.offer.refused !== null)
+			throw new AppFail('invalid-input', `${plan?.offer.refused ?? 'There is no earlier run to build on.'} Review all files instead.`)
+		return ai.start(access, reviewId, { kind: 'files', fileKeys: plan.offer.review }, choice, {
+			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings },
+		})
+	}
+
+	/** Whether a run with `choice` can review only the files whose diff changed since the newest finished run. */
+	async incrementalOffer(reviewId: string, choice: ReviewerChoice): Promise<IncrementalOffer | null> {
+		return (await this.incrementalPlan(reviewId, choice))?.offer ?? null
+	}
+
+	/**
+	 * The newest finished run of this review's pull request or branch, when it is on an earlier snapshot, and what a run
+	 * with `choice` would carry from it. Null when there is none, or when this snapshot already has a newer finished run.
+	 */
+	private async incrementalPlan(
+		reviewId: string,
+		choice: ReviewerChoice,
+	): Promise<{ offer: IncrementalOffer; files: Array<FileCoverage>; findings: Array<Finding> } | null> {
+		const { ai } = this.aiAccess(reviewId)
+		const data = this.loaded(reviewId)
+		const c = data.comparison
+		const repo = this.store.read().repos[c.repoId]
+		const key = targetKey(targetOf(c))
+		const finished = Object.values(repo.reviews)
+			.filter((r) => r.id === c.id || targetKey(targetOf(r)) === key)
+			.flatMap((r) => repo.aiRuns[r.id] ?? [])
+			.filter((run) => (run.status === 'completed' || run.status === 'partial') && run.finishedAt)
+			.sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!))
+		const earlier = finished[0]
+		if (!earlier || earlier.reviewId === c.id) return null
+		const from: CarriedRun = { runId: earlier.id, reviewId: earlier.reviewId, headSha: earlier.headSha }
+		const print = ai.reviewerPrint(choice)
+		const gap = print ? trustGap(earlier, print) : 'That review team no longer exists.'
+		if (gap) return { offer: { from, refused: gap }, files: [], findings: [] }
+		let before: Awaited<ReturnType<typeof changesBetween>>
+		try {
+			before = await changesBetween(data.root, earlier.baseSha, earlier.headSha, false)
+		} catch {
+			return {
+				offer: { from, refused: `The commits the run on ${from.headSha.slice(0, 7)} reviewed are no longer in this clone.` },
+				files: [],
+				findings: [],
+			}
+		}
+		const plan = planIncremental(earlier, from, before, { files: c.files, blobs: data.blobs })
+		const carry = plan.carry.filter((f) => f.state === 'carried').map((f) => f.fileKey)
+		if (!carry.length)
+			return { offer: { from, refused: `Every file changed since the run on ${from.headSha.slice(0, 7)}.` }, files: [], findings: [] }
+		const earlierReview = repo.reviews[earlier.reviewId]
+		return {
+			offer: { from, review: plan.review, carry, refused: null },
+			files: plan.carry,
+			findings: carryFindings(earlier, from, earlierReview, repo.aiRuns[earlier.reviewId] ?? [], plan.carry, c),
+		}
 	}
 
 	async retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<AiRun> {

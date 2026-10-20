@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AiRun, AiScope, AiSettingsView, ChangedFile, ReviewerChoice } from '../../shared/types.ts'
+import type { AiRun, AiSettingsView, AiStartScope, ChangedFile, IncrementalOffer, ReviewerChoice } from '../../shared/types.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
 import { AiOrb } from './AiOrb.tsx'
@@ -12,9 +12,11 @@ interface Props {
 	currentFile: ChangedFile | null
 	fileCount: number
 	unviewed: Array<string> // keys of the changed files not marked viewed, in tree order
+	/** Whether this reviewer can review only the files changed since the last finished run; null when there is none. */
+	loadOffer(reviewer: ReviewerChoice): Promise<IncrementalOffer | null>
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
 	onOpened?(): void
-	onStart(scope: AiScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
+	onStart(scope: AiStartScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
 	onCancel(): void
 }
 
@@ -26,6 +28,7 @@ export function AiRunControl({
 	currentFile,
 	fileCount,
 	unviewed,
+	loadOffer,
 	openNow,
 	onOpened,
 	onStart,
@@ -34,11 +37,13 @@ export function AiRunControl({
 	const selection = reviewer.kind === 'model' ? reviewer.selection : null
 	const team = reviewer.kind === 'team' ? settings?.teams.find((t) => t.id === reviewer.teamId) : undefined
 	const [open, setOpen] = useState(false)
-	const [scope, setScope] = useState<'file' | 'unviewed' | 'all'>('all')
+	// Null until you pick one: then only the changed files when an earlier run can be built on, else all files.
+	const [scope, setScope] = useState<'changed' | 'file' | 'unviewed' | 'all' | null>(null)
 	const [passes, setPasses] = useState(readPasses)
 	// Not remembered: a partial review should never be the default without anyone noticing.
 	const [bugsOnly, setBugsOnly] = useState(false)
 	const [persona, setPersona] = useState(readPersona)
+	const [offer, setOffer] = useState<IncrementalOffer | null>(null)
 	const ref = useRef<HTMLDivElement>(null)
 	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
 
@@ -78,6 +83,22 @@ export function AiRunControl({
 		}
 	}, [open])
 
+	// Asked again whenever the options change: a run with other rules or another model can't carry the earlier results.
+	const choice: ReviewerChoice = reviewer.kind === 'model' ? { ...reviewer, passes, bugsOnly, persona } : reviewer
+	const choiceKey = JSON.stringify(choice)
+	// Another review, or a run finished: the old answer is stale.
+	useEffect(() => setOffer(null), [loadOffer])
+	useEffect(() => {
+		if (!open) return
+		let live = true
+		void loadOffer(JSON.parse(choiceKey) as ReviewerChoice).then((o) => {
+			if (live) setOffer(o)
+		})
+		return () => {
+			live = false
+		}
+	}, [open, choiceKey, loadOffer])
+
 	if (activeRun && activeRun.status === 'running') {
 		const c = activeRun.coverage
 		const finished = c.batchesDone + c.batchesFailed
@@ -109,7 +130,12 @@ export function AiRunControl({
 
 	// Every file unviewed is the same run as all files; none unviewed has nothing to send.
 	const unviewedOnly = unviewed.length > 0 && unviewed.length < fileCount
-	const effectiveScope = (scope === 'file' && !currentFile) || (scope === 'unviewed' && !unviewedOnly) ? 'all' : scope
+	const incremental = offer && offer.refused === null ? offer : null
+	const picked = scope ?? (incremental ? 'changed' : 'all')
+	const effectiveScope =
+		(picked === 'file' && !currentFile) || (picked === 'unviewed' && !unviewedOnly) || (picked === 'changed' && !incremental)
+			? 'all'
+			: picked
 	const connection = selection ? settings?.connections.find((c) => c.id === selection.connectionId) : undefined
 	const model = connection?.models.find((m) => m.id === selection?.modelId)
 	const fixture = connection?.kind === 'fixture'
@@ -134,6 +160,17 @@ export function AiRunControl({
 				<div className="popover" role="dialog" aria-label="Run AI review" style={anchor ?? undefined}>
 					<div className="popover-title">Run AI review</div>
 					<div className="seg soft" role="radiogroup" aria-label="Scope">
+						{incremental && (
+							<button
+								role="radio"
+								aria-checked={effectiveScope === 'changed'}
+								className={effectiveScope === 'changed' ? 'on' : ''}
+								title={`Only the files whose diff changed since the run on ${incremental.from.headSha.slice(0, 7)}; that run's results are kept for the rest`}
+								onClick={() => setScope('changed')}
+							>
+								Changed ({incremental.review.length})
+							</button>
+						)}
 						<button
 							role="radio"
 							aria-checked={effectiveScope === 'all'}
@@ -170,6 +207,17 @@ export function AiRunControl({
 							Current file
 						</button>
 					</div>
+					{effectiveScope === 'changed' && incremental ? (
+						<p className="muted small">
+							{incremental.review.length
+								? `Reviews ${incremental.review.length} changed file${incremental.review.length === 1 ? '' : 's'}. `
+								: 'No diff changed, so nothing is sent. '}
+							{incremental.carry.length} file{incremental.carry.length === 1 ? '' : 's'} keep{incremental.carry.length === 1 ? 's' : ''} the
+							findings and decisions of the run on <span className="mono">{incremental.from.headSha.slice(0, 7)}</span>.
+						</p>
+					) : (
+						offer?.refused && effectiveScope === 'all' && <p className="muted small">Reviews every file again: {offer.refused}</p>
+					)}
 					{team ? (
 						<ul className="team-members small" title="Each reviewer checks only its rules, all at the same time">
 							{team.members.map((m, i) => (
@@ -278,11 +326,13 @@ export function AiRunControl({
 							onClick={() => {
 								setOpen(false)
 								onStart(
-									effectiveScope === 'file' && currentFile
-										? { kind: 'file', fileKey: currentFile.key }
-										: effectiveScope === 'unviewed'
-											? { kind: 'files', fileKeys: unviewed }
-											: { kind: 'all' },
+									effectiveScope === 'changed'
+										? { kind: 'changed' }
+										: effectiveScope === 'file' && currentFile
+											? { kind: 'file', fileKey: currentFile.key }
+											: effectiveScope === 'unviewed'
+												? { kind: 'files', fileKeys: unviewed }
+												: { kind: 'all' },
 									!team && passes,
 									!team && bugsOnly,
 									team ? null : persona,

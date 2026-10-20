@@ -797,6 +797,23 @@ export interface RuleEvaluation {
 
 export type AiScope = { kind: 'file'; fileKey: string } | { kind: 'files'; fileKeys: Array<string> } | { kind: 'all' }
 
+/** What the run dialog asks for: a scope, or only the files whose diff changed since the last finished run (see IncrementalOffer). */
+export type AiStartScope = AiScope | { kind: 'changed' }
+
+/** The run that reviewed a carried file or raised a carried finding, in an earlier snapshot of the same pull request or branch. */
+export interface CarriedRun {
+	runId: string
+	reviewId: string
+	headSha: string
+}
+
+/**
+ * A run that reviews only the files whose diff changed since the newest finished run of the same pull request or
+ * branch, carrying that run's results for the rest. `refused`: why every file has to be reviewed again instead.
+ */
+export type IncrementalOffer =
+	{ from: CarriedRun; review: Array<string>; carry: Array<string>; refused: null } | { from: CarriedRun; refused: string }
+
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
 
 export interface LineRange {
@@ -832,6 +849,7 @@ export interface Finding {
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
+	carried?: CarriedFinding | null // copied from an earlier snapshot's run because its file's diff did not change
 	// Before prompt reviewer-2026-10-01:
 	problem?: string
 	consequence?: string
@@ -886,6 +904,16 @@ export interface RejectedFinding {
 	reason: string
 }
 
+/**
+ * Where a carried finding came from, and what was decided on it there. The decision and comment are read when this
+ * review has none of its own for the finding, so nothing is written into the review when a run carries it.
+ */
+export interface CarriedFinding {
+	from: CarriedRun
+	decision: Omit<FindingDecision, 'history'> | null
+	comment: string | null // CarriedFrom.originId of the comment made from it, which was carried in as a plain comment
+}
+
 // The accepted comment is linked through `findingId` on the draft/comment itself. 'open' overrides a decision
 // inherited from an equivalent finding of an earlier run (see Finding.repeatOf).
 export interface FindingDecision {
@@ -917,13 +945,15 @@ export interface PastDecision {
 	decidedAt: string
 }
 
-export type FileCoverageState = 'pending' | 'reviewed' | 'partial' | 'skipped' | 'failed' | 'cancelled' | 'not-reviewable'
+// carried: not sent; its diff is the same as when an earlier run reviewed it, and that run's findings are copied.
+export type FileCoverageState = 'pending' | 'reviewed' | 'carried' | 'partial' | 'skipped' | 'failed' | 'cancelled' | 'not-reviewable'
 
 export interface FileCoverage {
 	fileKey: string
 	state: FileCoverageState
 	reason: string | null
 	risk?: FileRisk | null // the app's estimate before the review; absent on older runs
+	from?: CarriedRun | null // carried: the run that reviewed it
 }
 
 export type RiskLevel = 'high' | 'medium' | 'low'
@@ -1053,6 +1083,7 @@ export interface AiRun {
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
 	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked
 	auto?: boolean // started by automatic review: its findings are added and published by the main process, not the window
+	carriedFrom?: CarriedRun | null // an incremental run: the earlier run whose results it carries for unchanged files
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
@@ -1331,6 +1362,7 @@ export const IPC = {
 	aiRemoveTeam: 'ai:team-remove',
 	aiSelectTeam: 'ai:team-select',
 	aiStart: 'ai:start',
+	aiIncremental: 'ai:incremental',
 	aiCancel: 'ai:cancel',
 	aiRetryRules: 'ai:retry-rules',
 	aiRunUpdate: 'ai:run-update',
@@ -1484,7 +1516,9 @@ export interface ReviewApi {
 	mcpSetTools(id: string, allowed: Array<string> | null): Promise<Result<McpSettingsView>>
 	mcpClaudeCandidates(repoId: string | null): Promise<Result<Array<McpImportCandidate>>>
 	mcpImportClaude(repoId: string | null, keys: Array<string>): Promise<Result<McpSettingsView>>
-	startAiReview(reviewId: string, scope: AiScope, reviewer: ReviewerChoice): Promise<Result<AiRun>>
+	startAiReview(reviewId: string, scope: AiStartScope, reviewer: ReviewerChoice): Promise<Result<AiRun>>
+	/** Whether a run with `reviewer` can review only the files changed since the last finished run; null when there is none. */
+	incrementalOffer(reviewId: string, reviewer: ReviewerChoice): Promise<Result<IncrementalOffer | null>>
 	cancelAiReview(runId: string): Promise<Result<boolean>>
 	/** Asks each rule's reviewer again, for those rules only, on the requests of a finished run that did not cover them. */
 	retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<Result<AiRun>>

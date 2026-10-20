@@ -220,6 +220,7 @@ export function packContext(
 	factsIn: Array<ContextFact>,
 	risk: Array<FileRisk>,
 	routing: Routing | null,
+	carried: ReadonlySet<string> = new Set(),
 ): ContextPackage {
 	const riskOf = new Map(risk.map((r) => [r.fileKey, r]))
 	const mine = (key: string): boolean => !routing || routing.fileKeys.has(key)
@@ -305,7 +306,7 @@ export function packContext(
 	}
 
 	for (const batch of batches) {
-		batch.overview = overview(comparison, sources, batch, batches, overviewBudget, riskOf, routing)
+		batch.overview = overview(comparison, sources, batch, batches, overviewBudget, riskOf, routing, carried)
 		batch.chars =
 			batch.overview.length +
 			batch.excerpts.reduce((n, e) => n + e.text.length, 0) +
@@ -519,6 +520,7 @@ function overview(
 	budget: number,
 	riskOf: Map<string, FileRisk>,
 	routing: Routing | null,
+	carried: ReadonlySet<string>,
 ): string {
 	const where = new Map<string, number>()
 	for (const b of batches) for (const k of b.fileKeys) where.set(k, b.index)
@@ -536,7 +538,9 @@ function overview(
 						? "checked by other team members: not one this reviewer's rules apply to"
 						: inScope.has(f.key)
 							? 'not supplied'
-							: 'outside the requested scope'
+							: carried.has(f.key)
+								? 'reviewed in an earlier run; its diff has not changed since, so it is not part of this review'
+								: 'outside the requested scope'
 		const r = inScope.has(f.key) ? riskOf.get(f.key) : undefined
 		return `- ${f.status} ${path} (${counts}) [${state}]${r ? ` risk ${r.level}: ${r.reasons.join('; ')}` : ''}`
 	}
