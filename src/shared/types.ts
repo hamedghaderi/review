@@ -1087,6 +1087,7 @@ export type PriceSource = 'catalog' | 'provider' | 'override' | 'local'
 
 export interface PricedModel extends ModelPrice {
 	source: PriceSource
+	listedAs?: string // a gateway's model priced as this catalog model, which it routes to
 }
 
 /**

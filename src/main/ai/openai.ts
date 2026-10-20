@@ -87,6 +87,7 @@ export function createOpenAIAccount(o: OpenAIClientOptions): ProviderAccount {
 						contextWindow: numberField(m, 'max_input_tokens') ?? numberField(m, 'context_length'),
 						maxOutputTokens: numberField(m, 'max_output_tokens'),
 						structuredOutput: 'unknown',
+						root: stringField(m, 'root'),
 					})
 					if (out.length >= 2000) break
 				}
@@ -143,6 +144,11 @@ export function writesText(m: object): boolean {
 	if (typeof r.type === 'string' && !['chat', 'text', 'language', 'llm', 'completion'].includes(r.type.toLowerCase())) return false
 	const out = r.output_modalities
 	return !Array.isArray(out) || out.length === 0 || out.includes('text')
+}
+
+function stringField(o: object, key: string): string | null {
+	const v = (o as Record<string, unknown>)[key]
+	return typeof v === 'string' && v ? v : null
 }
 
 function numberField(o: object, key: string): number | null {

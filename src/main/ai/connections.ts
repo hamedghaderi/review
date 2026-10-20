@@ -26,7 +26,7 @@ import type {
 import { AppFail } from '../git.ts'
 import { JsonStore } from '../store.ts'
 import type { AdapterFactory, ResolvedConnection } from './adapters.ts'
-import { CATALOG_UPDATED, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
+import { CATALOG_UPDATED, catalogMatch, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
 import type { CredentialService } from './credentials.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from './prompt.ts'
 import { ProviderError, type DiscoveredModel, type ModelLimits, type ReviewProvider } from './provider.ts'
@@ -56,6 +56,7 @@ interface StoredModel {
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	probe: ModelProbe | null
 	price?: ModelPrice | null // reported by the provider's model list
+	root?: string | null // the model a gateway routes it to
 }
 
 interface StoredConnection {
@@ -730,7 +731,13 @@ function modelPrice(c: StoredConnection, modelId: string): PricedModel | null {
 	if (c.kind === 'fixture' || descriptor(c.kind).presets.find((p) => p.id === c.preset)?.free)
 		return { input: 0, cachedInput: null, cacheWrite: null, output: 0, source: 'local' }
 	const cat = MODEL_CATALOG[c.kind]?.find((m) => m.id === modelId)?.price
-	return cat ? { ...cat, source: 'catalog' } : null
+	if (cat) return { ...cat, source: 'catalog' }
+	// Gateways name their models after the ones they route to ("cc/claude-opus-5-5-high"): price them as that model.
+	if (c.kind === 'custom' || c.kind === 'openrouter') {
+		const hit = catalogMatch(c.models.find((m) => m.id === modelId)?.root ?? null) ?? catalogMatch(modelId)
+		if (hit) return { ...hit.price, source: 'catalog', listedAs: hit.id }
+	}
+	return null
 }
 
 function endpointKey(c: StoredConnection): string {

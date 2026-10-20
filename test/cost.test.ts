@@ -8,6 +8,7 @@ import { ConnectionService } from '../src/main/ai/connections.ts'
 import { CredentialService, type SecretCipher } from '../src/main/ai/credentials.ts'
 import { createFakeProvider } from '../src/main/ai/fake.ts'
 import { interpretMessage } from '../src/main/ai/anthropic.ts'
+import { catalogMatch } from '../src/main/ai/catalog.ts'
 import { openRouterPrice } from '../src/main/ai/openai.ts'
 import { startRun } from '../src/main/ai/runner.ts'
 import { addCost, costOf, formatCost } from '../src/shared/cost.ts'
@@ -80,7 +81,7 @@ const cipher: SecretCipher = {
 	getSelectedStorageBackend: () => 'keychain',
 }
 
-async function connections(listed: Array<{ id: string; price: PricedModel | null }> = []) {
+async function connections(listed: Array<{ id: string; price: PricedModel | null; root?: string }> = []) {
 	const dir = mkdtempSync(join(tmpdir(), 'review-cost-'))
 	const adapters: AdapterFactory = {
 		account: () => ({
@@ -97,6 +98,7 @@ async function connections(listed: Array<{ id: string; price: PricedModel | null
 						cacheWrite: m.price.cacheWrite,
 						output: m.price.output,
 					},
+					root: m.root ?? null,
 				})),
 		}),
 		provider: (_c, model) => createFakeProvider({ model }),
@@ -248,4 +250,44 @@ test('a run is costed at the price its reviewer started with, per member and in 
 	assert.ok(priced.cost!.usd > 0 && priced.cost!.estimated && !priced.cost!.unpriced)
 	assert.deepEqual(unpriced.cost, { usd: 0, estimated: false, unpriced: true })
 	assert.deepEqual(team.cost, { usd: priced.cost!.usd, estimated: true, unpriced: true })
+})
+
+test('gateway models are priced as the catalog model they are named after, without prefix or effort and context suffixes', () => {
+	assert.equal(catalogMatch('cc/claude-opus-5-5-high')?.id, 'claude-opus-5-5')
+	assert.equal(catalogMatch('aug/sonnet5-500k'), null, 'a nickname is not guessed at')
+	assert.equal(catalogMatch('cx/gpt-6-astra-xhigh')?.id, 'gpt-6-astra')
+	assert.equal(catalogMatch('anthropic/claude-sonnet-5.5')?.id, 'claude-sonnet-5-5', 'OpenRouter writes versions with dots')
+	assert.equal(catalogMatch('google/gemini-3.8-flash')?.id, 'gemini-3.8-flash')
+	assert.equal(catalogMatch('gemini-3.8-flash-lite'), null, 'a different model with a longer name does not match')
+	assert.equal(catalogMatch('fixture-v1'), null)
+})
+
+test('an OmniRoute model without a price of its own gets the list price of the model it routes to, marked estimated', async () => {
+	const s = await connections([
+		{ id: 'cc/claude-fable-5-1-high', price: null, root: 'claude-fable-5-1-high' },
+		{ id: 'my-alias', price: null, root: 'claude-haiku-5-5' },
+		{ id: 'auto/best-coding', price: null, root: 'auto/best-coding' },
+	])
+	const gw = await s.create({ kind: 'custom', preset: 'omniroute' })
+	await s.setCredential(gw.id, 'omniroute-key', false)
+	await s.test(gw.id)
+	const price = (id: string) =>
+		s
+			.view()
+			.connections.find((c) => c.id === gw.id)!
+			.models.find((m) => m.id === id)?.price ?? null
+	assert.deepEqual(price('cc/claude-fable-5-1-high'), {
+		input: 10,
+		cachedInput: 0.25,
+		cacheWrite: 12.5,
+		output: 50,
+		source: 'catalog',
+		listedAs: 'claude-fable-5-1',
+	})
+	assert.equal(price('my-alias')?.listedAs, 'claude-haiku-5-5', "the listing's root wins over the id")
+	assert.equal(price('auto/best-coding'), null, 'a router picks the model, so its price is unknown')
+	assert.equal(
+		(await s.runConfig({ connectionId: gw.id, modelId: 'cc/claude-fable-5-1-high' })).provider.price?.listedAs,
+		'claude-fable-5-1',
+	)
 })
