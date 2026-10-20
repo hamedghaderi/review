@@ -234,6 +234,7 @@ export interface GitHubStatus {
 	notifications: NotificationPrefs
 	notificationProblem: string | null // the last notification could not be shown (e.g. blocked in System Settings)
 	autoReview: boolean // review new requests with AI and submit the result on GitHub as you; off by default
+	autoReviewCommits: boolean // with autoReview: also review new commits on pull requests it reviewed, incrementally; off by default
 }
 
 /** Desktop notifications for review requests in repositories opened in the app. */
@@ -294,6 +295,7 @@ export interface AutoReviewRecord {
 	url: string | null // the submitted review on GitHub
 	// paused: a budget was reached before it started; it is started again once the budget allows. Not reviewed yet.
 	waiting?: { repoId: string; pr: WatchedPr } | null
+	commits?: boolean // it was for new commits after an automatic review, so later ones are followed up too
 }
 
 export interface GitHubMapping {
@@ -1506,6 +1508,7 @@ export const IPC = {
 	githubSetNotifications: 'gh:notifications',
 	githubTestNotification: 'gh:notification-test',
 	githubSetAutoReview: 'gh:auto-review',
+	githubSetAutoReviewCommits: 'gh:auto-review-commits',
 	markPrSeen: 'gh:seen',
 	openKnownRepo: 'repo:open-known',
 	closeRepoTab: 'repo:close-tab',
@@ -1625,6 +1628,8 @@ export interface ReviewApi {
 	githubTestNotification(): Promise<Result<GitHubStatus>>
 	/** Turns automatic review on or off: new review requests are reviewed by AI and submitted on GitHub as you, approvals included. */
 	githubSetAutoReview(enabled: boolean): Promise<Result<GitHubStatus>>
+	/** With automatic review on: also reviews new commits on pull requests it reviewed, only the files whose diff changed. */
+	githubSetAutoReviewCommits(enabled: boolean): Promise<Result<GitHubStatus>>
 	/** Every pull request waiting for your review, in every repository, as the background check last saw them. */
 	homeInbox(): Promise<Result<HomeInbox>>
 	/** Checks GitHub now, then returns the start page's pull requests. */

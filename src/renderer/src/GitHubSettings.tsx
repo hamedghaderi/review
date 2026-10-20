@@ -116,7 +116,12 @@ export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRep
 						</div>
 						{status.notificationProblem && <p className="small error-text selectable">{status.notificationProblem}</p>}
 					</div>
-					<AutoReview on={status.autoReview} onSet={(enabled) => act(window.review.githubSetAutoReview(enabled))} />
+					<AutoReview
+						on={status.autoReview}
+						commits={status.autoReviewCommits}
+						onSet={(enabled) => act(window.review.githubSetAutoReview(enabled))}
+						onSetCommits={(enabled) => act(window.review.githubSetAutoReviewCommits(enabled))}
+					/>
 					{status.cli && (
 						<div className={`cli-box ${status.source === 'gh' ? 'on' : ''}`}>
 							<div className="cli-head">
@@ -246,7 +251,17 @@ export function GitHubSettings({ status, mapping, onClose, onStatus, onChooseRep
  * Automatic review, off by default. Ticking the box only opens a warning: it is turned on from there, once you have read
  * that the app will post reviews and approve pull requests as you.
  */
-function AutoReview({ on, onSet }: { on: boolean; onSet(enabled: boolean): Promise<void> }) {
+function AutoReview({
+	on,
+	commits,
+	onSet,
+	onSetCommits,
+}: {
+	on: boolean
+	commits: boolean
+	onSet(enabled: boolean): Promise<void>
+	onSetCommits(enabled: boolean): Promise<void>
+}) {
 	const [confirming, setConfirming] = useState(false)
 	const confirm = useRef<HTMLButtonElement>(null)
 	useEffect(() => {
@@ -271,6 +286,17 @@ function AutoReview({ on, onSet }: { on: boolean; onSet(enabled: boolean): Promi
 						It approves when every file was reviewed, it found no blocking, should-fix or question findings and CI passed (it waits up to 20
 						minutes for checks to finish), requests changes for a blocking finding, and otherwise comments. You get a notification each
 						time. Needs a token that can publish reviews.
+					</span>
+				</span>
+			</label>
+			<label className="check">
+				<input type="checkbox" checked={commits} disabled={!on} onChange={(e) => void onSetCommits(e.target.checked)} />
+				<span>
+					Also review new commits
+					<span className="muted block">
+						When a pull request it reviewed gets new commits, it reviews only the files whose changes differ since then, once nothing has
+						been pushed for 5 minutes. It submits a new review with the new findings; the earlier ones are not posted again. When every file
+						changed, or the model, team or finding levels did, it skips the commits and tells you.
 					</span>
 				</span>
 			</label>

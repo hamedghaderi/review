@@ -86,6 +86,7 @@ export class GitHubService {
 	private useCliMemory = false
 	private notifyMemory: NotificationPrefs = { enabled: true, sound: true }
 	private autoReviewMemory = false
+	private autoReviewCommitsMemory = false
 	private notifyProblem: string | null = null
 
 	constructor(store: TokenStore, options: { fetch?: Fetch; base?: string; cli?: CliTokenSource; dir?: string } = {}) {
@@ -93,15 +94,27 @@ export class GitHubService {
 		this.fetch = options.fetch ?? ((url, init) => fetch(url, init))
 		this.base = options.base ?? API_BASE
 		this.cli = options.cli ?? null
-		const empty = (): GitHubPrefs => ({ version: 1, useCli: false, notifications: { enabled: true, sound: true }, autoReview: false })
+		const empty = (): GitHubPrefs => ({
+			version: 1,
+			useCli: false,
+			notifications: { enabled: true, sound: true },
+			autoReview: false,
+			autoReviewCommits: false,
+		})
 		this.prefs = options.dir
 			? new JsonStore(join(options.dir, 'github-settings.json'), empty, (raw) => {
-					const r = raw as { useCli?: unknown; notifications?: { enabled?: unknown; sound?: unknown }; autoReview?: unknown } | null
+					const r = raw as {
+						useCli?: unknown
+						notifications?: { enabled?: unknown; sound?: unknown }
+						autoReview?: unknown
+						autoReviewCommits?: unknown
+					} | null
 					return {
 						...empty(),
 						useCli: r?.useCli === true,
 						notifications: { enabled: r?.notifications?.enabled !== false, sound: r?.notifications?.sound !== false },
 						autoReview: r?.autoReview === true,
+						autoReviewCommits: r?.autoReviewCommits === true,
 					}
 				})
 			: null
@@ -172,6 +185,17 @@ export class GitHubService {
 		this.emit()
 	}
 
+	/** With automatic review on, new commits on a pull request it reviewed are reviewed too. Off unless turned on. */
+	get autoReviewCommits(): boolean {
+		return this.prefs ? this.prefs.read().autoReviewCommits : this.autoReviewCommitsMemory
+	}
+
+	async setAutoReviewCommits(enabled: boolean): Promise<void> {
+		if (this.prefs) await this.prefs.update((d) => void (d.autoReviewCommits = enabled))
+		else this.autoReviewCommitsMemory = enabled
+		this.emit()
+	}
+
 	private get endpoint(): string {
 		return `github ${this.base}`
 	}
@@ -206,6 +230,7 @@ export class GitHubService {
 			notifications: this.notifications,
 			notificationProblem: this.notifyProblem,
 			autoReview: this.autoReview,
+			autoReviewCommits: this.autoReviewCommits,
 		}
 	}
 
@@ -1410,6 +1435,7 @@ interface GitHubPrefs {
 	useCli: boolean
 	notifications: NotificationPrefs
 	autoReview: boolean
+	autoReviewCommits: boolean
 }
 
 const GRAPH_TTL_MS = 2 * 60_000
