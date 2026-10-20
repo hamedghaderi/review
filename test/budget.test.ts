@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { checkBudget, NO_BUDGETS, type Spent } from '../src/main/ai/budget.ts'
+import { checkBudget, hasBudgets, NO_BUDGETS, type Spent } from '../src/main/ai/budget.ts'
 import type { FileSource } from '../src/main/ai/context.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { AiController } from '../src/main/ai/controller.ts'
@@ -210,4 +210,31 @@ test('budget settings: dollars or none, connection ids checked', () => {
 	assert.throws(() => budgetSettings({ connections: { 'not-an-id': { daily: 1 } } }))
 	const id = '00000000-0000-4000-8000-000000000000'
 	assert.deepEqual(budgetSettings({ connections: { [id]: { daily: 1 } } }).connections, { [id]: { daily: 1, monthly: null } })
+})
+
+test('without a budget set nothing is limited: a run goes exactly as before, however much was spent', async () => {
+	assert.equal(hasBudgets(NO_BUDGETS), false)
+	assert.equal(hasBudgets({ ...NO_BUDGETS, connections: { gw: { daily: null, monthly: null } } }), false)
+	assert.equal(hasBudgets({ ...NO_BUDGETS, connections: { gw: { daily: null, monthly: 0 } } }), true, 'a $0 budget is set')
+	assert.equal(hasBudgets({ ...NO_BUDGETS, perRun: 1 }), true)
+	assert.deepEqual(checkBudget(NO_BUDGETS, spent(1e6, 1e6, { gw: [1e6, 1e6] }), [GW]), { over: [], limit: null })
+
+	const { comp, sources } = change(3)
+	const go = (budget: { usd: number; reason: string } | null) => {
+		const provider = Object.assign(createFakeProvider({ delayMs: 0 }), { price: PRICE })
+		return startRun(
+			{ reviewId: comp.id, comparison: comp, scope: { kind: 'all' }, loadSources: async () => sources, previousFindings: [] },
+			{ provider, limits: { ...LIMITS, maxBatchChars: 6000 }, concurrency: 1, maxAttempts: 1, backoffMs: () => 1, budget },
+			() => {},
+		).done.then((run) => ({ run, calls: provider.calls }))
+	}
+	const before = await go(null)
+	const unset = await go(checkBudget(NO_BUDGETS, spent(1e6, 1e6), [GW]).limit)
+	assert.equal(unset.calls, before.calls)
+	assert.equal(unset.run.status, before.run.status)
+	assert.deepEqual(
+		unset.run.coverage.files.map((f) => f.state),
+		before.run.coverage.files.map((f) => f.state),
+	)
+	assert.ok(!unset.run.notices!.some((n) => /budget/i.test(n)))
 })

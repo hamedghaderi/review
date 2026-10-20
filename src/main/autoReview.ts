@@ -23,6 +23,7 @@ import type { ReviewStore } from './store.ts'
 const CONCERNS: ReadonlyArray<string> = ['blocking', 'should_fix', 'question']
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
+const paused = (label: string, why: string): string => `Automatic review of ${label} is paused: ${why} It starts once the budget allows.`
 
 /**
  * What an automatic review submits. Request changes when a blocking finding stands (not dismissed, not held back and
@@ -92,6 +93,8 @@ export interface AutoReviewDeps {
 	whenDone(runId: string): Promise<AiRun> | null
 	open(repoId: string, pr: { repo: string; number: number }, signal: AbortSignal): Promise<Comparison>
 	start(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun>
+	/** The daily or monthly budget the next run would go over, in words; null when none is reached or none is set. */
+	budgetReached?(): string | null
 	addFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>>
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
 	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
@@ -183,6 +186,9 @@ export class AutoReviewer {
 		}
 		try {
 			if (!(await this.turn())) return
+			// Checked before the pull request is fetched, so a paused review costs nothing while it waits.
+			const reached = this.d.budgetReached?.() ?? null
+			if (reached) return record('paused', paused(label, reached))
 			const c = await this.d.open(e.repoId, e.pr, AbortSignal.timeout(5 * 60_000))
 			reviewId = c.id
 			head = c.headSha
@@ -202,8 +208,7 @@ export class AutoReviewer {
 				try {
 					run = await this.d.start(c.id, choice, label)
 				} catch (err) {
-					if (err instanceof AppFail && err.code === 'over-budget')
-						return record('paused', `Automatic review of ${label} is paused: ${err.message} It starts once the budget allows.`)
+					if (err instanceof AppFail && err.code === 'over-budget') return record('paused', paused(label, err.message))
 					// Someone started a run between the check and the start: wait for it.
 					if (!(err instanceof AppFail && err.code === 'ai-busy')) throw err
 				}

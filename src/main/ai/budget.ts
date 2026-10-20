@@ -17,6 +17,16 @@ export interface BudgetCheck {
 
 const usd = (n: number): string => `$${n.toFixed(2)}`
 
+/** Whether you set any budget. Without one, nothing is checked and every run goes as it did before budgets. */
+export function hasBudgets(b: BudgetSettings): boolean {
+	return (
+		b.perRun !== null ||
+		b.daily !== null ||
+		b.monthly !== null ||
+		Object.values(b.connections).some((c) => c.daily !== null || c.monthly !== null)
+	)
+}
+
 /**
  * The caps reached by what was spent (a lower bound when some requests had no price), and the most a run on these
  * connections may cost: the per-run budget, or what is left of the tightest cap if that is less. `ignoreCaps`: you

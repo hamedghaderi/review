@@ -329,3 +329,17 @@ test('a budget pauses an automatic review: told once, taken again later, and rev
 	await auto.idle()
 	assert.equal(calls.filter((c) => c === 'start').length, 3, 'nothing is waiting any more')
 })
+
+test('a budget already reached pauses an automatic review before anything is fetched; with none reached it goes as before', async () => {
+	const paused = await setup({ budgetReached: () => "$5.00 spent: today's budget of $5.00 is reached." })
+	paused.auto.take([event()])
+	await paused.auto.idle()
+	assert.deepEqual(paused.calls, [], 'the pull request is not opened')
+	assert.equal(paused.records[0].outcome, 'paused')
+	assert.equal(paused.store.read().autoReviews?.['octo/app#7']?.waiting?.pr.number, 7)
+
+	const free = await setup({ budgetReached: () => null })
+	free.auto.take([event()])
+	await free.auto.idle()
+	assert.deepEqual(free.calls, ['open', 'start', 'add', 'changed', 'publish c-f1', 'submit REQUEST_CHANGES'])
+})

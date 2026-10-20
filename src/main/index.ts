@@ -17,7 +17,7 @@ import { IPC, type AppUpdate, type BudgetView, type InboxOpen, type Result } fro
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { UsageLog } from './ai/usage.ts'
-import { checkBudget } from './ai/budget.ts'
+import { checkBudget, hasBudgets, type BudgetCheck } from './ai/budget.ts'
 import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
@@ -579,7 +579,7 @@ app.whenReady().then(async () => {
 		limits: () => connections.view().limits,
 		label: (id) => connections.view().connections.find((c) => c.id === id)?.label ?? 'a removed connection',
 	})
-	ai.attachBudget({ check: (used, ignoreCaps) => checkBudget(connections.budgets(), usage.spent(), used, ignoreCaps) })
+	ai.attachBudget({ check: budgetCheck })
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()
@@ -605,6 +605,21 @@ app.whenReady().then(async () => {
 		whenDone: (runId) => ai.whenDone(runId),
 		open: (repoId, pr, signal) => service.openInBackground(repoId, pr, signal),
 		start: (reviewId, choice, label) => service.startAutoAi(reviewId, choice, label),
+		budgetReached: () => {
+			// Only when you set a budget; a reviewer that can't be resolved is left to the review to report, as before.
+			if (!hasBudgets(connections.budgets())) return null
+			const r = connections.view().reviewer
+			if (!r) return null
+			let ids: Array<string>
+			try {
+				ids = r.kind === 'model' ? [r.selection.connectionId] : connections.team(r.teamId).members.map((m) => m.connectionId)
+			} catch {
+				return null
+			}
+			const labels = connections.view().connections
+			const over = budgetCheck([...new Set(ids)].map((id) => ({ id, label: labels.find((c) => c.id === id)?.label ?? id }))).over
+			return over.length ? over.join(' ') : null
+		},
 		addFindings: (repoId, reviewId, runId, levels) => service.addAutoFindings(repoId, reviewId, runId, levels),
 		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
 		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
@@ -720,6 +735,12 @@ const EVENT_TITLE: Record<WatchEvent['kind'], string> = {
 	're-requested': 'Review requested again',
 	ready: 'Ready for review',
 	updated: 'New commits since your review',
+}
+
+/** The budgets for a run on these connections; with none set, nothing is read and nothing limits the run. */
+function budgetCheck(used: Array<{ id: string; label: string }>, ignoreCaps = false): BudgetCheck {
+	const b = connections.budgets()
+	return hasBudgets(b) ? checkBudget(b, usage.spent(), used, ignoreCaps) : { over: [], limit: null }
 }
 
 /** Budgets, what was spent against them, the caps reached and the automatic reviews waiting for them. */
