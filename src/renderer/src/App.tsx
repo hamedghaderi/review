@@ -58,6 +58,7 @@ import { ProviderSettings } from './ProviderSettings.tsx'
 import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
 import { FileView, type OutsideFile } from './FileView.tsx'
+import type { RefTarget } from './RefText.tsx'
 import { byProximity, IS_MAC, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
 import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
@@ -1060,6 +1061,36 @@ export function App() {
 			},
 		})
 	}
+	// A file a finding's text refers to: a changed file in its diff, any other read-only. Back returns to the finding.
+	const openRef = (t: RefTarget, line: number | null): void => {
+		if (!comparison) return
+		const cur = here()
+		if (cur) history.current = { back: [...history.current.back.slice(-99), cur], forward: [] }
+		if (!t.fileKey) return setOutside({ path: t.path, side: t.side, line, scrollTop: null, nonce: Date.now() })
+		const f = comparison.files.find((x) => x.key === t.fileKey)
+		selectFile(t.fileKey)
+		setReveal({
+			fileKey: t.fileKey,
+			itemId: null,
+			nonce: Date.now(),
+			mark: line !== null,
+			anchor:
+				line === null
+					? null
+					: {
+							repoId: comparison.repoId,
+							baseSha: comparison.baseSha,
+							headSha: comparison.headSha,
+							fileKey: t.fileKey,
+							oldPath: f?.oldPath ?? null,
+							newPath: f?.newPath ?? null,
+							side: t.side,
+							startLine: line,
+							endLine: line,
+							excerpt: '',
+						},
+		})
+	}
 	const lookup = async (r: SymbolRequest): Promise<void> => {
 		if (!comparison) return
 		const gen = ++lookupGen.current
@@ -1801,6 +1832,7 @@ export function App() {
 											onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
 											onStop={(run) => void window.review.cancelAiReview(run.id)}
 											onOpen={openFinding}
+											onOpenRef={openRef}
 											onAccept={acceptFinding}
 											onAsk={askFinding}
 											askModelPicker={askModelPicker}

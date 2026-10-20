@@ -193,3 +193,10 @@ test('calls in conditions and names in comments are not definitions; class field
 	assert.equal(definedName('func (s *Server) Serve(port int) error {'), 'Serve')
 	assert.equal(definedName('public static int count(List<String> xs) {'), 'count')
 })
+
+test('links in a finding: only paths that are files at the head commit count, not folders or missing files', async () => {
+	const { svc, id } = await world()
+	const found = await svc.filesAtHead(id, ['src/discount.ts', 'src/money.ts', 'src/missing.ts', 'src', 'tools/report.py'])
+	assert.deepEqual(found.sort(), ['src/discount.ts', 'src/money.ts', 'tools/report.py'])
+	assert.deepEqual(await svc.filesAtHead(id, []), [])
+})

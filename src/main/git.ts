@@ -657,6 +657,24 @@ export async function listAt(
 		})
 }
 
+/** Which of `paths` are files at a commit. */
+export async function filesAt(root: string, sha: string, paths: Array<string>): Promise<Set<string>> {
+	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	if (!paths.length) return new Set()
+	const r = await git(root, ['ls-tree', '-z', '--full-tree', sha, '--', ...paths], 1024 * 1024)
+	if (r.code !== 0) throw new AppFail('git-failed', `git ls-tree failed: ${r.stderr.trim()}`)
+	const wanted = new Set(paths)
+	return new Set(
+		r.stdout
+			.toString('utf8')
+			.split('\0')
+			.flatMap((rec) => {
+				const m = /^\d+ blob [0-9a-f]+\t(.*)$/s.exec(rec)
+				return m && wanted.has(m[1]) ? [m[1]] : []
+			}),
+	)
+}
+
 export interface GrepHit {
 	path: string
 	line: number

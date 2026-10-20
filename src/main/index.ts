@@ -45,6 +45,7 @@ import {
 	reviewEvent,
 	comparisonId,
 	repoPath,
+	repoPaths,
 	symbolName,
 	connectionId,
 	connectionPatch,
@@ -332,6 +333,7 @@ function registerIpc(): void {
 	handle(IPC.loadFileAt, (cid: unknown, path: unknown, side: unknown) =>
 		service.loadFileAt(comparisonId(cid), repoPath(path), side === 'old' ? 'old' : 'new'),
 	)
+	handle(IPC.filesAtHead, (cid: unknown, paths: unknown) => service.filesAtHead(comparisonId(cid), repoPaths(paths)))
 	handle(IPC.lookupSymbol, (cid: unknown, name: unknown, side: unknown, kind: unknown) =>
 		service.lookupSymbol(comparisonId(cid), symbolName(name), side === 'old' ? 'old' : 'new', kind === 'uses' ? 'uses' : 'definition'),
 	)
