@@ -795,7 +795,7 @@ export interface RuleEvaluation {
 	why: Array<string>
 }
 
-export type AiScope = { kind: 'file'; fileKey: string } | { kind: 'all' }
+export type AiScope = { kind: 'file'; fileKey: string } | { kind: 'files'; fileKeys: Array<string> } | { kind: 'all' }
 
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
 

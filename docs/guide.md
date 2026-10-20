@@ -191,6 +191,8 @@ After a successful test, catalog entries the account doesn't list are no longer 
 
 The picker next to **Run AI review…** groups models by connected provider. Only text models are listed: image, video and embedding models that a gateway such as OmniRoute reports (by `type` or `output_modalities`) are left out, since they can't answer a review. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.
 
+The Run dialog reviews **All files**, the **Current file**, or only the **Unviewed** files: the ones you haven't marked viewed in the file tree. Unviewed is offered once some, but not all, files are marked viewed. The other files are still listed to the model as outside the requested scope, and related code and lookups can still read them.
+
 When a review starts, the chosen connection, provider, protocol, model, endpoint and credential are fixed for the whole run. Changing the picker only affects later runs. Disconnecting a provider, replacing its key or changing its endpoint cancels a run that is using it, and any late responses are discarded. After an error the app never switches to another provider or credential. Each run stores its provenance (connection, provider, protocol, model, endpoint, prompt version, the limits actually used), so past reviews stay readable after a provider is disconnected.
 
 ### Credentials

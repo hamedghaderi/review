@@ -259,7 +259,9 @@ export function FindingsPanel({
 						{[...runs].reverse().map((r, i) => (
 							<option key={r.id} value={r.id}>
 								{i === 0 ? 'Latest · ' : ''}
-								{new Date(r.startedAt).toLocaleString()} · {r.scope.kind === 'all' ? 'all files' : 'one file'} · {r.status}
+								{new Date(r.startedAt).toLocaleString()} ·{' '}
+								{r.scope.kind === 'all' ? 'all files' : r.scope.kind === 'files' ? `${r.scope.fileKeys.length} files` : 'one file'} ·{' '}
+								{r.status}
 							</option>
 						))}
 					</select>
