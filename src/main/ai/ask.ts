@@ -1,5 +1,6 @@
 import type { Finding, FindingLevel, FindingMessage, Hunk, PatchResult } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
+import type { SeenLines } from './lookup.ts'
 import type { ProviderRequest } from './provider.ts'
 import { ANSWER_JSON_SCHEMA, ANSWER_SCHEMA_NAME, answerSchema, type ModelAnswer } from './schema.ts'
 
@@ -84,6 +85,24 @@ export function codeAround(f: Finding, patch: PatchResult | null, fileLines: Arr
 		out.push('', `# ${path} after the change, lines ${from}-${to}`)
 		for (let n = from; n <= to; n++) out.push(`${String(n).padStart(5)}  ${fileLines[n - 1]}`)
 	}
+	return out
+}
+
+/** The lines codeAround shows, for checking what an on-demand request's answer cites (see citations.ts). */
+export function seenAround(f: Finding, patch: PatchResult | null, fileLines: Array<string> | null): Array<SeenLines> {
+	const a = f.anchor
+	const out: Array<SeenLines> = []
+	for (const h of patch?.kind === 'text' ? near(patch.hunks, f) : []) {
+		if (a.oldPath && h.oldCount) out.push({ path: a.oldPath, version: 'base', start: h.oldStart, end: h.oldStart + h.oldCount - 1 })
+		if (a.newPath && h.newCount) out.push({ path: a.newPath, version: 'head', start: h.newStart, end: h.newStart + h.newCount - 1 })
+	}
+	if (fileLines && a.newPath && a.startLine !== null && a.side === 'new')
+		out.push({
+			path: a.newPath,
+			version: 'head',
+			start: Math.max(1, a.startLine - AROUND),
+			end: Math.min(fileLines.length, (a.endLine ?? a.startLine) + AROUND),
+		})
 	return out
 }
 

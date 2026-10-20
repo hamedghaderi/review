@@ -13,6 +13,8 @@ import { createReviewTools, type ReviewTools } from '../src/main/ai/lookup.ts'
 import { createOpenAIChatProvider, createOpenAIResponsesProvider } from '../src/main/ai/openai.ts'
 import { FINAL_ANSWER, type ProviderRequest, type ReviewProvider } from '../src/main/ai/provider.ts'
 import { startRun, type RunnerOptions } from '../src/main/ai/runner.ts'
+import { VERIFY_SCHEMA_NAME } from '../src/main/ai/schema.ts'
+import { verdictOf } from '../src/shared/findings.ts'
 import type { AiRun, ChangedFile, Comparison } from '../src/shared/types.ts'
 
 const CART_V1 = `export function total(items) {
@@ -578,4 +580,56 @@ test('runner: with lookups turned off, no tools are offered and the prompt says 
 	assert.ok(requests[0].instructions.includes('You have no tools'))
 	assert.equal(run.limitsUsed?.lookups, false)
 	assert.equal(run.coverage.lookups, null)
+})
+
+test('runner: references in a finding to lines its request never had are flagged; a "holds" resting on them is not settled', async () => {
+	const { run } = await runReview(
+		(req, call, looked) => {
+			if (req.schema?.name === VERIFY_SCHEMA_NAME)
+				return {
+					verdict: 'holds',
+					reason: 'src/checkout.js:4 calls total(items), and src/tax.js:9 never sets a default.',
+					level: 'blocking',
+					checked: ['src/cart.js:1-5'],
+				}
+			if (call === 0)
+				return { tool_calls: [{ name: 'read_file', args: { path: 'src/checkout.js', version: 'head', start_line: 1, end_line: 5 } }] }
+			assert.equal(looked.length, 1)
+			return {
+				findings: [
+					{
+						excerpt_id: req.batch.excerpts[0].id,
+						file_path: 'src/cart.js',
+						side: 'new',
+						start_line: 4,
+						end_line: 4,
+						category: 'bug',
+						signature: null,
+						test_pattern: null,
+						severity: 'blocking',
+						title: 'Totals become NaN without a tax rate',
+						// Read: cart.js (the excerpt), checkout.js 1-5 (looked up; 7 is within 3 lines of 5). Never read: the rest.
+						body: 'src/cart.js:4 multiplies by taxRate, and src/checkout.js:4 passes none. src/checkout.js:7 is fine. See src/checkout.js:40 and src/payments.js:12.',
+						reasoning: 'Read src/checkout.js and src/legacy/old.js.',
+						disproof: 'Pass a taxRate in src/checkout.js:4.',
+						background: null,
+						evidence: 'return sum * (1 + taxRate)',
+					},
+				],
+				evaluation: emptyEvaluation(),
+				unexplained_files: [],
+				limitations: [],
+			}
+		},
+		true,
+		true,
+	)
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	const f = run.findings[0]
+	assert.deepEqual(f.unread, ['src/checkout.js:40', 'src/payments.js:12', 'src/legacy/old.js'])
+	assert.equal(f.severity, 'blocking', 'the level is left alone')
+	// The double-check had the excerpt but looked nothing up: checkout.js and tax.js are unread there.
+	assert.equal(f.verification?.verdict, 'holds', 'what the model said is kept')
+	assert.deepEqual(f.verification?.unread, ['src/checkout.js:4', 'src/tax.js:9'])
+	assert.equal(verdictOf(f.verification!), 'unsure')
 })

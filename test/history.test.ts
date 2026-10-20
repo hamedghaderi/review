@@ -70,7 +70,7 @@ async function setup() {
 			const out = defaultScript(req)
 			if (req.schema?.name === VERIFY_SCHEMA_NAME) {
 				checks.push(req)
-				return { verdict: 'wrong', reason: 'Line 6 of e.ts no longer does it.', level: null, checked: ['e.ts:1-12'] }
+				return { verdict: 'wrong', reason: 'Line 6 of e.ts no longer does it.', level: null, checked: ['e.ts:1-12', 'src/elsewhere.ts:40'] }
 			}
 			if (req.schema) return out
 			const review = out as ReviewOutput
@@ -240,6 +240,7 @@ test('you can ask whether a gone finding is still there; the verdict is saved on
 	const after = checked.history!.gone.find((g) => g.finding.id === gone.finding.id)!
 	assert.equal(after.check?.verdict, 'wrong')
 	assert.equal(after.check?.reason, 'Line 6 of e.ts no longer does it.')
+	assert.deepEqual(after.check?.unread, ['src/elsewhere.ts:40'], 'e.ts:1-12 was in the code around the finding; the other file was not')
 	assert.equal(after.state, 'fixed')
 	assert.deepEqual(checked.findings, before, "the run's own findings are left alone")
 	const stored = ai.runsFor(repoId, v2.comparison.id).find((r) => r.id === next.id)!

@@ -5,6 +5,9 @@ import {
 	CATEGORY_LABEL,
 	droppedFindings,
 	findingState,
+	unreadSummary,
+	unreadText,
+	verdictOf,
 	findingTimeline,
 	historyCounts,
 	LEVEL_META,
@@ -574,6 +577,24 @@ function SinceLine({ since, history }: { since: HistoryCounts; history: NonNulla
 	)
 }
 
+/** "Citations: 3 findings cite lines their reviewer never read (Bugs: 2, Security: 1)." Nothing when none do. */
+function UnreadLine({ run }: { run: AiRun }) {
+	const u = unreadSummary(run)
+	if (!u.findings && !u.checks) return null
+	const who = run.team ? ` (${[...u.byMember].map(([id, n]) => `${memberName(run, id) ?? 'unknown reviewer'}: ${n}`).join(', ')})` : ''
+	const parts = [
+		u.findings
+			? `${u.findings} finding${u.findings === 1 ? '' : 's'} cite${u.findings === 1 ? 's' : ''} lines ${u.findings === 1 ? 'its' : 'their'} reviewer never read${who}`
+			: null,
+		u.checks ? `${u.checks} double-check${u.checks === 1 ? '' : 's'} did` : null,
+	].filter(Boolean)
+	return (
+		<div className="muted" title="References in the text checked against the excerpts, related code and lookups each request had.">
+			Citations: {parts.join('; ')}.
+		</div>
+	)
+}
+
 function RunSummary({
 	run,
 	since,
@@ -752,6 +773,7 @@ function RunSummary({
 					) : run.limitsUsed && run.limitsUsed.lookups === false ? (
 						<div className="muted">Lookups: off (the reviewer could not open other files or search).</div>
 					) : null}
+					<UnreadLine run={run} />
 					{run.coverage.lookups?.externalUnavailable?.map((x, i) => (
 						<div key={`mcp${i}`} className="warn-text">
 							MCP server not used: {x}
@@ -1142,7 +1164,7 @@ function GoneCard({
 	}
 	const check = g.check && !g.check.error ? g.check : null
 	// Only suggested, never done for you: a fixed finding whose comment's thread is still open on GitHub.
-	const resolvable = g.state === 'fixed' && check?.verdict !== 'holds' && thread?.resolved === false && !!onResolve
+	const resolvable = g.state === 'fixed' && (!check || verdictOf(check) !== 'holds') && thread?.resolved === false && !!onResolve
 	return (
 		<div className={`finding-card gone ${g.state}`}>
 			<div className="finding-open">
@@ -1164,8 +1186,13 @@ function GoneCard({
 				<Timeline heads={findingTimeline(f, at)} gone />
 			</div>
 			{g.check && (
-				<p className={`small ${check?.verdict === 'holds' ? 'warn-text' : ''}`}>
-					<b>{!check ? 'Not checked' : CHECK_LABEL[check.verdict]}:</b> <RefText text={g.check.reason} />{' '}
+				<p className={`small ${check && verdictOf(check) === 'holds' ? 'warn-text' : ''}`}>
+					<b>{!check ? 'Not checked' : CHECK_LABEL[verdictOf(check)]}:</b> <RefText text={g.check.reason} />{' '}
+					{check?.unread?.length ? (
+						<span className="warn-text">
+							It <RefText text={unreadText(check.unread)} />.{' '}
+						</span>
+					) : null}
 					<span className="muted">({g.check.model})</span>
 				</p>
 			)}
@@ -1327,25 +1354,34 @@ function Reproducer({ r }: { r: FindingReproducer }) {
 
 /** The double-check of a finding: a second request that tried to prove it wrong. */
 function Verification({ v, by, level }: { v: FindingVerification; by: string | null; level: Severity }) {
+	const verdict = verdictOf(v)
 	const head = v.error
 		? 'Not double-checked'
-		: v.verdict === 'holds'
+		: verdict === 'holds'
 			? 'Double-checked: it holds'
-			: v.verdict === 'wrong'
+			: verdict === 'wrong'
 				? 'Double-check says it is likely wrong (not added as a comment automatically)'
-				: 'Double-check could not settle it'
+				: v.verdict === 'holds'
+					? 'Double-check says it holds, but it rests on code it never read, so it is not settled'
+					: 'Double-check could not settle it'
 	return (
-		<div className={`verification small ${v.error ? 'unsure' : v.verdict}`}>
+		<div className={`verification small ${v.error ? 'unsure' : verdict}`}>
 			<b>
 				{head}
 				{by ? ` (checked by ${by})` : ''}.
 			</b>{' '}
 			{v.error ? v.reason.replace(/^Not double-checked: /, '') : v.reason}
+			{!v.error && v.unread?.length ? (
+				<span className="warn-text">
+					{' '}
+					It <RefText text={unreadText(v.unread)} />.
+				</span>
+			) : null}
 			{!v.error && v.level && v.verdict !== 'wrong' && v.level !== level ? ` Suggested level: ${LEVEL_META[v.level].label}.` : ''}
 			{v.checked.length ? <span className="muted"> Read: {v.checked.join(', ')}.</span> : null}
 			{v.earlier?.length ? (
 				<div className="muted">
-					Earlier: {v.earlier.map((e) => `${e.error ? 'not checked' : VERDICT_WORD[e.verdict]} (${e.model})`).join(', ')}
+					Earlier: {v.earlier.map((e) => `${e.error ? 'not checked' : VERDICT_WORD[verdictOf(e)]} (${e.model})`).join(', ')}
 				</div>
 			) : null}
 		</div>
@@ -1394,7 +1430,7 @@ function FindingCard(p: CardProps) {
 			</button>
 			<div className="ai-label small">
 				{fixture ? 'Fixture output' : 'AI suggestion'} · location verified,{' '}
-				{f.verification && !f.verification.error ? VERDICT_LABEL[f.verification.verdict] : 'claim not verified'}
+				{f.verification && !f.verification.error ? VERDICT_LABEL[verdictOf(f.verification)] : 'claim not verified'}
 				{f.support?.some((s) => s.strength === 'flags') ? ' · CI flagged these lines too' : ''}
 				{team && f.memberId ? ` · ${team.members.find((m) => m.id === f.memberId)?.role ?? 'reviewer'}` : ''}
 				{team && f.alsoBy?.length
@@ -1409,6 +1445,14 @@ function FindingCard(p: CardProps) {
 					<b>Read before posting:</b> its text has {p.screened.join(', ')}. The AI read pull request text anyone can write.
 				</div>
 			)}
+			{f.unread?.length ? (
+				<div
+					className="discussed-note raised-note rejected small"
+					title="Checked against the code, related code and lookups the request that raised it had. Its level and place in the list are unchanged."
+				>
+					<b>Unread citation:</b> it <RefText text={unreadText(f.unread)} />, so that part is a guess, not something it checked.
+				</div>
+			) : null}
 			{f.raisedBefore && <RaisedBeforeNote r={f.raisedBefore} thread={p.earlier} />}
 			<AlreadyDiscussed threads={discussed} unclaimed />
 			{f.body !== undefined ? (

@@ -38,12 +38,13 @@ import type { RunConfig } from './connections.ts'
 import type { FileSource } from './context.ts'
 import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
-import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
+import type { ExternalTools, LookupBudget, ReviewTools, SeenLines } from './lookup.ts'
 import { DEFAULT_LEVELS, instructionsFor, PROMPT_VERSION } from './prompt.ts'
 import { estimateRun, type EstimateReviewer } from './estimate.ts'
 import type { ReviewerPrint } from './incremental.ts'
 import type { Baseline } from './history.ts'
-import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
+import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer, seenAround } from './ask.ts'
+import { Seen, unreadRefs, verificationTexts, withUnread } from './citations.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
 import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
 import { capacityChars } from './context.ts'
@@ -562,7 +563,7 @@ export class AiController {
 						buildVerifyRequest(c.finding, null, [], tools, c.around),
 						AbortSignal.timeout(300_000),
 					)
-					return { ...parseVerification(response.output), ...who }
+					return checkedCitations({ ...parseVerification(response.output), ...who }, c.seen, tools)
 				} catch (e) {
 					const why = e instanceof Error ? e.message : String(e)
 					return { verdict: 'unsure', reason: `Not double-checked: ${why}`, level: null, checked: [], ...who, error: true }
@@ -603,7 +604,7 @@ export class AiController {
 						buildVerifyRequest(c.finding, null, [], tools, c.around, since),
 						AbortSignal.timeout(300_000),
 					)
-					return { ...parseVerification(response.output), ...who }
+					return checkedCitations({ ...parseVerification(response.output), ...who }, c.seen, tools)
 				} catch (e) {
 					const why = e instanceof Error ? e.message : String(e)
 					return { verdict: 'unsure', reason: `Not checked: ${why}`, level: null, checked: [], ...who, error: true }
@@ -667,6 +668,7 @@ export class AiController {
 			modelId: string
 			memberId: string | null
 			around: Array<string>
+			seen: Array<SeenLines> // the lines `around` shows
 			tools: (draft: ProviderRequest) => ReviewTools | undefined
 		}) => Promise<T>,
 		save: (f: Finding, result: T, gone: GoneFinding | null) => void,
@@ -713,6 +715,7 @@ export class AiController {
 				modelId,
 				memberId: picked ? null : (member?.id ?? null),
 				around: codeAround(finding, patch, lines?.kind === 'text' ? lines.lines : null),
+				seen: seenAround(finding, patch, lines?.kind === 'text' ? lines.lines : null),
 				// Lookups get what the window has left after the request, never more than a high-risk review request gets.
 				tools: (draft) => {
 					const room =
@@ -990,6 +993,11 @@ export class AiController {
  * and files. Bugs only: one pass (or the passes that own them) with just those rules, so only they are asked and shown.
  * None: one request set with every rule.
  */
+/** An on-demand check with the references in its answer to lines it was never shown or looked up (see citations.ts). */
+function checkedCitations(v: FindingVerification, around: Array<SeenLines>, tools: ReviewTools | undefined): FindingVerification {
+	return withUnread(v, unreadRefs(verificationTexts(v), new Seen().lines([...around, ...(tools?.log.seen ?? [])])))
+}
+
 /** Each connection a run uses, once. */
 function connectionsOf(configs: Array<RunConfig>): Array<{ id: string; label: string }> {
 	return [...new Map(configs.map((c) => [c.connectionId, { id: c.connectionId, label: c.connectionLabel }])).values()]
