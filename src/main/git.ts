@@ -384,6 +384,34 @@ export async function compareBranches(repo: RepoInfo, headRef: string, baseRef: 
 	})
 }
 
+/**
+ * Compares two commits, given as anything git resolves to one (a SHA, `HEAD~3`, `main`): `from..to`, or with
+ * `mergeBase` the merge base of the two to `to`, like `from...to`. The target stores the resolved SHAs, so the review
+ * stays pinned to what you opened.
+ */
+export async function compareCommits(repo: RepoInfo, from: string, to: string, mergeBase_: boolean): Promise<ComparisonData> {
+	const [headSha, fromSha] = await Promise.all([resolveCommit(repo.root, to), resolveCommit(repo.root, from)])
+	if (!headSha) throw new AppFail('not-found', `${to} is not a commit in this repository.`)
+	if (!fromSha)
+		throw new AppFail(
+			'not-found',
+			/\^1?$|~1?$/.test(from)
+				? `${from.replace(/(\^1?|~1?)$/, '')} has no parent commit to compare with.`
+				: `${from} is not a commit in this repository.`,
+		)
+	const baseSha = mergeBase_ ? await mergeBase(repo.root, fromSha, headSha, to, from) : fromSha
+	return buildComparison(repo.root, {
+		repoId: repo.id,
+		baseRef: fromSha,
+		headRef: null,
+		headSha,
+		baseTipSha: fromSha,
+		baseSha,
+		target: { kind: 'commits', from: fromSha, to: headSha, mergeBase: mergeBase_ },
+		pr: null,
+	})
+}
+
 /** A commit is reachable when it and its tree can be read; `merge-base` distinguishes shallow from unrelated history. */
 export async function mergeBase(root: string, a: string, b: string, headLabel: string, baseLabel: string): Promise<string> {
 	const mb = await git(root, ['merge-base', a, b])

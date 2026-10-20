@@ -1,7 +1,19 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { INBOX_LABEL } from '../../shared/inbox.ts'
 import { parsePrQuery } from '../../shared/prQuery.ts'
-import type { AppError, BranchRef, InboxStatus, PrFilter, PrSummary, RepoInfo, ReviewSummary, ReviewTarget } from '../../shared/types.ts'
+import { commitSpec } from '../../shared/commitSpec.ts'
+import {
+	commitsLabel,
+	targetKey,
+	type AppError,
+	type BranchRef,
+	type InboxStatus,
+	type PrFilter,
+	type PrSummary,
+	type RepoInfo,
+	type ReviewSummary,
+	type ReviewTarget,
+} from '../../shared/types.ts'
 import { ago, defaultBaseFor, matchBranches } from './branches.ts'
 import { ReviewBadge } from './PrReview.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
@@ -22,7 +34,12 @@ interface Props {
 	onOpenSnapshot(reviewId: string): void
 }
 
-type Item = { t: 'pr'; pr: PrSummary } | { t: 'branch'; b: BranchRef } | { t: 'review'; r: ReviewSummary }
+type CommitsTarget = Extract<ReviewTarget, { kind: 'commits' }>
+type Item =
+	| { t: 'pr'; pr: PrSummary }
+	| { t: 'branch'; b: BranchRef }
+	| { t: 'review'; r: ReviewSummary }
+	| { t: 'commits'; target: CommitsTarget; spec: string }
 type Scope = 'all' | 'prs' | 'branches'
 interface Section {
 	title: string
@@ -61,16 +78,17 @@ function shortRef(ref: string | null): string {
 }
 
 function reviewKey(r: ReviewSummary): string {
-	const t = r.target
-	return !t ? `branch:HEAD|${r.baseRef}` : t.kind === 'pr' ? `pr:${t.repo.toLowerCase()}#${t.number}` : `branch:${t.headRef}|${t.baseRef}`
+	return targetKey(r.target ?? { kind: 'branch', headRef: 'HEAD', baseRef: r.baseRef })
 }
 
 function reviewTitle(r: ReviewSummary): string {
-	return r.pr ? r.pr.title : `${shortRef(r.headRef ?? (r.target?.kind === 'branch' ? r.target.headRef : null))} → ${shortRef(r.baseRef)}`
+	if (r.pr) return r.pr.title
+	if (r.target?.kind === 'commits') return commitsLabel(r.target)
+	return `${shortRef(r.headRef ?? (r.target?.kind === 'branch' ? r.target.headRef : null))} → ${shortRef(r.baseRef)}`
 }
 
 function itemKey(it: Item): string {
-	return it.t === 'pr' ? `pr:${it.pr.number}` : it.t === 'branch' ? `b:${it.b.ref}` : `r:${it.r.id}`
+	return it.t === 'pr' ? `pr:${it.pr.number}` : it.t === 'branch' ? `b:${it.b.ref}` : it.t === 'commits' ? `c:${it.spec}` : `r:${it.r.id}`
 }
 
 async function copy(text: string): Promise<void> {
@@ -181,6 +199,8 @@ export function QuickOpen(props: Props) {
 			return out.filter((s) => s.items.length || s.error)
 		}
 
+		const commits = scope === 'all' ? commitSpec(text) : null
+		if (commits) out.push({ title: 'Commits', items: [{ t: 'commits', target: commits, spec: text }] })
 		if (scope === 'all' && !exact) {
 			const matches = recentReviews.filter((r) => {
 				const hay = `${reviewTitle(r)} ${r.headRef ?? ''} ${r.pr ? `#${r.pr.number}` : ''}`.toLowerCase()
@@ -237,6 +257,10 @@ export function QuickOpen(props: Props) {
 			out.push({ label: 'Copy link', run: close(() => void copy(pr.url)) })
 			if (pr.headRef) out.push({ label: 'Copy branch name', run: close(() => void copy(pr.headRef!)) })
 			return out
+		}
+		if (it.t === 'commits') {
+			const target = it.target
+			return [{ label: 'Review these commits', keys: '↵', run: close(() => props.onOpenReview(target)) }]
 		}
 		if (it.t === 'branch') {
 			const b = it.b
@@ -565,6 +589,21 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 			</>
 		)
 	}
+	if (it.t === 'commits') {
+		const t = it.target
+		const one = !t.mergeBase && t.from === `${t.to}^`
+		return (
+			<>
+				<span className="palette-icon review" title="Review commits">
+					<ReviewIcon />
+				</span>
+				<span className="palette-title ellipsis mono">{it.spec}</span>
+				<span className="palette-sub">
+					{one ? 'this commit' : t.mergeBase ? `from the merge base of ${t.from} and ${t.to}` : `after ${t.from}, up to ${t.to}`}
+				</span>
+			</>
+		)
+	}
 	const r = it.r
 	const notes = r.comments + r.drafts
 	return (
@@ -575,7 +614,7 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 			<span className="palette-title ellipsis">
 				<Highlight text={reviewTitle(r)} words={words} />
 			</span>
-			<span className="palette-sub">{r.pr ? `#${r.pr.number}` : 'branch review'}</span>
+			<span className="palette-sub">{r.pr ? `#${r.pr.number}` : r.target?.kind === 'commits' ? 'commits' : 'branch review'}</span>
 			<span className="spacer" />
 			{notes > 0 && (
 				<span className="palette-acc">

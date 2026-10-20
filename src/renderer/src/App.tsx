@@ -34,6 +34,7 @@ import type {
 	SymbolHit,
 	TargetProbe,
 } from '../../shared/types.ts'
+import { commitsLabel, targetKey } from '../../shared/types.ts'
 import { AiRunControl } from './AiRunControl.tsx'
 import { Browser, type BrowserHandle } from './Browser.tsx'
 import { GitHubSettings } from './GitHubSettings.tsx'
@@ -93,10 +94,6 @@ const ERROR_TITLES: Partial<Record<AppError['code'], string>> = {
 
 function targetOf(r: { target: ReviewTarget | null | undefined; baseRef: string }): ReviewTarget {
 	return r.target ?? { kind: 'branch', headRef: 'HEAD', baseRef: r.baseRef }
-}
-
-function targetKey(t: ReviewTarget): string {
-	return t.kind === 'pr' ? `pr:${t.repo.toLowerCase()}#${t.number}` : `branch:${t.headRef}|${t.baseRef}`
 }
 
 /** The GitHub connection in words, for the header's GitHub button. */
@@ -1345,7 +1342,9 @@ export function App() {
 											Publish
 										</button>
 									) : (
-										!branchPr.data?.prs.length && (
+										// A commits review has no branch or pull request to publish to.
+										!branchPr.data?.prs.length &&
+										comparison?.target?.kind !== 'commits' && (
 											<button
 												className="btn"
 												disabled
@@ -2021,6 +2020,16 @@ function RepoTabs(props: {
 /** What the review compares; for a pull request, its number (linking to GitHub), title and author. */
 function TargetLabel({ comparison: c, author }: { comparison: Comparison; author: string | null }) {
 	const title = `Comparing ${short(c.baseSha)}…${short(c.headSha)}\nMerge base ${c.baseSha}\nHead ${c.headSha}\n${c.pr ? `PR base ${c.pr.baseSha}` : `Base tip ${c.baseTipSha}`}`
+	if (c.target?.kind === 'commits')
+		return (
+			<span
+				className="hfield compare shrink"
+				title={`Commits ${c.target.mergeBase ? `from the merge base of ${c.target.from} and ${c.target.to}` : `after ${c.target.from}`} up to ${c.target.to}`}
+			>
+				<span className="muted">Commits</span>
+				<span className="mono ellipsis">{commitsLabel(c.target)}</span>
+			</span>
+		)
 	return (
 		<span className="hfield compare shrink" title={title}>
 			{c.pr ? (
@@ -2053,6 +2062,10 @@ function TargetLabel({ comparison: c, author }: { comparison: Comparison; author
 }
 
 function emptyReason(c: Comparison): string {
+	if (c.target?.kind === 'commits')
+		return c.baseSha === c.headSha
+			? `${commitsLabel(c.target)} starts and ends at the same commit, so there is nothing to compare.`
+			: `The commits in ${commitsLabel(c.target)} make no net file changes.`
 	const head = c.headRef ?? `HEAD (${short(c.headSha)})`
 	const base = refName(c.baseRef)
 	if (c.headSha === c.baseTipSha)
