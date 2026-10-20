@@ -194,8 +194,8 @@ export function autoAddFindings(
 }
 
 /**
- * Findings the previous finished run of the same snapshot raised that `run` did not raise again, on files `run`
- * reviewed. Runs are not deterministic, so a re-run can miss what an earlier one saw (or report it so differently that
+ * Findings the previous finished run of the same snapshot raised that `run` did not raise again, where `run` checked
+ * that rule on that file. Runs are not deterministic, so a re-run can miss what an earlier one saw (or report it so differently that
  * it isn't matched); these are worth a look before deciding. Dismissed, held-back and folded findings are left out.
  */
 export function droppedFindings(
@@ -215,11 +215,24 @@ export function droppedFindings(
 	const reviewed = new Set(run.coverage.files.filter((f) => f.state === 'reviewed' || f.state === 'partial').map((f) => f.fileKey))
 	const raised = new Set(run.findings.map((f) => roots.get(f.id) ?? f.id))
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+	// The re-run must have asked this finding's rule about its file: a rule nobody owned, or a team member that was not
+	// given the file, could not have raised it again. Runs before per-rule evaluation only say the file was reviewed.
+	const checked = (f: Finding): boolean => {
+		const rule = f.category === 'residue' ? `residue-${f.signature}` : f.category
+		if (!rule || !run.evaluation) return true
+		const e = run.evaluation.find((x) => x.rule === rule)
+		if (!e) return false
+		if (!e.checkedBy) return e.requests > 0
+		const supplied = run.coverage.supplied
+		const shared = !supplied.some((s) => s.memberId) // older team runs shared one set of requests
+		return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
+	}
 	const findings = from.findings.filter(
 		(f) =>
 			!f.heldBack &&
 			!f.mergedInto &&
 			reviewed.has(f.anchor.fileKey) &&
+			checked(f) &&
 			!raised.has(roots.get(f.id) ?? f.id) &&
 			findingState(review, roots, f, byId) !== 'dismissed',
 	)

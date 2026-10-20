@@ -90,3 +90,40 @@ test('not flagged: dismissed, held back, folded, files the re-run did not review
 	)
 	assert.equal(droppedFindings(cancelled, [first, cancelled], review(), new Map()), null, 'a run that did not finish says nothing')
 })
+
+test('not flagged: rules the re-run did not ask about that file', () => {
+	const ev = (rule: string, checkedBy: string | null = null) => ({ rule, requests: 1, checkedBy, nearMisses: [], why: [] })
+	const first = run('r1', [
+		f('bug', { category: 'bug' }),
+		f('naming', { category: 'misleading-name' }),
+		f('residue', { category: 'residue', signature: 3 }),
+		f('security', { category: 'security', anchor: anchor('b.ts', 1) }),
+	])
+	// Bugs-only: one member owning bug and security, the only rules stored; Security was not given b.ts (low risk).
+	const second = run('r2', [], {
+		evaluation: [ev('bug', 'm1'), ev('security', 'm2')],
+		coverage: {
+			files: [
+				{ fileKey: 'a.ts', state: 'reviewed' },
+				{ fileKey: 'b.ts', state: 'reviewed' },
+			],
+			supplied: [
+				{ fileKey: 'a.ts', memberId: 'm1' },
+				{ fileKey: 'b.ts', memberId: 'm1' },
+				{ fileKey: 'a.ts', memberId: 'm2' },
+			],
+		} as AiRun['coverage'],
+	} as Partial<AiRun>)
+	const runs = [first, second]
+	assert.deepEqual(
+		droppedFindings(second, runs, review(), findingRoots(runs))?.findings.map((x) => x.id),
+		['bug'],
+	)
+
+	const full = run('r3', [], { evaluation: [ev('bug'), ev('misleading-name'), ev('residue-3'), ev('security')] } as Partial<AiRun>)
+	assert.deepEqual(
+		droppedFindings(full, [first, full], review(), findingRoots([first, full]))?.findings.map((x) => x.id),
+		['bug', 'naming', 'residue', 'security'],
+		'a single-model run checked every rule it stored on every file',
+	)
+})
