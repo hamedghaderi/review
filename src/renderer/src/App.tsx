@@ -5,6 +5,7 @@ import type {
 	AiSettingsView,
 	AiStartScope,
 	IncrementalOffer,
+	RunEstimate,
 	Anchor,
 	AppError,
 	AppUpdate,
@@ -881,6 +882,17 @@ export function App() {
 		[comparisonKey, finishedRuns],
 	)
 
+	// Prices and limits change the estimate too.
+	const loadEstimate = useCallback(
+		async (choice: ReviewerChoice, scope: AiStartScope): Promise<RunEstimate | null> => {
+			if (!comparisonKey) return null
+			const r = await window.review.estimateRun(comparisonKey, choice, scope)
+			return r.ok ? r.value : null
+		},
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[comparisonKey, finishedRuns, aiSettings],
+	)
+
 	const retryRules = async (run: AiRun, rules: Array<ReviewRule>): Promise<void> => {
 		if (!comparison) return
 		await persist()
@@ -1306,6 +1318,7 @@ export function App() {
 											fileCount={comparison.files.length}
 											unviewed={unviewedKeys}
 											loadOffer={loadOffer}
+											loadEstimate={loadEstimate}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
 											onStart={(scope, passes, bugsOnly, persona) => void startAi(scope, passes, bugsOnly, persona)}

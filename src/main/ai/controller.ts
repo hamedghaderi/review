@@ -24,6 +24,9 @@ import {
 	type ReviewContext,
 	type FindingLevel,
 	type UsageKind,
+	type PricedModel,
+	type ReviewLimits,
+	type RunEstimate,
 	REVIEW_RULES,
 } from '../../shared/types.ts'
 import type { PersonaId } from '../../shared/personas.ts'
@@ -34,14 +37,15 @@ import type { FileSource } from './context.ts'
 import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
-import { DEFAULT_LEVELS, PROMPT_VERSION } from './prompt.ts'
+import { DEFAULT_LEVELS, instructionsFor, PROMPT_VERSION } from './prompt.ts'
+import { estimateRun, type EstimateReviewer } from './estimate.ts'
 import type { ReviewerPrint } from './incremental.ts'
 import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
 import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
 import { capacityChars } from './context.ts'
 import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
-import { outputBudget } from './provider.ts'
+import { outputBudget, type ModelLimits } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
@@ -50,6 +54,11 @@ import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInp
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
 export type RunConfigSource = (selection: ModelSelection) => Promise<RunConfig>
 export type TeamSource = (teamId: string) => ReviewTeam
+/** A model's limits and price as a run would use them, and the review limits; read without the credential. */
+export interface ModelSource {
+	info(selection: ModelSelection): { limits: ModelLimits; price: PricedModel | null } | null
+	limits(): ReviewLimits
+}
 
 export interface ComparisonAccess {
 	comparison: Comparison
@@ -89,6 +98,7 @@ export class AiController {
 	private teams: TeamSource | null = null
 	private levels: (() => Array<FindingLevel>) | null = null
 	private usage: UsageLog | null = null
+	private models: ModelSource | null = null
 	private onDemandBusy = new Set<string>() // "verify:<finding id>" and "test:<finding id>" requests under way
 	private starting = false
 	private store: ReviewStore
@@ -135,6 +145,59 @@ export class AiController {
 
 	attachUsage(usage: UsageLog): void {
 		this.usage = usage
+	}
+
+	attachModels(models: ModelSource): void {
+		this.models = models
+	}
+
+	/**
+	 * What a run with `choice` over `scope` would send and cost, from its requests packed as the run packs them. Reads
+	 * only the diff and the files it changes: no related code, CI results, conversation or credentials.
+	 */
+	async estimate(
+		access: ComparisonAccess,
+		scope: AiScope,
+		choice: ReviewerChoice,
+		carried: ReadonlySet<string> = new Set(),
+	): Promise<RunEstimate> {
+		if (!this.models) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		const levels = this.levels?.() ?? DEFAULT_LEVELS
+		const members: Array<{
+			role: string | null
+			rules: ReadonlyArray<ReviewRule> | null
+			persona: PersonaId | null
+			selection: ModelSelection
+		}> =
+			choice.kind === 'model'
+				? ((roles) =>
+						roles.length
+							? roles.map((r) => ({ role: r.role, rules: r.rules, persona: choice.persona ?? null, selection: choice.selection }))
+							: [{ role: null, rules: null, persona: choice.persona ?? null, selection: choice.selection }])(passRoles(choice))
+				: (this.teams?.(choice.teamId).members ?? []).map((m) => ({
+						role: m.role,
+						rules: m.rules,
+						persona: m.persona ?? null,
+						selection: { connectionId: m.connectionId, modelId: m.modelId },
+					}))
+		const limits = this.models.limits()
+		const reviewers: Array<EstimateReviewer> = []
+		for (const m of members) {
+			const info = this.models.info(m.selection)
+			if (!info) throw new AppFail('ai-unavailable', `${m.role ? `${m.role}: ` : ''}“${m.selection.modelId}” is not offered any more.`)
+			reviewers.push({
+				role: m.role,
+				model: m.selection.modelId,
+				// A focused pass or team member gets only the files its rules apply to; one model gets them all.
+				rules: m.role ? m.rules : null,
+				limits: info.limits,
+				price: info.price,
+				instructionChars: instructionsFor(m.role ? m.rules : null, m.role, levels, limits.lookups !== false, m.persona).length,
+			})
+		}
+		const keys =
+			scope.kind === 'file' ? [scope.fileKey] : scope.kind === 'files' ? scope.fileKeys : access.comparison.files.map((f) => f.key)
+		return estimateRun(access.comparison, await loadSources(access, keys), limits, reviewers, carried)
 	}
 
 	/** A fixed configuration whose provider books every response to the usage history. */

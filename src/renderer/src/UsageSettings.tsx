@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { costCaveat, formatCost } from '../../shared/cost.ts'
+import { costCaveat, formatCost, formatTokens as tokens } from '../../shared/cost.ts'
 import type { UsageGroup, UsageKind, UsagePeriod, UsageSummary, UsageTotals } from '../../shared/types.ts'
 
 const KIND_LABEL: Record<UsageKind, string> = {
@@ -8,11 +8,6 @@ const KIND_LABEL: Record<UsageKind, string> = {
 	explain: 'Questions about code',
 	verify: 'Verify',
 	test: 'Write test',
-}
-
-/** "12k", "3.4M". */
-function tokens(n: number): string {
-	return n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 }
 
 function Cost({ totals }: { totals: UsageTotals }) {

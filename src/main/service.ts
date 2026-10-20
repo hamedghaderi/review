@@ -36,6 +36,7 @@ import type {
 	ContextImage,
 	ReviewEvent,
 	ReviewerChoice,
+	RunEstimate,
 	ReviewRule,
 	ReviewTarget,
 	SearchSlot,
@@ -1161,6 +1162,17 @@ export class ReviewService {
 		return ai.start(access, reviewId, { kind: 'files', fileKeys: plan.offer.review }, choice, {
 			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings, recheck: plan.offer.recheck },
 		})
+	}
+
+	/** What a run would send and cost; the changed-files scope estimates the files the incremental run would send. */
+	async estimateAi(reviewId: string, choice: ReviewerChoice, scopeInput: unknown): Promise<RunEstimate> {
+		const { ai, access } = this.aiAccess(reviewId)
+		const scope = aiStartScope(scopeInput, new Set(access.comparison.files.map((f) => f.key)))
+		if (scope.kind !== 'changed') return ai.estimate(access, scope, choice)
+		const plan = await this.incrementalPlan(reviewId, choice)
+		if (!plan || plan.offer.refused !== null) return ai.estimate(access, { kind: 'all' }, choice)
+		const carried = new Set(plan.files.filter((f) => f.state === 'carried').map((f) => f.fileKey))
+		return ai.estimate(access, { kind: 'files', fileKeys: plan.offer.review }, choice, carried)
 	}
 
 	/** Whether a run with `choice` can review only the files whose diff changed since the newest finished run. */

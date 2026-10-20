@@ -1294,6 +1294,17 @@ a.ic-state:hover {
 	opacity: 0.5;
 	cursor: default;
 }
+.run-cost {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.run-cost-notes {
+	margin: 0;
+	padding-left: 16px;
+	font-size: 11px;
+}
 .run-info {
 	display: flex;
 	flex-direction: column;
