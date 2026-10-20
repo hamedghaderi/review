@@ -199,6 +199,10 @@ Models are labelled by source:
 
 After a successful test, catalog entries the account doesn't list are no longer offered.
 
+**Prices.** Each model shows its price in US dollars per million input and output tokens. Click it to enter your own. Prices come from, in order: your own price for that model on that connection; the provider's model list (OpenRouter reports prices); free for connections made from the Ollama and LM Studio presets; and the catalog's list prices. Catalog prices are dated with the catalog and may be out of date, so costs worked out from them are marked **estimated**. A model with no price, such as one on a gateway or a custom endpoint, shows **Set price**, and runs on it show no cost until you set one. Costs use list prices at the standard tier. Prompt-cache reads and writes are billed at their own prices. Higher long-context prices (Claude Haiku over 100,000 input tokens, for example) aren't applied.
+
+The run details show the cost next to the tokens, and team runs show it for each member. A run is costed at the price its models had when it started, so changing a price later doesn't change earlier runs. A request that reported no usage, or used a model without a price, isn't counted. The cost then reads "at least …", never a lower number that looks complete.
+
 ### Choosing a model
 
 The picker next to **Run AI review…** groups models by connected provider. Only text models are listed: image, video and embedding models that a gateway such as OmniRoute reports (by `type` or `output_modalities`) are left out, since they can't answer a review. It supports search, keyboard navigation (↑/↓, Enter, Esc) and a **Manage providers…** link, and it remembers the last valid choice across restarts. If that model or provider goes away, the picker says why instead of picking another one.

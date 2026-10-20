@@ -164,6 +164,7 @@ function usageOf(message: Message): AiUsage | null {
 		? {
 				inputTokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
 				cachedInputTokens: u.cache_read_input_tokens ?? 0,
+				cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
 				outputTokens: u.output_tokens ?? 0,
 				reasoningTokens: 0,
 				totalTokens: 0,

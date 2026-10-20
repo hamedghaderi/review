@@ -1952,6 +1952,22 @@ a.ic-state:hover {
 .model-row + .model-row {
 	border-top: 1px solid var(--border);
 }
+.price-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 8px;
+}
+.price-fields {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.price-fields input {
+	min-width: 0;
+}
 .model-name {
 	display: flex;
 	flex-direction: column;

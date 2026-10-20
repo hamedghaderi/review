@@ -793,6 +793,7 @@ export interface RunMember {
 	requestsTotal: number
 	maxBatchChars?: number // characters per request, sized for this member's model; absent on older runs (all used the run's)
 	usage: AiUsage | null
+	cost?: AiCost | null // absent on runs before prices
 	error: string | null
 }
 
@@ -1064,11 +1065,38 @@ export interface AiLookups {
 }
 
 export interface AiUsage {
-	inputTokens: number
+	inputTokens: number // includes cached and cache-write tokens
 	cachedInputTokens: number
-	outputTokens: number
+	cacheWriteTokens?: number // input written to the provider's prompt cache, billed above the input price; absent on older runs
+	outputTokens: number // includes reasoning tokens
 	reasoningTokens: number
 	totalTokens: number
+}
+
+/** US dollars per million tokens. A null cached or cache-write price is billed as plain input. */
+export interface ModelPrice {
+	input: number
+	cachedInput: number | null
+	cacheWrite: number | null
+	output: number
+}
+
+// catalog: shipped with the app, may be out of date; provider: reported by the provider's model list (OpenRouter);
+// override: entered by you; local: a local server, free.
+export type PriceSource = 'catalog' | 'provider' | 'override' | 'local'
+
+export interface PricedModel extends ModelPrice {
+	source: PriceSource
+}
+
+/**
+ * What requests cost, worked out from the price captured when they were sent. `estimated`: some price came from the
+ * catalog. `unpriced`: some requests used a model without a price or reported no usage, so the real cost is higher.
+ */
+export interface AiCost {
+	usd: number
+	estimated: boolean
+	unpriced: boolean
 }
 
 export interface AiRun {
@@ -1109,6 +1137,7 @@ export interface AiRun {
 	limitations: Array<string>
 	errors: Array<string>
 	usage: AiUsage | null
+	cost?: AiCost | null // absent on runs before prices
 	evaluation?: Array<RuleEvaluation> // since reviewer-2026-10-01
 	team?: { id: string; name: string; members: Array<RunMember> } | null // set when the run used a review team
 	persona?: PersonaId | null // single-model runs: the lens the model reviewed with
@@ -1137,6 +1166,7 @@ export interface EndpointPreset {
 	auth: AuthMethod
 	contextWindow: number | null // null = use the context window the endpoint reports per model
 	note: string | null // shown when adding or viewing a connection made from this preset
+	free: boolean // runs on your own computer: models cost nothing unless you set a price
 }
 
 /** Static, renderer-safe description of a provider. The settings UI is generated from these. */
@@ -1175,6 +1205,7 @@ export interface ModelView {
 	maxOutputTokens: number | null
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	probe: ModelProbe | null
+	price: PricedModel | null // null: unknown, so its cost is not shown
 }
 
 export interface ConnectionView {
@@ -1387,6 +1418,7 @@ export const IPC = {
 	aiAddModel: 'ai:model-add',
 	aiRemoveModel: 'ai:model-remove',
 	aiProbeModel: 'ai:model-probe',
+	aiSetModelPrice: 'ai:model-price',
 	aiSelectModel: 'ai:model-select',
 	aiSelectAskModel: 'ai:ask-model-select',
 	aiSetLimits: 'ai:limits-set',
@@ -1540,6 +1572,8 @@ export interface ReviewApi {
 	addModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	removeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	probeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
+	/** Your price for a model, used instead of the catalog's or the provider's; null goes back to those. */
+	setModelPrice(connectionId: string, modelId: string, price: ModelPrice | null): Promise<Result<AiSettingsView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
 	selectAskModel(selection: ModelSelection): Promise<Result<AiSettingsView>>

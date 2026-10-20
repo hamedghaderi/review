@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { RefText, RefLinksProvider, useRefLinks, type RefTarget } from './RefText.tsx'
 import {
 	CATEGORY_LABEL,
@@ -445,6 +446,12 @@ function TeamStatus({ run }: { run: AiRun }) {
 										: 'done'}
 						{routed ? ` · ${filesOf(m.id)} file${filesOf(m.id) === 1 ? '' : 's'}` : ''}
 						{m.usage ? ` · ${Math.round(m.usage.inputTokens / 1000)}k tokens` : ''}
+						{m.cost && (
+							<span title={costCaveat(m.cost) ?? undefined}>
+								{` · ${m.cost.unpriced && m.cost.usd === 0 ? 'no price' : formatCost(m.cost)}`}
+								{m.cost.estimated ? ' est.' : ''}
+							</span>
+						)}
 					</span>
 				</div>
 			))}
@@ -661,6 +668,12 @@ function RunSummary({
 						<div className="muted">
 							Tokens: {run.usage.inputTokens.toLocaleString()} in ({run.usage.cachedInputTokens.toLocaleString()} cached),{' '}
 							{run.usage.outputTokens.toLocaleString()} out ({run.usage.reasoningTokens.toLocaleString()} reasoning)
+						</div>
+					)}
+					{run.cost && (
+						<div className="muted" title={costCaveat(run.cost) ?? undefined}>
+							Cost: {formatCost(run.cost)}
+							{run.cost.estimated ? ' (estimated)' : ''}
 						</div>
 					)}
 					{(notReviewed.length > 0 || partial > 0 || notReviewable.length > 0) && (

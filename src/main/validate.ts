@@ -13,6 +13,7 @@ import type {
 	CompareTarget,
 	ConnectionPatch,
 	FindingDecision,
+	ModelPrice,
 	ModelSelection,
 	NewConnectionInput,
 	Review,
@@ -560,6 +561,22 @@ export function reviewLimits(v: unknown): ReviewLimits {
 		lookups: o.lookups === undefined ? true : bool(o.lookups, 'lookups setting'),
 		verify: o.verify === undefined ? true : bool(o.verify, 'double-check setting'),
 		groupDuplicates: o.groupDuplicates === undefined ? false : bool(o.groupDuplicates, 'group duplicates setting'),
+	}
+}
+
+/** Dollars per million tokens; null clears your price. */
+export function modelPrice(v: unknown): ModelPrice | null {
+	if (v === null) return null
+	const o = obj(v, 'model price')
+	const n = (x: unknown, what: string): number => {
+		if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > 10_000) bad(`${what} price ($0–$10,000 per million tokens)`)
+		return x
+	}
+	return {
+		input: n(o.input, 'input'),
+		cachedInput: o.cachedInput === null || o.cachedInput === undefined ? null : n(o.cachedInput, 'cached input'),
+		cacheWrite: o.cacheWrite === null || o.cacheWrite === undefined ? null : n(o.cacheWrite, 'cache write'),
+		output: n(o.output, 'output'),
 	}
 }
 
