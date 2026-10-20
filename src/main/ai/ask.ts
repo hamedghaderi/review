@@ -60,6 +60,21 @@ export function askInput({ finding: f, question, history, patch, fileLines }: As
 		'Cited lines:',
 		f.evidence,
 	]
+	out.push(...codeAround(f, patch, fileLines))
+	const earlier = history.filter((m) => !m.error)
+	if (earlier.length) {
+		out.push('', '# Earlier messages about this finding')
+		for (const m of earlier) out.push(`${m.role === 'you' ? 'Reviewer' : 'You'}: ${m.text}`)
+	}
+	out.push('', '# The reviewer asks', question)
+	return out.join('\n')
+}
+
+/** The hunks near a finding and, on the new side, the file around it: what a question or a check about it reads first. */
+export function codeAround(f: Finding, patch: PatchResult | null, fileLines: Array<string> | null): Array<string> {
+	const a = f.anchor
+	const path = (a.side === 'old' ? a.oldPath : a.newPath) ?? a.newPath ?? a.oldPath ?? a.fileKey
+	const out: Array<string> = []
 	const hunks = patch?.kind === 'text' ? near(patch.hunks, f) : []
 	if (hunks.length)
 		out.push('', '# The change around the finding (unified diff; old and new line numbers on the left)', ...hunks.map(hunkText))
@@ -69,13 +84,7 @@ export function askInput({ finding: f, question, history, patch, fileLines }: As
 		out.push('', `# ${path} after the change, lines ${from}-${to}`)
 		for (let n = from; n <= to; n++) out.push(`${String(n).padStart(5)}  ${fileLines[n - 1]}`)
 	}
-	const earlier = history.filter((m) => !m.error)
-	if (earlier.length) {
-		out.push('', '# Earlier messages about this finding')
-		for (const m of earlier) out.push(`${m.role === 'you' ? 'Reviewer' : 'You'}: ${m.text}`)
-	}
-	out.push('', '# The reviewer asks', question)
-	return out.join('\n')
+	return out
 }
 
 function near(hunks: Array<Hunk>, f: Finding): Array<Hunk> {

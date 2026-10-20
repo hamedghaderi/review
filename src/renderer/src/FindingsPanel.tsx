@@ -56,6 +56,8 @@ interface Props {
 	onRestore(finding: Finding): void
 	/** Asks the model about a finding; resolves with an error message, or null once the answer is saved. */
 	onAsk(finding: Finding, question: string): Promise<string | null>
+	/** Double-checks a finding now; resolves with an error message, or null once the verdict is saved. */
+	onVerify(finding: Finding): Promise<string | null>
 	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
 }
 
@@ -102,6 +104,7 @@ export function FindingsPanel({
 	onNote,
 	onRestore,
 	onAsk,
+	onVerify,
 	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
@@ -373,6 +376,7 @@ export function FindingsPanel({
 								foldedUnder={f.mergedInto ? (byId.get(f.mergedInto)?.title ?? null) : null}
 								onShowSeparately={(x) => onRestore(x)}
 								onAsk={(q) => onAsk(f, q)}
+								onVerify={() => onVerify(f)}
 								askModelPicker={askModelPicker}
 								askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
 							/>
@@ -970,6 +974,8 @@ interface CardProps {
 	foldedUnder: string | null // the title of the finding this one was folded under, when shown on its own
 	onShowSeparately(f: Finding): void
 	onAsk(question: string): Promise<string | null>
+	/** Double-checks it now; resolves with an error message, or null once the verdict is saved. */
+	onVerify(): Promise<string | null>
 	askDisabled: string | null
 	askModelPicker: React.ReactNode
 }
@@ -1047,8 +1053,10 @@ const VERDICT_LABEL = {
 	unsure: 'double-check: not settled',
 } as const
 
-/** The double-check of a blocking finding: a second request that tried to prove it wrong. */
-function Verification({ v, by }: { v: FindingVerification; by: string | null }) {
+const VERDICT_WORD = { holds: 'holds', wrong: 'likely wrong', unsure: 'not settled' } as const
+
+/** The double-check of a finding: a second request that tried to prove it wrong. */
+function Verification({ v, by, level }: { v: FindingVerification; by: string | null; level: Severity }) {
 	const head = v.error
 		? 'Not double-checked'
 		: v.verdict === 'holds'
@@ -1063,8 +1071,13 @@ function Verification({ v, by }: { v: FindingVerification; by: string | null }) 
 				{by ? ` (checked by ${by})` : ''}.
 			</b>{' '}
 			{v.error ? v.reason.replace(/^Not double-checked: /, '') : v.reason}
-			{!v.error && v.level && v.verdict !== 'wrong' && v.level !== 'blocking' ? ` Suggested level: ${LEVEL_META[v.level].label}.` : ''}
+			{!v.error && v.level && v.verdict !== 'wrong' && v.level !== level ? ` Suggested level: ${LEVEL_META[v.level].label}.` : ''}
 			{v.checked.length ? <span className="muted"> Read: {v.checked.join(', ')}.</span> : null}
+			{v.earlier?.length ? (
+				<div className="muted">
+					Earlier: {v.earlier.map((e) => `${e.error ? 'not checked' : VERDICT_WORD[e.verdict]} (${e.model})`).join(', ')}
+				</div>
+			) : null}
 		</div>
 	)
 }
@@ -1073,6 +1086,8 @@ function FindingCard(p: CardProps) {
 	const { finding: f, state, fixture, team, discussed, selected, onOpen, onAccept, onDismiss, onRestore } = p
 	const ref = useRef<HTMLDivElement>(null)
 	const [asking, setAsking] = useState(false)
+	const [verifying, setVerifying] = useState(false)
+	const [verifyError, setVerifyError] = useState<string | null>(null)
 	useEffect(() => {
 		if (selected) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 	}, [selected])
@@ -1175,10 +1190,13 @@ function FindingCard(p: CardProps) {
 					{f.verification && (
 						<Verification
 							v={f.verification}
+							level={f.severity}
 							by={
 								team && f.verification.memberId
 									? `${team.members.find((m) => m.id === f.verification!.memberId)?.role ?? 'another reviewer'} · ${f.verification.model}`
-									: null
+									: f.verification.onDemand
+										? f.verification.model
+										: null
 							}
 						/>
 					)}
@@ -1237,7 +1255,26 @@ function FindingCard(p: CardProps) {
 						Restore
 					</button>
 				)}
+				<button
+					className="btn small ghost"
+					disabled={verifying || p.askDisabled !== null}
+					title={
+						p.askDisabled ??
+						'Ask a model to try to prove this finding wrong, reading the code around it. Uses the model for questions, else the one that raised it.'
+					}
+					onClick={() => {
+						setVerifying(true)
+						setVerifyError(null)
+						void p.onVerify().then((err) => {
+							setVerifying(false)
+							setVerifyError(err)
+						})
+					}}
+				>
+					{verifying ? 'Verifying…' : f.verification && !f.verification.error ? 'Verify again' : 'Verify'}
+				</button>
 			</div>
+			{verifyError && <p className="error-text small">{verifyError}</p>}
 			{state === 'open' && p.dismissMenu && (
 				<div className="dismiss-menu small" role="group" aria-label="Why dismiss it?">
 					<span className="muted">Why?</span>

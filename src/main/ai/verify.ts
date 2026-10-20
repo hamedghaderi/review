@@ -1,4 +1,4 @@
-import type { Finding, FindingLevel } from '../../shared/types.ts'
+import type { Finding, FindingLevel, Severity } from '../../shared/types.ts'
 import type { ContextBatch, ContextFact } from './context.ts'
 import { InvalidOutputError } from './findings.ts'
 import type { ReviewTools } from './lookup.ts'
@@ -13,8 +13,18 @@ import { VERIFY_JSON_SCHEMA, VERIFY_SCHEMA_NAME, verifySchema, type ModelVerific
 export const MAX_VERIFIED = 8 // blocking findings double-checked per run
 const MAX_REASON_CHARS = 1500
 
-export function verifyInstructions(lookups: boolean): string {
-	return `Another reviewer reported the finding below on a code change and marked it blocking: it would stop the change from merging. Your job is to find out whether it is wrong before anyone acts on it.
+// What the reviewer claimed by its level, so the check knows what "holds" means for it.
+const CLAIM: Partial<Record<Severity, string>> = {
+	blocking: 'marked it blocking: it would stop the change from merging',
+	should_fix: 'marked it should_fix: a real problem in the change worth fixing',
+	question:
+		'raised it as a question: it is a problem only if an assumption holds. Here "holds" means the code shows the assumption is true and the problem happens; "wrong" means the code shows it is false',
+	pre_existing: 'marked it pre_existing: a problem in code the change did not write, which the change exposes',
+}
+
+export function verifyInstructions(lookups: boolean, level: Severity = 'blocking'): string {
+	const claim = CLAIM[level] ?? `reported it at level ${level}`
+	return `Another reviewer reported the finding below on a code change and ${claim}. Your job is to find out whether it is wrong before anyone acts on it.
 
 - Try to disprove it. Read the code it depends on: the rest of the function, what the changed code calls, its callers, where the values come from, the tests.${lookups ? ' Use the lookups (read_file, search_code, list_files) for anything the supplied code does not show.' : ' You have only the supplied code.'} If the finding names a check that would prove it wrong, work through that check against the code.
 - "wrong": the code shows the problem cannot happen (name the line that prevents it), the finding misreads the code, or it describes something the change does not do.
@@ -35,6 +45,7 @@ export function buildVerifyRequest(
 	excerpt: string | null,
 	facts: Array<ContextFact>,
 	tools: ReviewTools | undefined,
+	around: Array<string> = [], // on demand: the diff and file around the finding, as Ask AI reads them (see codeAround)
 ): ProviderRequest {
 	const a = f.anchor
 	const path = (a.side === 'old' ? a.oldPath : a.newPath) ?? a.newPath ?? a.oldPath ?? a.fileKey
@@ -54,10 +65,11 @@ export function buildVerifyRequest(
 			? ['', '# What the app found about these lines', ...f.support.map((s) => `- ${s.source === 'ci' ? 'CI' : 'Tests'}: ${s.text}`)]
 			: []),
 		...(excerpt ? ['', '# The change around the finding (repository data)', excerpt] : []),
+		...around,
 		...(facts.length ? ['', '# Facts the app computed or read (data)', ...facts.map((x) => `## ${x.title}\n${x.text}\n`)] : []),
 	]
 	return {
-		instructions: verifyInstructions(!!tools),
+		instructions: verifyInstructions(!!tools, f.severity),
 		input: lines.join('\n'),
 		batch: EMPTY_BATCH,
 		schema: { name: VERIFY_SCHEMA_NAME, json: VERIFY_JSON_SCHEMA },

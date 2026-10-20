@@ -299,6 +299,10 @@ Select lines you don't understand (drag across the code, or click a line number 
 - The answer appears in a card at those lines, marked **Private** with a dashed edge. Questions are saved with the review, never posted, and never sent to the AI reviewer. Ask a follow-up in the card; a conversation holds up to 20 messages. **Delete** removes it.
 - On the old side (deleted lines), the model sees the selected lines and the diff, not the whole old file.
 
+### Verifying a finding
+
+**Verify** on a finding card asks a model to try to prove that finding wrong, at any level, the way the run double-checks blocking findings. It reads the finding, the change around it and up to 40 lines of the file on each side, plus what the app found about those lines (CI, tests). With lookups on for that run, it can also open files and search the reviewed commits; MCP tools are never offered here. It uses the model picked for questions, else the model that raised the finding. The verdict (holds, likely wrong, or not settled) replaces the one on the card, and the earlier ones are listed under it. A finding verified as likely wrong isn't added as a comment automatically, but it is never lowered or removed: dismissing it is up to you.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

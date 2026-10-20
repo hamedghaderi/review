@@ -1247,6 +1247,11 @@ export class ReviewService {
 		return ai.ask(access, reviewId, findingId, question, model)
 	}
 
+	async verifyFinding(reviewId: string, findingId: string, model: ModelSelection | null): Promise<AiRun> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.verify(access, reviewId, findingId, model)
+	}
+
 	async askCode(
 		reviewId: string,
 		anchorInput: unknown,

@@ -110,6 +110,7 @@ const api: ReviewApi = {
 	setReviewLimits: (limits) => ipcRenderer.invoke(IPC.aiSetLimits, limits),
 	setFindingLevels: (levels) => ipcRenderer.invoke(IPC.aiSetLevels, levels),
 	askFinding: (reviewId, findingId, question) => ipcRenderer.invoke(IPC.aiAsk, reviewId, findingId, question),
+	verifyFinding: (reviewId, findingId) => ipcRenderer.invoke(IPC.aiVerify, reviewId, findingId),
 	askCode: (reviewId, anchor, question, questionId) => ipcRenderer.invoke(IPC.aiAskCode, reviewId, anchor, question, questionId),
 	deleteCodeQuestion: (reviewId, questionId) => ipcRenderer.invoke(IPC.aiDeleteCodeQuestion, reviewId, questionId),
 	gifStatus: () => ipcRenderer.invoke(IPC.gifStatus),
