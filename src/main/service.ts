@@ -95,6 +95,7 @@ import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import { carryFindings, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
+import { findingBaseline, type Baseline } from './ai/history.ts'
 import type { FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
@@ -1193,13 +1194,7 @@ export class ReviewService {
 		const data = this.loaded(reviewId)
 		const c = data.comparison
 		const repo = this.store.read().repos[c.repoId]
-		const key = targetKey(targetOf(c))
-		const finished = Object.values(repo.reviews)
-			.filter((r) => r.id === c.id || targetKey(targetOf(r)) === key)
-			.flatMap((r) => repo.aiRuns[r.id] ?? [])
-			.filter((run) => (run.status === 'completed' || run.status === 'partial') && run.finishedAt)
-			.sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!))
-		const earlier = finished[0]
+		const earlier = this.finishedRuns(c)[0]
 		if (!earlier || earlier.reviewId === c.id) return null
 		const from: CarriedRun = { runId: earlier.id, reviewId: earlier.reviewId, headSha: earlier.headSha }
 		const print = ai.reviewerPrint(choice)
@@ -1238,6 +1233,38 @@ export class ReviewService {
 			offer: { from, review, carry, recheck, refused: null },
 			files: kept,
 			findings: carryFindings(earlier, from, earlierReview, repo.aiRuns[earlier.reviewId] ?? [], kept, c),
+		}
+	}
+
+	/** Finished runs of every snapshot of the comparison's pull request or branch, newest first. */
+	private finishedRuns(c: Comparison): Array<AiRun> {
+		const repo = this.store.read().repos[c.repoId]
+		const key = targetKey(targetOf(c))
+		return Object.values(repo.reviews)
+			.filter((r) => r.id === c.id || targetKey(targetOf(r)) === key)
+			.flatMap((r) => repo.aiRuns[r.id] ?? [])
+			.filter((run) => (run.status === 'completed' || run.status === 'partial') && run.finishedAt)
+			.sort((a, b) => b.finishedAt!.localeCompare(a.finishedAt!))
+	}
+
+	/**
+	 * What a run on this snapshot is compared with: the newest finished run on a snapshot opened before it (or `pinned`),
+	 * with its findings moved here. Null when there is none, or when its commits are no longer in this clone.
+	 */
+	private async findingBaseline(reviewId: string, pinned: CarriedRun | null): Promise<Baseline | null> {
+		const data = this.loaded(reviewId)
+		const c = data.comparison
+		const repo = this.store.read().repos[c.repoId]
+		const opened = repo.reviews[c.id]?.createdAt
+		const earlier = pinned
+			? repo.aiRuns[pinned.reviewId]?.find((r) => r.id === pinned.runId)
+			: this.finishedRuns(c).find((r) => r.reviewId !== c.id && !!opened && repo.reviews[r.reviewId]?.createdAt < opened)
+		const review = earlier && repo.reviews[earlier.reviewId]
+		if (!earlier || !review) return null
+		try {
+			return await findingBaseline(data.root, earlier, review, repo.aiRuns[earlier.reviewId] ?? [], c)
+		} catch {
+			return null
 		}
 	}
 
@@ -1327,6 +1354,7 @@ export class ReviewService {
 				testExamples: (fileKey) => this.testExamples(data, fileKey),
 				pastDecisions: () => this.pastDecisions(repoId, data.comparison),
 				earlierLimitations: () => this.earlierLimitations(repoId, data.comparison),
+				findingBaseline: (pinned) => this.findingBaseline(reviewId, pinned),
 				tools: (budget, external) =>
 					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,

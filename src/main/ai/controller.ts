@@ -6,6 +6,7 @@ import {
 	type AiRun,
 	type AiScope,
 	type Anchor,
+	type CarriedRun,
 	type CodeMessage,
 	type CodeQuestion,
 	type Comparison,
@@ -40,6 +41,7 @@ import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
 import { DEFAULT_LEVELS, instructionsFor, PROMPT_VERSION } from './prompt.ts'
 import { estimateRun, type EstimateReviewer } from './estimate.ts'
 import type { ReviewerPrint } from './incremental.ts'
+import type { Baseline } from './history.ts'
 import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
 import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
@@ -85,6 +87,8 @@ export interface ComparisonAccess {
 	pastDecisions?(): Array<PastDecision>
 	/** What the newest finished run of this pull request or branch could not settle. */
 	earlierLimitations?(): EarlierLimitations | null
+	/** The newest finished run on an earlier snapshot of this pull request or branch, moved here; `pinned`: that run instead. */
+	findingBaseline?(pinned: CarriedRun | null): Promise<Baseline | null>
 	/** Read-only lookups in the comparison's two commits, for one review request, plus the run's MCP tools if any. */
 	tools?(budget: LookupBudget, external?: ExternalTools | null): ReviewTools
 	/** Connects the enabled MCP servers for one run; null when none is enabled. */
@@ -835,9 +839,19 @@ export class AiController {
 			console.warn('Context images could not be read:', e)
 			return []
 		})
+		// A retry compares with the run its run was compared with, and only if it was.
+		const pinned = input.retry ? (input.retry.run.history?.from ?? null) : null
+		const history =
+			input.retry && !pinned
+				? null
+				: await (access.findingBaseline?.(pinned) ?? Promise.resolve(null)).catch((e: unknown) => {
+						console.warn('The earlier snapshot could not be compared:', e)
+						return null
+					})
 		const handle = startRun(
 			{
 				...input,
+				history,
 				reviewId,
 				comparison,
 				loadSources: () => loadSources(access, keys),

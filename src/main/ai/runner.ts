@@ -37,6 +37,7 @@ import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
 import { recheckFacts } from './incremental.ts'
+import { traceFindings, type Baseline } from './history.ts'
 import { importFacts, importSummary } from './imports.ts'
 import type { FactsResult } from './facts.ts'
 import {
@@ -127,6 +128,8 @@ export interface RunInput {
 	retry?: { run: AiRun; rules: Array<ReviewRule>; providers: ReadonlyMap<string | null, ReviewProvider> }
 	/** An incremental run: the files not sent because an earlier run reviewed the same diff, and that run's findings on them. */
 	carried?: { from: CarriedRun; files: Array<FileCoverage>; findings: Array<Finding>; recheck?: Array<RecheckedFile> } | null
+	/** The newest finished run on an earlier snapshot, to tell which findings are new, still present or gone once this run finishes. */
+	history?: Baseline | null
 }
 
 export interface RunHandle {
@@ -940,11 +943,20 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			run.findings.push(...input.carried.findings.map((f) => ({ ...f, runId: run.id })))
 		}
 		if (!cancelled) run.status = overallStatus(run.coverage.files, pkg, run.errors)
+		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		run.finishedAt = now()
 		settled = true
 		onUpdate(structuredClone(run))
 		return structuredClone(run)
+	}
+
+	/** A run that reviewed nothing says nothing about what was fixed. */
+	function traceHistory(): void {
+		if (!input.history || (run.status !== 'completed' && run.status !== 'partial')) return
+		const traced = traceFindings(run, input.history)
+		run.findings = traced.findings
+		run.history = traced.history
 	}
 
 	/** File coverage follows the rules: a file is reviewed once every rule was answered for every request carrying it. */
@@ -971,6 +983,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		// A retry that could not rebuild the requests leaves the run's status as it was.
 		run.status = pkg ? overallStatus(run.coverage.files, pkg, run.errors) : retry!.run.status
 		run.retrying = null
+		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		run.finishedAt = now()
 		settled = true

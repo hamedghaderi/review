@@ -65,12 +65,12 @@ function repeats(finding: Finding, byId: Map<string, Finding>): Array<Finding> {
 }
 
 /**
- * The most specific decision on a finding: its own, then the one recorded on the finding it repeats. A carried finding
- * falls back on the decision it had in the earlier review.
+ * The most specific decision on a finding: its own, then the one recorded on the finding it repeats. A carried finding,
+ * or one matched to a finding of an earlier snapshot, falls back on the decision it had in the earlier review.
  */
 export function findingDecision(review: Review, finding: Finding, byId: Map<string, Finding>): Omit<FindingDecision, 'history'> | null {
 	for (const cur of repeats(finding, byId)) {
-		const d = review.findingDecisions[cur.id] ?? cur.carried?.decision
+		const d = review.findingDecisions[cur.id] ?? cur.carried?.decision ?? cur.previous?.decision
 		if (d?.status === 'dismissed' || d?.status === 'open') {
 			const { history: _, ...rest } = d as FindingDecision
 			return rest
@@ -81,7 +81,8 @@ export function findingDecision(review: Review, finding: Finding, byId: Map<stri
 
 /** Accepted = a linked comment/draft exists. Otherwise the most specific decision wins (see findingDecision). */
 export function findingState(review: Review, roots: Map<string, string>, finding: Finding, byId: Map<string, Finding>): FindingState {
-	const carried = repeats(finding, byId).find((f) => f.carried?.comment)?.carried?.comment ?? null
+	const earlier = repeats(finding, byId).find((f) => f.carried?.comment || f.previous?.comment)
+	const carried = earlier?.carried?.comment ?? earlier?.previous?.comment ?? null
 	if (findingLink(review, roots, finding.id, carried)) return 'accepted'
 	return findingDecision(review, finding, byId)?.status === 'dismissed' ? 'dismissed' : 'open'
 }
@@ -250,28 +251,31 @@ export function droppedFindings(
 	const reviewed = new Set(run.coverage.files.filter((f) => f.state === 'reviewed' || f.state === 'partial').map((f) => f.fileKey))
 	const raised = new Set(run.findings.map((f) => roots.get(f.id) ?? f.id))
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
-	// The re-run must have asked this finding's rule about its file: a rule nobody owned, or a team member that was not
-	// given the file, could not have raised it again. Runs before per-rule evaluation only say the file was reviewed.
-	const checked = (f: Finding): boolean => {
-		const rule = f.category === 'residue' ? `residue-${f.signature}` : f.category
-		if (!rule || !run.evaluation) return true
-		const e = run.evaluation.find((x) => x.rule === rule)
-		if (!e) return false
-		if (!e.checkedBy) return e.requests > 0
-		const supplied = run.coverage.supplied
-		const shared = !supplied.some((s) => s.memberId) // older team runs shared one set of requests
-		return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
-	}
 	const findings = from.findings.filter(
 		(f) =>
 			!f.heldBack &&
 			!f.mergedInto &&
 			reviewed.has(f.anchor.fileKey) &&
-			checked(f) &&
+			ruleChecked(run, f) &&
 			!raised.has(roots.get(f.id) ?? f.id) &&
 			findingState(review, roots, f, byId) !== 'dismissed',
 	)
 	return findings.length ? { from, findings } : null
+}
+
+/**
+ * Whether `run` asked this finding's rule about its file: a rule nobody owned, or a team member that was not given the
+ * file, could not have raised it again. Runs before per-rule evaluation only say the file was reviewed.
+ */
+export function ruleChecked(run: AiRun, f: Pick<Finding, 'anchor' | 'category' | 'signature'>): boolean {
+	const rule = f.category === 'residue' ? `residue-${f.signature}` : f.category
+	if (!rule || !run.evaluation) return true
+	const e = run.evaluation.find((x) => x.rule === rule)
+	if (!e) return false
+	if (!e.checkedBy) return e.requests > 0
+	const supplied = run.coverage.supplied
+	const shared = !supplied.some((s) => s.memberId) // older team runs shared one set of requests
+	return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
 }
 
 /** Where the blocking findings of a review stand, for the decision to approve or request changes. */
@@ -308,6 +312,33 @@ export function blockingSummary(review: Review, runs: Array<AiRun>, roots: Map<s
 				}
 			}
 		}
+	}
+	return out
+}
+
+/** How a run's findings compare with the earlier snapshot it was compared with (see FindingHistory). */
+export interface HistoryCounts {
+	fresh: number // raised for the first time
+	present: number // raised there and here
+	dismissed: number // raised there and here, and dismissed there or here
+	fixed: number // probably fixed
+	notSeen: number
+}
+
+/** Null when the run was not compared with an earlier snapshot. Held-back and folded findings are not counted. */
+export function historyCounts(review: Review, run: AiRun, runs: Array<AiRun>, roots: Map<string, string>): HistoryCounts | null {
+	if (!run.history) return null
+	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+	const out: HistoryCounts = { fresh: 0, present: 0, dismissed: 0, fixed: 0, notSeen: 0 }
+	for (const f of run.findings) {
+		if (f.heldBack || f.mergedInto) continue
+		if (!f.previous) out.fresh++
+		else if (findingState(review, roots, f, byId) === 'dismissed') out.dismissed++
+		else out.present++
+	}
+	for (const g of run.history.gone) {
+		if (g.state === 'fixed') out.fixed++
+		else out.notSeen++
 	}
 	return out
 }
