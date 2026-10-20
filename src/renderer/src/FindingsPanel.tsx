@@ -3,6 +3,7 @@ import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { RefText, RefLinksProvider, useRefLinks, type RefTarget } from './RefText.tsx'
 import {
 	CATEGORY_LABEL,
+	checkedBySameModel,
 	droppedFindings,
 	findingState,
 	unreadSummary,
@@ -435,6 +436,7 @@ export function FindingsPanel({
 								state={state}
 								fixture={run.fixture}
 								team={run.team}
+								sameModel={checkedBySameModel(run, f)}
 								discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
 								earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
 								screened={screenFinding(f, review?.pr?.repo ?? null)}
@@ -1100,6 +1102,7 @@ interface CardProps {
 	state: FindingState
 	fixture: boolean
 	team: AiRun['team']
+	sameModel: boolean // the model that raised it also double-checked it
 	discussed: Array<DiscussionThread> // threads on its lines, other than the one it says it raises again
 	earlier: DiscussionThread | null // the thread it says it raises again, as read now
 	screened: Array<string> // what in its text a person should read before posting (see screenFinding)
@@ -1313,13 +1316,17 @@ function DismissedNote({ finding: f, decision, onNote }: { finding: Finding; dec
 	)
 }
 
+// The check only tries to prove a finding wrong: failing to is not proof that it is right.
 const VERDICT_LABEL = {
-	holds: 'double-checked: holds',
+	holds: 'double-check: not disproved',
 	wrong: 'double-check: likely wrong',
 	unsure: 'double-check: not settled',
 } as const
 
-const VERDICT_WORD = { holds: 'holds', wrong: 'likely wrong', unsure: 'not settled' } as const
+const SAME_MODEL_HINT =
+	'The model that raised this finding also checked it. It knows what it knew then and can miss the same thing twice, so the check is weaker than one by another model.'
+
+const VERDICT_WORD = { holds: 'not disproved', wrong: 'likely wrong', unsure: 'not settled' } as const
 
 /** A test the AI wrote to show the finding: not run, so whether it fails is for you to find out. */
 function Reproducer({ r }: { r: FindingReproducer }) {
@@ -1353,16 +1360,16 @@ function Reproducer({ r }: { r: FindingReproducer }) {
 }
 
 /** The double-check of a finding: a second request that tried to prove it wrong. */
-function Verification({ v, by, level }: { v: FindingVerification; by: string | null; level: Severity }) {
+function Verification({ v, by, sameModel, level }: { v: FindingVerification; by: string | null; sameModel: boolean; level: Severity }) {
 	const verdict = verdictOf(v)
 	const head = v.error
 		? 'Not double-checked'
 		: verdict === 'holds'
-			? 'Double-checked: it holds'
+			? 'Double-check could not disprove it'
 			: verdict === 'wrong'
 				? 'Double-check says it is likely wrong (not added as a comment automatically)'
 				: v.verdict === 'holds'
-					? 'Double-check says it holds, but it rests on code it never read, so it is not settled'
+					? 'Double-check could not disprove it, but it rests on code it never read, so it is not settled'
 					: 'Double-check could not settle it'
 	return (
 		<div className={`verification small ${v.error ? 'unsure' : verdict}`}>
@@ -1370,6 +1377,13 @@ function Verification({ v, by, level }: { v: FindingVerification; by: string | n
 				{head}
 				{by ? ` (checked by ${by})` : ''}.
 			</b>{' '}
+			{sameModel && (
+				<>
+					<span className="warn-text" title={SAME_MODEL_HINT}>
+						Checked by the same model that raised it.
+					</span>{' '}
+				</>
+			)}
 			{v.error ? v.reason.replace(/^Not double-checked: /, '') : v.reason}
 			{!v.error && v.unread?.length ? (
 				<span className="warn-text">
@@ -1431,6 +1445,7 @@ function FindingCard(p: CardProps) {
 			<div className="ai-label small">
 				{fixture ? 'Fixture output' : 'AI suggestion'} · location verified,{' '}
 				{f.verification && !f.verification.error ? VERDICT_LABEL[verdictOf(f.verification)] : 'claim not verified'}
+				{p.sameModel ? <span title={SAME_MODEL_HINT}>, checked by the same model</span> : null}
 				{f.support?.some((s) => s.strength === 'flags') ? ' · CI flagged these lines too' : ''}
 				{team && f.memberId ? ` · ${team.members.find((m) => m.id === f.memberId)?.role ?? 'reviewer'}` : ''}
 				{team && f.alsoBy?.length
@@ -1506,6 +1521,7 @@ function FindingCard(p: CardProps) {
 					{f.verification && (
 						<Verification
 							v={f.verification}
+							sameModel={p.sameModel}
 							level={f.severity}
 							by={
 								team && f.verification.memberId
