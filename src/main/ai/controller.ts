@@ -10,6 +10,7 @@ import {
 	type Comparison,
 	type FileLinesResult,
 	type FindingMessage,
+	type FindingVerification,
 	type ModelSelection,
 	type PatchResult,
 	type ReviewerChoice,
@@ -31,7 +32,11 @@ import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools } from './lookup.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION } from './prompt.ts'
 import type { ReviewerPrint } from './incremental.ts'
-import { buildAskRequest, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
+import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
+import { buildVerifyRequest, parseVerification } from './verify.ts'
+import { capacityChars } from './context.ts'
+import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
+import { outputBudget } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { RequestImage } from './provider.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
@@ -63,6 +68,7 @@ export interface ComparisonAccess {
 }
 
 const MAX_RUNS_PER_REVIEW = 50
+const MAX_EARLIER_CHECKS = 5 // checks a finding keeps after Verify replaces them
 
 /**
  * Owns the single active AI run. Every update is persisted against the run's own review, so results can never
@@ -74,6 +80,7 @@ export class AiController {
 		null
 	private teams: TeamSource | null = null
 	private levels: (() => Array<FindingLevel>) | null = null
+	private verifying = new Set<string>() // finding ids being checked on demand
 	private starting = false
 	private store: ReviewStore
 	private resolveRun: RunConfigSource
@@ -410,6 +417,74 @@ export class AiController {
 			reply = { id: randomUUID(), role: 'ai', text: `No answer: ${why}`, at: new Date().toISOString(), model: modelId, error: true }
 		}
 		return this.addMessage(repoId, reviewId, run.id, findingId, reply)
+	}
+
+	/**
+	 * Double-checks one finding of any level on demand: the request the run sends for blocking findings, with the code
+	 * around it rebuilt from the diff, as Ask AI reads it. The model you picked for questions checks it, else the one
+	 * that raised it. Lookups follow the run's setting; MCP tools are never offered, because whether the run's text came
+	 * from outsiders (which turns them off) is not stored. The verdict replaces the one shown; earlier ones are kept.
+	 */
+	async verify(access: ComparisonAccess, reviewId: string, findingId: string, picked: ModelSelection | null = null): Promise<AiRun> {
+		const { comparison } = access
+		const repoId = comparison.repoId
+		const run = this.runsFor(repoId, reviewId).find((r) => r.findings.some((x) => x.id === findingId))
+		const finding = run?.findings.find((x) => x.id === findingId)
+		if (!run || !finding) throw new AppFail('not-found', 'That finding no longer exists.')
+		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish before verifying its findings.')
+		if (this.verifying.has(findingId)) throw new AppFail('ai-busy', 'This finding is already being checked.')
+		const member = finding.memberId ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
+		const connectionId = picked?.connectionId ?? member?.connectionId ?? run.connectionId
+		const modelId = picked?.modelId ?? member?.model ?? run.model
+		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
+		let config: RunConfig
+		try {
+			config = await this.resolveRun({ connectionId, modelId })
+		} catch (e) {
+			throw new AppFail('ai-unavailable', `The model (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`)
+		}
+		this.verifying.add(findingId)
+		let result: FindingVerification
+		try {
+			const fileKey = finding.anchor.fileKey
+			const inChange = comparison.files.some((x) => x.key === fileKey)
+			const patch = inChange ? await access.loadPatch(fileKey).catch(() => null) : null
+			const lines = inChange && finding.anchor.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
+			const around = codeAround(finding, patch, lines?.kind === 'text' ? lines.lines : null)
+			const draft = buildVerifyRequest(finding, null, [], undefined, around)
+			const l = config.provider.limits
+			const room =
+				capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + JSON.stringify(TOOL_DEFINITIONS).length) -
+				draft.input.length
+			const tools =
+				run.limitsUsed?.lookups === true && access.tools && room >= 2000
+					? access.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) }, null)
+					: undefined
+			const who = { model: modelId, memberId: picked ? null : (member?.id ?? null), onDemand: true }
+			try {
+				const response = await config.provider.review(buildVerifyRequest(finding, null, [], tools, around), AbortSignal.timeout(300_000))
+				result = { ...parseVerification(response.output), ...who }
+			} catch (e) {
+				const why = e instanceof Error ? e.message : String(e)
+				result = { verdict: 'unsure', reason: `Not double-checked: ${why}`, level: null, checked: [], ...who, error: true }
+			}
+		} finally {
+			this.verifying.delete(findingId)
+		}
+		let saved: AiRun | null = null
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.aiRuns?.[reviewId]?.find((x) => x.id === run.id)
+			const f = r?.findings.find((x) => x.id === findingId)
+			if (!r || !f) return
+			const prev = f.verification
+			const earlier = prev ? [(({ earlier: _, ...x }) => x)(prev), ...(prev.earlier ?? [])].slice(0, MAX_EARLIER_CHECKS) : []
+			f.verification = { ...result, ...(earlier.length ? { earlier } : {}) }
+			saved = r
+		})
+		if (!saved) throw new AppFail('not-found', 'That finding no longer exists.')
+		const out = structuredClone(saved as AiRun)
+		this.notify(out)
+		return out
 	}
 
 	/**

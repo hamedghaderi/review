@@ -984,6 +984,14 @@ export function App() {
 		return null
 	}
 
+	const verifyFinding = async (f: Finding): Promise<string | null> => {
+		if (!comparison) return 'No comparison is open.'
+		const r = await window.review.verifyFinding(comparison.id, f.id)
+		if (!r.ok) return r.error.message
+		if (comparisonIdRef.current === r.value.reviewId) setAiRuns((runs) => runs.map((x) => (x.id === r.value.id ? r.value : x)))
+		return null
+	}
+
 	// From a draft or comment made from a finding: show that finding (and its questions) in the Findings tab.
 	const [askFocus, setAskFocus] = useState<{ findingId: string; nonce: number } | null>(null)
 	const showFinding = (findingId: string): void => {
@@ -1835,6 +1843,7 @@ export function App() {
 											onOpenRef={openRef}
 											onAccept={acceptFinding}
 											onAsk={askFinding}
+											onVerify={verifyFinding}
 											askModelPicker={askModelPicker}
 											onDismiss={(f, reason) => {
 												change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))

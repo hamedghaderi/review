@@ -2548,3 +2548,77 @@ test('publish preview: an AI finding reads as text, with its level and rule as p
 	)
 	assert.deepEqual(plainPreview('Plain comment'), { pills: [], text: 'Plain comment' })
 })
+
+test('verify on demand: any level, with the code around it, lookups as the run had them, never MCP, keeping earlier verdicts', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const asked: Array<{ instructions: string; input: string; tools: boolean }> = []
+	const verdicts = ['holds', 'wrong'] as const
+	const provider = createFakeProvider({
+		script: (req) => {
+			if (req.schema?.name !== 'finding_verification') return defaultScript(req)
+			asked.push({ instructions: req.instructions, input: req.input, tools: !!req.tools })
+			return { verdict: verdicts[asked.length - 1], reason: `Check ${asked.length}.`, level: null, checked: ['src/app.ts:1-10'] }
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const byKey = new Map(s.srcs.map((x) => [x.file.key, x]))
+	const toolCalls: Array<unknown> = []
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => byKey.get(k)!.patch,
+		loadFileLines: async (k: string) => byKey.get(k)!.fullText ?? { kind: 'text' as const, lines: [] },
+		tools: (_budget: unknown, external?: unknown) => {
+			toolCalls.push(external)
+			const log = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [] }
+			return { definitions: [], exhausted: () => true, call: async () => ({ text: '', error: true }), log } as never
+		},
+	}
+	await controller.start(access, s.comp.id, { kind: 'all' }, SEL)
+	for (let i = 0; i < 100 && controller.runsFor('/repo', s.comp.id)[0].status === 'running'; i++)
+		await new Promise((r) => setTimeout(r, 10))
+	const run = controller.runsFor('/repo', s.comp.id)[0]
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	const f = run.findings.find((x) => x.anchor.fileKey === 'src/app.ts')!
+	assert.equal(f.severity, 'should_fix')
+	assert.equal(f.verification, undefined, 'not checked by the run: it is not blocking')
+	toolCalls.length = 0
+
+	const first = await controller.verify(access, s.comp.id, f.id)
+	const v1 = first.findings.find((x) => x.id === f.id)!.verification!
+	assert.equal(v1.verdict, 'holds')
+	assert.equal(v1.onDemand, true)
+	assert.equal(v1.model, 'fixture-v1')
+	assert.match(asked[0].instructions, /marked it should_fix/)
+	assert.doesNotMatch(asked[0].instructions, /marked it blocking/)
+	assert.match(asked[0].input, /# The change around the finding \(unified diff/)
+	assert.match(asked[0].input, /src\/app\.ts after the change, lines/)
+	assert.equal(run.limitsUsed?.lookups, true)
+	assert.equal(asked[0].tools, true, 'lookups, as the run had them')
+	assert.ok(
+		toolCalls.every((x) => x === null),
+		'MCP tools are never offered on demand',
+	)
+
+	const second = await controller.verify(access, s.comp.id, f.id)
+	const v2 = second.findings.find((x) => x.id === f.id)!.verification!
+	assert.equal(v2.verdict, 'wrong')
+	assert.deepEqual(
+		v2.earlier?.map((e) => [e.verdict, e.reason]),
+		[['holds', 'Check 1.']],
+	)
+	assert.equal(controller.runsFor('/repo', s.comp.id)[0].findings.find((x) => x.id === f.id)!.verification!.verdict, 'wrong', 'stored')
+	await assert.rejects(controller.verify(access, s.comp.id, 'nope'), /no longer exists/)
+})

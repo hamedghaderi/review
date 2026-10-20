@@ -848,7 +848,7 @@ export interface Finding {
 	background?: string | null // context needed to follow it, when the hunk alone is not enough
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
-	verification?: FindingVerification // blocking findings: a second request that tried to prove it wrong
+	verification?: FindingVerification // a second request that tried to prove it wrong (see FindingVerification)
 	mergedInto?: string | null // the same problem as this finding of the run, which stays open; this one is folded under it
 	mergedReason?: string | null // the shared cause, in one sentence
 	alsoAt?: Array<{ findingId: string; path: string; line: number | null; title: string }> // findings folded under this one
@@ -888,7 +888,7 @@ export interface CiAnnotation {
 	message: string
 }
 
-/** The double-check of a blocking finding: a separate request asked to prove it wrong, with lookups. */
+/** The double-check of a finding (blocking ones after the run, any one on demand): a separate request asked to prove it wrong. */
 export interface FindingVerification {
 	verdict: 'holds' | 'wrong' | 'unsure'
 	reason: string
@@ -897,6 +897,8 @@ export interface FindingVerification {
 	model: string
 	memberId?: string | null // team runs: the member that checked it, another one than raised it when the team has one
 	error?: boolean // the check itself failed; the verdict is 'unsure'
+	onDemand?: boolean // you asked for it with Verify, rather than the run checking a blocking finding
+	earlier?: Array<Omit<FindingVerification, 'earlier'>> // the checks it replaced, newest first
 }
 
 /** Evidence the app attached to a finding; never written by the model. 'flags': a tool flagged the same lines. */
@@ -1362,6 +1364,7 @@ export const IPC = {
 	aiSetLimits: 'ai:limits-set',
 	aiSetLevels: 'ai:levels-set',
 	aiAsk: 'ai:ask',
+	aiVerify: 'ai:verify',
 	aiAskCode: 'ai:ask-code',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
@@ -1537,6 +1540,8 @@ export interface ReviewApi {
 	onAiRunUpdate(handler: (run: AiRun) => void): () => void
 	/** Asks the model that raised a finding a question about it. The answer is added to the finding's thread. */
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
+	/** Double-checks one finding now, with the model for questions (else the one that raised it); resolves with its run. */
+	verifyFinding(reviewId: string, findingId: string): Promise<Result<AiRun>>
 	/**
 	 * Asks the selected model a question about lines of code. `questionId` continues an earlier conversation about the
 	 * same lines. Returns the review's updated list of questions.
