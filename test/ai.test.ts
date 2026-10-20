@@ -14,7 +14,7 @@ import { answeredRequests, defaultBackoff, startRun, type RunInput, type RunnerO
 import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { ReviewStore } from '../src/main/store.ts'
-import { reviewUpdate } from '../src/main/validate.ts'
+import { aiScope, reviewUpdate } from '../src/main/validate.ts'
 import { findingCommentBody, findingRoots, findingState } from '../src/shared/findings.ts'
 import {
 	DEFAULT_TEAM_ROLES,
@@ -1975,6 +1975,41 @@ test('focused passes: one model runs as the four default roles, each on its own 
 	)
 	assert.deepEqual([...new Set(assignments)].sort(), DEFAULT_TEAM_ROLES.map((r) => r.role).sort())
 	for (const e of run.evaluation!) assert.ok(e.checkedBy, `${e.rule} has a pass`)
+})
+
+test('a files scope reviews only the listed files; other files and empty lists are refused', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const controller = new AiController(store, fixedConfig(createFakeProvider()), () => {})
+	const byKey = new Map(s.srcs.map((x) => [x.file.key, x]))
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => byKey.get(k)!.patch,
+		loadFileLines: async (k: string) => byKey.get(k)!.fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	const keys = new Set(s.comp.files.map((f) => f.key))
+	const [app, gone] = s.comp.files.map((f) => f.key)
+	const scope = aiScope({ kind: 'files', fileKeys: [app, gone, app] }, keys)
+	assert.deepEqual(scope, { kind: 'files', fileKeys: [app, gone] })
+	assert.throws(() => aiScope({ kind: 'files', fileKeys: [] }, keys))
+	assert.throws(() => aiScope({ kind: 'files', fileKeys: ['nope'] }, keys))
+	await controller.start(access, s.comp.id, scope, SEL)
+	for (let i = 0; i < 100 && controller.runsFor('/repo', s.comp.id)[0].status === 'running'; i++)
+		await new Promise((r) => setTimeout(r, 10))
+	const run = controller.runsFor('/repo', s.comp.id)[0]
+	assert.deepEqual(run.coverage.files.map((f) => f.fileKey).sort(), [app, gone].sort())
 })
 
 test('bugs only: one model checks only bug and security, alone or as the passes that own them', async () => {

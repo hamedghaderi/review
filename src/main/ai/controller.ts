@@ -497,7 +497,12 @@ export class AiController {
 	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
-		const keys = input.scope.kind === 'file' ? [input.scope.fileKey] : comparison.files.map((f) => f.key)
+		const keys =
+			input.scope.kind === 'file'
+				? [input.scope.fileKey]
+				: input.scope.kind === 'files'
+					? input.scope.fileKeys
+					: comparison.files.map((f) => f.key)
 		// MCP tools ride on the lookups, so they are only connected when the run offers lookups.
 		const lookups = input.retry ? input.retry.run.limitsUsed?.lookups === true : options.limits.lookups !== false
 		let external: ExternalTools | null = null

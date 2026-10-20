@@ -363,6 +363,12 @@ export function aiScope(v: unknown, fileKeys: ReadonlySet<string>): AiScope {
 		if (!fileKeys.has(key)) bad('file (not part of this comparison)')
 		return { kind: 'file', fileKey: key }
 	}
+	if (o.kind === 'files') {
+		const keys = [...new Set(arr(o.fileKeys, 'files').map((k) => str(k, 'file')))]
+		if (!keys.length) bad('files (at least one)')
+		if (keys.some((k) => !fileKeys.has(k))) bad('file (not part of this comparison)')
+		return { kind: 'files', fileKeys: keys }
+	}
 	bad('AI review scope')
 }
 

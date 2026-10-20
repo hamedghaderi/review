@@ -762,6 +762,7 @@ export function App() {
 	const update = probe?.changed && comparison ? probe : null
 
 	const viewed = useMemo(() => new Set(review?.viewed ?? []), [review?.viewed])
+	const unviewedKeys = useMemo(() => files.filter((f) => !viewed.has(f.key)).map((f) => f.key), [files, viewed])
 	const commented = useMemo(() => {
 		const m = new Map<string, number>()
 		for (const c of review?.comments ?? []) m.set(c.anchor.fileKey, (m.get(c.anchor.fileKey) ?? 0) + 1)
@@ -1251,6 +1252,7 @@ export function App() {
 											activeRun={activeRun}
 											currentFile={file}
 											fileCount={comparison.files.length}
+											unviewed={unviewedKeys}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
 											onStart={(scope, passes, bugsOnly, persona) => void startAi(scope, passes, bugsOnly, persona)}

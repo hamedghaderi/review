@@ -11,6 +11,7 @@ interface Props {
 	activeRun: AiRun | null
 	currentFile: ChangedFile | null
 	fileCount: number
+	unviewed: Array<string> // keys of the changed files not marked viewed, in tree order
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
 	onOpened?(): void
 	onStart(scope: AiScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
@@ -18,11 +19,22 @@ interface Props {
 }
 
 /** Header control: opens a confirmation popover showing scope, provider and model; nothing is sent before "Start". */
-export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileCount, openNow, onOpened, onStart, onCancel }: Props) {
+export function AiRunControl({
+	settings,
+	reviewer,
+	activeRun,
+	currentFile,
+	fileCount,
+	unviewed,
+	openNow,
+	onOpened,
+	onStart,
+	onCancel,
+}: Props) {
 	const selection = reviewer.kind === 'model' ? reviewer.selection : null
 	const team = reviewer.kind === 'team' ? settings?.teams.find((t) => t.id === reviewer.teamId) : undefined
 	const [open, setOpen] = useState(false)
-	const [scope, setScope] = useState<'file' | 'all'>('all')
+	const [scope, setScope] = useState<'file' | 'unviewed' | 'all'>('all')
 	const [passes, setPasses] = useState(readPasses)
 	// Not remembered: a partial review should never be the default without anyone noticing.
 	const [bugsOnly, setBugsOnly] = useState(false)
@@ -95,7 +107,9 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 		)
 	}
 
-	const effectiveScope: 'file' | 'all' = scope === 'file' && !currentFile ? 'all' : scope
+	// Every file unviewed is the same run as all files; none unviewed has nothing to send.
+	const unviewedOnly = unviewed.length > 0 && unviewed.length < fileCount
+	const effectiveScope = (scope === 'file' && !currentFile) || (scope === 'unviewed' && !unviewedOnly) ? 'all' : scope
 	const connection = selection ? settings?.connections.find((c) => c.id === selection.connectionId) : undefined
 	const model = connection?.models.find((m) => m.id === selection?.modelId)
 	const fixture = connection?.kind === 'fixture'
@@ -128,6 +142,22 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 							onClick={() => setScope('all')}
 						>
 							All {fileCount} file{fileCount === 1 ? '' : 's'}
+						</button>
+						<button
+							role="radio"
+							aria-checked={effectiveScope === 'unviewed'}
+							className={effectiveScope === 'unviewed' ? 'on' : ''}
+							title={
+								unviewedOnly
+									? 'Only the files you have not marked viewed'
+									: unviewed.length
+										? 'No file is marked viewed yet'
+										: 'Every file is marked viewed'
+							}
+							disabled={!unviewedOnly}
+							onClick={() => setScope('unviewed')}
+						>
+							Unviewed ({unviewed.length})
 						</button>
 						<button
 							role="radio"
@@ -248,7 +278,11 @@ export function AiRunControl({ settings, reviewer, activeRun, currentFile, fileC
 							onClick={() => {
 								setOpen(false)
 								onStart(
-									effectiveScope === 'file' && currentFile ? { kind: 'file', fileKey: currentFile.key } : { kind: 'all' },
+									effectiveScope === 'file' && currentFile
+										? { kind: 'file', fileKey: currentFile.key }
+										: effectiveScope === 'unviewed'
+											? { kind: 'files', fileKeys: unviewed }
+											: { kind: 'all' },
 									!team && passes,
 									!team && bugsOnly,
 									team ? null : persona,
