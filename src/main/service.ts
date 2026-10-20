@@ -88,7 +88,8 @@ import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
-import { carryFindings, planIncremental, trustGap } from './ai/incremental.ts'
+import { carryFindings, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
+import type { FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
 const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
@@ -1142,7 +1143,7 @@ export class ReviewService {
 		if (!plan || plan.offer.refused !== null)
 			throw new AppFail('invalid-input', `${plan?.offer.refused ?? 'There is no earlier run to build on.'} Review all files instead.`)
 		return ai.start(access, reviewId, { kind: 'files', fileKeys: plan.offer.review }, choice, {
-			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings },
+			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings, recheck: plan.offer.recheck },
 		})
 	}
 
@@ -1185,16 +1186,48 @@ export class ReviewService {
 				findings: [],
 			}
 		}
-		const plan = planIncremental(earlier, from, before, { files: c.files, blobs: data.blobs })
-		const carry = plan.carry.filter((f) => f.state === 'carried').map((f) => f.fileKey)
+		const planned = planIncremental(earlier, from, before, { files: c.files, blobs: data.blobs })
+		const recheck = usersOfChangedNames(
+			await this.changedSince(data, earlier.headSha, planned.review),
+			await Promise.all(
+				planned.carry
+					.filter((f) => f.state === 'carried')
+					.map(async (f) => ({
+						fileKey: f.fileKey,
+						patch: await this.loadPatch(reviewId, f.fileKey, false).catch((): PatchResult => ({ kind: 'binary' })),
+					})),
+			),
+		)
+		const again = new Set(recheck.map((r) => r.fileKey))
+		const review = c.files.map((f) => f.key).filter((k) => planned.review.includes(k) || again.has(k))
+		const kept = planned.carry.filter((f) => !again.has(f.fileKey))
+		const carry = kept.filter((f) => f.state === 'carried').map((f) => f.fileKey)
 		if (!carry.length)
 			return { offer: { from, refused: `Every file changed since the run on ${from.headSha.slice(0, 7)}.` }, files: [], findings: [] }
 		const earlierReview = repo.reviews[earlier.reviewId]
 		return {
-			offer: { from, review: plan.review, carry, refused: null },
-			files: plan.carry,
-			findings: carryFindings(earlier, from, earlierReview, repo.aiRuns[earlier.reviewId] ?? [], plan.carry, c),
+			offer: { from, review, carry, recheck, refused: null },
+			files: kept,
+			findings: carryFindings(earlier, from, earlierReview, repo.aiRuns[earlier.reviewId] ?? [], kept, c),
 		}
+	}
+
+	/**
+	 * Each of `keys`' diff between `since` and the comparison's head: what changed in those files after the earlier run.
+	 * A diff too large to read, or one that can't be read, is left out.
+	 */
+	private async changedSince(data: ComparisonData, since: string, keys: Array<string>): Promise<Array<FileSource>> {
+		const out: Array<FileSource> = []
+		for (const key of keys) {
+			const file = data.comparison.files.find((x) => x.key === key)
+			const path = file?.newPath ?? file?.oldPath
+			if (!file || !path || file.binary) continue
+			const r = await readPatchBetween(data.root, since, data.comparison.headSha, path, PATCH_LIMIT).catch(() => null)
+			const section = r && !r.truncated ? parsePatch(r.text)[0] : undefined
+			if (section && !section.binary)
+				out.push({ file, patch: { kind: 'text', hunks: section.hunks, bytes: r!.text.length }, fullText: null })
+		}
+		return out
 	}
 
 	async retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<AiRun> {

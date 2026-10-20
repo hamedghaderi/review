@@ -807,12 +807,20 @@ export interface CarriedRun {
 	headSha: string
 }
 
+/** A file whose diff didn't change, reviewed again because its added lines use names whose definitions changed in `changedIn`. */
+export interface RecheckedFile {
+	fileKey: string
+	names: Array<string>
+	changedIn: Array<string> // file keys
+}
+
 /**
  * A run that reviews only the files whose diff changed since the newest finished run of the same pull request or
  * branch, carrying that run's results for the rest. `refused`: why every file has to be reviewed again instead.
  */
 export type IncrementalOffer =
-	{ from: CarriedRun; review: Array<string>; carry: Array<string>; refused: null } | { from: CarriedRun; refused: string }
+	| { from: CarriedRun; review: Array<string>; carry: Array<string>; recheck: Array<RecheckedFile>; refused: null }
+	| { from: CarriedRun; refused: string }
 
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
 
@@ -1084,6 +1092,7 @@ export interface AiRun {
 	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked
 	auto?: boolean // started by automatic review: its findings are added and published by the main process, not the window
 	carriedFrom?: CarriedRun | null // an incremental run: the earlier run whose results it carries for unchanged files
+	rechecked?: Array<RecheckedFile> // an incremental run: unchanged files it reviewed again, and why
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'

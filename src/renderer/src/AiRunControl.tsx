@@ -212,6 +212,21 @@ export function AiRunControl({
 							{incremental.review.length
 								? `Reviews ${incremental.review.length} changed file${incremental.review.length === 1 ? '' : 's'}. `
 								: 'No diff changed, so nothing is sent. '}
+							{incremental.recheck.length > 0 && (
+								<>
+									{incremental.recheck.length === 1
+										? 'One of them didn’t change but uses'
+										: `${incremental.recheck.length} of them didn’t change but use`}{' '}
+									names whose definitions did:{' '}
+									{incremental.recheck.slice(0, 3).map((r, i) => (
+										<span key={r.fileKey}>
+											{i ? ', ' : ''}
+											<span className="mono">{r.fileKey}</span> ({r.names.slice(0, 3).join(', ')})
+										</span>
+									))}
+									{incremental.recheck.length > 3 ? '…' : ''}.{' '}
+								</>
+							)}
 							{incremental.carry.length} file{incremental.carry.length === 1 ? '' : 's'} keep{incremental.carry.length === 1 ? 's' : ''} the
 							findings and decisions of the run on <span className="mono">{incremental.from.headSha.slice(0, 7)}</span>.
 						</p>
