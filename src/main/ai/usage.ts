@@ -1,8 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { addCost } from '../../shared/cost.ts'
-import type { AiCost, AiUsage, UsageGroup, UsageKind, UsagePeriod, UsageRecord, UsageSummary, UsageTotals } from '../../shared/types.ts'
+import type {
+	AiCost,
+	AiUsage,
+	SpendTotals,
+	UsageGroup,
+	UsageKind,
+	UsagePeriod,
+	UsageRecord,
+	UsageSummary,
+	UsageTotals,
+} from '../../shared/types.ts'
 import { JsonStore } from '../store.ts'
+import type { Spent } from './budget.ts'
 import { addUsage, ProviderError, type ProviderErrorKind, type ReviewProvider } from './provider.ts'
 
 const KEEP_DAYS = 400 // a year of months, plus the one in progress
@@ -64,6 +75,11 @@ export class UsageLog {
 
 	summary(by: UsagePeriod, now = new Date()): UsageSummary {
 		return summarizeUsage(this.file.read().records, by, now)
+	}
+
+	/** What was spent today and this month, in local time, overall and by connection. */
+	spent(now = new Date()): Spent {
+		return spentBy(this.file.read().records, now)
 	}
 
 	private add(id: string, ctx: UsageContext, provider: ReviewProvider, usage: AiUsage | null): Promise<void> {
@@ -149,6 +165,28 @@ export function summarizeUsage(records: Array<UsageRecord>, by: UsagePeriod, now
 		),
 		oldest: records.reduce<string | null>((a, r) => (!a || r.at < a ? r.at : a), null),
 	}
+}
+
+export function spentBy(records: Array<UsageRecord>, now: Date): Spent {
+	const empty = (): SpendTotals => ({ usd: 0, unpriced: false, inputTokens: 0, outputTokens: 0 })
+	const out: Spent = { today: { ...empty(), connections: {} }, month: { ...empty(), connections: {} } }
+	const add = (t: SpendTotals, r: UsageRecord): void => {
+		t.usd += r.cost.usd
+		t.unpriced ||= r.cost.unpriced
+		t.inputTokens += r.usage?.inputTokens ?? 0
+		t.outputTokens += r.usage?.outputTokens ?? 0
+	}
+	const periods = [
+		{ totals: out.today, by: 'day' as const, key: periodKey(now, 'day') },
+		{ totals: out.month, by: 'month' as const, key: periodKey(now, 'month') },
+	]
+	for (const r of records)
+		for (const p of periods) {
+			if (periodKey(new Date(r.at), p.by) !== p.key) continue
+			add(p.totals, r)
+			add((p.totals.connections[r.connectionId] ??= empty()), r)
+		}
+	return out
 }
 
 /** "2026-10-20" or "2026-10", in local time. */

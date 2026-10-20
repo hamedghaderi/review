@@ -13,6 +13,7 @@ import type {
 	CompareTarget,
 	ConnectionPatch,
 	FindingDecision,
+	BudgetSettings,
 	ModelPrice,
 	ModelSelection,
 	NewConnectionInput,
@@ -562,6 +563,28 @@ export function reviewLimits(v: unknown): ReviewLimits {
 		lookups: o.lookups === undefined ? true : bool(o.lookups, 'lookups setting'),
 		verify: o.verify === undefined ? true : bool(o.verify, 'double-check setting'),
 		groupDuplicates: o.groupDuplicates === undefined ? false : bool(o.groupDuplicates, 'group duplicates setting'),
+	}
+}
+
+/** Dollars; null for no budget. Connections are keyed by connection id. */
+export function budgetSettings(v: unknown): BudgetSettings {
+	const o = obj(v, 'budgets')
+	const usd = (x: unknown, what: string): number | null => {
+		if (x === null || x === undefined) return null
+		if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > 1_000_000) bad(`${what} ($0–$1,000,000)`)
+		return x
+	}
+	const raw = o.connections === undefined ? {} : obj(o.connections, 'connection budgets')
+	const connections: BudgetSettings['connections'] = {}
+	for (const [id, c] of Object.entries(raw)) {
+		const one = obj(c, 'connection budget')
+		connections[connectionId(id)] = { daily: usd(one.daily, 'daily budget'), monthly: usd(one.monthly, 'monthly budget') }
+	}
+	return {
+		perRun: usd(o.perRun, 'run budget'),
+		daily: usd(o.daily, 'daily budget'),
+		monthly: usd(o.monthly, 'monthly budget'),
+		connections,
 	}
 }
 

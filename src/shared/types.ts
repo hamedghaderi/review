@@ -1,5 +1,5 @@
 import type { HeadChecks } from './ci.ts'
-import type { HomeInbox } from './inbox.ts'
+import type { HomeInbox, WatchedPr } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
 export type Side = 'old' | 'new'
 
@@ -30,6 +30,7 @@ export type ErrorCode =
 	| 'offline'
 	| 'cancelled'
 	| 'gif-failed'
+	| 'over-budget'
 
 export interface AppError {
 	code: ErrorCode
@@ -288,9 +289,11 @@ export interface AutoReviewRecord {
 	head: string // the head commit it was started for
 	at: string
 	reviewId: string | null // the snapshot it reviewed, when one was opened
-	outcome: 'approved' | 'changes-requested' | 'commented' | 'skipped' | 'failed'
+	outcome: 'approved' | 'changes-requested' | 'commented' | 'skipped' | 'failed' | 'paused'
 	message: string // what happened, in words, as the notification said
 	url: string | null // the submitted review on GitHub
+	// paused: a budget was reached before it started; it is started again once the budget allows. Not reviewed yet.
+	waiting?: { repoId: string; pr: WatchedPr } | null
 }
 
 export interface GitHubMapping {
@@ -852,6 +855,8 @@ export interface RunEstimate {
 	outputTokens: { low: number; high: number }
 	cost: { low: number; high: number; estimated: boolean; unpriced: boolean } | null // null: no model has a price
 	notes: Array<string>
+	over: Array<string> // caps already reached: starting asks first
+	unbudgeted: Array<string> // with a budget set: the models of this run without a price, which budgets don't limit
 }
 
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
@@ -1158,6 +1163,33 @@ export interface UsageSummary {
 	repos: Array<UsageGroup>
 	kinds: Array<UsageGroup>
 	oldest: string | null // the oldest record kept
+}
+
+/**
+ * Spending limits in US dollars, checked against the usage history (local days and months). `perRun` stops a run once
+ * its own cost reaches it; the caps stop new runs: automatic reviews wait, and a run you start asks first. Null: none.
+ */
+export interface BudgetSettings {
+	perRun: number | null
+	daily: number | null
+	monthly: number | null
+	connections: Record<string, { daily: number | null; monthly: number | null }>
+}
+
+export interface SpendTotals {
+	usd: number // what priced requests cost
+	unpriced: boolean // some requests had no price or usage, so this is a lower bound
+	inputTokens: number
+	outputTokens: number
+}
+
+/** Settings → AI providers → Usage → Budgets. */
+export interface BudgetView {
+	budgets: BudgetSettings
+	today: SpendTotals & { connections: Record<string, SpendTotals> }
+	month: SpendTotals & { connections: Record<string, SpendTotals> }
+	over: Array<string> // caps reached now, in words
+	paused: Array<{ label: string; at: string }> // automatic reviews waiting for a budget
 }
 
 export interface UsageGroup {
@@ -1505,6 +1537,8 @@ export const IPC = {
 	aiRemoveTeam: 'ai:team-remove',
 	aiSelectTeam: 'ai:team-select',
 	aiStart: 'ai:start',
+	aiBudget: 'ai:budget',
+	aiSetBudgets: 'ai:budget-set',
 	aiIncremental: 'ai:incremental',
 	aiEstimate: 'ai:estimate',
 	aiCancel: 'ai:cancel',
@@ -1646,6 +1680,8 @@ export interface ReviewApi {
 	setModelPrice(connectionId: string, modelId: string, price: ModelPrice | null): Promise<Result<AiSettingsView>>
 	/** Tokens and cost of every AI request, from the usage history. */
 	aiUsage(by: UsagePeriod): Promise<Result<UsageSummary>>
+	aiBudget(): Promise<Result<BudgetView>>
+	setBudgets(budgets: BudgetSettings): Promise<Result<BudgetView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
 	selectAskModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
@@ -1666,7 +1702,8 @@ export interface ReviewApi {
 	mcpSetTools(id: string, allowed: Array<string> | null): Promise<Result<McpSettingsView>>
 	mcpClaudeCandidates(repoId: string | null): Promise<Result<Array<McpImportCandidate>>>
 	mcpImportClaude(repoId: string | null, keys: Array<string>): Promise<Result<McpSettingsView>>
-	startAiReview(reviewId: string, scope: AiStartScope, reviewer: ReviewerChoice): Promise<Result<AiRun>>
+	/** `overBudget`: start even though a daily or monthly budget is reached (you were asked). */
+	startAiReview(reviewId: string, scope: AiStartScope, reviewer: ReviewerChoice, overBudget?: boolean): Promise<Result<AiRun>>
 	/** Whether a run with `reviewer` can review only the files changed since the last finished run; null when there is none. */
 	incrementalOffer(reviewId: string, reviewer: ReviewerChoice): Promise<Result<IncrementalOffer | null>>
 	/** What a run with these options would send and cost, before anything is sent. */

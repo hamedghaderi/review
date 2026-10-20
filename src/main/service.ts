@@ -1150,10 +1150,10 @@ export class ReviewService {
 		return { savedAt }
 	}
 
-	async startAi(reviewId: string, scopeInput: unknown, selection: ModelSelection | ReviewerChoice): Promise<AiRun> {
+	async startAi(reviewId: string, scopeInput: unknown, selection: ModelSelection | ReviewerChoice, overBudget = false): Promise<AiRun> {
 		const { ai, access } = this.aiAccess(reviewId)
 		const scope = aiStartScope(scopeInput, new Set(access.comparison.files.map((f) => f.key)))
-		if (scope.kind !== 'changed') return ai.start(access, reviewId, scope, selection)
+		if (scope.kind !== 'changed') return ai.start(access, reviewId, scope, selection, { overBudget })
 		const choice: ReviewerChoice = 'kind' in selection ? selection : { kind: 'model', selection }
 		const plan = await this.incrementalPlan(reviewId, choice)
 		// The offer was made when the dialog opened; a run that finished since, or a changed setting, can withdraw it.
@@ -1161,6 +1161,7 @@ export class ReviewService {
 			throw new AppFail('invalid-input', `${plan?.offer.refused ?? 'There is no earlier run to build on.'} Review all files instead.`)
 		return ai.start(access, reviewId, { kind: 'files', fileKeys: plan.offer.review }, choice, {
 			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings, recheck: plan.offer.recheck },
+			overBudget,
 		})
 	}
 

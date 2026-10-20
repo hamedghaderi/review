@@ -1963,6 +1963,25 @@ a.ic-state:hover {
 .model-row + .model-row {
 	border-top: 1px solid var(--border);
 }
+.budgets {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.budget-table td {
+	padding: 4px 8px;
+}
+.budget-input {
+	width: 110px;
+	height: 26px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	padding: 0 8px;
+}
+.budget-input.invalid {
+	border-color: var(--danger);
+}
 .usage-total {
 	display: flex;
 	align-items: baseline;

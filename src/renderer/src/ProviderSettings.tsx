@@ -248,7 +248,7 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 					</nav>
 					<section className="settings-main">
 						{usage ? (
-							<UsageSettings />
+							<UsageSettings connections={settings.connections} />
 						) : mcpPane?.kind === 'import' ? (
 							<McpImport repoId={repoId} run={mcpRun} onDone={() => setMcpPane(null)} />
 						) : mcpPane && (mcpPane.kind === 'new' || mcpServer) ? (

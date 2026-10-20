@@ -19,7 +19,7 @@ interface Props {
 	loadEstimate(reviewer: ReviewerChoice, scope: AiStartScope): Promise<RunEstimate | null>
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
 	onOpened?(): void
-	onStart(scope: AiStartScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
+	onStart(scope: AiStartScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null, overBudget: boolean): void
 	onCancel(): void
 }
 
@@ -358,6 +358,31 @@ export function AiRunControl({
 							suggestions; they never mark files as viewed.
 						</p>
 					</details>
+					{shown && shown.unbudgeted.length > 0 && (
+						<p className="muted small">
+							{shown.unbudgeted.length === 1 ? (
+								<>
+									<span className="mono">{shown.unbudgeted[0]}</span> has no price, so your budgets don’t limit it.
+								</>
+							) : (
+								<>
+									{shown.unbudgeted.map((m, i) => (
+										<span key={m}>
+											{i ? ', ' : ''}
+											<span className="mono">{m}</span>
+										</span>
+									))}{' '}
+									have no price, so your budgets don’t limit them.
+								</>
+							)}{' '}
+							Set a price in Settings → AI providers to include {shown.unbudgeted.length === 1 ? 'it' : 'them'}.
+						</p>
+					)}
+					{shown && shown.over.length > 0 && (
+						<p className="notice small" role="alert">
+							{shown.over.join(' ')} Starting this review goes over it.
+						</p>
+					)}
 					{problem && <p className="error-text small">{problem}</p>}
 					<div className="popover-actions">
 						<button className="btn small ghost" onClick={() => setOpen(false)}>
@@ -368,10 +393,10 @@ export function AiRunControl({
 							disabled={problem !== null}
 							onClick={() => {
 								setOpen(false)
-								onStart(startScope, !team && passes, !team && bugsOnly, team ? null : persona)
+								onStart(startScope, !team && passes, !team && bugsOnly, team ? null : persona, !!shown?.over.length)
 							}}
 						>
-							Start review
+							{shown?.over.length ? 'Start anyway' : 'Start review'}
 						</button>
 					</div>
 				</div>

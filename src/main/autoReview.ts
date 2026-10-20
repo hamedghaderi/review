@@ -23,6 +23,7 @@ import type { ReviewStore } from './store.ts'
 const CONCERNS: ReadonlyArray<string> = ['blocking', 'should_fix', 'question']
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
+const paused = (label: string, why: string): string => `Automatic review of ${label} is paused: ${why} It starts once the budget allows.`
 
 /**
  * What an automatic review submits. Request changes when a blocking finding stands (not dismissed, not held back and
@@ -92,6 +93,8 @@ export interface AutoReviewDeps {
 	whenDone(runId: string): Promise<AiRun> | null
 	open(repoId: string, pr: { repo: string; number: number }, signal: AbortSignal): Promise<Comparison>
 	start(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun>
+	/** The daily or monthly budget the next run would go over, in words; null when none is reached or none is set. */
+	budgetReached?(): string | null
 	addFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>>
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
 	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
@@ -142,6 +145,17 @@ export class AutoReviewer {
 		}
 	}
 
+	/**
+	 * Takes again the reviews a budget paused. Each one stops at the start again, quietly, while the budget is still
+	 * reached; called when budgets change and from time to time, since a new day or month frees a daily or monthly one.
+	 */
+	resumePaused(): void {
+		const waiting = Object.values(this.d.store.read().autoReviews ?? {}).flatMap((r) =>
+			r.outcome === 'paused' && r.waiting ? [{ kind: 'requested' as const, ...r.waiting }] : [],
+		)
+		if (waiting.length) this.take(waiting)
+	}
+
 	/** Resolves once everything queued so far is done (for tests and shutdown). */
 	idle(): Promise<void> {
 		return this.queue
@@ -154,12 +168,27 @@ export class AutoReviewer {
 		let head = e.pr.head ?? ''
 		let posted = 0
 		const record = async (outcome: AutoReviewRecord['outcome'], message: string, url: string | null = null): Promise<void> => {
-			const r: AutoReviewRecord = { head, at: new Date().toISOString(), reviewId, outcome, message, url }
+			const paused = outcome === 'paused'
+			const before = this.d.store.read().autoReviews?.[key]
+			// A paused review has not reviewed this head, so it keeps none; it remembers the request to take it again.
+			const r: AutoReviewRecord = {
+				head: paused ? '' : head,
+				at: new Date().toISOString(),
+				reviewId,
+				outcome,
+				message,
+				url,
+				...(paused ? { waiting: { repoId: e.repoId, pr: e.pr } } : {}),
+			}
 			await this.d.store.update((s) => void ((s.autoReviews ??= {})[key] = r))
-			this.d.finished(e, r)
+			// Told once: taking it again while the budget is still reached says nothing new.
+			if (!(paused && before?.outcome === 'paused')) this.d.finished(e, r)
 		}
 		try {
 			if (!(await this.turn())) return
+			// Checked before the pull request is fetched, so a paused review costs nothing while it waits.
+			const reached = this.d.budgetReached?.() ?? null
+			if (reached) return record('paused', paused(label, reached))
 			const c = await this.d.open(e.repoId, e.pr, AbortSignal.timeout(5 * 60_000))
 			reviewId = c.id
 			head = c.headSha
@@ -179,6 +208,7 @@ export class AutoReviewer {
 				try {
 					run = await this.d.start(c.id, choice, label)
 				} catch (err) {
+					if (err instanceof AppFail && err.code === 'over-budget') return record('paused', paused(label, err.message))
 					// Someone started a run between the check and the start: wait for it.
 					if (!(err instanceof AppFail && err.code === 'ai-busy')) throw err
 				}

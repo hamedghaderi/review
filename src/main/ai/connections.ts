@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type {
 	AiSettingsView,
 	AuthMethod,
+	BudgetSettings,
 	ConnectionPatch,
 	ConnectionStatus,
 	ConnectionView,
@@ -26,6 +27,7 @@ import type {
 import { AppFail } from '../git.ts'
 import { JsonStore } from '../store.ts'
 import type { AdapterFactory, ResolvedConnection } from './adapters.ts'
+import { NO_BUDGETS } from './budget.ts'
 import { CATALOG_UPDATED, catalogMatch, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
 import type { CredentialService } from './credentials.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from './prompt.ts'
@@ -88,6 +90,7 @@ interface SettingsFile {
 	teams: Array<ReviewTeam>
 	teamId: string | null // selected team; takes precedence over `selection` for runs
 	askModel?: ModelSelection | null // the model you picked for questions (Ask AI); absent: a default, see `questionModel`
+	budgets?: BudgetSettings // absent in files from before budgets: none
 }
 
 export interface RunConfig {
@@ -268,6 +271,10 @@ export class ConnectionService {
 		await this.file.update((f) => {
 			f.connections = f.connections.filter((c) => c.id !== id)
 			if (f.selection?.connectionId === id) f.selection = null
+			if (f.budgets && Object.hasOwn(f.budgets.connections, id)) {
+				const { [id]: _, ...rest } = f.budgets.connections
+				f.budgets = { ...f.budgets, connections: rest }
+			}
 		})
 		this.emit()
 	}
@@ -537,6 +544,16 @@ export class ConnectionService {
 			f.levels = levels
 		})
 		this.emit()
+	}
+
+	budgets(): BudgetSettings {
+		return this.file.read().budgets ?? NO_BUDGETS
+	}
+
+	async setBudgets(budgets: BudgetSettings): Promise<void> {
+		await this.file.update((f) => {
+			f.budgets = budgets
+		})
 	}
 
 	async setLimits(limits: ReviewLimits): Promise<void> {
@@ -836,6 +853,7 @@ export function migrateSettings(raw: unknown): SettingsFile {
 		teams: Array.isArray(d.teams) ? d.teams.map(adoptNewRules) : [],
 		teamId: typeof d.teamId === 'string' ? d.teamId : null,
 		askModel: d.askModel ?? null,
+		budgets: d.budgets ?? NO_BUDGETS,
 	}
 }
 

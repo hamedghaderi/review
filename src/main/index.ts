@@ -13,10 +13,11 @@ import {
 	shell,
 	type IpcMainInvokeEvent,
 } from 'electron'
-import { IPC, type AppUpdate, type InboxOpen, type Result } from '../shared/types.ts'
+import { IPC, type AppUpdate, type BudgetView, type InboxOpen, type Result } from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { UsageLog } from './ai/usage.ts'
+import { checkBudget, hasBudgets, type BudgetCheck } from './ai/budget.ts'
 import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
@@ -64,6 +65,7 @@ import {
 	reviewTeam,
 	str,
 	usagePeriod,
+	budgetSettings,
 } from './validate.ts'
 
 let win: BrowserWindow | null = null
@@ -342,10 +344,10 @@ function registerIpc(): void {
 		service.lookupSymbol(comparisonId(cid), symbolName(name), side === 'old' ? 'old' : 'new', kind === 'uses' ? 'uses' : 'definition'),
 	)
 	handle(IPC.saveReview, (review: unknown) => service.saveReview(review))
-	handle(IPC.aiStart, (reviewId: unknown, scope: unknown, reviewer: unknown) => {
+	handle(IPC.aiStart, (reviewId: unknown, scope: unknown, reviewer: unknown, overBudget: unknown) => {
 		const choice = reviewerChoice(reviewer)
 		connections.checkChoice(choice)
-		return service.startAi(comparisonId(reviewId), scope, choice)
+		return service.startAi(comparisonId(reviewId), scope, choice, overBudget === true)
 	})
 	handle(IPC.aiEstimate, async (reviewId: unknown, reviewer: unknown, scope: unknown) =>
 		service.estimateAi(comparisonId(reviewId), reviewerChoice(reviewer), scope),
@@ -414,6 +416,13 @@ function registerIpc(): void {
 		view(() => connections.setModelPrice(connectionId(id), modelId(m), modelPrice(price))),
 	)
 	handle(IPC.aiUsage, async (by: unknown) => usage.summary(usagePeriod(by)))
+	handle(IPC.aiBudget, async () => budgetView())
+	handle(IPC.aiSetBudgets, async (b: unknown) => {
+		await connections.setBudgets(budgetSettings(b))
+		// A higher cap can let paused automatic reviews go ahead.
+		autoReviewer.resumePaused()
+		return budgetView()
+	})
 	handle(IPC.aiSelectModel, (sel: unknown) => view(() => connections.select(modelSelection(sel))))
 	handle(IPC.aiSelectAskModel, (sel: unknown) => view(() => connections.selectAskModel(modelSelection(sel))))
 	handle(IPC.aiSetLimits, (limits: unknown) => view(() => connections.setLimits(reviewLimits(limits))))
@@ -565,7 +574,12 @@ app.whenReady().then(async () => {
 	usage = new UsageLog(dir)
 	await usage.load()
 	ai.attachUsage(usage)
-	ai.attachModels({ info: (sel) => connections.modelInfo(sel), limits: () => connections.view().limits })
+	ai.attachModels({
+		info: (sel) => connections.modelInfo(sel),
+		limits: () => connections.view().limits,
+		label: (id) => connections.view().connections.find((c) => c.id === id)?.label ?? 'a removed connection',
+	})
+	ai.attachBudget({ check: budgetCheck, active: () => hasBudgets(connections.budgets()) })
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()
@@ -591,6 +605,21 @@ app.whenReady().then(async () => {
 		whenDone: (runId) => ai.whenDone(runId),
 		open: (repoId, pr, signal) => service.openInBackground(repoId, pr, signal),
 		start: (reviewId, choice, label) => service.startAutoAi(reviewId, choice, label),
+		budgetReached: () => {
+			// Only when you set a budget; a reviewer that can't be resolved is left to the review to report, as before.
+			if (!hasBudgets(connections.budgets())) return null
+			const r = connections.view().reviewer
+			if (!r) return null
+			let ids: Array<string>
+			try {
+				ids = r.kind === 'model' ? [r.selection.connectionId] : connections.team(r.teamId).members.map((m) => m.connectionId)
+			} catch {
+				return null
+			}
+			const labels = connections.view().connections
+			const over = budgetCheck([...new Set(ids)].map((id) => ({ id, label: labels.find((c) => c.id === id)?.label ?? id }))).over
+			return over.length ? over.join(' ') : null
+		},
 		addFindings: (repoId, reviewId, runId, levels) => service.addAutoFindings(repoId, reviewId, runId, levels),
 		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
 		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
@@ -612,6 +641,9 @@ app.whenReady().then(async () => {
 			)
 		},
 	})
+	// Reviews a budget paused go ahead once a new day or month frees it.
+	autoReviewer.resumePaused()
+	setInterval(() => autoReviewer.resumePaused(), 15 * 60_000).unref()
 	registerIpc()
 	createWindow()
 	app.on('activate', () => {
@@ -703,6 +735,22 @@ const EVENT_TITLE: Record<WatchEvent['kind'], string> = {
 	're-requested': 'Review requested again',
 	ready: 'Ready for review',
 	updated: 'New commits since your review',
+}
+
+/** The budgets for a run on these connections; with none set, nothing is read and nothing limits the run. */
+function budgetCheck(used: Array<{ id: string; label: string }>, ignoreCaps = false): BudgetCheck {
+	const b = connections.budgets()
+	return hasBudgets(b) ? checkBudget(b, usage.spent(), used, ignoreCaps) : { over: [], limit: null }
+}
+
+/** Budgets, what was spent against them, the caps reached and the automatic reviews waiting for them. */
+function budgetView(): BudgetView {
+	const spent = usage.spent()
+	const all = connections.view().connections.map((c) => ({ id: c.id, label: c.label }))
+	const paused = Object.values(store.read().autoReviews ?? {})
+		.filter((r) => r.outcome === 'paused' && r.waiting)
+		.map((r) => ({ label: `${r.waiting!.pr.repo}#${r.waiting!.pr.number}`, at: r.at }))
+	return { budgets: connections.budgets(), ...spent, over: checkBudget(connections.budgets(), spent, all).over, paused }
 }
 
 function showNotifications(events: Array<WatchEvent>): void {
