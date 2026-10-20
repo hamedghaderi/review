@@ -16,6 +16,7 @@ import type {
 	Comparison,
 	Discussion,
 	DiscussionThread,
+	GoneFinding,
 	Finding,
 	FindingLevel,
 	GitHubStatus,
@@ -1001,6 +1002,8 @@ export function App() {
 
 	const verifyFinding = (f: Finding): Promise<string | null> => onFinding((id) => window.review.verifyFinding(id, f.id))
 	const writeFindingTest = (f: Finding): Promise<string | null> => onFinding((id) => window.review.writeFindingTest(id, f.id))
+	const checkFixed = (run: AiRun, g: GoneFinding): Promise<string | null> =>
+		onFinding((id) => window.review.checkFixed(id, run.id, g.finding.id))
 	const onFinding = async (call: (comparisonId: string) => Promise<Result<AiRun>>): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const r = await call(comparison.id)
@@ -1865,6 +1868,22 @@ export function App() {
 											onAsk={askFinding}
 											onVerify={verifyFinding}
 											onWriteTest={writeFindingTest}
+											onCheckFixed={checkFixed}
+											goneThread={(g) => {
+												// The comment made from it came along as a plain comment, keeping where it was published.
+												const c = g.comment ? review.comments.find((x) => (x.carried?.originId ?? x.id) === g.comment) : undefined
+												return c ? ownThread(threads, ownIds(c.id)) : null
+											}}
+											onResolveThread={
+												comparison.pr
+													? async (threadId) => {
+															const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, '', true)
+															if (!r.ok) return r.error.message
+															loadDiscussion(session.repo.id, comparison.id)
+															return null
+														}
+													: undefined
+											}
 											askModelPicker={askModelPicker}
 											onDismiss={(f, reason) => {
 												change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))

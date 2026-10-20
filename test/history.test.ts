@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { AiController } from '../src/main/ai/controller.ts'
 import { createFakeProvider, defaultScript } from '../src/main/ai/fake.ts'
-import type { ReviewOutput } from '../src/main/ai/schema.ts'
+import { VERIFY_SCHEMA_NAME, type ReviewOutput } from '../src/main/ai/schema.ts'
+import type { ProviderRequest } from '../src/main/ai/provider.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { Mapper } from '../src/main/linemap.ts'
 import { ReviewService } from '../src/main/service.ts'
@@ -63,9 +64,14 @@ async function setup() {
 	await store.load()
 	const svc = new ReviewService(store, null)
 	const silent = new Set<string>() // files the fake reviewer raises nothing on
+	const checks: Array<ProviderRequest> = [] // double-check requests
 	const provider = createFakeProvider({
 		script: (req) => {
 			const out = defaultScript(req)
+			if (req.schema?.name === VERIFY_SCHEMA_NAME) {
+				checks.push(req)
+				return { verdict: 'wrong', reason: 'Line 6 of e.ts no longer does it.', level: null, checked: ['e.ts:1-12'] }
+			}
 			if (req.schema) return out
 			const review = out as ReviewOutput
 			return { ...review, findings: review.findings.filter((f) => !silent.has(f.file_path)) }
@@ -81,7 +87,7 @@ async function setup() {
 	const ai = new AiController(store, config, () => {})
 	svc.attachAi(ai)
 	const s = await svc.open(w.dir)
-	return { w, svc, ai, silent, repoId: s.repo.id }
+	return { w, svc, ai, silent, checks, repoId: s.repo.id }
 }
 
 async function finished(ai: AiController, run: AiRun): Promise<AiRun> {
@@ -208,4 +214,37 @@ test('a changed range is followed to what replaced it, shifted by lines added ab
 	assert.deepEqual(await m.near(move, 6, 6), { start: 9, end: 9 })
 	assert.deepEqual(await m.near(move, 10, 11), { start: 13, end: 14 }, 'unchanged lines below only move')
 	assert.deepEqual(await m.near(move, 5, 7), { start: 8, end: 10 })
+})
+
+test('you can ask whether a gone finding is still there; the verdict is saved on it and nothing else changes', async () => {
+	const { w, svc, ai, silent, checks, repoId } = await setup()
+	const v1 = await svc.loadComparison(repoId, { kind: 'target', target })
+	const first = await finished(ai, await svc.startAi(v1.comparison.id, { kind: 'all' }, MODEL))
+	// v2: three lines above e.ts's cited line, which changes; the reviewer doesn't raise it again.
+	const lines = file('e', 2).split('\n')
+	w.push({ 'e.ts': ['// one', '// two', '// three', ...lines].join('\n') }, 'v2')
+	const v2 = await svc.loadComparison(repoId, { kind: 'target', target, from: v1.comparison.id })
+	silent.add('e.ts')
+	const next = await finished(ai, await svc.startAi(v2.comparison.id, { kind: 'all' }, MODEL))
+	const gone = next.history!.gone.find((g) => g.finding.anchor.fileKey === 'e.ts')!
+	assert.equal(gone.state, 'fixed')
+	assert.equal(gone.finding.anchor.startLine, 6, 'kept as it was')
+	assert.equal(gone.at?.startLine, 9, 'and about where it would be now')
+
+	const before = structuredClone(next.findings)
+	const checked = await svc.checkFixed(v2.comparison.id, next.id, gone.finding.id, null)
+	assert.equal(checks.length, 1)
+	assert.match(checks[0].instructions, new RegExp(`at commit ${first.headSha.slice(0, 7)}`))
+	assert.match(checks[0].input, /Location: e\.ts, new side, lines 9-9/, 'asked about where it is now')
+	assert.match(checks[0].input, /e = 2/, 'with the code as it is now')
+	const after = checked.history!.gone.find((g) => g.finding.id === gone.finding.id)!
+	assert.equal(after.check?.verdict, 'wrong')
+	assert.equal(after.check?.reason, 'Line 6 of e.ts no longer does it.')
+	assert.equal(after.state, 'fixed')
+	assert.deepEqual(checked.findings, before, "the run's own findings are left alone")
+	const stored = ai.runsFor(repoId, v2.comparison.id).find((r) => r.id === next.id)!
+	assert.equal(stored.history!.gone.find((g) => g.finding.id === gone.finding.id)?.check?.verdict, 'wrong', 'saved')
+
+	await assert.rejects(svc.checkFixed(v2.comparison.id, next.id, 'nope', null), /no longer exists/)
+	await assert.rejects(svc.checkFixed(v2.comparison.id, first.id, gone.finding.id, null), /no longer exists/, 'another run')
 })

@@ -1004,6 +1004,8 @@ export interface GoneFinding {
 	why: string
 	decision: Omit<FindingDecision, 'history'> | null
 	comment: string | null // as on PreviousFinding
+	at: Anchor | null // about where it would be in this snapshot; null when its file is gone from the change
+	check?: FindingVerification | null // you asked whether it is still there: "wrong" means it was fixed
 }
 
 // The accepted comment is linked through `findingId` on the draft/comment itself. 'open' overrides a decision
@@ -1561,6 +1563,7 @@ export const IPC = {
 	aiSetLevels: 'ai:levels-set',
 	aiAsk: 'ai:ask',
 	aiVerify: 'ai:verify',
+	aiCheckFixed: 'ai:check-fixed',
 	aiWriteTest: 'ai:write-test',
 	aiAskCode: 'ai:ask-code',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
@@ -1751,6 +1754,7 @@ export interface ReviewApi {
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
 	/** Double-checks one finding now, with the model for questions (else the one that raised it); resolves with its run. */
 	verifyFinding(reviewId: string, findingId: string): Promise<Result<AiRun>>
+	checkFixed(reviewId: string, runId: string, findingId: string): Promise<Result<AiRun>>
 	/** Writes a test that should fail while the finding holds, with the same model as Verify; resolves with its run. */
 	writeFindingTest(reviewId: string, findingId: string): Promise<Result<AiRun>>
 	/**

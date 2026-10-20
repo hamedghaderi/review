@@ -1456,6 +1456,11 @@ a.ic-state:hover {
 .finding-card.gone > details {
 	padding: 0 8px 8px;
 }
+.finding-card.gone > p,
+.finding-card.gone > .ask-actions {
+	margin: 0;
+	padding: 4px 8px;
+}
 .finding-title {
 	font-weight: 600;
 }

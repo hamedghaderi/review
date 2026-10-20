@@ -68,6 +68,12 @@ interface Props {
 	onVerify(finding: Finding): Promise<string | null>
 	/** Writes a test that should fail while the finding holds; resolves with an error message, or null once it is saved. */
 	onWriteTest(finding: Finding): Promise<string | null>
+	/** Asks whether a gone finding is still in the code; resolves with an error message, or null once the verdict is saved. */
+	onCheckFixed(run: AiRun, gone: GoneFinding): Promise<string | null>
+	/** The GitHub thread of the comment you made from a gone finding, when it was published. */
+	goneThread(gone: GoneFinding): DiscussionThread | null
+	/** Resolves a GitHub thread; absent without a pull request. Resolves with an error message, or null. */
+	onResolveThread?(threadId: string): Promise<string | null>
 	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
 }
 
@@ -125,6 +131,9 @@ export function FindingsPanel({
 	onAsk,
 	onVerify,
 	onWriteTest,
+	onCheckFixed,
+	goneThread,
+	onResolveThread,
 	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
@@ -384,7 +393,16 @@ export function FindingsPanel({
 			<RefLinksProvider value={links}>
 				<div className="comments-list">
 					{filter === 'gone' && goneShown.length > 0 ? (
-						goneShown.map((g) => <GoneCard key={g.finding.id} gone={g} at={run.history!.from.headSha} />)
+						goneShown.map((g) => (
+							<GoneCard
+								key={g.finding.id}
+								gone={g}
+								at={run.history!.from.headSha}
+								thread={goneThread(g)}
+								onCheck={run.status === 'running' ? null : () => onCheckFixed(run, g)}
+								onResolve={onResolveThread}
+							/>
+						))
 					) : shown.length === 0 && goneShown.length === 0 ? (
 						<div className="muted pad small">
 							{narrowed && inTab.length > 0 ? (
@@ -1099,9 +1117,32 @@ function Timeline({ heads, gone }: { heads: Array<string>; gone?: boolean }) {
 }
 
 /** A finding the earlier run raised and this run did not; it belongs to the earlier snapshot, so it can't be opened here. */
-function GoneCard({ gone: g, at }: { gone: GoneFinding; at: string }) {
+function GoneCard({
+	gone: g,
+	at,
+	thread,
+	onCheck,
+	onResolve,
+}: {
+	gone: GoneFinding
+	at: string
+	thread: DiscussionThread | null
+	onCheck: (() => Promise<string | null>) | null // null while the run is running
+	onResolve?: (threadId: string) => Promise<string | null>
+}) {
 	const f = g.finding
 	const meta = LEVEL_META[f.severity]
+	const [busy, setBusy] = useState<'check' | 'resolve' | null>(null)
+	const [error, setError] = useState<string | null>(null)
+	const act = async (kind: 'check' | 'resolve', call: () => Promise<string | null>): Promise<void> => {
+		setBusy(kind)
+		setError(null)
+		setError(await call())
+		setBusy(null)
+	}
+	const check = g.check && !g.check.error ? g.check : null
+	// Only suggested, never done for you: a fixed finding whose comment's thread is still open on GitHub.
+	const resolvable = g.state === 'fixed' && check?.verdict !== 'holds' && thread?.resolved === false && !!onResolve
 	return (
 		<div className={`finding-card gone ${g.state}`}>
 			<div className="finding-open">
@@ -1122,6 +1163,40 @@ function GoneCard({ gone: g, at }: { gone: GoneFinding; at: string }) {
 				{g.comment ? ' You had added it as a comment.' : ''}
 				<Timeline heads={findingTimeline(f, at)} gone />
 			</div>
+			{g.check && (
+				<p className={`small ${check?.verdict === 'holds' ? 'warn-text' : ''}`}>
+					<b>{!check ? 'Not checked' : CHECK_LABEL[check.verdict]}:</b> <RefText text={g.check.reason} />{' '}
+					<span className="muted">({g.check.model})</span>
+				</p>
+			)}
+			{resolvable && (
+				<p className="small">
+					The GitHub thread of your comment on it is still open.{' '}
+					{thread!.url && (
+						<a href={thread!.url} target="_blank" rel="noreferrer">
+							Open thread
+						</a>
+					)}
+				</p>
+			)}
+			<div className="ask-actions">
+				{onCheck && (
+					<button
+						className="btn small ghost"
+						disabled={busy !== null}
+						title="Asks the model whether the problem is still in the code as it is now. One request, counted towards your budgets."
+						onClick={() => void act('check', onCheck)}
+					>
+						{busy === 'check' ? 'Checking…' : g.check ? 'Check again' : 'Check it’s fixed'}
+					</button>
+				)}
+				{resolvable && (
+					<button className="btn small ghost" disabled={busy !== null} onClick={() => void act('resolve', () => onResolve!(thread!.id))}>
+						{busy === 'resolve' ? 'Resolving…' : 'Resolve thread'}
+					</button>
+				)}
+				{error && <span className="small error-text">{error}</span>}
+			</div>
 			<details className="small">
 				<summary>What it said</summary>
 				{f.body !== undefined ? (
@@ -1135,6 +1210,13 @@ function GoneCard({ gone: g, at }: { gone: GoneFinding; at: string }) {
 			</details>
 		</div>
 	)
+}
+
+// A check of a gone finding asks whether it is still there, so "wrong" means fixed.
+const CHECK_LABEL: Record<FindingVerification['verdict'], string> = {
+	wrong: 'Checked, fixed',
+	holds: 'Checked, still there',
+	unsure: 'Checked, not sure',
 }
 
 const REASON_LABEL: Record<DismissReason, string> = {

@@ -115,6 +115,7 @@ const api: ReviewApi = {
 	setFindingLevels: (levels) => ipcRenderer.invoke(IPC.aiSetLevels, levels),
 	askFinding: (reviewId, findingId, question) => ipcRenderer.invoke(IPC.aiAsk, reviewId, findingId, question),
 	verifyFinding: (reviewId, findingId) => ipcRenderer.invoke(IPC.aiVerify, reviewId, findingId),
+	checkFixed: (reviewId, runId, findingId) => ipcRenderer.invoke(IPC.aiCheckFixed, reviewId, runId, findingId),
 	writeFindingTest: (reviewId, findingId) => ipcRenderer.invoke(IPC.aiWriteTest, reviewId, findingId),
 	askCode: (reviewId, anchor, question, questionId) => ipcRenderer.invoke(IPC.aiAskCode, reviewId, anchor, question, questionId),
 	deleteCodeQuestion: (reviewId, questionId) => ipcRenderer.invoke(IPC.aiDeleteCodeQuestion, reviewId, questionId),
