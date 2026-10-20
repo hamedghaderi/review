@@ -897,6 +897,7 @@ export interface Finding {
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
 	carried?: CarriedFinding | null // copied from an earlier snapshot's run because its file's diff did not change
 	previous?: PreviousFinding | null // the same finding in the earlier snapshot the run compared with (see FindingHistory)
+	unread?: Array<string> // file references in its text to lines the request that raised it never had, as written
 	// Before prompt reviewer-2026-10-01:
 	problem?: string
 	consequence?: string
@@ -948,6 +949,7 @@ export interface FindingVerification {
 	memberId?: string | null // team runs: the member that checked it, another one than raised it when the team has one
 	error?: boolean // the check itself failed; the verdict is 'unsure'
 	onDemand?: boolean // you asked for it with Verify, rather than the run checking a blocking finding
+	unread?: Array<string> // file references in its reason or checks to lines this request never had: a "holds" is not settled
 	earlier?: Array<Omit<FindingVerification, 'earlier'>> // the checks it replaced, newest first
 }
 

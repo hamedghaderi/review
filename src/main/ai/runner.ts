@@ -37,6 +37,7 @@ import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
 import { recheckFacts } from './incremental.ts'
+import { findingTexts, Seen, seenInBatch, unreadRefs, verificationTexts, withUnread } from './citations.ts'
 import { traceFindings, type Baseline } from './history.ts'
 import { importFacts, importSummary } from './imports.ts'
 import type { FactsResult } from './facts.ts'
@@ -631,10 +632,10 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						`${w.role ? `${w.role}: the` : 'The'} endpoint does not support native structured output; JSON mode was used and the output was validated against the same schema.`,
 					)
 				checkTruncation(batch, response.usage?.inputTokens ?? null, w)
-				return {
-					ok: true,
-					value: validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads),
-				}
+				const value = validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads)
+				const seen = seenInBatch(batch, tools?.log.seen ?? [])
+				value.findings = value.findings.map((f) => withUnread(f, unreadRefs(findingTexts(f), seen)))
+				return { ok: true, value }
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return { ok: false, error: e }
@@ -783,7 +784,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	async function verifyOne(f: Finding, raiser: Worker, w: Worker): Promise<FindingVerification> {
 		// The excerpt and facts come from the requests of the member that raised it; the checker may not have had that file.
 		const batch = raiser.pkg?.batches.find((b) => b.excerpts.some((e) => e.id === f.excerptId))
-		const excerpt = batch?.excerpts.find((e) => e.id === f.excerptId)?.text ?? null
+		const excerpt = batch?.excerpts.find((e) => e.id === f.excerptId) ?? null
 		const facts = (batch?.facts ?? []).filter((x) => x.fileKeys?.includes(f.anchor.fileKey))
 		const failed = (why: string): FindingVerification => ({
 			verdict: 'unsure',
@@ -795,7 +796,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			error: true,
 		})
 		for (let attempt = 0; ; attempt++) {
-			const draft = buildVerifyRequest(f, excerpt, facts, undefined)
+			const draft = buildVerifyRequest(f, excerpt?.text ?? null, facts, undefined)
 			const l = w.provider.limits
 			// Lookups get the full budget: a blocking finding is worth reading for. Never more than the window has left.
 			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
@@ -807,9 +808,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						)
 					: undefined
 			try {
-				const response = await w.provider.review(buildVerifyRequest(f, excerpt, facts, tools), controller.signal)
+				const response = await w.provider.review(buildVerifyRequest(f, excerpt?.text ?? null, facts, tools), controller.signal)
 				addUsage(response.usage, w)
-				return { ...parseVerification(response.output), model: w.provider.model, memberId: w.id }
+				const v = parseVerification(response.output)
+				const seen = new Seen().lines(tools?.log.seen ?? [])
+				if (excerpt) seen.excerpt(excerpt)
+				return withUnread<FindingVerification>({ ...v, model: w.provider.model, memberId: w.id }, unreadRefs(verificationTexts(v), seen))
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return failed('cancelled')

@@ -5,6 +5,7 @@ import type {
 	FindingCategory,
 	FindingDecision,
 	FindingLevel,
+	FindingVerification,
 	Review,
 	ReviewComment,
 	Severity,
@@ -278,6 +279,18 @@ export function ruleChecked(run: AiRun, f: Pick<Finding, 'anchor' | 'category' |
 	return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
 }
 
+/** The double-check's verdict as it counts: a "holds" that cites lines the check never read is not settled. */
+export function verdictOf(v: Pick<FindingVerification, 'verdict' | 'unread'>): FindingVerification['verdict'] {
+	return v.verdict === 'holds' && v.unread?.length ? 'unsure' : v.verdict
+}
+
+/** "cites src/cart.ts:88, which it never read", or two or more of them. */
+export function unreadText(unread: Array<string>): string {
+	const shown = unread.slice(0, 3)
+	const list = unread.length > 3 ? `${shown.join(', ')} and ${unread.length - 3} more` : shown.join(shown.length === 2 ? ' and ' : ', ')
+	return `cites ${list}, which it never read`
+}
+
 /** Where the blocking findings of a review stand, for the decision to approve or request changes. */
 export interface BlockingSummary {
 	added: number // added to the review as comments
@@ -307,8 +320,8 @@ export function blockingSummary(review: Review, runs: Array<AiRun>, roots: Map<s
 			else {
 				out.open++
 				if (f.verification && !f.verification.error) {
-					if (f.verification.verdict === 'holds') out.openHolds++
-					if (f.verification.verdict === 'wrong') out.openWrong++
+					if (verdictOf(f.verification) === 'holds') out.openHolds++
+					if (verdictOf(f.verification) === 'wrong') out.openWrong++
 				}
 			}
 		}
@@ -353,4 +366,24 @@ export function sinceState(run: AiRun, f: Finding): 'new' | 'present' | null {
 /** The heads of the snapshots a finding was raised in, oldest first; `last` is the snapshot it was raised in last. */
 export function findingTimeline(f: Finding, last: string): Array<string> {
 	return [...(f.previous?.seen ?? []).map((s) => s.headSha), last]
+}
+
+/**
+ * How many of a run's own findings cite lines their reviewer never read, by team member (null: a single model), and
+ * how many double-checks did. Carried findings were raised by an earlier run and are left out.
+ */
+export function unreadSummary(run: AiRun): { findings: number; byMember: Map<string | null, number>; checks: number } {
+	const byMember = new Map<string | null, number>()
+	let findings = 0
+	let checks = 0
+	for (const f of run.findings) {
+		if (f.carried) continue
+		if (f.unread?.length) {
+			findings++
+			const m = f.memberId ?? null
+			byMember.set(m, (byMember.get(m) ?? 0) + 1)
+		}
+		if (f.verification?.unread?.length) checks++
+	}
+	return { findings, byMember, checks }
 }

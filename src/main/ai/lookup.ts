@@ -48,6 +48,15 @@ export interface LookupLog {
 	paths: Array<string> // files read and folders listed, in order, without repeats
 	searches: Array<string>
 	external: Array<string> // MCP tools called, as "server: tool", without repeats
+	seen: Array<SeenLines> // lines read_file and search_code showed, as sent back (after any cut)
+}
+
+/** Lines of one file a request had in front of it. */
+export interface SeenLines {
+	path: string
+	version: 'head' | 'base'
+	start: number
+	end: number
 }
 
 export interface LookupBudget {
@@ -126,7 +135,7 @@ export function createReviewTools(
 	budget: LookupBudget,
 	external: ExternalTools | null = null,
 ): ReviewTools {
-	const log: LookupLog = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [] }
+	const log: LookupLog = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [], seen: [] }
 	let full = false // a result was cut to fit the request's characters
 	const exhausted = (): boolean => full || log.calls >= budget.maxCalls || log.chars >= budget.maxChars
 	const seen = (list: Array<string>, item: string): void => {
@@ -222,9 +231,37 @@ export function createReviewTools(
 				text = `${text.slice(0, Math.max(0, room - 80))}\n… (cut: ${why})`
 			}
 			log.chars += text.length
+			if (!result.error && (name === 'read_file' || name === 'search_code')) log.seen.push(...shownLines(name, text))
 			return { text, error: result.error }
 		},
 	}
+}
+
+/**
+ * The lines a read_file or search_code result showed, read back from the text the model got, so lines cut to fit are
+ * not counted. Consecutive lines of a file become one range.
+ */
+export function shownLines(name: 'read_file' | 'search_code', text: string): Array<SeenLines> {
+	const out: Array<SeenLines> = []
+	const add = (path: string, version: 'head' | 'base', n: number): void => {
+		const last = out[out.length - 1]
+		if (last && last.path === path && last.version === version && last.end === n - 1) last.end = n
+		else out.push({ path, version, start: n, end: n })
+	}
+	const lines = text.split('\n')
+	if (name === 'read_file') {
+		const head = /^(.+) \((head|base)\), lines \d+-\d+ of \d+:$/.exec(lines[0] ?? '')
+		if (!head) return out
+		for (const l of lines.slice(1)) {
+			const m = /^\s*(\d+) \| /.exec(l)
+			if (m) add(head[1], head[2] as 'head' | 'base', Number(m[1]))
+		}
+	} else
+		for (const l of lines.slice(1)) {
+			const m = /^(.+?):(\d+): /.exec(l)
+			if (m) add(m[1], 'head', Number(m[2]))
+		}
+	return out
 }
 
 /** Adds one request's lookups to the run's totals. */
