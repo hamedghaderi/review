@@ -11,7 +11,7 @@ import type { RunConfig } from '../src/main/ai/connections.ts'
 import { Mapper } from '../src/main/linemap.ts'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
-import { findingRoots, findingState, historyCounts } from '../src/shared/findings.ts'
+import { findingRoots, findingState, findingTimeline, historyCounts, sinceState } from '../src/shared/findings.ts'
 import type { AiRun, ReviewerChoice } from '../src/shared/types.ts'
 
 const SEL = { connectionId: '00000000-0000-4000-8000-000000000000', modelId: 'fixture-v1' }
@@ -146,6 +146,10 @@ test('after new commits, a run tells which findings are new, still present, prob
 	assert.equal(findingState(r2, roots, a, byId), 'accepted', 'linked to the comment carried from v1')
 	assert.equal(findingState(r2, roots, on(next, 'b.ts')!, byId), 'dismissed')
 	assert.deepEqual(historyCounts(r2, next, runs, roots), { fresh: 1, present: 1, dismissed: 1, fixed: 2, notSeen: 1 })
+	assert.equal(sinceState(next, a), 'present')
+	assert.equal(sinceState(next, on(next, 'f.ts')!), 'new')
+	assert.equal(sinceState(first, onA), null, 'not compared, so neither')
+	assert.deepEqual(findingTimeline(a, next.headSha), [first.headSha, next.headSha])
 
 	// v3 changes only f.ts; an incremental run carries the rest, and carried findings are still present.
 	silent.clear()
@@ -164,6 +168,7 @@ test('after new commits, a run tells which findings are new, still present, prob
 	)
 	assert.equal(on(third, 'f.ts')!.previous?.findingId, on(next, 'f.ts')!.id, 'raised again on the changed line')
 	assert.deepEqual(third.history?.gone, [])
+	assert.deepEqual(findingTimeline(a3, third.headSha), [first.headSha, next.headSha, third.headSha])
 })
 
 test('a rebase is noted, and lines are still matched head to head', async () => {

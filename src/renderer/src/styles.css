@@ -1442,6 +1442,20 @@ a.ic-state:hover {
 .finding-open:hover {
 	background: var(--hover);
 }
+/* Gone since the earlier snapshot: it can't be opened here, and a fixed one needs no action. */
+.finding-card.gone .finding-open {
+	cursor: default;
+}
+.finding-card.gone .finding-open:hover {
+	background: transparent;
+}
+.finding-card.gone.fixed .finding-title {
+	text-decoration: line-through;
+	text-decoration-color: var(--text-2);
+}
+.finding-card.gone > details {
+	padding: 0 8px 8px;
+}
 .finding-title {
 	font-weight: 600;
 }
