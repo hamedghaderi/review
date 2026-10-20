@@ -5,6 +5,7 @@ import {
 	CATEGORY_LABEL,
 	droppedFindings,
 	findingState,
+	findingTimeline,
 	historyCounts,
 	LEVEL_META,
 	RESIDUE_LABEL,
@@ -12,6 +13,8 @@ import {
 	TEST_PATTERN_LABEL,
 	type FindingState,
 	type HistoryCounts,
+	sinceState,
+	type SinceState,
 } from '../../shared/findings.ts'
 import { changeRisk, DISMISS_REASONS, REVIEW_RULES } from '../../shared/types.ts'
 import type {
@@ -25,6 +28,7 @@ import type {
 	FindingMessage,
 	FindingVerification,
 	FindingReproducer,
+	GoneFinding,
 	Review,
 	ReviewRule,
 	Severity,
@@ -67,7 +71,16 @@ interface Props {
 	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
 }
 
-type Filter = 'open' | 'accepted' | 'dismissed'
+type Filter = 'open' | 'accepted' | 'dismissed' | 'gone'
+
+const SINCE_LABEL: Record<SinceState, string> = {
+	new: 'New',
+	present: 'Still present',
+	fixed: 'Probably fixed',
+	'not-seen': 'Not seen this time',
+}
+const FIXED_HINT =
+	'Its lines changed or went away, and this run did not raise it again. The model can miss things, so check it before you rely on it.'
 
 const LEVEL_FILTERS = ['all', ...Object.keys(LEVEL_META)] as Array<Severity | 'all'>
 const RULE_FILTERS = ['all', ...Object.keys(CATEGORY_LABEL)] as Array<FindingCategory | 'all'>
@@ -118,13 +131,14 @@ export function FindingsPanel({
 	const [level, setLevel] = useStored<Severity | 'all'>('review.findingLevel', 'all', LEVEL_FILTERS)
 	const [rule, setRule] = useStored<FindingCategory | 'all'>('review.findingRule', 'all', RULE_FILTERS)
 	const [query, setQuery] = useState('')
+	const [since, setSince] = useState<SinceState | 'all'>('all')
 	const [runId, setRunId] = useState<string | null>(null)
 	const [showDetails, setShowDetails] = useState(false)
 	const latest = runs[runs.length - 1] ?? null
 	const run = runs.find((r) => r.id === runId) ?? latest
 	const byId = useMemo(() => new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const))), [runs])
 	const dropped = useMemo(() => (run ? droppedFindings(run, runs, review, roots) : null), [run, runs, review, roots])
-	const since = useMemo(() => (run ? historyCounts(review, run, runs, roots) : null), [run, runs, review, roots])
+	const sinceCounts = useMemo(() => (run ? historyCounts(review, run, runs, roots) : null), [run, runs, review, roots])
 	const order = useMemo(() => new Map(files.map((f, i) => [f.key, i])), [files])
 
 	const items = useMemo(() => {
@@ -150,7 +164,7 @@ export function FindingsPanel({
 		const owner = runs.find((r) => r.findings.some((f) => f.id === selectedFindingId))
 		if (owner && owner.id !== run?.id) setRunId(owner.id)
 		const f = owner?.findings.find((x) => x.id === selectedFindingId)
-		if (f) setFilter(findingState(review, roots, f, byId))
+		if (f) pickTab(findingState(review, roots, f, byId))
 		if (f && !matches(f)) {
 			setLevel('all')
 			setRule('all')
@@ -166,14 +180,26 @@ export function FindingsPanel({
 		const text = `${f.title}\n${f.body ?? f.evidence}\n${anchorPath(f.anchor)}`.toLowerCase()
 		return words.every((w) => text.includes(w))
 	}
+	const gone = run?.history?.gone ?? []
+	const sinceOf = (f: Finding): SinceState | null => (run ? sinceState(run, f) : null)
 	const filtered = items.filter((it) => matches(it.f))
-	const counts: Record<FindingState, number> = { open: 0, accepted: 0, dismissed: 0 }
+	const goneFiltered = gone.filter((g) => matches(g.finding))
+	const counts: Record<Filter, number> = { open: 0, accepted: 0, dismissed: 0, gone: goneFiltered.length }
 	for (const it of filtered) counts[it.state]++
-	const inTab = items.filter((it) => it.state === filter)
+	const inTab =
+		filter === 'gone'
+			? gone.map((g) => ({ f: g.finding, since: g.state }))
+			: items.filter((it) => it.state === filter).map((it) => ({ f: it.f, since: sinceOf(it.f) }))
 	const levels = [...new Set(inTab.map((it) => it.f.severity))].sort((a, b) => SEVERITY_ORDER[a] - SEVERITY_ORDER[b])
 	const rules = [...new Set(inTab.flatMap((it) => (it.f.category ? [it.f.category] : [])))]
-	const shown = filtered.filter((it) => it.state === filter)
-	const narrowed = level !== 'all' || rule !== 'all' || words.length > 0
+	const sinceOptions = run?.history ? ((filter === 'gone' ? ['fixed', 'not-seen'] : ['new', 'present']) as Array<SinceState>) : []
+	const shown = filter === 'gone' ? [] : filtered.filter((it) => it.state === filter && (since === 'all' || sinceOf(it.f) === since))
+	const goneShown = filter === 'gone' ? goneFiltered.filter((g) => since === 'all' || g.state === since) : []
+	const narrowed = level !== 'all' || rule !== 'all' || since !== 'all' || words.length > 0
+	const pickTab = (k: Filter): void => {
+		setFilter(k)
+		setSince('all')
+	}
 	// A repeat from a later run inherits the decision on the finding it repeats; that one holds the reason and note.
 	const decisionOwner = (f: Finding): { finding: Finding; decision: FindingDecision | null } => {
 		const seen = new Set<string>()
@@ -237,7 +263,7 @@ export function FindingsPanel({
 		<div className="comments findings-scroll">
 			<RunSummary
 				run={run}
-				since={since}
+				since={sinceCounts}
 				showDetails={showDetails}
 				onToggleDetails={() => setShowDetails((x) => !x)}
 				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
@@ -258,7 +284,7 @@ export function FindingsPanel({
 									title="Show it in the run that raised it"
 									onClick={() => {
 										setRunId(dropped.from.id)
-										setFilter(findingState(review, roots, f, byId))
+										pickTab(findingState(review, roots, f, byId))
 										onOpen(f)
 									}}
 								>
@@ -298,13 +324,21 @@ export function FindingsPanel({
 				</div>
 			)}
 			<div className="seg findings-seg" role="tablist">
-				{(['open', 'accepted', 'dismissed'] as const).map((k) => (
-					<button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
-						{k === 'open' ? 'Open' : k === 'accepted' ? 'Added' : 'Dismissed'} <span className="count">{counts[k]}</span>
+				{(['open', 'accepted', 'dismissed', ...(gone.length ? ['gone' as const] : [])] as const).map((k) => (
+					<button
+						key={k}
+						role="tab"
+						aria-selected={filter === k}
+						className={filter === k ? 'on' : ''}
+						onClick={() => pickTab(k)}
+						title={k === 'gone' ? `Raised by the run on ${run.history!.from.headSha.slice(0, 7)}, and not by this one` : undefined}
+					>
+						{k === 'open' ? 'Open' : k === 'accepted' ? 'Added' : k === 'dismissed' ? 'Dismissed' : 'Gone'}{' '}
+						<span className="count">{counts[k]}</span>
 					</button>
 				))}
 			</div>
-			{items.length > 0 && (
+			{(items.length > 0 || gone.length > 0) && (
 				<div className="findings-filters">
 					<input
 						className="search"
@@ -321,6 +355,20 @@ export function FindingsPanel({
 							</option>
 						))}
 					</select>
+					{sinceOptions.length > 0 && (
+						<select
+							value={since}
+							onChange={(e) => setSince(e.target.value as SinceState | 'all')}
+							aria-label={`Since ${run.history!.from.headSha.slice(0, 7)}`}
+						>
+							<option value="all">Since {run.history!.from.headSha.slice(0, 7)}: all</option>
+							{sinceOptions.map((k) => (
+								<option key={k} value={k}>
+									{SINCE_LABEL[k]} ({inTab.filter((it) => it.since === k).length})
+								</option>
+							))}
+						</select>
+					)}
 					{(rules.length > 1 || rule !== 'all') && (
 						<select value={rule} onChange={(e) => setRule(e.target.value as FindingCategory | 'all')} aria-label="Rule">
 							<option value="all">All rules</option>
@@ -335,7 +383,9 @@ export function FindingsPanel({
 			)}
 			<RefLinksProvider value={links}>
 				<div className="comments-list">
-					{shown.length === 0 ? (
+					{filter === 'gone' && goneShown.length > 0 ? (
+						goneShown.map((g) => <GoneCard key={g.finding.id} gone={g} at={run.history!.from.headSha} />)
+					) : shown.length === 0 && goneShown.length === 0 ? (
 						<div className="muted pad small">
 							{narrowed && inTab.length > 0 ? (
 								<>
@@ -345,6 +395,7 @@ export function FindingsPanel({
 										onClick={() => {
 											setLevel('all')
 											setRule('all')
+											setSince('all')
 											setQuery('')
 										}}
 									>
@@ -387,6 +438,7 @@ export function FindingsPanel({
 								onAsk={(q) => onAsk(f, q)}
 								onVerify={() => onVerify(f)}
 								onWriteTest={() => onWriteTest(f)}
+								timeline={run.history ? findingTimeline(f, run.headSha) : null}
 								askModelPicker={askModelPicker}
 								askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
 							/>
@@ -399,6 +451,7 @@ export function FindingsPanel({
 }
 
 function emptyText(run: AiRun, filter: Filter, total: number): string {
+	if (filter === 'gone') return 'This run raised everything the earlier one did.'
 	if (filter !== 'open') return filter === 'accepted' ? 'No findings added to the review yet.' : 'No dismissed findings.'
 	if (run.status === 'running') return 'Waiting for results…'
 	if (total > 0) return 'Every finding from this run has been added or dismissed.'
@@ -1030,6 +1083,58 @@ interface CardProps {
 	onWriteTest(): Promise<string | null>
 	askDisabled: string | null
 	askModelPicker: React.ReactNode
+	timeline: Array<string> | null // the snapshots it was raised in, oldest first, when the run was compared with an earlier one
+}
+
+/** The snapshots a finding was raised in: "new" or "a1b2c3d → e4f5a6b → here". */
+function Timeline({ heads, gone }: { heads: Array<string>; gone?: boolean }) {
+	if (heads.length === 1 && !gone) return <span title="Not raised on the earlier snapshot this run was compared with"> · new</span>
+	const shas = heads.map((h) => h.slice(0, 7))
+	return (
+		<span title="The snapshots it was raised in, oldest first">
+			{' '}
+			· raised on {gone ? shas.join(' → ') : [...shas.slice(0, -1), 'this snapshot'].join(' → ')}
+		</span>
+	)
+}
+
+/** A finding the earlier run raised and this run did not; it belongs to the earlier snapshot, so it can't be opened here. */
+function GoneCard({ gone: g, at }: { gone: GoneFinding; at: string }) {
+	const f = g.finding
+	const meta = LEVEL_META[f.severity]
+	return (
+		<div className={`finding-card gone ${g.state}`}>
+			<div className="finding-open">
+				<div className="ci-loc">
+					<span className={`sev ${f.severity}`} title={meta.hint}>
+						{meta.label}
+					</span>
+					{f.category && <span className="cat-tag">{CATEGORY_LABEL[f.category]}</span>}
+					<span className="mono ellipsis">{anchorPath(f.anchor)}</span>
+					<span className="muted small nowrap" title={`As it was on ${at.slice(0, 7)}`}>
+						{anchorLabel(f.anchor)}
+					</span>
+				</div>
+				<div className="finding-title">{f.title}</div>
+			</div>
+			<div className="ai-label small">
+				<b title={g.state === 'fixed' ? FIXED_HINT : undefined}>{SINCE_LABEL[g.state]}:</b> {g.why}
+				{g.comment ? ' You had added it as a comment.' : ''}
+				<Timeline heads={findingTimeline(f, at)} gone />
+			</div>
+			<details className="small">
+				<summary>What it said</summary>
+				{f.body !== undefined ? (
+					<p className="finding-text selectable">
+						<RefText text={f.body} />
+					</p>
+				) : (
+					<p className="finding-text selectable">{f.problem}</p>
+				)}
+				<pre className="ci-excerpt">{f.evidence}</pre>
+			</details>
+		</div>
+	)
 }
 
 const REASON_LABEL: Record<DismissReason, string> = {
@@ -1215,6 +1320,7 @@ function FindingCard(p: CardProps) {
 					: ''}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}
 				{f.carried ? ` · carried from the run on ${f.carried.from.headSha.slice(0, 7)}, the file's diff is unchanged` : ''}
+				{p.timeline && <Timeline heads={p.timeline} />}
 			</div>
 			{p.screened.length > 0 && (
 				<div className="discussed-note raised-note rejected small" title="Automatic review doesn't post a finding like this.">

@@ -342,3 +342,15 @@ export function historyCounts(review: Review, run: AiRun, runs: Array<AiRun>, ro
 	}
 	return out
 }
+
+export type SinceState = 'new' | 'present' | 'fixed' | 'not-seen'
+
+/** A finding of `run` compared with the earlier snapshot: new, or still present. Null when the run was not compared. */
+export function sinceState(run: AiRun, f: Finding): 'new' | 'present' | null {
+	return run.history ? (f.previous ? 'present' : 'new') : null
+}
+
+/** The heads of the snapshots a finding was raised in, oldest first; `last` is the snapshot it was raised in last. */
+export function findingTimeline(f: Finding, last: string): Array<string> {
+	return [...(f.previous?.seen ?? []).map((s) => s.headSha), last]
+}
