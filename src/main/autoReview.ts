@@ -59,6 +59,12 @@ export function autoVerdict(
 	const lines = [
 		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
+	if (run.carriedFrom) {
+		const carried = run.coverage.files.filter((f) => f.state === 'carried').length
+		lines.push(
+			`It reviewed the commits since ${run.carriedFrom.headSha.slice(0, 7)}: only the files whose changes differ since then. ${plural(carried, 'file')} and ${carried === 1 ? 'its' : 'their'} findings carry over from the review of ${run.carriedFrom.headSha.slice(0, 7)}, and are not posted again.`,
+		)
+	}
 	if (event === 'APPROVE') lines.push('It found no blocking, should-fix or question findings in the changed files.')
 	else {
 		const parts: Array<string> = []
@@ -91,6 +97,8 @@ export function autoVerdict(
 export interface AutoReviewDeps {
 	store: ReviewStore
 	enabled(): boolean
+	/** New commits on a pull request it reviewed are reviewed too (only matters while `enabled`). */
+	commits(): boolean
 	viewer(): string | null
 	/** The model or team the next run uses, as picked in the AI settings, with a name for the review body. */
 	reviewer(): { choice: ReviewerChoice; label: string }
@@ -100,6 +108,8 @@ export interface AutoReviewDeps {
 	whenDone(runId: string): Promise<AiRun> | null
 	open(repoId: string, pr: { repo: string; number: number }, signal: AbortSignal): Promise<Comparison>
 	start(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun>
+	/** Starts a run on only the files whose diff changed since the newest finished run, or says why it can't. */
+	startIncremental(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun | { refused: string }>
 	/** The daily or monthly budget the next run would go over, in words; null when none is reached or none is set. */
 	budgetReached?(): string | null
 	addFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>>
@@ -115,6 +125,7 @@ export interface AutoReviewDeps {
 	waitMs?: number
 	ciPollMs?: number // how often unfinished CI is read again before approving (default 1 minute)
 	ciWaitMs?: number // how long to wait for it (default 20 minutes)
+	quietMs?: number // how long the head must stay the same before new commits are reviewed (default 5 minutes)
 }
 
 const OUTCOME: Record<ReviewEvent, AutoReviewRecord['outcome']> = {
@@ -123,33 +134,68 @@ const OUTCOME: Record<ReviewEvent, AutoReviewRecord['outcome']> = {
 	COMMENT: 'commented',
 }
 
+const SUBMITTED: ReadonlyArray<AutoReviewRecord['outcome']> = Object.values(OUTCOME)
+
 /**
  * Reviews new review requests with AI and submits the result on GitHub as you, when automatic review is turned on.
  * One pull request at a time, after any AI review you are running. Each head commit is reviewed at most once. It never
- * posts into a pending review of yours, since submitting would send your comments too.
+ * posts into a pending review of yours, since submitting would send your comments too. With `commits` on, new commits
+ * on a pull request it submitted a review for are reviewed too, incrementally, once the head has stopped moving.
  */
 export class AutoReviewer {
 	private d: AutoReviewDeps
 	private queue: Promise<void> = Promise.resolve()
 	private queued = new Set<string>()
+	private quiet = new Map<string, ReturnType<typeof setTimeout>>() // new commits waiting for the head to settle, by pull request
 
 	constructor(deps: AutoReviewDeps) {
 		this.d = deps
 	}
 
-	/** Takes the watcher's events; new requests, requests after an earlier review, and drafts marked ready are reviewed. */
+	/**
+	 * Takes the watcher's events; new requests, requests after an earlier review, and drafts marked ready are reviewed.
+	 * New commits are reviewed with `commits` on, when an automatic review was submitted for the pull request, once its
+	 * head has stayed the same for `quietMs`: each push restarts the wait, so a series of pushes is reviewed once.
+	 */
 	take(events: Array<RepoEvent>): void {
 		if (!this.d.enabled()) return
 		const viewer = this.d.viewer()?.toLowerCase() ?? null
 		for (const e of events) {
-			if (e.kind === 'updated' || e.pr.draft) continue
+			if (e.pr.draft) continue
 			if (viewer && e.pr.author?.toLowerCase() === viewer) continue
 			const key = watchKey(e.pr)
-			const id = `${key}@${e.pr.head ?? ''}`
-			if (this.queued.has(id) || (e.pr.head && this.d.store.read().autoReviews?.[key]?.head === e.pr.head)) continue
-			this.queued.add(id)
-			this.queue = this.queue.then(() => this.review(e).finally(() => this.queued.delete(id)))
+			clearTimeout(this.quiet.get(key))
+			this.quiet.delete(key)
+			if (e.kind === 'updated') {
+				if (!this.d.commits() || !this.followsUp(key)) continue
+				this.quiet.set(
+					key,
+					setTimeout(
+						() => {
+							this.quiet.delete(key)
+							if (this.d.enabled() && this.d.commits()) this.enqueue(e)
+						},
+						this.d.quietMs ?? 5 * 60_000,
+					),
+				)
+				continue
+			}
+			this.enqueue(e)
 		}
+	}
+
+	/** Whether new commits on this pull request are for the automatic review: it submitted one, or it followed one up. */
+	private followsUp(key: string): boolean {
+		const r = this.d.store.read().autoReviews?.[key]
+		return !!r && (SUBMITTED.includes(r.outcome) || r.commits === true)
+	}
+
+	private enqueue(e: RepoEvent): void {
+		const key = watchKey(e.pr)
+		const id = `${key}@${e.pr.head ?? ''}`
+		if (this.queued.has(id) || (e.pr.head && this.d.store.read().autoReviews?.[key]?.head === e.pr.head)) return
+		this.queued.add(id)
+		this.queue = this.queue.then(() => this.review(e).finally(() => this.queued.delete(id)))
 	}
 
 	/**
@@ -158,12 +204,12 @@ export class AutoReviewer {
 	 */
 	resumePaused(): void {
 		const waiting = Object.values(this.d.store.read().autoReviews ?? {}).flatMap((r) =>
-			r.outcome === 'paused' && r.waiting ? [{ kind: 'requested' as const, ...r.waiting }] : [],
+			r.outcome === 'paused' && r.waiting ? [{ kind: r.commits ? ('updated' as const) : ('requested' as const), ...r.waiting }] : [],
 		)
 		if (waiting.length) this.take(waiting)
 	}
 
-	/** Resolves once everything queued so far is done (for tests and shutdown). */
+	/** Resolves once everything queued so far is done (for tests and shutdown). New commits still settling are not queued yet. */
 	idle(): Promise<void> {
 		return this.queue
 	}
@@ -171,6 +217,7 @@ export class AutoReviewer {
 	private async review(e: RepoEvent): Promise<void> {
 		const key = watchKey(e.pr)
 		const label = `${e.pr.repo}#${e.pr.number}`
+		const commits = e.kind === 'updated'
 		let reviewId: string | null = null
 		let head = e.pr.head ?? ''
 		let posted = 0
@@ -186,6 +233,7 @@ export class AutoReviewer {
 				message,
 				url,
 				...(paused ? { waiting: { repoId: e.repoId, pr: e.pr } } : {}),
+				...(commits ? { commits: true } : {}),
 			}
 			await this.d.store.update((s) => void ((s.autoReviews ??= {})[key] = r))
 			// Told once: taking it again while the budget is still reached says nothing new.
@@ -200,6 +248,8 @@ export class AutoReviewer {
 			reviewId = c.id
 			head = c.headSha
 			if (this.d.store.read().autoReviews?.[key]?.head === head) return
+			// Pushed again since the event: that push's own event comes next and waits for the head to settle.
+			if (commits && e.pr.head && head !== e.pr.head) return
 			const plan = await this.d.plan(e.repoId, c.id)
 			if (plan.blocked) return record('skipped', `Not reviewed automatically: ${plan.blocked.message}`)
 			if (plan.pr.state !== 'open') return record('skipped', `Not reviewed automatically: ${label} is ${plan.pr.state}.`)
@@ -213,7 +263,16 @@ export class AutoReviewer {
 			while (!run) {
 				if (!(await this.turn())) return
 				try {
-					run = await this.d.start(c.id, choice, label)
+					if (!commits) run = await this.d.start(c.id, choice, label)
+					else {
+						const started = await this.d.startIncremental(c.id, choice, label)
+						if ('refused' in started)
+							return record(
+								'skipped',
+								`New commits on ${label} were not reviewed automatically: ${started.refused} Review them yourself, or run a review of all files.`,
+							)
+						run = started
+					}
 				} catch (err) {
 					if (err instanceof AppFail && err.code === 'over-budget') return record('paused', paused(label, err.message))
 					// Someone started a run between the check and the start: wait for it.

@@ -109,6 +109,7 @@ async function setup(over: Partial<AutoReviewDeps> = {}, findings: Array<Finding
 	const deps: AutoReviewDeps = {
 		store,
 		enabled: () => enabled,
+		commits: () => false,
 		viewer: () => 'me',
 		reviewer: () => ({ choice: { kind: 'model', selection: { connectionId: 'c', modelId: 'model-x' } }, label: 'model-x' }),
 		levels: () => ['blocking', 'should_fix', 'question'],
@@ -121,6 +122,11 @@ async function setup(over: Partial<AutoReviewDeps> = {}, findings: Array<Finding
 		},
 		start: async () => {
 			calls.push('start')
+			await store.update((d) => void (d.repos.r.aiRuns['b..h1'] = [run(findings)]))
+			return run(findings, 'running')
+		},
+		startIncremental: async () => {
+			calls.push('start incremental')
 			await store.update((d) => void (d.repos.r.aiRuns['b..h1'] = [run(findings)]))
 			return run(findings, 'running')
 		},
@@ -153,6 +159,7 @@ async function setup(over: Partial<AutoReviewDeps> = {}, findings: Array<Finding
 		waitMs: 1,
 		ciPollMs: 1,
 		ciWaitMs: 50,
+		quietMs: 20,
 		...over,
 	}
 	const auto = new AutoReviewer(deps)
@@ -342,4 +349,92 @@ test('a budget already reached pauses an automatic review before anything is fet
 	free.auto.take([event()])
 	await free.auto.idle()
 	assert.deepEqual(free.calls, ['open', 'start', 'add', 'changed', 'publish c-f1', 'submit REQUEST_CHANGES'])
+})
+
+const settle = () => new Promise((r) => setTimeout(r, 60))
+
+/** A pull request the automatic review submitted a review for at h1, now with new commits at `head`. */
+async function reviewedBefore(over: Partial<AutoReviewDeps> = {}, head: () => string = () => 'h2') {
+	const s = await setup({ commits: () => true, ...over })
+	const open = s.auto['d'].open
+	s.auto['d'].open = async (...a) => ({ ...(await open(...a)), headSha: head() })
+	await s.store.update((d) => {
+		d.autoReviews = { 'octo/app#7': { head: 'h1', at: 't', reviewId: 'b..h1', outcome: 'commented', message: '', url: 'u' } }
+	})
+	return s
+}
+
+test('new commits on a pull request it reviewed are reviewed incrementally once the head settles, and submitted', async () => {
+	const { auto, store, calls, records } = await reviewedBefore()
+	auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await auto.idle()
+	assert.deepEqual(calls, [], 'nothing starts while the head may still move')
+	await settle()
+	await auto.idle()
+	assert.deepEqual(calls, ['open', 'start incremental', 'add', 'changed', 'publish c-f1', 'submit REQUEST_CHANGES'])
+	assert.equal(records[0].commits, true)
+	assert.equal(store.read().autoReviews?.['octo/app#7']?.head, 'h2')
+})
+
+test('a series of pushes is reviewed once, at the newest head', async () => {
+	const { auto, calls } = await reviewedBefore({}, () => 'h3')
+	auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await new Promise((r) => setTimeout(r, 10))
+	auto.take([event({ head: 'h3', reviewed: true }, 'updated')])
+	await settle()
+	await auto.idle()
+	assert.equal(calls.filter((c) => c === 'open').length, 1)
+	assert.equal(calls.filter((c) => c === 'start incremental').length, 1)
+})
+
+test('new commits are left alone with the setting off, or when no automatic review was submitted for the pull request', async () => {
+	const off = await reviewedBefore({ commits: () => false })
+	off.auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await off.auto.idle()
+	assert.deepEqual(off.calls, [])
+
+	const mine = await setup({ commits: () => true })
+	mine.auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await mine.auto.idle()
+	assert.deepEqual(mine.calls, [], 'you reviewed it yourself')
+})
+
+test('new commits that cannot be reviewed incrementally are skipped with the reason, and later pushes are still followed', async () => {
+	let head = 'h2'
+	const s = await reviewedBefore({}, () => head)
+	const { auto, calls, records } = s
+	s.auto['d'].startIncremental = async () => {
+		calls.push('start incremental')
+		return { refused: 'Every file changed since the run on h1.' }
+	}
+	auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await auto.idle()
+	assert.ok(!calls.includes('start'), 'never falls back to a full run')
+	assert.equal(records[0].outcome, 'skipped')
+	assert.match(records[0].message, /Every file changed since the run on h1/)
+
+	head = 'h3'
+	auto.take([event({ head: 'h3', reviewed: true }, 'updated')])
+	await settle()
+	await auto.idle()
+	assert.equal(calls.filter((c) => c === 'start incremental').length, 2)
+})
+
+test('verdict: an incremental run says which commits it covered and how many files carried over', () => {
+	const r = {
+		...run([]),
+		carriedFrom: { runId: 'run0', reviewId: 'b..h0', headSha: 'abcdef123' },
+		coverage: {
+			files: [
+				{ fileKey: 'a.ts', state: 'reviewed' },
+				{ fileKey: 'b.ts', state: 'carried' },
+				{ fileKey: 'c.ts', state: 'carried' },
+			],
+		},
+	} as unknown as AiRun
+	const v = autoVerdict(r, review(), [r], 0, who, green)
+	assert.match(v.body, /commits since abcdef1.*2 files and their findings carry over/s)
 })

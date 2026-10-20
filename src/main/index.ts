@@ -197,6 +197,10 @@ function registerIpc(): void {
 		void watcher.check()
 		return github.status()
 	})
+	handle(IPC.githubSetAutoReviewCommits, async (enabled: unknown) => {
+		await github.setAutoReviewCommits(bool(enabled, 'automatic review of new commits'))
+		return github.status()
+	})
 	handle(IPC.githubTestNotification, async () => {
 		await present(
 			new Notification({
@@ -593,6 +597,7 @@ app.whenReady().then(async () => {
 	autoReviewer = new AutoReviewer({
 		store,
 		enabled: () => github.autoReview,
+		commits: () => github.autoReviewCommits,
 		viewer: () => github.status().login,
 		reviewer: () => {
 			const v = connections.view()
@@ -608,6 +613,7 @@ app.whenReady().then(async () => {
 		whenDone: (runId) => ai.whenDone(runId),
 		open: (repoId, pr, signal) => service.openInBackground(repoId, pr, signal),
 		start: (reviewId, choice, label) => service.startAutoAi(reviewId, choice, label),
+		startIncremental: (reviewId, choice, label) => service.startAutoIncremental(reviewId, choice, label),
 		budgetReached: () => {
 			// Only when you set a budget; a reviewer that can't be resolved is left to the review to report, as before.
 			if (!hasBudgets(connections.budgets())) return null

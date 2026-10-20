@@ -571,8 +571,25 @@ export class ReviewService {
 	}
 
 	/**
+	 * Starts an automatic review's run on new commits: only the files whose diff changed since the newest finished run,
+	 * carrying that run's results for the rest. Returns why not when nothing can be carried or nothing changed.
+	 */
+	async startAutoIncremental(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun | { refused: string }> {
+		const plan = await this.incrementalPlan(reviewId, choice)
+		if (!plan) return { refused: 'There is no earlier run to build on.' }
+		if (plan.offer.refused !== null) return { refused: plan.offer.refused }
+		if (!plan.offer.review.length) return { refused: `No file's diff changed since ${plan.offer.from.headSha.slice(0, 7)}.` }
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.start(access, reviewId, { kind: 'files', fileKeys: plan.offer.review }, choice, {
+			background: label,
+			carried: { from: plan.offer.from, files: plan.files, findings: plan.findings, recheck: plan.offer.recheck },
+		})
+	}
+
+	/**
 	 * Adds a finished automatic run's findings at `levels` to the stored review as comments and returns their ids. They
-	 * are kept through the window's saves until it has seen them, so a review open on screen can't drop them.
+	 * are kept through the window's saves until it has seen them, so a review open on screen can't drop them. Carried
+	 * findings are left out: the earlier review already posted them, or left them for a person on purpose.
 	 */
 	async addAutoFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>> {
 		let ids: Array<string> = []
@@ -583,7 +600,14 @@ export class ReviewService {
 			const run = runs.find((x) => x.id === runId)
 			if (!r || !run) return
 			// Nobody reads these before they go out: a finding whose text needs a person stays in the app.
-			const res = autoAddFindings(r, run, runs, findingRoots(runs), levels, (f) => screenFinding(f, r.pr?.repo ?? null).length > 0)
+			const res = autoAddFindings(
+				r,
+				run,
+				runs,
+				findingRoots(runs),
+				levels,
+				(f) => !!f.carried || screenFinding(f, r.pr?.repo ?? null).length > 0,
+			)
 			if (!res.added) return
 			r.comments = res.review.comments
 			r.findingDecisions = res.review.findingDecisions
