@@ -30,6 +30,13 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 400_000, maxOutputTokens: 128_000, price: price(0.1, 0.01, 0.5, 0.125) },
 	],
 	anthropic: [
+		{
+			id: 'claude-fable-5-1',
+			label: 'Claude Fable 5.1',
+			contextWindow: 1_000_000,
+			maxOutputTokens: 128_000,
+			price: price(10, 0.25, 50, 12.5),
+		},
 		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: price(4, 0.2, 20, 5) },
 		{
 			id: 'claude-sonnet-5-5',
@@ -71,6 +78,28 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		},
 	],
 	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000, price: price(0, 0, 0) }],
+}
+
+// What gateways add to a model's name: effort ("-high"), thinking, and context size ("-500k").
+const VARIANT = /-(?:none|minimal|low|medium|high|xhigh|max|thinking|\d+k)$/
+
+/** The model's own name, without a gateway's provider prefix or variant suffix; dots and dashes compare equal. */
+function bareName(id: string): string {
+	let s = id.slice(id.lastIndexOf('/') + 1).toLowerCase()
+	while (VARIANT.test(s)) s = s.replace(VARIANT, '')
+	return s.replace(/\./g, '-')
+}
+
+/** The catalog model a gateway's model is named after, of any provider; null when none matches exactly. */
+export function catalogMatch(id: string | null): { id: string; price: ModelPrice } | null {
+	if (!id) return null
+	const name = bareName(id)
+	for (const [kind, models] of Object.entries(MODEL_CATALOG)) {
+		if (kind === 'fixture') continue
+		const m = models.find((x) => x.price && bareName(x.id) === name)
+		if (m) return { id: m.id, price: m.price! }
+	}
+	return null
 }
 
 const LOCAL_PRESETS: Array<EndpointPreset> = [

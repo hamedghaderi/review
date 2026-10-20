@@ -508,6 +508,10 @@ const PRICE_SOURCE: Record<NonNullable<ModelView['price']>['source'], string> = 
 	local: 'local server, free',
 }
 
+function priceSource(p: NonNullable<ModelView['price']>): string {
+	return p.listedAs ? `list price of ${p.listedAs}, which it is named after; from the catalog, may be out of date` : PRICE_SOURCE[p.source]
+}
+
 /** "$2 / $10": dollars per million input and output tokens. */
 function shortPrice(p: ModelPrice): string {
 	if (p.input === 0 && p.output === 0) return 'Free'
@@ -543,7 +547,7 @@ function PriceEditor({
 			<div className="small">
 				Price for <span className="mono">{m.id}</span>, in US dollars per million tokens.{' '}
 				<span className="muted">
-					{m.price ? `Now: ${PRICE_SOURCE[m.price.source]}.` : 'No price is known for this model.'} Runs keep the price they started with.
+					{m.price ? `Now: ${priceSource(m.price)}.` : 'No price is known for this model.'} Runs keep the price they started with.
 				</span>
 			</div>
 			<div className="price-fields">
@@ -727,7 +731,7 @@ function ConnectionDetail({
 							className={`btn small ghost nowrap${m.price ? '' : ' muted'}`}
 							title={
 								m.price
-									? `${formatPrice(m.price)} (${PRICE_SOURCE[m.price.source]}). Click to change.`
+									? `${formatPrice(m.price)} (${priceSource(m.price)}). Click to change.`
 									: 'No price known, so runs on this model show no cost. Click to set one.'
 							}
 							aria-expanded={pricing === m.id}

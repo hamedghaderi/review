@@ -36,6 +36,7 @@ export interface DiscoveredModel {
 	maxOutputTokens: number | null
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	price?: ModelPrice | null // what the provider's listing says the model costs (OpenRouter)
+	root?: string | null // the model a gateway routes this one to, when its listing says (OmniRoute)
 }
 
 /** What a provider can tell us about its limits for one model, used to size review batches. */
