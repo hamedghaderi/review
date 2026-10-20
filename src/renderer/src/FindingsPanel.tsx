@@ -514,6 +514,18 @@ function RunSummary({
 				{run.merged ? ` · ${run.merged.findings} grouped with another as the same problem` : ''}
 				{run.rejected.length ? ` · ${run.rejected.length} rejected by validation` : ''}
 			</div>
+			{(run.rechecked ?? []).length > 0 && (
+				<div className="small">
+					<b>Reviewed again, diff unchanged:</b>{' '}
+					{run.rechecked!.map((r, i) => (
+						<span key={r.fileKey}>
+							{i ? '; ' : ''}
+							<span className="mono">{r.fileKey}</span> uses {r.names.map((n) => `\`${n}\``).join(', ')}, changed in{' '}
+							<span className="mono">{r.changedIn.join(', ')}</span>
+						</span>
+					))}
+				</div>
+			)}
 			<TeamStatus run={run} />
 			<Checked run={run} onRetry={onRetryRules} />
 			{(run.ciUncovered ?? []).length > 0 && (

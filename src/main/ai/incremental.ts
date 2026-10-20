@@ -7,10 +7,16 @@ import {
 	type FileCoverage,
 	type Finding,
 	type FindingLevel,
+	IDENT,
+	type PatchResult,
+	type RecheckedFile,
 	type Review,
 	type ReviewRule,
 } from '../../shared/types.ts'
 import { findingDecision, findingLink, findingRoots } from '../../shared/findings.ts'
+import { NOT_NAMES } from '../symbols.ts'
+import type { ContextFact, FileSource } from './context.ts'
+import { wantedNames } from './related.ts'
 
 /**
  * Incremental runs: after new commits, a run reviews only the files whose diff changed since the newest finished run of
@@ -131,4 +137,42 @@ export function carryFindings(
 			carried: { from: f.carried?.from ?? origin, decision: findingDecision(review, f, byId), comment: linked },
 		}
 	})
+}
+
+/**
+ * Carried files to review again because their added lines use a name whose definition changed since the earlier run:
+ * edited or removed in `since`, each file's diff between the earlier run's head and this one. A name the change only
+ * adds can't break code written before it, and an edited body is left to related code, or every caller would go.
+ */
+export function usersOfChangedNames(
+	since: Array<FileSource>,
+	carried: Array<{ fileKey: string; patch: PatchResult }>,
+): Array<RecheckedFile> {
+	const changed = new Map<string, Set<string>>() // name → files that changed its definition
+	for (const [name, d] of wantedNames(since).defined)
+		if ((d.kind === 'signature' || d.kind === 'removed') && name.length >= 3 && !NOT_NAMES.has(name)) changed.set(name, d.fileKeys)
+	if (!changed.size) return []
+	const out: Array<RecheckedFile> = []
+	for (const { fileKey, patch } of carried) {
+		if (patch.kind !== 'text') continue
+		const names = new Set<string>()
+		for (const h of patch.hunks)
+			for (const l of h.lines) if (l.kind === 'add') for (const n of l.text.match(IDENT) ?? []) if (changed.has(n)) names.add(n)
+		if (!names.size) continue
+		const sorted = [...names].sort()
+		const changedIn = [...new Set(sorted.flatMap((n) => [...changed.get(n)!]))].filter((k) => k !== fileKey).sort()
+		if (changedIn.length) out.push({ fileKey, names: sorted, changedIn })
+	}
+	return out
+}
+
+/** Tells the reviewer why an unchanged file is in the request, so it checks the uses against the new definitions. */
+export function recheckFacts(rechecked: Array<RecheckedFile>, from: CarriedRun | null): Array<ContextFact> {
+	const at = from ? ` since the run on ${from.headSha.slice(0, 7)}` : ''
+	return rechecked.map((r) => ({
+		kind: 'structure' as const,
+		title: `Why ${r.fileKey} is reviewed again`,
+		text: `Its diff has not changed${at}, but its added lines use ${r.names.map((n) => `\`${n}\``).join(', ')}, whose definition changed${at} in ${r.changedIn.join(', ')}. Check those uses against the definitions as they are now.`,
+		fileKeys: [r.fileKey],
+	}))
 }

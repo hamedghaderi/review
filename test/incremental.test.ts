@@ -51,9 +51,11 @@ async function setup() {
 	await store.load()
 	const svc = new ReviewService(store, null)
 	const sent: Array<Array<string>> = []
+	const inputs: Array<string> = []
 	const provider = createFakeProvider({
 		script: (req) => {
 			if (!req.schema) sent.push(req.batch.excerpts.map((e) => e.file.key))
+			if (!req.schema) inputs.push(req.input)
 			return defaultScript(req)
 		},
 	})
@@ -67,7 +69,7 @@ async function setup() {
 	const ai = new AiController(store, config, () => {})
 	svc.attachAi(ai)
 	const s = await svc.open(w.dir)
-	return { w, store, svc, ai, sent, repoId: s.repo.id }
+	return { w, store, svc, ai, sent, inputs, repoId: s.repo.id }
 }
 
 async function finished(ai: AiController, run: AiRun): Promise<AiRun> {
@@ -207,4 +209,42 @@ test('a file the earlier run did not review fully, or did not review at all, is 
 	assert.ok(offer && offer.refused === null)
 	assert.deepEqual(offer.review.sort(), ['a.ts', 'c.ts'], 'c.ts was outside the earlier run, so it was never reviewed')
 	assert.deepEqual(offer.carry, ['b.ts'])
+})
+
+test('an unchanged file whose added lines use a name whose definition changed is reviewed again; an edited body is not enough', async () => {
+	const { w, svc, ai, inputs, repoId } = await setup()
+	const lib = (sig: string, body: string) => `export function computeTotal(${sig}) {\n  return ${body}\n}\n`
+	const caller = '// b\nimport { computeTotal } from "./a"\nexport const total = computeTotal(1, 2)\n'
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'a.ts': lib('a, b', 'a + b'), 'b.ts': caller }, 'v1 uses computeTotal')
+	w.run('checkout', '-q', 'main')
+	const v1 = await svc.loadComparison(repoId, { kind: 'target', target })
+	await finished(ai, await svc.startAi(v1.comparison.id, { kind: 'all' }, MODEL))
+
+	// Only the body changes: callers can't break, so b.ts carries.
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'a.ts': lib('a, b', 'b + a') }, 'v2 body')
+	w.run('checkout', '-q', 'main')
+	const v2 = await svc.loadComparison(repoId, { kind: 'target', target, from: v1.comparison.id })
+	const body = await svc.incrementalOffer(v2.comparison.id, MODEL)
+	assert.ok(body && body.refused === null)
+	assert.deepEqual(body.review, ['a.ts'])
+	assert.deepEqual(body.recheck, [])
+
+	// The signature changes: b.ts calls it on an added line, so it is reviewed again and told why.
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'a.ts': lib('items', 'items.length') }, 'v3 signature')
+	w.run('checkout', '-q', 'main')
+	const v3 = await svc.loadComparison(repoId, { kind: 'target', target, from: v1.comparison.id })
+	const sig = await svc.incrementalOffer(v3.comparison.id, MODEL)
+	assert.ok(sig && sig.refused === null)
+	assert.deepEqual(sig.review, ['a.ts', 'b.ts'])
+	assert.deepEqual(sig.carry, ['c.ts'])
+	assert.deepEqual(sig.recheck, [{ fileKey: 'b.ts', names: ['computeTotal'], changedIn: ['a.ts'] }])
+	inputs.length = 0
+	const run = await finished(ai, await svc.startAi(v3.comparison.id, { kind: 'changed' }, MODEL))
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.equal(run.coverage.files.find((f) => f.fileKey === 'b.ts')?.state, 'reviewed')
+	assert.deepEqual(run.rechecked, sig.recheck)
+	assert.match(inputs.join('\n'), /added lines use `computeTotal`, whose definition changed since the run on \w{7} in a\.ts/)
 })

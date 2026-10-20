@@ -5,6 +5,7 @@ import {
 	type AiScope,
 	type AiUsage,
 	type CarriedRun,
+	type RecheckedFile,
 	type Comparison,
 	type Discussion,
 	type FileCoverage,
@@ -34,6 +35,7 @@ import { buildEvidence, supportFor, uncoveredCi, type EvidenceIndex } from './ev
 import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts'
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
+import { recheckFacts } from './incremental.ts'
 import { importFacts, importSummary } from './imports.ts'
 import type { FactsResult } from './facts.ts'
 import {
@@ -118,7 +120,7 @@ export interface RunInput {
 	 */
 	retry?: { run: AiRun; rules: Array<ReviewRule>; providers: ReadonlyMap<string | null, ReviewProvider> }
 	/** An incremental run: the files not sent because an earlier run reviewed the same diff, and that run's findings on them. */
-	carried?: { from: CarriedRun; files: Array<FileCoverage>; findings: Array<Finding> } | null
+	carried?: { from: CarriedRun; files: Array<FileCoverage>; findings: Array<Finding>; recheck?: Array<RecheckedFile> } | null
 }
 
 export interface RunHandle {
@@ -191,6 +193,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				levels,
 				earlier: input.earlier ?? null,
 				...(input.carried ? { carriedFrom: input.carried.from } : {}),
+				...(input.carried?.recheck?.length ? { rechecked: input.carried.recheck } : {}),
 			}
 	const description = input.comparison.pr?.body?.trim() || null
 	const images = input.images ?? []
@@ -349,7 +352,13 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 			const told = decisionFacts(input.decisions ?? [], sources)
 			const leads = earlierFacts(input.earlier ?? null, sources)
-			const allFacts = [...(facts?.facts ?? []), ...importFacts(related?.importers ?? []), ...told, ...leads]
+			const allFacts = [
+				...(facts?.facts ?? []),
+				...importFacts(related?.importers ?? []),
+				...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
+				...told,
+				...leads,
+			]
 			const risk = classifyRisk(sources, related)
 			evidence = buildEvidence(sources, facts?.annotations ?? [], related ? related.importers : null)
 			const prepared = prepareChange(sources, tight.limits, allFacts)
@@ -461,6 +470,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const allFacts = [
 			...(facts?.facts ?? []),
 			...importFacts(related?.importers ?? []),
+			...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
 			...decisionFacts(input.decisions ?? [], sources),
 			...earlierFacts(input.earlier ?? null, sources),
 		]
