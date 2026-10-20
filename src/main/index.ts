@@ -16,6 +16,7 @@ import {
 import { IPC, type AppUpdate, type InboxOpen, type Result } from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
+import { UsageLog } from './ai/usage.ts'
 import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
@@ -62,6 +63,7 @@ import {
 	reviewRules,
 	reviewTeam,
 	str,
+	usagePeriod,
 } from './validate.ts'
 
 let win: BrowserWindow | null = null
@@ -75,6 +77,7 @@ let github: GitHubService
 let watcher: InboxWatcher
 let autoReviewer: AutoReviewer
 let giphy: GiphyService
+let usage: UsageLog
 let quitting = false
 // How old a connection's model list may be before it is re-listed in the background, and when the model picker opens.
 const MODELS_MAX_AGE_MS = 5 * 60_000
@@ -407,6 +410,7 @@ function registerIpc(): void {
 	handle(IPC.aiSetModelPrice, (id: unknown, m: unknown, price: unknown) =>
 		view(() => connections.setModelPrice(connectionId(id), modelId(m), modelPrice(price))),
 	)
+	handle(IPC.aiUsage, async (by: unknown) => usage.summary(usagePeriod(by)))
 	handle(IPC.aiSelectModel, (sel: unknown) => view(() => connections.select(modelSelection(sel))))
 	handle(IPC.aiSelectAskModel, (sel: unknown) => view(() => connections.selectAskModel(modelSelection(sel))))
 	handle(IPC.aiSetLimits, (limits: unknown) => view(() => connections.setLimits(reviewLimits(limits))))
@@ -475,7 +479,7 @@ function createWindow(): void {
 			flushed = true
 			void ai
 				.flush()
-				.then(() => Promise.all([store.flush(), connections.flush(), credentials.flush(), github.flush()]))
+				.then(() => Promise.all([store.flush(), connections.flush(), credentials.flush(), github.flush(), usage.flush()]))
 				.finally(() => (quitting ? app.quit() : w.close()))
 		}
 		const onDone = (ev: Electron.IpcMainEvent): void => {
@@ -555,6 +559,9 @@ app.whenReady().then(async () => {
 	await ai.recoverInterrupted()
 	ai.attachTeams((id) => connections.team(id))
 	ai.attachLevels(() => connections.view().levels.enabled)
+	usage = new UsageLog(dir)
+	await usage.load()
+	ai.attachUsage(usage)
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()

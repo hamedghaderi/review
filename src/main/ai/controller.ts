@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { basename } from 'node:path'
 import {
 	BUGS_ONLY_RULES,
 	DEFAULT_TEAM_ROLES,
@@ -22,6 +23,7 @@ import {
 	type EarlierLimitations,
 	type ReviewContext,
 	type FindingLevel,
+	type UsageKind,
 	REVIEW_RULES,
 } from '../../shared/types.ts'
 import type { PersonaId } from '../../shared/personas.ts'
@@ -42,6 +44,7 @@ import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
 import { outputBudget } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
+import type { UsageLog } from './usage.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
@@ -85,6 +88,7 @@ export class AiController {
 		null
 	private teams: TeamSource | null = null
 	private levels: (() => Array<FindingLevel>) | null = null
+	private usage: UsageLog | null = null
 	private onDemandBusy = new Set<string>() // "verify:<finding id>" and "test:<finding id>" requests under way
 	private starting = false
 	private store: ReviewStore
@@ -127,6 +131,25 @@ export class AiController {
 
 	attachLevels(levels: () => Array<FindingLevel>): void {
 		this.levels = levels
+	}
+
+	attachUsage(usage: UsageLog): void {
+		this.usage = usage
+	}
+
+	/** A fixed configuration whose provider books every response to the usage history. */
+	private async configFor(selection: ModelSelection, kind: UsageKind, repoId: string): Promise<RunConfig> {
+		const config = await this.resolveRun(selection)
+		if (!this.usage) return config
+		const repo = this.store.read().repos[repoId]
+		const ctx = {
+			kind,
+			repoId,
+			repo: repo?.githubResolved ?? (repo ? basename(repo.root) : null),
+			connectionId: config.connectionId,
+			connection: config.connectionLabel,
+		}
+		return { ...config, provider: this.usage.meter(config.provider, ctx) }
 	}
 
 	/**
@@ -208,7 +231,7 @@ export class AiController {
 		} | null = null
 		try {
 			if (reviewer.kind === 'model') {
-				config = await this.resolveRun(reviewer.selection)
+				config = await this.configFor(reviewer.selection, 'review', access.comparison.repoId)
 				const roles = passRoles(reviewer)
 				const only = reviewer.bugsOnly ? BUGS_ONLY_RULES : null
 				if (roles.length)
@@ -236,7 +259,7 @@ export class AiController {
 							role: m.role,
 							rules: m.rules,
 							persona: m.persona ?? null,
-							config: await this.resolveRun({ connectionId: m.connectionId, modelId: m.modelId }),
+							config: await this.configFor({ connectionId: m.connectionId, modelId: m.modelId }, 'review', access.comparison.repoId),
 						})
 					} catch (e) {
 						throw new AppFail('ai-unavailable', `${m.role}: ${e instanceof Error ? e.message : String(e)}`)
@@ -330,7 +353,7 @@ export class AiController {
 		try {
 			for (const [id, selection] of owners) {
 				try {
-					configs.set(id, await this.resolveRun(selection))
+					configs.set(id, await this.configFor(selection, 'review', comparison.repoId))
 				} catch (e) {
 					const role = id ? run.team?.members.find((m) => m.id === id)?.role : null
 					const message = e instanceof Error ? e.message : String(e)
@@ -385,7 +408,7 @@ export class AiController {
 		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
 		let config: RunConfig
 		try {
-			config = await this.resolveRun({ connectionId, modelId })
+			config = await this.configFor({ connectionId, modelId }, 'question', repoId)
 		} catch (e) {
 			throw new AppFail(
 				'ai-unavailable',
@@ -529,7 +552,7 @@ export class AiController {
 		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
 		let config: RunConfig
 		try {
-			config = await this.resolveRun({ connectionId, modelId })
+			config = await this.configFor({ connectionId, modelId }, kind, repoId)
 		} catch (e) {
 			throw new AppFail('ai-unavailable', `The model (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`)
 		}
@@ -600,7 +623,7 @@ export class AiController {
 			throw new AppFail('invalid-input', 'This conversation is full. Select the lines again to start a new one.')
 		let config: RunConfig
 		try {
-			config = await this.resolveRun(selection)
+			config = await this.configFor(selection, 'explain', repoId)
 		} catch (e) {
 			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
 		}

@@ -15,6 +15,7 @@ import type {
 import { sourceLabel, sourceTitle } from './ModelPicker.tsx'
 import { suggestTeam, TeamEditor } from './TeamEditor.tsx'
 import { McpImport, McpServerEditor } from './McpSettings.tsx'
+import { UsageSettings } from './UsageSettings.tsx'
 import { FINDING_LEVELS, type FindingLevel, type FindingLevelSettings, type ReviewTeam } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
 import { formatPrice } from '../../shared/cost.ts'
@@ -48,7 +49,13 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 	)
 	const [error, setError] = useState<string | null>(null)
 	const [mcp, setMcp] = useState<McpSettingsView | null>(null)
-	const [mcpPane, setMcpPane] = useState<{ kind: 'server'; id: string } | { kind: 'new' } | { kind: 'import' } | null>(null)
+	const [mcpPane, setMcpPaneOnly] = useState<{ kind: 'server'; id: string } | { kind: 'new' } | { kind: 'import' } | null>(null)
+	const [usage, setUsage] = useState(false)
+	// Every other pane is opened through this, so it also closes Usage.
+	const setMcpPane = (pane: typeof mcpPane): void => {
+		setUsage(false)
+		setMcpPaneOnly(pane)
+	}
 	const dialog = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
@@ -120,7 +127,7 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						{settings.connections.map((c) => (
 							<button
 								key={c.id}
-								className={`conn-item ${c.id === selectedId && !adding && !editingTeam && !mcpPane ? 'on' : ''}`}
+								className={`conn-item ${c.id === selectedId && !adding && !editingTeam && !mcpPane && !usage ? 'on' : ''}`}
 								onClick={() => {
 									setAdding(null)
 									setEditingTeam(null)
@@ -133,6 +140,18 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 								<span className="muted small nowrap">{STATUS_TEXT[c.status]}</span>
 							</button>
 						))}
+						<button
+							className={`conn-item ${usage ? 'on' : ''}`}
+							onClick={() => {
+								setAdding(null)
+								setEditingTeam(null)
+								setMcpPane(null)
+								setUsage(true)
+							}}
+							title="Tokens and cost of every AI request"
+						>
+							<span className="ellipsis">Usage</span>
+						</button>
 						<div className="section-title add-title">Add provider</div>
 						{settings.providers.flatMap((p) => {
 							const exists = !p.multiple && settings.connections.some((c) => c.kind === p.kind)
@@ -228,7 +247,9 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						<div className="app-version muted small selectable">Review {__APP_VERSION__}</div>
 					</nav>
 					<section className="settings-main">
-						{mcpPane?.kind === 'import' ? (
+						{usage ? (
+							<UsageSettings />
+						) : mcpPane?.kind === 'import' ? (
 							<McpImport repoId={repoId} run={mcpRun} onDone={() => setMcpPane(null)} />
 						) : mcpPane && (mcpPane.kind === 'new' || mcpServer) ? (
 							<McpServerEditor
@@ -494,7 +515,7 @@ function shortPrice(p: ModelPrice): string {
 	return `${n(p.input)} / ${n(p.output)}`
 }
 
-/** Your price for one model, in dollars per million tokens. Cache writes are billed as input. */
+/** Your price for one model, in dollars per million tokens. The cache-write price, which it doesn't ask for, is kept. */
 function PriceEditor({
 	model: m,
 	onSave,
@@ -515,7 +536,8 @@ function PriceEditor({
 			className="price-editor"
 			onSubmit={(e) => {
 				e.preventDefault()
-				if (valid) void onSave({ input: num(input)!, cachedInput: num(cached), cacheWrite: null, output: num(output)! })
+				if (valid)
+					void onSave({ input: num(input)!, cachedInput: num(cached), cacheWrite: m.price?.cacheWrite ?? null, output: num(output)! })
 			}}
 		>
 			<div className="small">

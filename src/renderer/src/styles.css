@@ -1952,6 +1952,24 @@ a.ic-state:hover {
 .model-row + .model-row {
 	border-top: 1px solid var(--border);
 }
+.usage-total {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	font-size: 15px;
+}
+.usage-total .muted {
+	font-size: 12px;
+}
+.usage-table th:first-child,
+.usage-table td:first-child {
+	width: 40%;
+}
+.usage-table .num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
 .price-editor {
 	display: flex;
 	flex-direction: column;

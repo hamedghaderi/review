@@ -1099,6 +1099,59 @@ export interface AiCost {
 	unpriced: boolean
 }
 
+// review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
+// verify and test: Verify and Write test on a finding.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test'
+
+/**
+ * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
+ * deleting a review keeps it. Never contains review content.
+ */
+export interface UsageRecord {
+	id: string
+	at: string // the first request
+	kind: UsageKind
+	repoId: string | null
+	repo: string | null // "owner/name", or the folder name
+	connectionId: string
+	connection: string
+	provider: ProviderKind
+	model: string
+	requests: number
+	unreported: number // requests the model answered without reporting usage, or that failed after it answered
+	usage: AiUsage | null
+	cost: AiCost
+}
+
+export interface UsageTotals {
+	requests: number
+	inputTokens: number
+	outputTokens: number
+	cost: AiCost
+	unreported: number
+}
+
+export type UsagePeriod = 'day' | 'month'
+
+/** Settings → AI providers → Usage: the last 30 days by day, or the last 12 months by month, in local time. */
+export interface UsageSummary {
+	by: UsagePeriod
+	periods: Array<{ key: string; totals: UsageTotals }> // every period in the window, newest first, empty ones included
+	total: UsageTotals
+	connections: Array<UsageGroup>
+	models: Array<UsageGroup>
+	repos: Array<UsageGroup>
+	kinds: Array<UsageGroup>
+	oldest: string | null // the oldest record kept
+}
+
+export interface UsageGroup {
+	key: string
+	label: string
+	detail: string | null // the connection, for models
+	totals: UsageTotals
+}
+
 export interface AiRun {
 	id: string
 	reviewId: string
@@ -1419,6 +1472,7 @@ export const IPC = {
 	aiRemoveModel: 'ai:model-remove',
 	aiProbeModel: 'ai:model-probe',
 	aiSetModelPrice: 'ai:model-price',
+	aiUsage: 'ai:usage',
 	aiSelectModel: 'ai:model-select',
 	aiSelectAskModel: 'ai:ask-model-select',
 	aiSetLimits: 'ai:limits-set',
@@ -1574,6 +1628,8 @@ export interface ReviewApi {
 	probeModel(connectionId: string, modelId: string): Promise<Result<AiSettingsView>>
 	/** Your price for a model, used instead of the catalog's or the provider's; null goes back to those. */
 	setModelPrice(connectionId: string, modelId: string, price: ModelPrice | null): Promise<Result<AiSettingsView>>
+	/** Tokens and cost of every AI request, from the usage history. */
+	aiUsage(by: UsagePeriod): Promise<Result<UsageSummary>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
 	selectAskModel(selection: ModelSelection): Promise<Result<AiSettingsView>>

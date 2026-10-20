@@ -21,6 +21,7 @@ import type {
 	NotificationPrefs,
 	ReviewLimits,
 	ReviewRule,
+	UsagePeriod,
 } from '../shared/types.ts'
 import { PERSONA_IDS } from '../shared/personas.ts'
 import { isImageType } from './contextImages.ts'
@@ -562,6 +563,10 @@ export function reviewLimits(v: unknown): ReviewLimits {
 		verify: o.verify === undefined ? true : bool(o.verify, 'double-check setting'),
 		groupDuplicates: o.groupDuplicates === undefined ? false : bool(o.groupDuplicates, 'group duplicates setting'),
 	}
+}
+
+export function usagePeriod(v: unknown): UsagePeriod {
+	return oneOf(v, ['day', 'month'], 'usage period')
 }
 
 /** Dollars per million tokens; null clears your price. */
