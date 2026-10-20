@@ -75,6 +75,8 @@ import { Publisher } from './publish.ts'
 import { carryComments } from './carry.ts'
 import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
+import { findImporters } from './ai/imports.ts'
+import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
 import { findSymbol } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
@@ -1247,6 +1249,26 @@ export class ReviewService {
 		return ai.ask(access, reviewId, findingId, question, model)
 	}
 
+	/** Up to two tests that import the changed file, read at the head commit, as examples for a test the AI writes. */
+	private async testExamples(data: ComparisonData, fileKey: string): Promise<Array<{ path: string; text: string }>> {
+		const file = data.comparison.files.find((f) => f.key === fileKey)
+		if (!file) return []
+		const [traced] = await findImporters(data.root, data.comparison.headSha, [{ file, patch: { kind: 'binary' }, fullText: null }])
+		const out: Array<{ path: string; text: string }> = []
+		for (const path of (traced?.tests ?? []).slice(0, 2)) {
+			const r = await readAt(data.root, data.comparison.headSha, path, MAX_EXAMPLE_CHARS * 4)
+			if (!r) continue
+			const text = r.buf.toString('utf8')
+			out.push({ path, text: text.length > MAX_EXAMPLE_CHARS ? `${text.slice(0, MAX_EXAMPLE_CHARS)}\n… (cut)` : text })
+		}
+		return out
+	}
+
+	async writeTest(reviewId: string, findingId: string, model: ModelSelection | null): Promise<AiRun> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.writeTest(access, reviewId, findingId, model)
+	}
+
 	async verifyFinding(reviewId: string, findingId: string, model: ModelSelection | null): Promise<AiRun> {
 		const { ai, access } = this.aiAccess(reviewId)
 		return ai.verify(access, reviewId, findingId, model)
@@ -1282,6 +1304,7 @@ export class ReviewService {
 				loadPatch: (key) => this.loadPatch(reviewId, key, false),
 				loadFileLines: (key) => this.loadFileLines(reviewId, key),
 				findRelated: (sources, signal) => findRelated(data.root, data.comparison.headSha, sources, signal),
+				testExamples: (fileKey) => this.testExamples(data, fileKey),
 				pastDecisions: () => this.pastDecisions(repoId, data.comparison),
 				earlierLimitations: () => this.earlierLimitations(repoId, data.comparison),
 				tools: (budget, external) =>

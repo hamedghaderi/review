@@ -11,6 +11,8 @@ import {
 	type FileLinesResult,
 	type FindingMessage,
 	type FindingVerification,
+	type FindingReproducer,
+	type Finding,
 	type ModelSelection,
 	type PatchResult,
 	type ReviewerChoice,
@@ -34,11 +36,12 @@ import { DEFAULT_LEVELS, PROMPT_VERSION } from './prompt.ts'
 import type { ReviewerPrint } from './incremental.ts'
 import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer } from './ask.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
+import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
 import { capacityChars } from './context.ts'
 import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
 import { outputBudget } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
-import type { RequestImage } from './provider.ts'
+import type { ProviderRequest, RequestImage } from './provider.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
@@ -57,6 +60,8 @@ export interface ComparisonAccess {
 	reviewContext?(): ReviewContext | null
 	/** The images in that context, read from disk when the run starts. */
 	contextImages?(): Promise<Array<RequestImage>>
+	/** Existing tests that import a changed file, at the head commit, to write a new test in their style. */
+	testExamples?(fileKey: string): Promise<Array<{ path: string; text: string }>>
 	/** Findings the reviewer dismissed on earlier runs of this pull request or branch, newest first. */
 	pastDecisions?(): Array<PastDecision>
 	/** What the newest finished run of this pull request or branch could not settle. */
@@ -80,7 +85,7 @@ export class AiController {
 		null
 	private teams: TeamSource | null = null
 	private levels: (() => Array<FindingLevel>) | null = null
-	private verifying = new Set<string>() // finding ids being checked on demand
+	private onDemandBusy = new Set<string>() // "verify:<finding id>" and "test:<finding id>" requests under way
 	private starting = false
 	private store: ReviewStore
 	private resolveRun: RunConfigSource
@@ -421,18 +426,103 @@ export class AiController {
 
 	/**
 	 * Double-checks one finding of any level on demand: the request the run sends for blocking findings, with the code
-	 * around it rebuilt from the diff, as Ask AI reads it. The model you picked for questions checks it, else the one
-	 * that raised it. Lookups follow the run's setting; MCP tools are never offered, because whether the run's text came
-	 * from outsiders (which turns them off) is not stored. The verdict replaces the one shown; earlier ones are kept.
+	 * around it rebuilt from the diff, as Ask AI reads it. The verdict replaces the one shown; earlier ones are kept.
 	 */
-	async verify(access: ComparisonAccess, reviewId: string, findingId: string, picked: ModelSelection | null = null): Promise<AiRun> {
+	verify(access: ComparisonAccess, reviewId: string, findingId: string, picked: ModelSelection | null = null): Promise<AiRun> {
+		return this.onDemand(
+			access,
+			reviewId,
+			findingId,
+			picked,
+			'verify',
+			async (c): Promise<FindingVerification> => {
+				const who = { model: c.modelId, memberId: c.memberId, onDemand: true }
+				try {
+					const tools = c.tools(buildVerifyRequest(c.finding, null, [], undefined, c.around))
+					const response = await c.config.provider.review(
+						buildVerifyRequest(c.finding, null, [], tools, c.around),
+						AbortSignal.timeout(300_000),
+					)
+					return { ...parseVerification(response.output), ...who }
+				} catch (e) {
+					const why = e instanceof Error ? e.message : String(e)
+					return { verdict: 'unsure', reason: `Not double-checked: ${why}`, level: null, checked: [], ...who, error: true }
+				}
+			},
+			(f, result) => {
+				const prev = f.verification
+				const earlier = prev ? [(({ earlier: _, ...x }) => x)(prev), ...(prev.earlier ?? [])].slice(0, MAX_EARLIER_CHECKS) : []
+				f.verification = { ...result, ...(earlier.length ? { earlier } : {}) }
+			},
+		)
+	}
+
+	/**
+	 * Writes a test that should fail on the head commit while the finding holds, in the style of the tests that import
+	 * its file. It replaces the one shown. The test is only stored on the finding: nothing is written to disk or run.
+	 */
+	writeTest(access: ComparisonAccess, reviewId: string, findingId: string, picked: ModelSelection | null = null): Promise<AiRun> {
+		return this.onDemand(
+			access,
+			reviewId,
+			findingId,
+			picked,
+			'test',
+			async (c): Promise<FindingReproducer> => {
+				const at = new Date().toISOString()
+				try {
+					const examples = (await access.testExamples?.(c.finding.anchor.fileKey).catch(() => [])) ?? []
+					const tools = c.tools(buildReproducerRequest(c.finding, c.around, examples, undefined))
+					const response = await c.config.provider.review(
+						buildReproducerRequest(c.finding, c.around, examples, tools),
+						AbortSignal.timeout(300_000),
+					)
+					return { ...parseReproducer(response.output), model: c.modelId, at }
+				} catch (e) {
+					const why = e instanceof Error ? e.message : String(e)
+					return { path: null, code: null, asserts: `No test written: ${why}`, model: c.modelId, at, error: true }
+				}
+			},
+			(f, result) => {
+				f.reproducer = result
+			},
+		)
+	}
+
+	/**
+	 * Sends one request about a finding of a finished run and saves its result on the finding. The model you picked for
+	 * questions answers, else the one that raised the finding. It gets the code around the finding and, when the run had
+	 * them, lookups; MCP tools are never offered, because whether the run's text came from outsiders (which turns them
+	 * off) is not stored.
+	 */
+	private async onDemand<T>(
+		access: ComparisonAccess,
+		reviewId: string,
+		findingId: string,
+		picked: ModelSelection | null,
+		kind: 'verify' | 'test',
+		ask: (c: {
+			finding: Finding
+			config: RunConfig
+			modelId: string
+			memberId: string | null
+			around: Array<string>
+			tools: (draft: ProviderRequest) => ReviewTools | undefined
+		}) => Promise<T>,
+		save: (f: Finding, result: T) => void,
+	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
 		const run = this.runsFor(repoId, reviewId).find((r) => r.findings.some((x) => x.id === findingId))
 		const finding = run?.findings.find((x) => x.id === findingId)
 		if (!run || !finding) throw new AppFail('not-found', 'That finding no longer exists.')
-		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish before verifying its findings.')
-		if (this.verifying.has(findingId)) throw new AppFail('ai-busy', 'This finding is already being checked.')
+		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish first.')
+		const busy = `${kind}:${findingId}`
+		if (this.onDemandBusy.has(busy))
+			throw new AppFail(
+				'ai-busy',
+				kind === 'verify' ? 'This finding is already being checked.' : 'A test for this finding is already being written.',
+			)
 		const member = finding.memberId ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
 		const connectionId = picked?.connectionId ?? member?.connectionId ?? run.connectionId
 		const modelId = picked?.modelId ?? member?.model ?? run.model
@@ -443,42 +533,39 @@ export class AiController {
 		} catch (e) {
 			throw new AppFail('ai-unavailable', `The model (${modelId}) is not available: ${e instanceof Error ? e.message : String(e)}`)
 		}
-		this.verifying.add(findingId)
-		let result: FindingVerification
+		this.onDemandBusy.add(busy)
+		let result: T
 		try {
 			const fileKey = finding.anchor.fileKey
-			const inChange = comparison.files.some((x) => x.key === fileKey)
+			const inChange = comparison.files.some((f) => f.key === fileKey)
 			const patch = inChange ? await access.loadPatch(fileKey).catch(() => null) : null
 			const lines = inChange && finding.anchor.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
-			const around = codeAround(finding, patch, lines?.kind === 'text' ? lines.lines : null)
-			const draft = buildVerifyRequest(finding, null, [], undefined, around)
 			const l = config.provider.limits
-			const room =
-				capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + JSON.stringify(TOOL_DEFINITIONS).length) -
-				draft.input.length
-			const tools =
-				run.limitsUsed?.lookups === true && access.tools && room >= 2000
-					? access.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) }, null)
-					: undefined
-			const who = { model: modelId, memberId: picked ? null : (member?.id ?? null), onDemand: true }
-			try {
-				const response = await config.provider.review(buildVerifyRequest(finding, null, [], tools, around), AbortSignal.timeout(300_000))
-				result = { ...parseVerification(response.output), ...who }
-			} catch (e) {
-				const why = e instanceof Error ? e.message : String(e)
-				result = { verdict: 'unsure', reason: `Not double-checked: ${why}`, level: null, checked: [], ...who, error: true }
-			}
+			result = await ask({
+				finding,
+				config,
+				modelId,
+				memberId: picked ? null : (member?.id ?? null),
+				around: codeAround(finding, patch, lines?.kind === 'text' ? lines.lines : null),
+				// Lookups get what the window has left after the request, never more than a high-risk review request gets.
+				tools: (draft) => {
+					const room =
+						capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + JSON.stringify(TOOL_DEFINITIONS).length) -
+						draft.input.length
+					return run.limitsUsed?.lookups === true && access.tools && room >= 2000
+						? access.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) }, null)
+						: undefined
+				},
+			})
 		} finally {
-			this.verifying.delete(findingId)
+			this.onDemandBusy.delete(busy)
 		}
 		let saved: AiRun | null = null
 		await this.store.update((d) => {
 			const r = d.repos[repoId]?.aiRuns?.[reviewId]?.find((x) => x.id === run.id)
 			const f = r?.findings.find((x) => x.id === findingId)
 			if (!r || !f) return
-			const prev = f.verification
-			const earlier = prev ? [(({ earlier: _, ...x }) => x)(prev), ...(prev.earlier ?? [])].slice(0, MAX_EARLIER_CHECKS) : []
-			f.verification = { ...result, ...(earlier.length ? { earlier } : {}) }
+			save(f, result)
 			saved = r
 		})
 		if (!saved) throw new AppFail('not-found', 'That finding no longer exists.')

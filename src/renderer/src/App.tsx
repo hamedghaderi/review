@@ -984,9 +984,11 @@ export function App() {
 		return null
 	}
 
-	const verifyFinding = async (f: Finding): Promise<string | null> => {
+	const verifyFinding = (f: Finding): Promise<string | null> => onFinding((id) => window.review.verifyFinding(id, f.id))
+	const writeFindingTest = (f: Finding): Promise<string | null> => onFinding((id) => window.review.writeFindingTest(id, f.id))
+	const onFinding = async (call: (comparisonId: string) => Promise<Result<AiRun>>): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
-		const r = await window.review.verifyFinding(comparison.id, f.id)
+		const r = await call(comparison.id)
 		if (!r.ok) return r.error.message
 		if (comparisonIdRef.current === r.value.reviewId) setAiRuns((runs) => runs.map((x) => (x.id === r.value.id ? r.value : x)))
 		return null
@@ -1844,6 +1846,7 @@ export function App() {
 											onAccept={acceptFinding}
 											onAsk={askFinding}
 											onVerify={verifyFinding}
+											onWriteTest={writeFindingTest}
 											askModelPicker={askModelPicker}
 											onDismiss={(f, reason) => {
 												change((r) => ops.setFindingDecision(r, f.id, 'dismissed', { reason }))

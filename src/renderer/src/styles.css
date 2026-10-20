@@ -3809,6 +3809,18 @@ button.stack-row:hover {
 	border-left-color: var(--warn-fg);
 	background: var(--warn-bg);
 }
+.finding-card .reproducer {
+	margin: 6px 0 0;
+}
+.finding-card .reproducer p {
+	margin: 4px 0;
+}
+.finding-card .reproducer pre {
+	max-height: 320px;
+	overflow: auto;
+	white-space: pre;
+	margin-bottom: 4px;
+}
 .finding-card.refuted .finding-title {
 	color: var(--text-2);
 }
