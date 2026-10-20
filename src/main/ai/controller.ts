@@ -14,6 +14,7 @@ import {
 	type FindingMessage,
 	type FindingVerification,
 	type FindingReproducer,
+	type GoneFinding,
 	type Finding,
 	type ModelSelection,
 	type PatchResult,
@@ -111,7 +112,7 @@ export class AiController {
 	private usage: UsageLog | null = null
 	private models: ModelSource | null = null
 	private budget: BudgetSource | null = null
-	private onDemandBusy = new Set<string>() // "verify:<finding id>" and "test:<finding id>" requests under way
+	private onDemandBusy = new Set<string>() // "verify:", "test:" and "check:<finding id>" requests under way
 	private starting = false
 	private store: ReviewStore
 	private resolveRun: RunConfigSource
@@ -576,6 +577,46 @@ export class AiController {
 	}
 
 	/**
+	 * Asks whether a finding of the earlier snapshot that run `runId` did not raise again is still in the code: the
+	 * double-check, told the code changed since and given the code about where the finding would be now. The model you
+	 * picked for questions answers, else the run's. The verdict is saved on the gone finding; nothing else changes.
+	 */
+	checkFixed(
+		access: ComparisonAccess,
+		reviewId: string,
+		runId: string,
+		findingId: string,
+		picked: ModelSelection | null = null,
+	): Promise<AiRun> {
+		const since = this.runsFor(access.comparison.repoId, reviewId).find((r) => r.id === runId)?.history?.from.headSha ?? null
+		return this.onDemand(
+			access,
+			reviewId,
+			findingId,
+			picked,
+			'verify',
+			async (c): Promise<FindingVerification> => {
+				const who = { model: c.modelId, memberId: null, onDemand: true }
+				try {
+					const tools = c.tools(buildVerifyRequest(c.finding, null, [], undefined, c.around, since))
+					const response = await c.config.provider.review(
+						buildVerifyRequest(c.finding, null, [], tools, c.around, since),
+						AbortSignal.timeout(300_000),
+					)
+					return { ...parseVerification(response.output), ...who }
+				} catch (e) {
+					const why = e instanceof Error ? e.message : String(e)
+					return { verdict: 'unsure', reason: `Not checked: ${why}`, level: null, checked: [], ...who, error: true }
+				}
+			},
+			(_, result, gone) => {
+				if (gone) gone.check = result
+			},
+			runId,
+		)
+	}
+
+	/**
 	 * Writes a test that should fail on the head commit while the finding holds, in the style of the tests that import
 	 * its file. It replaces the one shown. The test is only stored on the finding: nothing is written to disk or run.
 	 */
@@ -611,7 +652,8 @@ export class AiController {
 	 * Sends one request about a finding of a finished run and saves its result on the finding. The model you picked for
 	 * questions answers, else the one that raised the finding. It gets the code around the finding and, when the run had
 	 * them, lookups; MCP tools are never offered, because whether the run's text came from outsiders (which turns them
-	 * off) is not stored.
+	 * off) is not stored. `goneFrom`: the finding is one run `goneFrom` did not raise again (see FindingHistory), asked
+	 * about where it would be now; the run's model answers it, since the one that raised it ran on another snapshot.
 	 */
 	private async onDemand<T>(
 		access: ComparisonAccess,
@@ -627,21 +669,27 @@ export class AiController {
 			around: Array<string>
 			tools: (draft: ProviderRequest) => ReviewTools | undefined
 		}) => Promise<T>,
-		save: (f: Finding, result: T) => void,
+		save: (f: Finding, result: T, gone: GoneFinding | null) => void,
+		goneFrom: string | null = null,
 	): Promise<AiRun> {
 		const { comparison } = access
 		const repoId = comparison.repoId
-		const run = this.runsFor(repoId, reviewId).find((r) => r.findings.some((x) => x.id === findingId))
-		const finding = run?.findings.find((x) => x.id === findingId)
+		const goneIn = (r: AiRun | undefined) => (goneFrom ? r?.history?.gone.find((g) => g.finding.id === findingId) : undefined)
+		const runs = this.runsFor(repoId, reviewId)
+		const run = goneFrom ? runs.find((r) => r.id === goneFrom) : runs.find((r) => r.findings.some((x) => x.id === findingId))
+		const gone = goneIn(run)
+		const finding = goneFrom
+			? gone && { ...gone.finding, anchor: gone.at ?? gone.finding.anchor }
+			: run?.findings.find((x) => x.id === findingId)
 		if (!run || !finding) throw new AppFail('not-found', 'That finding no longer exists.')
 		if (run.status === 'running') throw new AppFail('ai-busy', 'Wait for this review run to finish first.')
-		const busy = `${kind}:${findingId}`
+		const busy = `${goneFrom ? 'check' : kind}:${findingId}`
 		if (this.onDemandBusy.has(busy))
 			throw new AppFail(
 				'ai-busy',
 				kind === 'verify' ? 'This finding is already being checked.' : 'A test for this finding is already being written.',
 			)
-		const member = finding.memberId ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
+		const member = finding.memberId && !goneFrom ? run.team?.members.find((m) => m.id === finding.memberId) : undefined
 		const connectionId = picked?.connectionId ?? member?.connectionId ?? run.connectionId
 		const modelId = picked?.modelId ?? member?.model ?? run.model
 		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding. Run the review again.')
@@ -681,9 +729,10 @@ export class AiController {
 		let saved: AiRun | null = null
 		await this.store.update((d) => {
 			const r = d.repos[repoId]?.aiRuns?.[reviewId]?.find((x) => x.id === run.id)
-			const f = r?.findings.find((x) => x.id === findingId)
+			const g = goneIn(r)
+			const f = goneFrom ? g?.finding : r?.findings.find((x) => x.id === findingId)
 			if (!r || !f) return
-			save(f, result)
+			save(f, result, g ?? null)
 			saved = r
 		})
 		if (!saved) throw new AppFail('not-found', 'That finding no longer exists.')

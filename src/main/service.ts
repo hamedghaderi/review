@@ -1321,6 +1321,12 @@ export class ReviewService {
 		return ai.verify(access, reviewId, findingId, model)
 	}
 
+	/** Asks whether a finding the newest run did not raise again is still in the code; see AiController.checkFixed. */
+	async checkFixed(reviewId: string, runId: string, findingId: string, model: ModelSelection | null): Promise<AiRun> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.checkFixed(access, reviewId, runId, findingId, model)
+	}
+
 	async askCode(
 		reviewId: string,
 		anchorInput: unknown,

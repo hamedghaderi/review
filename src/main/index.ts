@@ -374,6 +374,9 @@ function registerIpc(): void {
 	handle(IPC.aiVerify, (reviewId: unknown, findingId: unknown) =>
 		service.verifyFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), connections.pickedAskModel()),
 	)
+	handle(IPC.aiCheckFixed, (reviewId: unknown, runId: unknown, findingId: unknown) =>
+		service.checkFixed(comparisonId(reviewId), str(runId, 'run id', 64), str(findingId, 'finding id', 64), connections.pickedAskModel()),
+	)
 	handle(IPC.aiWriteTest, (reviewId: unknown, findingId: unknown) =>
 		service.writeTest(comparisonId(reviewId), str(findingId, 'finding id', 64), connections.pickedAskModel()),
 	)

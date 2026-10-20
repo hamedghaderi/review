@@ -142,7 +142,7 @@ export function traceFindings(run: AiRun, baseline: Baseline): { findings: Array
 					: b.changed
 						? ['fixed', b.changed]
 						: ['not-seen', 'Its lines did not change, but this run did not raise it again.']
-		gone.push({ finding: b.finding, state, why, decision: b.decision, comment: b.comment })
+		gone.push({ finding: b.finding, state, why, decision: b.decision, comment: b.comment, at: b.near })
 	}
 	return { findings, history: { from: baseline.from, baseMoved: baseline.baseMoved, rewritten: baseline.rewritten, gone } }
 }
