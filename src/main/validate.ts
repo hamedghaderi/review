@@ -104,7 +104,21 @@ export function reviewTarget(v: unknown): ReviewTarget {
 	const o = obj(v, 'review target')
 	if (o.kind === 'branch') return { kind: 'branch', headRef: branchRef(o.headRef), baseRef: branchRef(o.baseRef, 'base branch') }
 	if (o.kind === 'pr') return { kind: 'pr', repo: githubRepo(o.repo), number: prNumber(o.number) }
+	if (o.kind === 'commits')
+		return {
+			kind: 'commits',
+			from: revision(o.from, 'from commit'),
+			to: revision(o.to, 'to commit'),
+			mergeBase: bool(o.mergeBase, 'merge base'),
+		}
 	bad('review target')
+}
+
+/** Something git resolves to a commit: a SHA, `HEAD~3`, `main^`, a branch or tag. Never an option or a path. */
+function revision(v: unknown, what: string): string {
+	const s = str(v, what, 200)
+	if (s.startsWith('-') || !/^[^\0\s:\\]+$/.test(s)) bad(what)
+	return s
 }
 
 export function githubRepo(v: unknown): string {

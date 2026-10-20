@@ -74,7 +74,24 @@ export interface RepoInfo {
 }
 
 /** What a review compares. Both kinds feed the same comparison pipeline. */
-export type ReviewTarget = { kind: 'branch'; headRef: string; baseRef: string } | { kind: 'pr'; repo: string; number: number }
+// commits: `from..to`, or the merge base of the two to `to` (`from...to`). Stored as SHAs; when opening, anything git
+// resolves to a commit.
+export type ReviewTarget =
+	| { kind: 'branch'; headRef: string; baseRef: string }
+	| { kind: 'pr'; repo: string; number: number }
+	| { kind: 'commits'; from: string; to: string; mergeBase: boolean }
+
+/** "a1b2c3d..e4f5a6b" (or "..." for the merge base), as a commits review is labelled. */
+export function commitsLabel(t: Extract<ReviewTarget, { kind: 'commits' }>): string {
+	return `${t.from.slice(0, 7)}${t.mergeBase ? '...' : '..'}${t.to.slice(0, 7)}`
+}
+
+/** One key per thing a review follows: snapshots of the same key carry comments and context to each other. */
+export function targetKey(t: ReviewTarget): string {
+	if (t.kind === 'pr') return `pr:${t.repo.toLowerCase()}#${t.number}`
+	if (t.kind === 'commits') return `commits:${t.from}${t.mergeBase ? '...' : '..'}${t.to}`
+	return `branch:${t.headRef}|${t.baseRef}`
+}
 
 export type PrState = 'open' | 'draft' | 'merged' | 'closed'
 

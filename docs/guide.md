@@ -18,6 +18,17 @@ Read with `git for-each-ref` only; nothing is fetched. `main`, `origin/main` and
 
 The base picker is searchable. The default comes from the repository, not a hard-coded name: the remotes' `HEAD` targets (upstream first, then origin), then local branches of the same name, then `main`/`master`/`develop`/`trunk`. A review compares `merge-base(base, head)..head`. Missing refs, unrelated histories and shallow clones (where a merge base may just not be downloaded) are reported as such.
 
+### Commits
+
+To review commits that aren't a branch comparison, type them in Quick open (`⌘P`) the way git writes them and pick **Review these commits**:
+
+- a commit's SHA (at least 7 characters): that commit alone, compared with its parent;
+- `a..b`: what `b` has after `a`, for example `topic~3..topic` for the last three commits of a branch;
+- `a...b`: from the merge base of `a` and `b` to `b`, like a branch review;
+- either side left out means `HEAD`, so `HEAD~2..` is your last two commits.
+
+Anything git resolves to a commit works on either side (a SHA, a branch, a tag, `HEAD~3`, `main^`). The review stores the SHAs it resolved to, so it never changes and never offers an update; type the range again for newer commits. A range with the same two SHAs as a branch review opens that review. Commits reviews can't be published; the first commit of a repository has no parent to compare with.
+
 ### Pull requests (GitHub)
 
 Repositories are detected from HTTPS, SSH, scp-style and `git://` remotes. If remotes point at different GitHub repositories (fork `origin` plus `upstream`), `upstream` is used by default, and you can choose another one under the **GitHub** icon in the header (next to settings; a green dot means connected, red means the connection failed); the choice is saved per clone.

@@ -45,11 +45,13 @@ import type {
 	SymbolLookup,
 	TargetProbe,
 } from '../shared/types.ts'
+import { targetKey } from '../shared/types.ts'
 import {
 	aheadBehind,
 	AppFail,
 	cloneGitHub,
 	compareBranches,
+	compareCommits,
 	changesBetween,
 	compareSnapshot,
 	ensureCommits,
@@ -493,6 +495,9 @@ export class ReviewService {
 			} else if (target.target.kind === 'branch') {
 				const repo = await this.reread(repoId)
 				data = await compareBranches(repo, target.target.headRef, target.target.baseRef)
+			} else if (target.target.kind === 'commits') {
+				const t = target.target
+				data = await compareCommits(this.repo(repoId), t.from, t.to, t.mergeBase)
 			} else {
 				;({ data, notice } = await this.openPr(repoId, target.target, ctl.signal))
 			}
@@ -861,6 +866,8 @@ export class ReviewService {
 				const summary = head ? `New head ${d.headSha.slice(0, 7)}` : base ? `Retargeted to ${d.baseRef}` : null
 				return { repo: null, changed: head || base, summary, error: null }
 			}
+			// Pinned to the SHAs it was opened with: there is nothing newer to update to.
+			if (target.kind === 'commits') return { repo: null, changed: false, summary: null, error: null }
 			const repo = await this.reread(repoId)
 			const s = await resolveBranchTarget(repo, target.headRef, target.baseRef)
 			const head = s.headSha !== stored.headSha
@@ -1424,10 +1431,6 @@ export function pushHead(repo: RepoInfo, headRef: string): string | null {
 /** Reviews saved before milestone 3 compared HEAD with their base branch. */
 function targetOf(r: Pick<Review, 'target' | 'baseRef'>): ReviewTarget {
 	return r.target ?? { kind: 'branch', headRef: 'HEAD', baseRef: r.baseRef }
-}
-
-function targetKey(t: ReviewTarget): string {
-	return t.kind === 'pr' ? `pr:${t.repo.toLowerCase()}#${t.number}` : `branch:${t.headRef}|${t.baseRef}`
 }
 
 function snapshotOf(r: Review): Omit<Comparison, 'id' | 'files'> {
