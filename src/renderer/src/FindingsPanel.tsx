@@ -21,6 +21,7 @@ import type {
 	FindingCategory,
 	FindingMessage,
 	FindingVerification,
+	FindingReproducer,
 	Review,
 	ReviewRule,
 	Severity,
@@ -58,6 +59,8 @@ interface Props {
 	onAsk(finding: Finding, question: string): Promise<string | null>
 	/** Double-checks a finding now; resolves with an error message, or null once the verdict is saved. */
 	onVerify(finding: Finding): Promise<string | null>
+	/** Writes a test that should fail while the finding holds; resolves with an error message, or null once it is saved. */
+	onWriteTest(finding: Finding): Promise<string | null>
 	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
 }
 
@@ -105,6 +108,7 @@ export function FindingsPanel({
 	onRestore,
 	onAsk,
 	onVerify,
+	onWriteTest,
 	askModelPicker,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
@@ -377,6 +381,7 @@ export function FindingsPanel({
 								onShowSeparately={(x) => onRestore(x)}
 								onAsk={(q) => onAsk(f, q)}
 								onVerify={() => onVerify(f)}
+								onWriteTest={() => onWriteTest(f)}
 								askModelPicker={askModelPicker}
 								askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
 							/>
@@ -976,6 +981,8 @@ interface CardProps {
 	onAsk(question: string): Promise<string | null>
 	/** Double-checks it now; resolves with an error message, or null once the verdict is saved. */
 	onVerify(): Promise<string | null>
+	/** Writes a failing test for it; resolves with an error message, or null once the test is saved. */
+	onWriteTest(): Promise<string | null>
 	askDisabled: string | null
 	askModelPicker: React.ReactNode
 }
@@ -1055,6 +1062,37 @@ const VERDICT_LABEL = {
 
 const VERDICT_WORD = { holds: 'holds', wrong: 'likely wrong', unsure: 'not settled' } as const
 
+/** A test the AI wrote to show the finding: not run, so whether it fails is for you to find out. */
+function Reproducer({ r }: { r: FindingReproducer }) {
+	const [copied, setCopied] = useState(false)
+	if (!r.code || !r.path)
+		return (
+			<div className={`reproducer small ${r.error ? 'error-text' : 'muted'}`}>
+				<b>{r.error ? 'No test written.' : 'No test can show this:'}</b> {r.asserts.replace(/^No test written: /, '')}
+			</div>
+		)
+	return (
+		<details className="reproducer small" open>
+			<summary>
+				Failing test <span className="mono">{r.path}</span> <span className="muted">({r.model}, not run)</span>
+			</summary>
+			<p>{r.asserts}</p>
+			<pre className="ci-excerpt selectable">{r.code}</pre>
+			<button
+				className="btn small ghost"
+				onClick={() => {
+					void navigator.clipboard.writeText(r.code!).then(() => {
+						setCopied(true)
+						setTimeout(() => setCopied(false), 1500)
+					})
+				}}
+			>
+				{copied ? 'Copied' : 'Copy test'}
+			</button>
+		</details>
+	)
+}
+
 /** The double-check of a finding: a second request that tried to prove it wrong. */
 function Verification({ v, by, level }: { v: FindingVerification; by: string | null; level: Severity }) {
 	const head = v.error
@@ -1087,7 +1125,8 @@ function FindingCard(p: CardProps) {
 	const ref = useRef<HTMLDivElement>(null)
 	const [asking, setAsking] = useState(false)
 	const [verifying, setVerifying] = useState(false)
-	const [verifyError, setVerifyError] = useState<string | null>(null)
+	const [verifyError, setVerifyError] = useState<string | null>(null) // from Verify or Write failing test
+	const [writing, setWriting] = useState(false)
 	useEffect(() => {
 		if (selected) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 	}, [selected])
@@ -1273,8 +1312,27 @@ function FindingCard(p: CardProps) {
 				>
 					{verifying ? 'Verifying…' : f.verification && !f.verification.error ? 'Verify again' : 'Verify'}
 				</button>
+				<button
+					className="btn small ghost"
+					disabled={writing || p.askDisabled !== null}
+					title={
+						p.askDisabled ??
+						'Ask a model for a test in the project’s style that fails while this finding holds. It is shown here to copy; nothing is saved to disk or run.'
+					}
+					onClick={() => {
+						setWriting(true)
+						setVerifyError(null)
+						void p.onWriteTest().then((err) => {
+							setWriting(false)
+							setVerifyError(err)
+						})
+					}}
+				>
+					{writing ? 'Writing test…' : f.reproducer?.code ? 'Write test again' : 'Write failing test'}
+				</button>
 			</div>
 			{verifyError && <p className="error-text small">{verifyError}</p>}
+			{f.reproducer && <Reproducer r={f.reproducer} />}
 			{state === 'open' && p.dismissMenu && (
 				<div className="dismiss-menu small" role="group" aria-label="Why dismiss it?">
 					<span className="muted">Why?</span>

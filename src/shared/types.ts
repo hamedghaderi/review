@@ -849,6 +849,7 @@ export interface Finding {
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
 	verification?: FindingVerification // a second request that tried to prove it wrong (see FindingVerification)
+	reproducer?: FindingReproducer // a failing test you asked for; only the newest is kept
 	mergedInto?: string | null // the same problem as this finding of the run, which stays open; this one is folded under it
 	mergedReason?: string | null // the shared cause, in one sentence
 	alsoAt?: Array<{ findingId: string; path: string; line: number | null; title: string }> // findings folded under this one
@@ -886,6 +887,16 @@ export interface CiAnnotation {
 	level: 'failure' | 'warning' | 'notice'
 	title: string | null
 	message: string
+}
+
+/** A test that should fail on the head commit while the finding holds. Shown to copy; never written to disk or run. */
+export interface FindingReproducer {
+	path: string | null // null with `code`: the model said no test can show it, and `asserts` says why
+	code: string | null
+	asserts: string // what the test does and why it fails now, or why there is no test
+	model: string
+	at: string
+	error?: boolean // the request failed; `asserts` holds the reason
 }
 
 /** The double-check of a finding (blocking ones after the run, any one on demand): a separate request asked to prove it wrong. */
@@ -1365,6 +1376,7 @@ export const IPC = {
 	aiSetLevels: 'ai:levels-set',
 	aiAsk: 'ai:ask',
 	aiVerify: 'ai:verify',
+	aiWriteTest: 'ai:write-test',
 	aiAskCode: 'ai:ask-code',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
@@ -1542,6 +1554,8 @@ export interface ReviewApi {
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
 	/** Double-checks one finding now, with the model for questions (else the one that raised it); resolves with its run. */
 	verifyFinding(reviewId: string, findingId: string): Promise<Result<AiRun>>
+	/** Writes a test that should fail while the finding holds, with the same model as Verify; resolves with its run. */
+	writeFindingTest(reviewId: string, findingId: string): Promise<Result<AiRun>>
 	/**
 	 * Asks the selected model a question about lines of code. `questionId` continues an earlier conversation about the
 	 * same lines. Returns the review's updated list of questions.

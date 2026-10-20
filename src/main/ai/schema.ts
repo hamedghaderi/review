@@ -163,6 +163,23 @@ export type ModelVerification = z.infer<typeof verifySchema>
 export const VERIFY_SCHEMA_NAME = 'finding_verification'
 export const VERIFY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(verifySchema, { target: 'draft-7' }))
 
+/** A test that fails on the head commit while the finding holds, written on demand. */
+export const reproducerSchema = z.object({
+	path: z
+		.string()
+		.nullable()
+		.describe("Where the test file goes, relative to the repository root, following the project's layout; null when no test can show it."),
+	code: z.string().nullable().describe('The whole test file, ready to save; null when no test can show it.'),
+	asserts: z
+		.string()
+		.describe(
+			'One or two sentences: what the test does and why it fails now and passes once the problem is fixed. When no test can show it, why not.',
+		),
+})
+export type ModelReproducer = z.infer<typeof reproducerSchema>
+export const REPRODUCER_SCHEMA_NAME = 'finding_reproducer'
+export const REPRODUCER_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(reproducerSchema, { target: 'draft-7' }))
+
 /** Findings that describe the same underlying problem. */
 export const mergeSchema = z.object({
 	groups: z.array(

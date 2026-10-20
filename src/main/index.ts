@@ -365,6 +365,9 @@ function registerIpc(): void {
 	handle(IPC.aiVerify, (reviewId: unknown, findingId: unknown) =>
 		service.verifyFinding(comparisonId(reviewId), str(findingId, 'finding id', 64), connections.pickedAskModel()),
 	)
+	handle(IPC.aiWriteTest, (reviewId: unknown, findingId: unknown) =>
+		service.writeTest(comparisonId(reviewId), str(findingId, 'finding id', 64), connections.pickedAskModel()),
+	)
 	handle(IPC.aiAskCode, async (reviewId: unknown, anchor: unknown, question: unknown, questionId: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first.')

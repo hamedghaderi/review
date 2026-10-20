@@ -2622,3 +2622,60 @@ test('verify on demand: any level, with the code around it, lookups as the run h
 	assert.equal(controller.runsFor('/repo', s.comp.id)[0].findings.find((x) => x.id === f.id)!.verification!.verdict, 'wrong', 'stored')
 	await assert.rejects(controller.verify(access, s.comp.id, 'nope'), /no longer exists/)
 })
+
+test('a failing test on demand: written in the style of the tests that import the file, kept on the finding, never run', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const inputs: Array<string> = []
+	const answers: Array<unknown> = [
+		{ path: 'src/app.test.ts', code: 'test("adds", () => expect(add(1, 2)).toBe(3))\n', asserts: 'Fails now: add subtracts.' },
+		{ path: '../outside.ts', code: 'x', asserts: 'Escapes the repository.' },
+		{ path: null, code: null, asserts: 'It needs a real payment gateway.' },
+	]
+	const provider = createFakeProvider({
+		script: (req) => {
+			if (req.schema?.name !== 'finding_reproducer') return defaultScript(req)
+			inputs.push(req.input)
+			return answers[inputs.length - 1]
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const byKey = new Map(s.srcs.map((x) => [x.file.key, x]))
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => byKey.get(k)!.patch,
+		loadFileLines: async (k: string) => byKey.get(k)!.fullText ?? { kind: 'text' as const, lines: [] },
+		testExamples: async () => [{ path: 'src/math.test.ts', text: 'import { test } from "vitest"\ntest("sum", () => {})\n' }],
+	}
+	await controller.start(access, s.comp.id, { kind: 'all' }, SEL)
+	for (let i = 0; i < 100 && controller.runsFor('/repo', s.comp.id)[0].status === 'running'; i++)
+		await new Promise((r) => setTimeout(r, 10))
+	const f = controller.runsFor('/repo', s.comp.id)[0].findings.find((x) => x.anchor.fileKey === 'src/app.ts')!
+
+	const written = (await controller.writeTest(access, s.comp.id, f.id)).findings.find((x) => x.id === f.id)!.reproducer!
+	assert.equal(written.path, 'src/app.test.ts')
+	assert.match(written.code ?? '', /expect\(add\(1, 2\)\)/)
+	assert.equal(written.asserts, 'Fails now: add subtracts.')
+	assert.equal(written.model, 'fixture-v1')
+	assert.match(inputs[0], /# Existing tests that import this file[\s\S]*## src\/math\.test\.ts[\s\S]*vitest/)
+	assert.match(inputs[0], /src\/app\.ts after the change, lines/)
+
+	const escaped = (await controller.writeTest(access, s.comp.id, f.id)).findings.find((x) => x.id === f.id)!.reproducer!
+	assert.equal(escaped.path, null, 'a path outside the repository is no test')
+	assert.equal(escaped.code, null)
+
+	const none = (await controller.writeTest(access, s.comp.id, f.id)).findings.find((x) => x.id === f.id)!.reproducer!
+	assert.deepEqual([none.path, none.code, none.asserts, none.error], [null, null, 'It needs a real payment gateway.', undefined])
+})
