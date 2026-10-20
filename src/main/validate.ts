@@ -386,6 +386,13 @@ export function repoPath(v: unknown): string {
 	return s
 }
 
+/** Up to 200 repository paths, without repeats. */
+export function repoPaths(v: unknown): Array<string> {
+	const list = arr(v, 'paths')
+	if (list.length > 200) bad('paths (at most 200)')
+	return [...new Set(list.map(repoPath))]
+}
+
 /** One identifier, as go to definition reads it from the code. */
 export function symbolName(v: unknown): string {
 	const s = str(v, 'name', 200)

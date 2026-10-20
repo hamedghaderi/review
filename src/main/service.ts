@@ -53,6 +53,7 @@ import {
 	changesBetween,
 	compareSnapshot,
 	ensureCommits,
+	filesAt,
 	findRoot,
 	isAncestor,
 	isManagedClone,
@@ -1082,6 +1083,12 @@ export class ReviewService {
 		const r = await readAt(data.root, sha, path, FILE_LINES_LIMIT)
 		if (!r) throw new AppFail('not-found', `${path} is not in the ${side === 'old' ? 'base' : 'head'} commit.`)
 		return blobLines(r.buf, r.truncated)
+	}
+
+	/** Which of `paths` (from file references in a finding's text) are files at the head commit. */
+	async filesAtHead(comparisonId: string, paths: Array<string>): Promise<Array<string>> {
+		const data = this.loaded(comparisonId)
+		return [...(await filesAt(data.root, data.comparison.headSha, paths))]
 	}
 
 	/** Go to definition and find uses: text matches at one commit, with the lines this change touched marked. */

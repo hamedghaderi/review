@@ -188,6 +188,14 @@ textarea {
 .link:hover {
 	text-decoration: underline;
 }
+/* A file reference inside a sentence: sized and wrapped like the text around it. */
+.link.ref-link {
+	padding: 0;
+	font-size: inherit;
+	text-align: inherit;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
 :focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;

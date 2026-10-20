@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { RefText, RefLinksProvider, useRefLinks, type RefTarget } from './RefText.tsx'
 import {
 	CATEGORY_LABEL,
 	droppedFindings,
@@ -47,6 +48,8 @@ interface Props {
 	/** Stops a running run; the answers it already got are kept, and Resume asks the rest. */
 	onStop(run: AiRun): void
 	onOpen(finding: Finding): void
+	/** Opens a file a finding's text refers to, at the line it names. */
+	onOpenRef(t: RefTarget, line: number | null): void
 	onAccept(finding: Finding): void
 	onDismiss(finding: Finding, reason: DismissReason): void
 	onNote(finding: Finding, note: string): void
@@ -93,6 +96,7 @@ export function FindingsPanel({
 	onRetryRules,
 	onStop,
 	onOpen,
+	onOpenRef,
 	onAccept,
 	onDismiss,
 	onNote,
@@ -170,6 +174,14 @@ export function FindingsPanel({
 		return { finding: f, decision: null }
 	}
 	const [dismissMenu, setDismissMenu] = useState<string | null>(null) // finding id whose reason menu is open
+	const links = useRefLinks(
+		review.id,
+		files,
+		shown.flatMap(({ f }) =>
+			[f.body, f.reasoning, f.disproof, f.background, f.problem, f.consequence, f.suggestion].filter((t): t is string => !!t),
+		),
+		onOpenRef,
+	)
 
 	// Keyboard triage while the Findings panel is shown: j/k move, a adds to the review, d picks a dismiss reason (1-4).
 	const keys = useRef({ shown, selectedFindingId, dismissMenu })
@@ -309,63 +321,65 @@ export function FindingsPanel({
 					)}
 				</div>
 			)}
-			<div className="comments-list">
-				{shown.length === 0 ? (
-					<div className="muted pad small">
-						{narrowed && inTab.length > 0 ? (
-							<>
-								No findings match.{' '}
-								<button
-									className="link"
-									onClick={() => {
-										setLevel('all')
-										setRule('all')
-										setQuery('')
-									}}
-								>
-									Clear filters
-								</button>
-							</>
-						) : (
-							emptyText(run, filter, items.length)
-						)}
-					</div>
-				) : (
-					shown.map(({ f, state }) => (
-						<FindingCard
-							key={f.id}
-							finding={f}
-							state={state}
-							fixture={run.fixture}
-							team={run.team}
-							discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
-							earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
-							screened={screenFinding(f, review?.pr?.repo ?? null)}
-							selected={f.id === selectedFindingId}
-							focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
-							onOpen={() => onOpen(f)}
-							onAccept={() => onAccept(f)}
-							onDismiss={(reason) => {
-								setDismissMenu(null)
-								onDismiss(f, reason)
-							}}
-							dismissMenu={dismissMenu === f.id}
-							onToggleDismissMenu={() => setDismissMenu(dismissMenu === f.id ? null : f.id)}
-							decision={decisionOwner(f).decision}
-							onNote={(note) => onNote(decisionOwner(f).finding, note)}
-							onRestore={() => onRestore(f)}
-							folded={run.findings.filter(
-								(x) => x.mergedInto === f.id && findingState(review, roots, x, byId) === 'open' && !review.findingDecisions[x.id],
+			<RefLinksProvider value={links}>
+				<div className="comments-list">
+					{shown.length === 0 ? (
+						<div className="muted pad small">
+							{narrowed && inTab.length > 0 ? (
+								<>
+									No findings match.{' '}
+									<button
+										className="link"
+										onClick={() => {
+											setLevel('all')
+											setRule('all')
+											setQuery('')
+										}}
+									>
+										Clear filters
+									</button>
+								</>
+							) : (
+								emptyText(run, filter, items.length)
 							)}
-							foldedUnder={f.mergedInto ? (byId.get(f.mergedInto)?.title ?? null) : null}
-							onShowSeparately={(x) => onRestore(x)}
-							onAsk={(q) => onAsk(f, q)}
-							askModelPicker={askModelPicker}
-							askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
-						/>
-					))
-				)}
-			</div>
+						</div>
+					) : (
+						shown.map(({ f, state }) => (
+							<FindingCard
+								key={f.id}
+								finding={f}
+								state={state}
+								fixture={run.fixture}
+								team={run.team}
+								discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
+								earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
+								screened={screenFinding(f, review?.pr?.repo ?? null)}
+								selected={f.id === selectedFindingId}
+								focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
+								onOpen={() => onOpen(f)}
+								onAccept={() => onAccept(f)}
+								onDismiss={(reason) => {
+									setDismissMenu(null)
+									onDismiss(f, reason)
+								}}
+								dismissMenu={dismissMenu === f.id}
+								onToggleDismissMenu={() => setDismissMenu(dismissMenu === f.id ? null : f.id)}
+								decision={decisionOwner(f).decision}
+								onNote={(note) => onNote(decisionOwner(f).finding, note)}
+								onRestore={() => onRestore(f)}
+								folded={run.findings.filter(
+									(x) => x.mergedInto === f.id && findingState(review, roots, x, byId) === 'open' && !review.findingDecisions[x.id],
+								)}
+								foldedUnder={f.mergedInto ? (byId.get(f.mergedInto)?.title ?? null) : null}
+								onShowSeparately={(x) => onRestore(x)}
+								onAsk={(q) => onAsk(f, q)}
+								askModelPicker={askModelPicker}
+								askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
+							/>
+						))
+					)}
+				</div>
+			</RefLinksProvider>
 		</div>
 	)
 }
@@ -1112,21 +1126,25 @@ function FindingCard(p: CardProps) {
 			<AlreadyDiscussed threads={discussed} unclaimed />
 			{f.body !== undefined ? (
 				<div className="finding-body">
-					<p className="finding-text selectable">{f.body}</p>
+					<p className="finding-text selectable">
+						<RefText text={f.body} />
+					</p>
 					{f.reasoning && (
 						<p className="small muted">
-							<b>Why flagged:</b> {f.reasoning}
+							<b>Why flagged:</b> <RefText text={f.reasoning} />
 						</p>
 					)}
 					{f.disproof && (
 						<p className="small">
-							<b>Would prove it wrong:</b> {f.disproof}
+							<b>Would prove it wrong:</b> <RefText text={f.disproof} />
 						</p>
 					)}
 					{f.background && (
 						<details className="small">
 							<summary>Background</summary>
-							<p>{f.background}</p>
+							<p>
+								<RefText text={f.background} />
+							</p>
 						</details>
 					)}
 					<pre className="ci-excerpt">{f.evidence}</pre>
@@ -1179,15 +1197,21 @@ function FindingCard(p: CardProps) {
 			) : (
 				<dl className="finding-body">
 					<dt>Problem</dt>
-					<dd>{f.problem}</dd>
+					<dd>
+						<RefText text={f.problem ?? ''} />
+					</dd>
 					<dt>Consequence</dt>
-					<dd>{f.consequence}</dd>
+					<dd>
+						<RefText text={f.consequence ?? ''} />
+					</dd>
 					<dt>Evidence</dt>
 					<dd>
 						<pre className="ci-excerpt">{f.evidence}</pre>
 					</dd>
 					<dt>Suggestion</dt>
-					<dd>{f.suggestion}</dd>
+					<dd>
+						<RefText text={f.suggestion ?? ''} />
+					</dd>
 				</dl>
 			)}
 			{(!!f.thread?.length || asking) && <Thread messages={f.thread ?? []} pending={asking} />}

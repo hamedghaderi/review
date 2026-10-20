@@ -1343,6 +1343,7 @@ export const IPC = {
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
 	loadFileAt: 'diff:file-at',
+	filesAtHead: 'diff:files-at-head',
 	lookupSymbol: 'diff:lookup-symbol',
 	saveReview: 'review:save',
 	aiSettings: 'ai:settings',
@@ -1489,6 +1490,8 @@ export interface ReviewApi {
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
 	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */
 	loadFileAt(comparisonId: string, path: string, side: Side): Promise<Result<FileLinesResult>>
+	/** Which of these paths are files at the head commit; for links in a finding's text. */
+	filesAtHead(comparisonId: string, paths: Array<string>): Promise<Result<Array<string>>>
 	/** Where a name is defined or used, by text, at the head commit (base for `side: 'old'`). */
 	lookupSymbol(comparisonId: string, name: string, side: Side, kind: SymbolKind): Promise<Result<SymbolLookup>>
 	saveReview(review: Review): Promise<Result<{ savedAt: string }>>

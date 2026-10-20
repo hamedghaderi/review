@@ -84,6 +84,7 @@ To follow a path through a change (which function calls which, who else uses the
 - **Back and forward**: `⌘[` and `⌘]` (`Alt+←` and `Alt+→` elsewhere) return to where you were, with the scroll position. Selecting a file in the tree leaves the read-only view.
 - **Which commit**: lookups read the reviewed commits, never the working tree. On a removed line, names are looked up at the base commit, and results open at the base commit (removed lines are marked **removed**).
 - A plain click and drag still start a comment; `⌘`/`Ctrl`-click never does.
+- **References in findings**: a file reference in an AI finding's text (`src/cart.ts:40`, `src/cart.ts:40-52`, or a path with a folder and no line) is a link, and opens the same way as a result. A bare file name (`cart.ts:40`) links when exactly one changed file has that name. A path that isn't a file at the head commit stays plain text.
 
 Limits: it is a text match, not a language server. A name can be a different thing with the same name, so a common name can list several definitions, and a use can be of another thing called the same. Definitions are recognised by the common forms of JS/TS, Python, Go, Rust, Java, Kotlin, C#, PHP and Ruby (functions, methods, classes, types, `const x = () =>`), the same patterns the AI reviewer's related code uses; anything else is not found. Only source files are searched, and vendored, built and generated folders (`node_modules`, `vendor`, `dist`, `build` and similar), lock files and lines over 400 characters are skipped. At most 50 definitions and 300 uses are listed.
 
