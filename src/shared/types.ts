@@ -80,6 +80,9 @@ export type ReviewTarget =
 	| { kind: 'branch'; headRef: string; baseRef: string }
 	| { kind: 'pr'; repo: string; number: number }
 	| { kind: 'commits'; from: string; to: string; mergeBase: boolean }
+	// HEAD against the index (`staged`) or the working tree, with or without untracked files. `branch`: the branch checked
+	// out when it was taken, so its comments carry to that branch's review after you commit.
+	| { kind: 'uncommitted'; staged: boolean; untracked: boolean; branch: string | null }
 
 /** "a1b2c3d..e4f5a6b" (or "..." for the merge base), as a commits review is labelled. */
 export function commitsLabel(t: Extract<ReviewTarget, { kind: 'commits' }>): string {
@@ -90,6 +93,8 @@ export function commitsLabel(t: Extract<ReviewTarget, { kind: 'commits' }>): str
 export function targetKey(t: ReviewTarget): string {
 	if (t.kind === 'pr') return `pr:${t.repo.toLowerCase()}#${t.number}`
 	if (t.kind === 'commits') return `commits:${t.from}${t.mergeBase ? '...' : '..'}${t.to}`
+	// Leaving untracked files out or in is the same review, so comments carry between the two.
+	if (t.kind === 'uncommitted') return `uncommitted:${t.staged ? 'staged' : 'all'}|${t.branch ?? 'HEAD'}`
 	return `branch:${t.headRef}|${t.baseRef}`
 }
 
@@ -345,12 +350,13 @@ export interface Comparison {
 	baseRef: string
 	baseTipSha: string
 	baseSha: string // merge base of base tip and HEAD
-	headSha: string
+	headSha: string // a tree, not a commit, for uncommitted changes
 	headRef: string | null // display name of the head, e.g. "feat/login" or "octocat:fix"
 	target: ReviewTarget | null // null for reviews recorded before milestone 3 (HEAD against baseRef)
 	pr: PrSnapshot | null
 	stackedOn?: StackedBase | null // compared with a merged lower PR's last commit instead of the merge base
 	files: Array<ChangedFile>
+	untracked?: Array<string> // uncommitted changes: keys of new files git doesn't track yet, when the snapshot was taken
 }
 
 /**

@@ -40,6 +40,7 @@ type Item =
 	| { t: 'branch'; b: BranchRef }
 	| { t: 'review'; r: ReviewSummary }
 	| { t: 'commits'; target: CommitsTarget; spec: string }
+	| { t: 'uncommitted'; staged: boolean }
 type Scope = 'all' | 'prs' | 'branches'
 interface Section {
 	title: string
@@ -84,11 +85,21 @@ function reviewKey(r: ReviewSummary): string {
 function reviewTitle(r: ReviewSummary): string {
 	if (r.pr) return r.pr.title
 	if (r.target?.kind === 'commits') return commitsLabel(r.target)
+	if (r.target?.kind === 'uncommitted')
+		return `${r.target.staged ? 'Staged' : 'Uncommitted'} changes on ${shortRef(r.target.branch)} (HEAD ${r.baseSha.slice(0, 7)})`
 	return `${shortRef(r.headRef ?? (r.target?.kind === 'branch' ? r.target.headRef : null))} → ${shortRef(r.baseRef)}`
 }
 
 function itemKey(it: Item): string {
-	return it.t === 'pr' ? `pr:${it.pr.number}` : it.t === 'branch' ? `b:${it.b.ref}` : it.t === 'commits' ? `c:${it.spec}` : `r:${it.r.id}`
+	return it.t === 'pr'
+		? `pr:${it.pr.number}`
+		: it.t === 'branch'
+			? `b:${it.b.ref}`
+			: it.t === 'commits'
+				? `c:${it.spec}`
+				: it.t === 'uncommitted'
+					? `u:${it.staged}`
+					: `r:${it.r.id}`
 }
 
 async function copy(text: string): Promise<void> {
@@ -187,6 +198,14 @@ export function QuickOpen(props: Props) {
 					out.push({ title: 'Open pull requests', items: prItems.slice(0, 8).map((pr) => ({ t: 'pr', pr })) })
 				if (prError) out.push({ title: 'Pull requests', items: [], error: prError })
 			}
+			if (scope === 'all' && repo.uncommitted > 0)
+				out.push({
+					title: 'Not committed yet',
+					items: [
+						{ t: 'uncommitted', staged: false },
+						{ t: 'uncommitted', staged: true },
+					],
+				})
 			if (scope === 'all' && recentReviews.length)
 				out.push({ title: 'Recent reviews', items: recentReviews.slice(0, 5).map((r) => ({ t: 'review', r })) })
 			if (scope !== 'prs') {
@@ -201,6 +220,14 @@ export function QuickOpen(props: Props) {
 
 		const commits = scope === 'all' ? commitSpec(text) : null
 		if (commits) out.push({ title: 'Commits', items: [{ t: 'commits', target: commits, spec: text }] })
+		if (scope === 'all' && /^(uncommitted|working|staged?|changes|wip)/i.test(text))
+			out.push({
+				title: 'Not committed yet',
+				items: [
+					{ t: 'uncommitted', staged: false },
+					{ t: 'uncommitted', staged: true },
+				],
+			})
 		if (scope === 'all' && !exact) {
 			const matches = recentReviews.filter((r) => {
 				const hay = `${reviewTitle(r)} ${r.headRef ?? ''} ${r.pr ? `#${r.pr.number}` : ''}`.toLowerCase()
@@ -257,6 +284,16 @@ export function QuickOpen(props: Props) {
 			out.push({ label: 'Copy link', run: close(() => void copy(pr.url)) })
 			if (pr.headRef) out.push({ label: 'Copy branch name', run: close(() => void copy(pr.headRef!)) })
 			return out
+		}
+		if (it.t === 'uncommitted') {
+			const staged = it.staged
+			return [
+				{
+					label: staged ? 'Review staged changes' : 'Review uncommitted changes',
+					keys: '↵',
+					run: close(() => props.onOpenReview({ kind: 'uncommitted', staged, untracked: true, branch: null })),
+				},
+			]
 		}
 		if (it.t === 'commits') {
 			const target = it.target
@@ -589,6 +626,18 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 			</>
 		)
 	}
+	if (it.t === 'uncommitted')
+		return (
+			<>
+				<span className="palette-icon review" title="Changes that are not committed yet">
+					<ReviewIcon />
+				</span>
+				<span className="palette-title ellipsis">{it.staged ? 'Staged changes' : 'Uncommitted changes'}</span>
+				<span className="palette-sub">
+					{it.staged ? 'what you would commit now, against HEAD' : 'the working tree, untracked files included, against HEAD'}
+				</span>
+			</>
+		)
 	if (it.t === 'commits') {
 		const t = it.target
 		const one = !t.mergeBase && t.from === `${t.to}^`
@@ -614,7 +663,15 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 			<span className="palette-title ellipsis">
 				<Highlight text={reviewTitle(r)} words={words} />
 			</span>
-			<span className="palette-sub">{r.pr ? `#${r.pr.number}` : r.target?.kind === 'commits' ? 'commits' : 'branch review'}</span>
+			<span className="palette-sub">
+				{r.pr
+					? `#${r.pr.number}`
+					: r.target?.kind === 'commits'
+						? 'commits'
+						: r.target?.kind === 'uncommitted'
+							? 'snapshot'
+							: 'branch review'}
+			</span>
 			<span className="spacer" />
 			{notes > 0 && (
 				<span className="palette-acc">

@@ -355,6 +355,14 @@ export function App() {
 	const sessionRef = useRef<RepoSession | null>(null)
 	sessionRef.current = session
 
+	const untrackedKeys = useMemo(() => new Set(comparison?.untracked ?? []), [comparison?.untracked])
+
+	/** HEAD against the working tree (untracked files included), or against what is staged. */
+	const reviewUncommitted = (staged: boolean, untracked = true): void => {
+		if (sessionRef.current)
+			void openReview(sessionRef.current.repo.id, { kind: 'target', target: { kind: 'uncommitted', staged, untracked, branch: null } })
+	}
+
 	/** Opens a review for a target or a stored snapshot. On failure the browser stays put and explains why. */
 	const openReview = useCallback(
 		async (repoId: string, target: CompareTarget, prUrl: string | null = null) => {
@@ -1305,6 +1313,7 @@ export function App() {
 											currentFile={file}
 											fileCount={comparison.files.length}
 											unviewed={unviewedKeys}
+											snapshot={comparison.target?.kind === 'uncommitted'}
 											loadOffer={loadOffer}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
@@ -1342,9 +1351,9 @@ export function App() {
 											Publish
 										</button>
 									) : (
-										// A commits review has no branch or pull request to publish to.
+										// Commits and uncommitted reviews have no branch or pull request to publish to.
 										!branchPr.data?.prs.length &&
-										comparison?.target?.kind !== 'commits' && (
+										(!comparison?.target || comparison.target.kind === 'branch') && (
 											<button
 												className="btn"
 												disabled
@@ -1431,14 +1440,37 @@ export function App() {
 									</select>
 								</label>
 							)}
-							{repo.uncommitted > 0 && (
-								<span className="pill warn" title="Only committed changes are reviewed. Working-tree and staged changes are not included.">
-									{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'} excluded
-								</span>
+							{repo.uncommitted > 0 && comparison?.target?.kind !== 'uncommitted' && (
+								<button
+									className="pill warn"
+									title="This review reads commits only. Review the working tree (staged, unstaged and untracked changes) against HEAD instead."
+									onClick={() => reviewUncommitted(false)}
+								>
+									{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? '' : 's'}: review them
+								</button>
 							)}
 						</div>
 					)}
 
+					{view === 'review' && comparison?.target?.kind === 'uncommitted' && !comparison.target.staged && (
+						<div className="banner" role="status">
+							<span>
+								{comparison.target.untracked
+									? untrackedKeys.size
+										? `${untrackedKeys.size} untracked file${untrackedKeys.size === 1 ? ' is' : 's are'} included, marked in the file list.`
+										: 'Untracked files are included; there are none.'
+									: 'Untracked files are left out.'}{' '}
+								This is a snapshot of the working tree; edits after it show as an update.
+							</span>
+							<button
+								className="btn small"
+								disabled={!!busy}
+								onClick={() => reviewUncommitted(false, !(comparison.target as { untracked: boolean }).untracked)}
+							>
+								{comparison.target.untracked ? 'Leave untracked files out' : 'Include untracked files'}
+							</button>
+						</div>
+					)}
 					{view === 'review' && update && comparison && (
 						<div className="banner" role="status">
 							<span>
@@ -1628,6 +1660,7 @@ export function App() {
 									selected={selected}
 									viewed={viewed}
 									commented={commented}
+									untracked={untrackedKeys}
 									onSelect={selectFile}
 									onToggleViewed={(k) => change((r) => ops.setViewed(r, k, !viewed.has(k)))}
 									onNextUnreviewed={nextUnreviewed}
@@ -1637,12 +1670,19 @@ export function App() {
 							<section className="center">
 								{comparison.files.length === 0 ? (
 									<div className="empty">
-										<h2>No committed changes</h2>
+										<h2>{comparison.target?.kind === 'uncommitted' ? 'No uncommitted changes' : 'No committed changes'}</h2>
 										<p className="muted">{emptyReason(comparison)}</p>
-										{repo && repo.uncommitted > 0 && (
+										{repo && repo.uncommitted > 0 && comparison.target?.kind !== 'uncommitted' && (
 											<p className="muted">
-												{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} excluded. Review only reads commits,
-												so commit the work (for example on a feature branch) to review it here.
+												{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} not part of this review.{' '}
+												<button className="link" onClick={() => reviewUncommitted(false)}>
+													Review uncommitted changes
+												</button>{' '}
+												or{' '}
+												<button className="link" onClick={() => reviewUncommitted(true)}>
+													only what is staged
+												</button>
+												.
 											</p>
 										)}
 										<p className="muted">
@@ -2020,6 +2060,18 @@ function RepoTabs(props: {
 /** What the review compares; for a pull request, its number (linking to GitHub), title and author. */
 function TargetLabel({ comparison: c, author }: { comparison: Comparison; author: string | null }) {
 	const title = `Comparing ${short(c.baseSha)}…${short(c.headSha)}\nMerge base ${c.baseSha}\nHead ${c.headSha}\n${c.pr ? `PR base ${c.pr.baseSha}` : `Base tip ${c.baseTipSha}`}`
+	if (c.target?.kind === 'uncommitted')
+		return (
+			<span
+				className="hfield compare shrink"
+				title={`${c.target.staged ? 'What is staged' : 'The working tree'}, as it was when this snapshot was taken, compared with HEAD (${c.baseSha}). Not a commit, so it can't be published.`}
+			>
+				<span className="ellipsis">{c.target.staged ? 'Staged changes' : 'Uncommitted changes'}</span>
+				{c.headRef && <span className="mono small ellipsis">on {c.headRef}</span>}
+				<span className="muted">vs</span>
+				<span className="mono small">HEAD {short(c.baseSha)}</span>
+			</span>
+		)
 	if (c.target?.kind === 'commits')
 		return (
 			<span
@@ -2062,6 +2114,10 @@ function TargetLabel({ comparison: c, author }: { comparison: Comparison; author
 }
 
 function emptyReason(c: Comparison): string {
+	if (c.target?.kind === 'uncommitted')
+		return c.target.staged
+			? `Nothing is staged on top of HEAD (${short(c.baseSha)}).`
+			: `The working tree matches HEAD (${short(c.baseSha)})${c.target.untracked ? '' : ', apart from any untracked files, which this review leaves out'}.`
 	if (c.target?.kind === 'commits')
 		return c.baseSha === c.headSha
 			? `${commitsLabel(c.target)} starts and ends at the same commit, so there is nothing to compare.`

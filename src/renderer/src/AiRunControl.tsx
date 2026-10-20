@@ -12,6 +12,7 @@ interface Props {
 	currentFile: ChangedFile | null
 	fileCount: number
 	unviewed: Array<string> // keys of the changed files not marked viewed, in tree order
+	snapshot?: boolean // the review is of uncommitted changes, as they were when it was taken
 	/** Whether this reviewer can review only the files changed since the last finished run; null when there is none. */
 	loadOffer(reviewer: ReviewerChoice): Promise<IncrementalOffer | null>
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
@@ -28,6 +29,7 @@ export function AiRunControl({
 	currentFile,
 	fileCount,
 	unviewed,
+	snapshot = false,
 	loadOffer,
 	openNow,
 	onOpened,
@@ -325,7 +327,7 @@ export function AiRunControl({
 								? `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent to the ${team.members.length} reviewers (${[...new Set(teamConnections.map((c) => c?.label))].join(', ')}), each getting only the files its rules apply to. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' Each reviewer can also open files and search the code in the pinned commits while it reviews.' : ''}`
 								: fixture
 									? 'The fixture provider returns deterministic sample findings. Nothing leaves this computer.'
-									: `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent${local ? ' to this local server' : ` to ${connection?.label ?? 'the provider'}`}. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' The model can also open files and search the code in the pinned commits while it reviews.' : ''} Uncommitted changes are not included.`}{' '}
+									: `Only the numbered diff and nearby source from the pinned commits${limits?.relatedCode ? ', plus related code from other files (definitions and uses of the changed names),' : ''} are sent${local ? ' to this local server' : ` to ${connection?.label ?? 'the provider'}`}. Dependency changes also get facts computed from package.json and the lock file, and the head commit’s CI results are read from GitHub and included.${limits?.lookups ? ' The model can also open files and search the code in the pinned commits while it reviews.' : ''} ${snapshot ? 'Edits made after this snapshot of your uncommitted changes are not included.' : 'Uncommitted changes are not included.'}`}{' '}
 							{team ? 'Each reviewer’s model stays fixed for this run.' : 'The provider and model stay fixed for this run.'} Results are
 							suggestions; they never mark files as viewed.
 						</p>

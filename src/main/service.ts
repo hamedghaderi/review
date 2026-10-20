@@ -52,12 +52,16 @@ import {
 	cloneGitHub,
 	compareBranches,
 	compareCommits,
+	compareUncommitted,
+	resolveCommit,
+	snapshotTree,
 	changesBetween,
 	compareSnapshot,
 	ensureCommits,
 	filesAt,
 	findRoot,
 	isAncestor,
+	isSha,
 	isManagedClone,
 	setAppCloneRoots,
 	mergeBase,
@@ -498,6 +502,8 @@ export class ReviewService {
 			} else if (target.target.kind === 'commits') {
 				const t = target.target
 				data = await compareCommits(this.repo(repoId), t.from, t.to, t.mergeBase)
+			} else if (target.target.kind === 'uncommitted') {
+				data = await compareUncommitted(await this.reread(repoId), target.target.staged, target.target.untracked)
 			} else {
 				;({ data, notice } = await this.openPr(repoId, target.target, ctl.signal))
 			}
@@ -636,21 +642,52 @@ export class ReviewService {
 		const existing = reviews[c.id]
 		let src = from && from !== c.id ? reviews[from] : undefined
 		if (!src && !existing) src = this.predecessor(repoId, c, Object.values(reviews))
-		if (!src?.comments.length) return null
+		// A new snapshot of a branch also takes the comments you wrote on its uncommitted changes before committing them.
+		const local = !existing ? await this.uncommittedBefore(repoId, data, Object.values(reviews)) : undefined
+		const sources = [src, local].filter((r): r is Review => !!r?.comments.length)
+		if (!sources.length) return null
 		const skip = new Set([...(existing?.carriedOrigins ?? []), ...(existing?.comments.map((x) => x.carried?.originId ?? x.id) ?? [])])
-		const label = `${src.pr ? 'snapshot' : 'branch review'} ${src.baseSha.slice(0, 7)}…${src.headSha.slice(0, 7)}`
-		try {
-			const comments = await carryComments(data.root, src, c, skip)
-			if (!comments.length) return null
-			const outdated = comments.filter((x) => x.carried?.outdated).length
-			const n = comments.length
-			return {
-				comments,
-				notice: `Carried ${n} comment${n === 1 ? '' : 's'} over from ${label}.${outdated ? ` ${outdated} ${outdated === 1 ? 'is' : 'are'} outdated because the code changed; ${outdated === 1 ? 'it shows' : 'they show'} the old code.` : ''} The earlier snapshot keeps its own copy.`,
+		const comments: Array<ReviewComment> = []
+		const notices: Array<string> = []
+		for (const r of sources) {
+			const label =
+				r.target?.kind === 'uncommitted'
+					? `the review of your uncommitted changes on ${r.baseSha.slice(0, 7)}`
+					: `${r.pr ? 'snapshot' : 'branch review'} ${r.baseSha.slice(0, 7)}…${r.headSha.slice(0, 7)}`
+			try {
+				const got = await carryComments(data.root, r, c, skip)
+				for (const x of got) skip.add(x.carried!.originId)
+				comments.push(...got)
+				if (!got.length) continue
+				const outdated = got.filter((x) => x.carried?.outdated).length
+				const n = got.length
+				notices.push(
+					`Carried ${n} comment${n === 1 ? '' : 's'} over from ${label}.${outdated ? ` ${outdated} ${outdated === 1 ? 'is' : 'are'} outdated because the code changed; ${outdated === 1 ? 'it shows' : 'they show'} the old code.` : ''}`,
+				)
+			} catch (e) {
+				notices.push(`Comments could not be carried over from ${label}: ${errorOf(e).message}`)
 			}
-		} catch (e) {
-			return { comments: [], notice: `Comments could not be carried over from ${label}: ${errorOf(e).message}` }
 		}
+		if (!notices.length) return null
+		return { comments, notice: `${notices.join(' ')}${comments.length ? ' The earlier snapshot keeps its own copy.' : ''}` }
+	}
+
+	/**
+	 * For a branch review (or HEAD's), the newest review of uncommitted changes made on that branch from a commit that is
+	 * now part of it: after you commit, its comments belong with the branch.
+	 */
+	private async uncommittedBefore(repoId: string, data: ComparisonData, reviews: Array<Review>): Promise<Review | undefined> {
+		const c = data.comparison
+		const t = targetOf(c)
+		if (t.kind !== 'branch') return undefined
+		const branch =
+			t.headRef === 'HEAD' ? (this.repos.get(repoId)?.branch ? `refs/heads/${this.repos.get(repoId)!.branch}` : null) : t.headRef
+		if (!branch) return undefined
+		const local = reviews
+			.filter((r) => r.target?.kind === 'uncommitted' && r.target.branch === branch && r.comments.length)
+			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+		if (!local || !isSha(local.baseSha)) return undefined
+		return (await isAncestor(data.root, local.baseSha, c.headSha).catch(() => false)) ? local : undefined
 	}
 
 	/** The context you gave the reviewer, copied into a new snapshot from the one it replaces (as comments are). */
@@ -868,6 +905,20 @@ export class ReviewService {
 			}
 			// Pinned to the SHAs it was opened with: there is nothing newer to update to.
 			if (target.kind === 'commits') return { repo: null, changed: false, summary: null, error: null }
+			if (target.kind === 'uncommitted') {
+				// A snapshot is cheap (git only reads the files whose size or time changed) and exact, so it is the check.
+				const root = this.repo(repoId).root
+				const [head, snap] = await Promise.all([resolveCommit(root, 'HEAD'), snapshotTree(root, target.staged, target.untracked)])
+				const summary =
+					head !== stored.baseSha
+						? `HEAD is now at ${head?.slice(0, 7) ?? 'nothing'}: you committed or switched branches since this snapshot`
+						: snap.tree !== stored.headSha
+							? target.staged
+								? 'What is staged changed since this snapshot'
+								: 'Files changed since this snapshot'
+							: null
+				return { repo: null, changed: summary !== null, summary, error: null }
+			}
 			const repo = await this.reread(repoId)
 			const s = await resolveBranchTarget(repo, target.headRef, target.baseRef)
 			const head = s.headSha !== stored.headSha
@@ -1339,7 +1390,8 @@ export class ReviewService {
 						baseSha: c.baseSha,
 						headSha: c.headSha,
 						sources,
-						checks: gh && repo ? () => gh.checks(repo, c.headSha, signal) : null,
+						// Uncommitted changes have no commit for CI to have run on.
+						checks: gh && repo && c.target?.kind !== 'uncommitted' ? () => gh.checks(repo, c.headSha, signal) : null,
 						annotations: gh && repo ? (id) => gh.annotations(repo, id, signal) : null,
 						signal,
 					})

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, join, sep } from 'node:path'
 import { parseGitHubRemote } from '../shared/prQuery.ts'
 import type { AppError, BranchRef, ChangedFile, Comparison, ErrorCode, FileStatus, RemoteInfo, RepoInfo } from '../shared/types.ts'
@@ -133,12 +134,12 @@ export function git(
 	cwd: string,
 	args: Array<string>,
 	maxBytes = 256 * 1024 * 1024,
-	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean } = {},
+	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean; env?: Record<string, string> } = {},
 ): Promise<GitOutput> {
 	return new Promise((resolve, reject) => {
 		const child = spawn('git', [...GLOBAL_ARGS, ...args], {
 			cwd,
-			env: envFor(cwd, !!options.appClone),
+			env: { ...envFor(cwd, !!options.appClone), ...options.env },
 			shell: false,
 			windowsHide: true,
 			signal: options.signal,
@@ -443,6 +444,16 @@ export async function isAncestor(root: string, a: string, b: string): Promise<bo
 
 /** Rebuilds a stored comparison from its pinned SHAs. */
 export async function compareSnapshot(root: string, s: Omit<Comparison, 'id' | 'files'>): Promise<ComparisonData> {
+	if (s.target?.kind === 'uncommitted') {
+		// Its head is a tree nothing refers to, so garbage collection may have removed it since.
+		const [b, kind] = await Promise.all([resolveCommit(root, s.baseSha), git(root, ['cat-file', '-t', s.headSha])])
+		if (b !== s.baseSha || kind.stdout.toString('utf8').trim() !== 'tree')
+			throw new AppFail(
+				'missing-commits',
+				'This snapshot of uncommitted changes is no longer in the repository (git removes unused snapshots when it cleans up). Review the uncommitted changes again.',
+			)
+		return buildComparison(root, s)
+	}
 	const [b, h] = await Promise.all([resolveCommit(root, s.baseSha), resolveCommit(root, s.headSha)])
 	if (b !== s.baseSha || h !== s.headSha) {
 		throw new AppFail(
@@ -451,6 +462,72 @@ export async function compareSnapshot(root: string, s: Omit<Comparison, 'id' | '
 		)
 	}
 	return buildComparison(root, s)
+}
+
+/**
+ * Uncommitted changes as a tree: the index as it is (`staged`), or the working tree. The working tree is added to a
+ * copy of the index in a temporary folder, so the repository's own index is never changed, and git only reads again
+ * the files whose size or time differ from it. `untracked` also takes new files `.gitignore` doesn't exclude.
+ * This writes the tree and any new file contents to the object database, unreferenced, as `git stash create` does;
+ * `git gc` removes them later. `untracked` in the result: the new files it took that the index doesn't have.
+ */
+export async function snapshotTree(root: string, staged: boolean, untracked: boolean): Promise<{ tree: string; untracked: Array<string> }> {
+	const write = async (env?: Record<string, string>): Promise<string> => {
+		const r = await git(root, ['write-tree'], 1024, { env })
+		const tree = r.stdout.toString('utf8').trim()
+		if (r.code !== 0 || !isSha(tree))
+			throw new AppFail(
+				'git-failed',
+				/unmerged|needs merge/i.test(r.stderr) ? 'Resolve the merge conflicts first.' : `git write-tree failed: ${r.stderr.trim()}`,
+			)
+		return tree
+	}
+	if (staged) return { tree: await write(), untracked: [] }
+	const indexPath = (await gitText(root, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])).trim()
+	const dir = await mkdtemp(join(tmpdir(), 'review-index-'))
+	try {
+		const env = { GIT_INDEX_FILE: join(dir, 'index') }
+		// No index yet (nothing was ever staged): start from HEAD instead.
+		const copied = await copyFile(indexPath, env.GIT_INDEX_FILE).then(
+			() => true,
+			() => false,
+		)
+		if (!copied) await gitOk(root, ['read-tree', 'HEAD'], env)
+		await gitOk(root, ['add', untracked ? '--all' : '--update'], env)
+		const tree = await write(env)
+		const others = untracked ? (await gitText(root, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean) : []
+		return { tree, untracked: others }
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+}
+
+async function gitOk(root: string, args: Array<string>, env: Record<string, string>): Promise<void> {
+	const r = await git(root, args, 1024 * 1024, { env, timeoutMs: 120_000 })
+	if (r.code !== 0) throw new AppFail('git-failed', `git ${args[0]} failed: ${r.stderr.trim() || `exit ${r.code}`}`)
+}
+
+/**
+ * Compares HEAD with its uncommitted changes, staged only or the whole working tree. The head of the comparison is a
+ * tree, not a commit (see snapshotTree), so it can be reviewed, looked up and carried, but not published.
+ */
+export async function compareUncommitted(repo: RepoInfo, staged: boolean, untracked: boolean): Promise<ComparisonData> {
+	const head = await resolveCommit(repo.root, 'HEAD')
+	if (!head) throw new AppFail('no-commits', 'This repository has no commits yet, so there is nothing to compare the changes with.')
+	const snap = await snapshotTree(repo.root, staged, untracked)
+	const data = await buildComparison(repo.root, {
+		repoId: repo.id,
+		baseRef: 'HEAD',
+		headRef: repo.branch,
+		headSha: snap.tree,
+		baseTipSha: head,
+		baseSha: head,
+		target: { kind: 'uncommitted', staged, untracked, branch: repo.branch ? `refs/heads/${repo.branch}` : null },
+		pr: null,
+	})
+	const fresh = new Set(snap.untracked)
+	data.comparison.untracked = data.comparison.files.filter((f) => f.newPath && fresh.has(f.newPath)).map((f) => f.key)
+	return data
 }
 
 export function shortRef(ref: string): string {

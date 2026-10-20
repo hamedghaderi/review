@@ -9,6 +9,7 @@ interface Props {
 	selected: string | null
 	viewed: Set<string>
 	commented: Map<string, number>
+	untracked?: ReadonlySet<string> // uncommitted changes: new files git doesn't track yet
 	onSelect(key: string): void
 	onToggleViewed(key: string): void
 	onNextUnreviewed(): void
@@ -23,7 +24,7 @@ const STATUS_LETTER: Record<ChangedFile['status'], string> = {
 	'type-changed': 'T',
 }
 
-export function FileTree({ files, selected, viewed, commented, onSelect, onToggleViewed, onNextUnreviewed }: Props) {
+export function FileTree({ files, selected, viewed, commented, untracked, onSelect, onToggleViewed, onNextUnreviewed }: Props) {
 	const [query, setQuery] = useState('')
 	const [filter, setFilter] = useState<Filter>('all')
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -100,6 +101,14 @@ export function FileTree({ files, selected, viewed, commented, onSelect, onToggl
 							{STATUS_LETTER[f.status]}
 						</span>
 						<span className="tree-name">{name}</span>
+						{untracked?.has(f.key) && (
+							<span
+								className="pill small-pill"
+								title="Not tracked by git yet: a new file you haven't added. Check it belongs in the change."
+							>
+								untracked
+							</span>
+						)}
 						{n ? (
 							<span className="badge" title={`${n} comment${n === 1 ? '' : 's'}`}>
 								{n}

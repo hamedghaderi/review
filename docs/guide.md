@@ -29,6 +29,16 @@ To review commits that aren't a branch comparison, type them in Quick open (`⌘
 
 Anything git resolves to a commit works on either side (a SHA, a branch, a tag, `HEAD~3`, `main^`). The review stores the SHAs it resolved to, so it never changes and never offers an update; type the range again for newer commits. A range with the same two SHAs as a branch review opens that review. Commits reviews can't be published; the first commit of a repository has no parent to compare with.
 
+### Uncommitted changes
+
+To review work before you commit it, click **N uncommitted changes: review them** in the header, or pick **Uncommitted changes** or **Staged changes** in Quick open (or type `uncommitted` or `staged`).
+
+- **Uncommitted changes** compares HEAD with the working tree: staged, unstaged and untracked files, minus what `.gitignore` excludes. Untracked files are marked **untracked** in the file list; **Leave untracked files out** takes a snapshot without them. **Staged changes** compares HEAD with what you would commit now.
+- The review is of a **snapshot** taken when you open it. Comments, AI review, lookups and go to definition all read that snapshot, not the files as you keep editing them. When the files change (or you commit, or switch branches), **Update available** offers a new snapshot, and your comments carry over the same way as between commits.
+- After you commit, open the branch's review (or **Review update** on it): the comments you wrote on its uncommitted changes carry over to it, marked outdated where the lines changed since.
+- Taking a snapshot never touches your index or files. It does write the snapshot (and the new file contents in it) into the repository's object database, unreferenced, like `git stash create`; `git gc` removes them later. A snapshot opened again after that is gone; review the changes again.
+- These reviews can't be published, and CI results aren't read for them, since there is no commit.
+
 ### Pull requests (GitHub)
 
 Repositories are detected from HTTPS, SSH, scp-style and `git://` remotes. If remotes point at different GitHub repositories (fork `origin` plus `upstream`), `upstream` is used by default, and you can choose another one under the **GitHub** icon in the header (next to settings; a green dot means connected, red means the connection failed); the choice is saved per clone.

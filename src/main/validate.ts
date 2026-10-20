@@ -104,6 +104,13 @@ export function reviewTarget(v: unknown): ReviewTarget {
 	const o = obj(v, 'review target')
 	if (o.kind === 'branch') return { kind: 'branch', headRef: branchRef(o.headRef), baseRef: branchRef(o.baseRef, 'base branch') }
 	if (o.kind === 'pr') return { kind: 'pr', repo: githubRepo(o.repo), number: prNumber(o.number) }
+	if (o.kind === 'uncommitted')
+		return {
+			kind: 'uncommitted',
+			staged: bool(o.staged, 'staged'),
+			untracked: bool(o.untracked, 'untracked files'),
+			branch: o.branch == null ? null : branchRef(o.branch),
+		}
 	if (o.kind === 'commits')
 		return {
 			kind: 'commits',
