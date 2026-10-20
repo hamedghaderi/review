@@ -37,6 +37,23 @@ export function costCaveat(c: AiCost): string | null {
 	return parts.length ? parts.join(' ') : null
 }
 
+/** "12k", "3.4M". */
+export function formatTokens(n: number): string {
+	return n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
+}
+
+/** "12k–48k", or one number when both ends round the same. */
+export function formatTokenRange(r: { low: number; high: number }): string {
+	const [a, b] = [formatTokens(r.low), formatTokens(r.high)]
+	return a === b ? a : `${a}–${b}`
+}
+
+/** "$0.40–$1.60", "<$0.01", or one amount when both ends round the same. */
+export function formatCostRange(low: number, high: number): string {
+	const one = (x: number): string => (x > 0 && x < 0.01 ? '<$0.01' : `$${x.toFixed(2)}`)
+	return one(low) === one(high) ? one(low) : `${one(low)}–${one(high)}`
+}
+
 /** "$3 in · $15 out per million tokens". */
 export function formatPrice(p: ModelPrice): string {
 	const n = (x: number): string => `$${Number(x.toFixed(4))}`

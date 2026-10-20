@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AiRun, AiSettingsView, AiStartScope, ChangedFile, IncrementalOffer, ReviewerChoice } from '../../shared/types.ts'
+import type { AiRun, AiSettingsView, AiStartScope, ChangedFile, IncrementalOffer, ReviewerChoice, RunEstimate } from '../../shared/types.ts'
+import { formatCostRange, formatTokenRange } from '../../shared/cost.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
 import { AiOrb } from './AiOrb.tsx'
@@ -14,6 +15,8 @@ interface Props {
 	unviewed: Array<string> // keys of the changed files not marked viewed, in tree order
 	/** Whether this reviewer can review only the files changed since the last finished run; null when there is none. */
 	loadOffer(reviewer: ReviewerChoice): Promise<IncrementalOffer | null>
+	/** What a run with these options would send and cost; null when it can't be worked out. */
+	loadEstimate(reviewer: ReviewerChoice, scope: AiStartScope): Promise<RunEstimate | null>
 	openNow?: boolean // open the dialog once (a pull request link opened this review); onOpened clears it
 	onOpened?(): void
 	onStart(scope: AiStartScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null): void
@@ -29,6 +32,7 @@ export function AiRunControl({
 	fileCount,
 	unviewed,
 	loadOffer,
+	loadEstimate,
 	openNow,
 	onOpened,
 	onStart,
@@ -44,6 +48,7 @@ export function AiRunControl({
 	const [bugsOnly, setBugsOnly] = useState(false)
 	const [persona, setPersona] = useState(readPersona)
 	const [offer, setOffer] = useState<IncrementalOffer | null>(null)
+	const [estimate, setEstimate] = useState<{ key: string; value: RunEstimate | null } | null>(null)
 	const ref = useRef<HTMLDivElement>(null)
 	const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
 
@@ -99,6 +104,36 @@ export function AiRunControl({
 		}
 	}, [open, choiceKey, loadOffer])
 
+	// Every file unviewed is the same run as all files; none unviewed has nothing to send.
+	const unviewedOnly = unviewed.length > 0 && unviewed.length < fileCount
+	const incremental = offer && offer.refused === null ? offer : null
+	const picked = scope ?? (incremental ? 'changed' : 'all')
+	const effectiveScope =
+		(picked === 'file' && !currentFile) || (picked === 'unviewed' && !unviewedOnly) || (picked === 'changed' && !incremental)
+			? 'all'
+			: picked
+	const startScope: AiStartScope =
+		effectiveScope === 'changed'
+			? { kind: 'changed' }
+			: effectiveScope === 'file' && currentFile
+				? { kind: 'file', fileKey: currentFile.key }
+				: effectiveScope === 'unviewed'
+					? { kind: 'files', fileKeys: unviewed }
+					: { kind: 'all' }
+	const estimateKey = JSON.stringify([choice, startScope])
+	useEffect(() => {
+		if (!open || running) return
+		let live = true
+		const [c, sc] = JSON.parse(estimateKey) as [ReviewerChoice, AiStartScope]
+		void loadEstimate(c, sc).then((value) => {
+			if (live) setEstimate({ key: estimateKey, value })
+		})
+		return () => {
+			live = false
+		}
+	}, [open, running, estimateKey, loadEstimate])
+	const shown = estimate?.key === estimateKey ? estimate.value : undefined
+
 	if (activeRun && activeRun.status === 'running') {
 		const c = activeRun.coverage
 		const finished = c.batchesDone + c.batchesFailed
@@ -128,14 +163,6 @@ export function AiRunControl({
 		)
 	}
 
-	// Every file unviewed is the same run as all files; none unviewed has nothing to send.
-	const unviewedOnly = unviewed.length > 0 && unviewed.length < fileCount
-	const incremental = offer && offer.refused === null ? offer : null
-	const picked = scope ?? (incremental ? 'changed' : 'all')
-	const effectiveScope =
-		(picked === 'file' && !currentFile) || (picked === 'unviewed' && !unviewedOnly) || (picked === 'changed' && !incremental)
-			? 'all'
-			: picked
 	const connection = selection ? settings?.connections.find((c) => c.id === selection.connectionId) : undefined
 	const model = connection?.models.find((m) => m.id === selection?.modelId)
 	const fixture = connection?.kind === 'fixture'
@@ -292,6 +319,7 @@ export function AiRunControl({
 							</label>
 						</>
 					)}
+					<RunCost estimate={shown} />
 					<details className="run-info small">
 						<summary>What gets sent</summary>
 						<dl className="ai-meta" hidden={!!team}>
@@ -340,24 +368,41 @@ export function AiRunControl({
 							disabled={problem !== null}
 							onClick={() => {
 								setOpen(false)
-								onStart(
-									effectiveScope === 'changed'
-										? { kind: 'changed' }
-										: effectiveScope === 'file' && currentFile
-											? { kind: 'file', fileKey: currentFile.key }
-											: effectiveScope === 'unviewed'
-												? { kind: 'files', fileKeys: unviewed }
-												: { kind: 'all' },
-									!team && passes,
-									!team && bugsOnly,
-									team ? null : persona,
-								)
+								onStart(startScope, !team && passes, !team && bugsOnly, team ? null : persona)
 							}}
 						>
 							Start review
 						</button>
 					</div>
 				</div>
+			)}
+		</div>
+	)
+}
+
+/** The estimate before a run: undefined while it is worked out, null when it couldn't be. */
+function RunCost({ estimate: e }: { estimate: RunEstimate | null | undefined }) {
+	if (e === undefined) return <p className="muted small run-cost">Estimating cost…</p>
+	if (e === null || e.requests === 0) return null
+	return (
+		<div className="small run-cost" title={e.notes.join('\n') || undefined}>
+			<div>
+				<b>
+					{e.cost
+						? `${e.cost.unpriced ? 'At least ' : ''}${formatCostRange(e.cost.low, e.cost.high)}${e.cost.estimated ? ' est.' : ''}`
+						: 'Cost unknown'}
+				</b>{' '}
+				<span className="muted">
+					· {formatTokenRange(e.inputTokens)} tokens in, {formatTokenRange(e.outputTokens)} out · {e.requests} request
+					{e.requests === 1 ? '' : 's'}
+				</span>
+			</div>
+			{e.notes.length > 0 && (
+				<ul className="muted run-cost-notes">
+					{e.notes.map((n) => (
+						<li key={n}>{n}</li>
+					))}
+				</ul>
 			)}
 		</div>
 	)

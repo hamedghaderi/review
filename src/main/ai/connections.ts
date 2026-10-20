@@ -573,6 +573,13 @@ export class ConnectionService {
 		}
 	}
 
+	/** The limits and price a run on this model would use, without reading the credential; null when it isn't offered. */
+	modelInfo(selection: ModelSelection): { limits: ModelLimits; price: PricedModel | null } | null {
+		const conn = this.file.read().connections.find((c) => c.id === selection.connectionId)
+		if (!conn || !this.connectionView(conn).models.some((m) => m.id === selection.modelId)) return null
+		return { limits: this.modelLimits(conn, selection.modelId), price: modelPrice(conn, selection.modelId) }
+	}
+
 	flush(): Promise<unknown> {
 		return this.file.flush()
 	}

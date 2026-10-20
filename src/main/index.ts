@@ -347,6 +347,9 @@ function registerIpc(): void {
 		connections.checkChoice(choice)
 		return service.startAi(comparisonId(reviewId), scope, choice)
 	})
+	handle(IPC.aiEstimate, async (reviewId: unknown, reviewer: unknown, scope: unknown) =>
+		service.estimateAi(comparisonId(reviewId), reviewerChoice(reviewer), scope),
+	)
 	handle(IPC.aiIncremental, async (reviewId: unknown, reviewer: unknown) =>
 		service.incrementalOffer(comparisonId(reviewId), reviewerChoice(reviewer)),
 	)
@@ -562,6 +565,7 @@ app.whenReady().then(async () => {
 	usage = new UsageLog(dir)
 	await usage.load()
 	ai.attachUsage(usage)
+	ai.attachModels({ info: (sel) => connections.modelInfo(sel), limits: () => connections.view().limits })
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()

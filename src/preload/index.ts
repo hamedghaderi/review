@@ -137,6 +137,7 @@ const api: ReviewApi = {
 	mcpImportClaude: (repoId, keys) => ipcRenderer.invoke(IPC.mcpImportClaude, repoId, keys),
 	startAiReview: (reviewId, scope, reviewer) => ipcRenderer.invoke(IPC.aiStart, reviewId, scope, reviewer),
 	incrementalOffer: (reviewId, reviewer) => ipcRenderer.invoke(IPC.aiIncremental, reviewId, reviewer),
+	estimateRun: (reviewId, reviewer, scope) => ipcRenderer.invoke(IPC.aiEstimate, reviewId, reviewer, scope),
 	cancelAiReview: (runId) => ipcRenderer.invoke(IPC.aiCancel, runId),
 	retryAiRules: (reviewId, runId, rules) => ipcRenderer.invoke(IPC.aiRetryRules, reviewId, runId, rules),
 	onAiRunUpdate: (handler) => {

@@ -840,6 +840,20 @@ export type IncrementalOffer =
 	| { from: CarriedRun; review: Array<string>; carry: Array<string>; recheck: Array<RecheckedFile>; refused: null }
 	| { from: CarriedRun; refused: string }
 
+/**
+ * What a run would send, worked out when the run dialog opens from its requests packed as the run packs them. The
+ * related code, CI results and conversation a run adds are not gathered, and lookups and double-checks can't be
+ * predicted, so it is a range; `notes` says what it leaves out.
+ */
+export interface RunEstimate {
+	requests: number
+	files: number // files sent to at least one reviewer
+	inputTokens: { low: number; high: number }
+	outputTokens: { low: number; high: number }
+	cost: { low: number; high: number; estimated: boolean; unpriced: boolean } | null // null: no model has a price
+	notes: Array<string>
+}
+
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'
 
 export interface LineRange {
@@ -1492,6 +1506,7 @@ export const IPC = {
 	aiSelectTeam: 'ai:team-select',
 	aiStart: 'ai:start',
 	aiIncremental: 'ai:incremental',
+	aiEstimate: 'ai:estimate',
 	aiCancel: 'ai:cancel',
 	aiRetryRules: 'ai:retry-rules',
 	aiRunUpdate: 'ai:run-update',
@@ -1654,6 +1669,8 @@ export interface ReviewApi {
 	startAiReview(reviewId: string, scope: AiStartScope, reviewer: ReviewerChoice): Promise<Result<AiRun>>
 	/** Whether a run with `reviewer` can review only the files changed since the last finished run; null when there is none. */
 	incrementalOffer(reviewId: string, reviewer: ReviewerChoice): Promise<Result<IncrementalOffer | null>>
+	/** What a run with these options would send and cost, before anything is sent. */
+	estimateRun(reviewId: string, reviewer: ReviewerChoice, scope: AiStartScope): Promise<Result<RunEstimate>>
 	cancelAiReview(runId: string): Promise<Result<boolean>>
 	/** Asks each rule's reviewer again, for those rules only, on the requests of a finished run that did not cover them. */
 	retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<Result<AiRun>>
