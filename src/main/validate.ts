@@ -457,6 +457,7 @@ export function reviewerChoice(v: unknown): ReviewerChoice {
 			kind: 'model',
 			selection: modelSelection(o.selection),
 			...(o.passes === undefined ? {} : { passes: bool(o.passes, 'focused passes setting') }),
+			...(o.bugsOnly === undefined ? {} : { bugsOnly: bool(o.bugsOnly, 'bugs-only setting') }),
 			...(o.persona == null ? {} : { persona: oneOf(o.persona, PERSONA_IDS, 'persona') }),
 		}
 	if (o.kind === 'team') return { kind: 'team', teamId: connectionId(o.teamId) }

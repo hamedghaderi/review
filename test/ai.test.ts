@@ -1977,6 +1977,54 @@ test('focused passes: one model runs as the four default roles, each on its own 
 	for (const e of run.evaluation!) assert.ok(e.checkedBy, `${e.rule} has a pass`)
 })
 
+test('bugs only: one model checks only bug and security, alone or as the passes that own them', async () => {
+	for (const passes of [false, true]) {
+		const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+		const s = sources()
+		const store = ReviewStore.in(dir)
+		await store.load()
+		await store.update((d) => {
+			d.repos['/repo'] = {
+				repoId: '/repo',
+				root: '/repo',
+				selectedBase: null,
+				activeReviewId: s.comp.id,
+				reviews: { [s.comp.id]: emptyReview() },
+				aiRuns: {},
+			}
+		})
+		const assigned: Array<string> = []
+		const provider = createFakeProvider({
+			script: (req) => {
+				if (!req.schema) assigned.push(/exactly these rules, in this order: ([^.]+)\./.exec(req.instructions)?.[1] ?? 'all')
+				return defaultScript(req)
+			},
+		})
+		const controller = new AiController(store, fixedConfig(provider), () => {})
+		const byKey = new Map(s.srcs.map((x) => [x.file.key, x]))
+		const access = {
+			comparison: s.comp,
+			loadPatch: async (k: string) => byKey.get(k)!.patch,
+			loadFileLines: async (k: string) => byKey.get(k)!.fullText ?? { kind: 'text' as const, lines: [] },
+		}
+		await controller.start(access, s.comp.id, { kind: 'all' }, { kind: 'model', selection: SEL, passes, bugsOnly: true })
+		for (let i = 0; i < 100 && controller.runsFor('/repo', s.comp.id)[0].status === 'running'; i++)
+			await new Promise((r) => setTimeout(r, 10))
+		const run = controller.runsFor('/repo', s.comp.id)[0]
+		assert.equal(run.status, 'completed', run.errors.join('; '))
+		assert.deepEqual([...new Set(assigned)].sort(), passes ? ['bug', 'security'] : ['bug, security'])
+		assert.deepEqual(
+			run.evaluation!.map((e) => e.rule),
+			['bug', 'security'],
+			'rules nobody was asked about are not stored as missing',
+		)
+		assert.deepEqual(
+			run.team!.members.map((m) => m.role),
+			passes ? ['Defects', 'Security'] : ['Bugs & security'],
+		)
+	}
+})
+
 test('double-check: each blocking finding gets a request that tries to prove it wrong; one shown likely wrong is not auto-added', async () => {
 	const s = sources()
 	const checks: Array<{ instructions: string; input: string }> = []

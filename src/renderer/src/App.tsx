@@ -853,7 +853,7 @@ export function App() {
 		else setAiError(r.error.message)
 	}
 
-	const startAi = async (scope: AiScope, passes = false, persona: PersonaId | null = null): Promise<void> => {
+	const startAi = async (scope: AiScope, passes = false, bugsOnly = false, persona: PersonaId | null = null): Promise<void> => {
 		if (!comparison || !reviewer) return
 		await persist()
 		setAiError(null)
@@ -861,7 +861,7 @@ export function App() {
 		const r = await window.review.startAiReview(
 			comparison.id,
 			scope,
-			reviewer.kind === 'model' ? { ...reviewer, passes, persona } : reviewer,
+			reviewer.kind === 'model' ? { ...reviewer, passes, bugsOnly, persona } : reviewer,
 		)
 		if (!r.ok) setAiError(r.error.message)
 		else if (comparisonIdRef.current === r.value.reviewId)
@@ -1253,7 +1253,7 @@ export function App() {
 											fileCount={comparison.files.length}
 											openNow={runPromptFor === comparison.id}
 											onOpened={() => setRunPromptFor(null)}
-											onStart={(scope, passes, persona) => void startAi(scope, passes, persona)}
+											onStart={(scope, passes, bugsOnly, persona) => void startAi(scope, passes, bugsOnly, persona)}
 											onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
 										/>
 									)}

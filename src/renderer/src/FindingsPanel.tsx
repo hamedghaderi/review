@@ -472,7 +472,7 @@ function RunSummary({
 					}
 				>
 					{run.team
-						? `${run.team.name} · ${run.team.members.length} reviewers`
+						? `${run.team.name} · ${run.team.members.length === 1 ? run.team.members[0].model : `${run.team.members.length} reviewers`}`
 						: `${run.connectionLabel ?? run.providerLabel} · ${run.model}${lensNote(run.persona)}`}
 				</span>
 				<span className="spacer" />
@@ -775,6 +775,8 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 	const retryable = REVIEW_RULES.filter((r) => missing.includes(r) && canRetry(r))
 	// A stopped run resumes by asking every rule it did not finish, even a single one.
 	const stopped = run.status === 'cancelled'
+	// Rules this run never asked (a bugs-only run, or rules added since) read as not checked, not as nothing found.
+	const notAsked = RULE_GROUPS.flatMap((g) => g.rules).filter((r) => !byRule.has(r))
 	return (
 		<div className="checklist small" aria-live="polite">
 			<div className="checklist-head">
@@ -783,6 +785,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 					{doneCount} of {ev.length}
 					{!running && withFindings ? ` · ${withFindings} with findings` : ''}
 					{!running && missing.length ? ` · ${missing.length} not fully checked` : ''}
+					{notAsked.length ? ` · ${notAsked.length} not part of this run` : ''}
 					{running && run.coverage.batchesTotal > 1
 						? ` · ${run.coverage.batchesDone} of ${run.coverage.batchesTotal} requests answered`
 						: ''}
@@ -800,20 +803,28 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 						{stopped ? 'Resume' : 'Retry all'}
 					</button>
 				)}
-				{!running && notable.length < ev.length && (
+				{!running && notable.length < ev.length + notAsked.length && (
 					<button className="link checklist-toggle" onClick={() => setAll(!all)}>
-						{all ? (notable.length ? 'Only rules to look at' : 'Hide rules') : `Show all ${ev.length}`}
+						{all ? (notable.length ? 'Only rules to look at' : 'Hide rules') : `Show all ${ev.length + notAsked.length}`}
 					</button>
 				)}
 			</div>
-			{/* A run lists only the rules it was checked against; rules added later are not part of older runs. */}
-			{RULE_GROUPS.map((g) => ({ ...g, rules: g.rules.filter((r) => byRule.has(r) && (showAll || stateOf(r) !== 'clear')) }))
+			{RULE_GROUPS.map((g) => ({ ...g, rules: g.rules.filter((r) => showAll || (byRule.has(r) && stateOf(r) !== 'clear')) }))
 				.filter((g) => g.rules.length > 0)
 				.map((g) => (
 					<div key={g.title} className="checklist-group">
 						<div className="checklist-title">{g.title}</div>
 						{g.rules.map((rule) => {
-							const e = byRule.get(rule)!
+							const e = byRule.get(rule)
+							if (!e)
+								return (
+									<div key={rule} className="check-row skipped">
+										<span className="check-icon" aria-hidden />
+										<span className="check-label">{RULE_LABEL[rule]}</span>
+										<span className="spacer" />
+										<span className="muted nowrap check-status">not checked</span>
+									</div>
+								)
 							const n = found.get(rule) ?? 0
 							const need = requestsFor(run, e.checkedBy)
 							const state = stateOf(rule)

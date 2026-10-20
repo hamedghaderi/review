@@ -232,9 +232,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	if (options.team && !retry) {
 		run.team = { id: options.team.id, name: options.team.name, members: workers.map((w) => w.member!) }
 		run.providerLabel = options.team.name
-		run.model = `${workers.length} reviewers`
+		run.model = workers.length === 1 ? workers[0].provider.model : `${workers.length} reviewers`
 		run.fixture = workers.every((w) => w.provider.fixture)
 		for (const w of workers) for (const r of w.rules) run.evaluation!.find((e) => e.rule === r)!.checkedBy = w.id
+		// A rule no reviewer owns (a bugs-only run) was not asked, so it is left out rather than shown as missing and retried.
+		run.evaluation = run.evaluation!.filter((e) => e.checkedBy)
 	}
 	// Settled once the background is read: text from outsiders turns the MCP tools off.
 	let external = lookups && input.external?.definitions.length ? input.external : null

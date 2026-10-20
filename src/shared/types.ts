@@ -736,9 +736,13 @@ export interface ReviewTeamView extends ReviewTeam {
 /**
  * What a run uses: one model for all rules, or a team. `passes` runs one model as the four default roles, each a
  * separate pass over only the files its rules apply to. `persona` reviews with that lens (every pass, with passes).
+ * `bugsOnly` checks only BUGS_ONLY_RULES (with passes, only the passes that own them).
  */
 export type ReviewerChoice =
-	{ kind: 'model'; selection: ModelSelection; passes?: boolean; persona?: PersonaId | null } | { kind: 'team'; teamId: string }
+	| { kind: 'model'; selection: ModelSelection; passes?: boolean; bugsOnly?: boolean; persona?: PersonaId | null }
+	| { kind: 'team'; teamId: string }
+
+export const BUGS_ONLY_RULES: ReadonlyArray<ReviewRule> = ['bug', 'security']
 
 /** The roles a new team starts with, and the passes of a focused-pass run. Each rule belongs to exactly one role. */
 export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> = [
