@@ -1,4 +1,4 @@
-import type { AiUsage, ContextImageType, ProviderKind, ProviderProtocol } from '../../shared/types.ts'
+import type { AiUsage, ContextImageType, ModelPrice, PricedModel, ProviderKind, ProviderProtocol } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
 import type { ReviewTools } from './lookup.ts'
 
@@ -35,6 +35,7 @@ export interface DiscoveredModel {
 	contextWindow: number | null
 	maxOutputTokens: number | null
 	structuredOutput: 'yes' | 'no' | 'unknown'
+	price?: ModelPrice | null // what the provider's listing says the model costs (OpenRouter)
 }
 
 /** What a provider can tell us about its limits for one model, used to size review batches. */
@@ -54,6 +55,7 @@ export interface ReviewProvider {
 	model: string
 	fixture: boolean
 	limits: ModelLimits
+	price?: PricedModel | null // captured with the configuration; null or absent: unknown, so the cost isn't counted
 	review(request: ProviderRequest, signal: AbortSignal): Promise<ProviderResponse>
 }
 
@@ -171,6 +173,9 @@ export function addUsage(total: AiUsage | null, u: AiUsage | null): AiUsage | nu
 	return {
 		inputTokens: total.inputTokens + u.inputTokens,
 		cachedInputTokens: total.cachedInputTokens + u.cachedInputTokens,
+		...(total.cacheWriteTokens !== undefined || u.cacheWriteTokens !== undefined
+			? { cacheWriteTokens: (total.cacheWriteTokens ?? 0) + (u.cacheWriteTokens ?? 0) }
+			: {}),
 		outputTokens: total.outputTokens + u.outputTokens,
 		reasoningTokens: total.reasoningTokens + u.reasoningTokens,
 		totalTokens: total.totalTokens + (u.totalTokens || u.inputTokens + u.outputTokens),

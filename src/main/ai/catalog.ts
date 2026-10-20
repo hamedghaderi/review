@@ -1,9 +1,10 @@
-import type { EndpointPreset, ProviderDescriptor, ProviderKind } from '../../shared/types.ts'
+import type { EndpointPreset, ModelPrice, ProviderDescriptor, ProviderKind } from '../../shared/types.ts'
 
 /**
  * Maintained list of models offered before discovery succeeds, or where discovery is unavailable. Entries are
  * suggestions only: they are labelled "Catalog" in the UI until the provider's model list confirms account access.
- * Update CATALOG_UPDATED when this list changes.
+ * Prices are list prices in US dollars per million tokens at the standard tier, for prompts under the long-context
+ * threshold, as published on CATALOG_UPDATED; they are shown as estimates. Update CATALOG_UPDATED when this list changes.
  */
 export const CATALOG_UPDATED = '2026-10-08'
 
@@ -12,25 +13,64 @@ export interface CatalogModel {
 	label: string
 	contextWindow: number
 	maxOutputTokens: number
+	price: ModelPrice | null
 }
+
+const price = (input: number, cachedInput: number, output: number, cacheWrite: number | null = null): ModelPrice => ({
+	input,
+	cachedInput,
+	cacheWrite,
+	output,
+})
 
 export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> = {
 	openai: [
-		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', contextWindow: 1_050_000, maxOutputTokens: 128_000 },
-		{ id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 1_050_000, maxOutputTokens: 128_000 },
-		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 400_000, maxOutputTokens: 128_000 },
+		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', contextWindow: 1_050_000, maxOutputTokens: 128_000, price: price(2, 0.1, 10, 2.5) },
+		{ id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 1_050_000, maxOutputTokens: 128_000, price: price(10, 1, 50, 12.5) },
+		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 400_000, maxOutputTokens: 128_000, price: price(0.1, 0.01, 0.5, 0.125) },
 	],
 	anthropic: [
-		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
-		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
-		{ id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000 },
+		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: price(4, 0.2, 20, 5) },
+		{
+			id: 'claude-sonnet-5-5',
+			label: 'Claude Sonnet 5.5',
+			contextWindow: 1_000_000,
+			maxOutputTokens: 128_000,
+			price: price(2, 0.1, 10, 2.5),
+		},
+		{
+			id: 'claude-haiku-5-5',
+			label: 'Claude Haiku 5.5',
+			contextWindow: 1_000_000,
+			maxOutputTokens: 128_000,
+			price: price(0.1, 0.01, 0.5, 0.125),
+		},
 	],
+	// Gemini 3.8 Flash doubles in price from 2027-01-01.
 	gemini: [
-		{ id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
-		{ id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (preview)', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
-		{ id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
+		{
+			id: 'gemini-3.8-flash',
+			label: 'Gemini 3.8 Flash',
+			contextWindow: 1_048_576,
+			maxOutputTokens: 65_536,
+			price: price(0.75, 0.075, 3.75),
+		},
+		{
+			id: 'gemini-3.1-pro-preview',
+			label: 'Gemini 3.1 Pro (preview)',
+			contextWindow: 1_048_576,
+			maxOutputTokens: 65_536,
+			price: price(2, 0.2, 12),
+		},
+		{
+			id: 'gemini-3.5-flash-lite',
+			label: 'Gemini 3.5 Flash-Lite',
+			contextWindow: 1_048_576,
+			maxOutputTokens: 65_536,
+			price: price(0.3, 0.03, 2.5),
+		},
 	],
-	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000 }],
+	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000, price: price(0, 0, 0) }],
 }
 
 const LOCAL_PRESETS: Array<EndpointPreset> = [
@@ -42,6 +82,7 @@ const LOCAL_PRESETS: Array<EndpointPreset> = [
 		auth: 'none',
 		contextWindow: 8192,
 		note: null,
+		free: true,
 	},
 	{
 		id: 'lmstudio',
@@ -51,6 +92,7 @@ const LOCAL_PRESETS: Array<EndpointPreset> = [
 		auth: 'none',
 		contextWindow: 8192,
 		note: null,
+		free: true,
 	},
 	{
 		id: 'omniroute',
@@ -60,6 +102,7 @@ const LOCAL_PRESETS: Array<EndpointPreset> = [
 		auth: 'api-key',
 		contextWindow: null,
 		note: 'OmniRoute routes to the providers configured in its own dashboard; use an API key created there, or choose “None” if your OmniRoute does not require keys. Its model list is public, so “Test connection” confirms the gateway is reachable but not that the key is accepted. Use “Test model” to check a model end to end.',
+		free: false,
 	},
 	{
 		id: 'generic',
@@ -69,6 +112,7 @@ const LOCAL_PRESETS: Array<EndpointPreset> = [
 		auth: 'api-key',
 		contextWindow: 32_768,
 		note: null,
+		free: false,
 	},
 ]
 

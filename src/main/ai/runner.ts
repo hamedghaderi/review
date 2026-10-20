@@ -20,6 +20,7 @@ import {
 	type EarlierLimitations,
 	type ReviewContext,
 } from '../../shared/types.ts'
+import { addCost } from '../../shared/cost.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import type { LinkedIssue } from '../github.ts'
 import type { RequestImage } from './provider.ts'
@@ -868,11 +869,16 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	}
 
 	function addUsage(u: AiUsage | null, w: Worker): void {
+		// A request that reported no usage still cost something: the cost becomes a lower bound.
+		const price = w.provider.price ?? null
+		run.cost = addCost(run.cost ?? null, u, price)
+		if (w.member) w.member.cost = addCost(w.member.cost ?? null, u, price)
 		if (!u) return
 		const targets = [(run.usage ??= emptyUsage()), ...(w.member ? [(w.member.usage ??= emptyUsage())] : [])]
 		for (const t of targets) {
 			t.inputTokens += u.inputTokens
 			t.cachedInputTokens += u.cachedInputTokens
+			if (u.cacheWriteTokens) t.cacheWriteTokens = (t.cacheWriteTokens ?? 0) + u.cacheWriteTokens
 			t.outputTokens += u.outputTokens
 			t.reasoningTokens += u.reasoningTokens
 			t.totalTokens += u.totalTokens || u.inputTokens + u.outputTokens

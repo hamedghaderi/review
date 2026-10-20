@@ -8,11 +8,13 @@ import type {
 	ConnectionView,
 	CredentialState,
 	FindingLevelSettings,
+	ModelPrice,
 	ModelProbe,
 	ModelSelection,
 	ModelSource,
 	ModelView,
 	NewConnectionInput,
+	PricedModel,
 	ProviderKind,
 	ProviderProtocol,
 	ReviewerChoice,
@@ -53,6 +55,7 @@ interface StoredModel {
 	maxOutputTokens: number | null
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	probe: ModelProbe | null
+	price?: ModelPrice | null // reported by the provider's model list
 }
 
 interface StoredConnection {
@@ -72,6 +75,7 @@ interface StoredConnection {
 	models: Array<StoredModel> // discovered + manual; catalog entries are merged in for display
 	modelsFetchedAt: string | null
 	createdAt: string
+	prices?: Record<string, ModelPrice> // your prices, by model id; they win over the provider's and the catalog's
 }
 
 interface SettingsFile {
@@ -439,6 +443,17 @@ export class ConnectionService {
 		this.emit()
 	}
 
+	async setModelPrice(id: string, modelId: string, price: ModelPrice | null): Promise<void> {
+		this.get(id)
+		await this.file.update((f) => {
+			const c = f.connections.find((x) => x.id === id)
+			if (!c) return
+			const { [modelId]: _, ...rest } = c.prices ?? {}
+			c.prices = price ? { ...rest, [modelId]: price } : rest
+		})
+		this.emit()
+	}
+
 	async select(selection: ModelSelection): Promise<void> {
 		const conn = this.get(selection.connectionId)
 		const view = this.connectionView(conn)
@@ -563,7 +578,10 @@ export class ConnectionService {
 
 	private async buildProvider(conn: StoredConnection, modelId: string, timeoutMs: number): Promise<ReviewProvider> {
 		const resolved = await this.resolve(conn, timeoutMs)
-		return this.adapters.provider(resolved, modelId, this.modelLimits(conn, modelId))
+		// The price is fixed with the rest of the configuration, so a run is costed at the price it started with.
+		return Object.assign(this.adapters.provider(resolved, modelId, this.modelLimits(conn, modelId)), {
+			price: modelPrice(conn, modelId),
+		})
 	}
 
 	private async resolve(conn: StoredConnection, timeoutMs: number): Promise<ResolvedConnection> {
@@ -638,7 +656,7 @@ export class ConnectionService {
 
 	/** Discovered and manual models, plus catalog entries not confirmed by discovery. */
 	private models(c: StoredConnection, verified: boolean): Array<ModelView> {
-		const out: Array<ModelView> = c.models.map((m) => ({ ...m }))
+		const out: Array<ModelView> = c.models.map((m) => ({ ...m, price: modelPrice(c, m.id) }))
 		const discovered = c.models.some((m) => m.source === 'discovered')
 		for (const cat of MODEL_CATALOG[c.kind] ?? []) {
 			if (out.some((m) => m.id === cat.id)) continue
@@ -652,6 +670,7 @@ export class ConnectionService {
 				maxOutputTokens: cat.maxOutputTokens,
 				structuredOutput: 'unknown',
 				probe: null,
+				price: modelPrice(c, cat.id),
 			})
 		}
 		return out
@@ -700,6 +719,18 @@ export function questionModel(v: Omit<AiSettingsView, 'questionModel'>, picked: 
 		if (pick) return { connectionId: pick.connectionId, modelId: pick.modelId }
 	}
 	return v.selection
+}
+
+/** Your price, else the provider's, else free on a local server, else the catalog's; null when none is known. */
+function modelPrice(c: StoredConnection, modelId: string): PricedModel | null {
+	const override = c.prices && Object.hasOwn(c.prices, modelId) ? c.prices[modelId] : undefined
+	if (override) return { ...override, source: 'override' }
+	const listed = c.models.find((m) => m.id === modelId)?.price
+	if (listed) return { ...listed, source: 'provider' }
+	if (c.kind === 'fixture' || descriptor(c.kind).presets.find((p) => p.id === c.preset)?.free)
+		return { input: 0, cachedInput: null, cacheWrite: null, output: 0, source: 'local' }
+	const cat = MODEL_CATALOG[c.kind]?.find((m) => m.id === modelId)?.price
+	return cat ? { ...cat, source: 'catalog' } : null
 }
 
 function endpointKey(c: StoredConnection): string {

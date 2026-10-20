@@ -50,6 +50,7 @@ import {
 	connectionId,
 	connectionPatch,
 	modelId,
+	modelPrice,
 	modelSelection,
 	newConnection,
 	findingLevels,
@@ -403,6 +404,9 @@ function registerIpc(): void {
 	handle(IPC.aiAddModel, (id: unknown, m: unknown) => view(() => connections.addModel(connectionId(id), modelId(m))))
 	handle(IPC.aiRemoveModel, (id: unknown, m: unknown) => view(() => connections.removeModel(connectionId(id), modelId(m))))
 	handle(IPC.aiProbeModel, (id: unknown, m: unknown) => view(() => connections.probeModel(connectionId(id), modelId(m))))
+	handle(IPC.aiSetModelPrice, (id: unknown, m: unknown, price: unknown) =>
+		view(() => connections.setModelPrice(connectionId(id), modelId(m), modelPrice(price))),
+	)
 	handle(IPC.aiSelectModel, (sel: unknown) => view(() => connections.select(modelSelection(sel))))
 	handle(IPC.aiSelectAskModel, (sel: unknown) => view(() => connections.selectAskModel(modelSelection(sel))))
 	handle(IPC.aiSetLimits, (limits: unknown) => view(() => connections.setLimits(reviewLimits(limits))))

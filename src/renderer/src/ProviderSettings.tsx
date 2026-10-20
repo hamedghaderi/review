@@ -5,6 +5,8 @@ import type {
 	ConnectionStatus,
 	ConnectionView,
 	McpSettingsView,
+	ModelPrice,
+	ModelView,
 	ProviderDescriptor,
 	ProviderKind,
 	ProviderProtocol,
@@ -15,6 +17,7 @@ import { suggestTeam, TeamEditor } from './TeamEditor.tsx'
 import { McpImport, McpServerEditor } from './McpSettings.tsx'
 import { FINDING_LEVELS, type FindingLevel, type FindingLevelSettings, type ReviewTeam } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
+import { formatPrice } from '../../shared/cost.ts'
 
 interface Props {
 	settings: AiSettingsView
@@ -477,6 +480,81 @@ function EndpointFields(p: EndpointProps) {
 	)
 }
 
+const PRICE_SOURCE: Record<NonNullable<ModelView['price']>['source'], string> = {
+	catalog: 'catalog price, may be out of date',
+	provider: 'reported by the provider',
+	override: 'your price',
+	local: 'local server, free',
+}
+
+/** "$2 / $10": dollars per million input and output tokens. */
+function shortPrice(p: ModelPrice): string {
+	if (p.input === 0 && p.output === 0) return 'Free'
+	const n = (x: number): string => `$${Number(x.toFixed(4))}`
+	return `${n(p.input)} / ${n(p.output)}`
+}
+
+/** Your price for one model, in dollars per million tokens. Cache writes are billed as input. */
+function PriceEditor({
+	model: m,
+	onSave,
+	onCancel,
+}: {
+	model: ModelView
+	onSave(price: ModelPrice | null): Promise<void>
+	onCancel(): void
+}) {
+	const start = (x: number | null | undefined): string => (x === null || x === undefined ? '' : String(x))
+	const [input, setInput] = useState(start(m.price?.input))
+	const [cached, setCached] = useState(start(m.price?.cachedInput))
+	const [output, setOutput] = useState(start(m.price?.output))
+	const num = (x: string): number | null => (x.trim() === '' || !Number.isFinite(Number(x)) || Number(x) < 0 ? null : Number(x))
+	const valid = num(input) !== null && num(output) !== null && (cached.trim() === '' || num(cached) !== null)
+	return (
+		<form
+			className="price-editor"
+			onSubmit={(e) => {
+				e.preventDefault()
+				if (valid) void onSave({ input: num(input)!, cachedInput: num(cached), cacheWrite: null, output: num(output)! })
+			}}
+		>
+			<div className="small">
+				Price for <span className="mono">{m.id}</span>, in US dollars per million tokens.{' '}
+				<span className="muted">
+					{m.price ? `Now: ${PRICE_SOURCE[m.price.source]}.` : 'No price is known for this model.'} Runs keep the price they started with.
+				</span>
+			</div>
+			<div className="price-fields">
+				<label className="field">
+					<span>Input</span>
+					<input inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} placeholder="0" />
+				</label>
+				<label className="field">
+					<span>Cached input</span>
+					<input inputMode="decimal" value={cached} onChange={(e) => setCached(e.target.value)} placeholder="Same as input" />
+				</label>
+				<label className="field">
+					<span>Output</span>
+					<input inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} placeholder="0" />
+				</label>
+			</div>
+			<div className="form-actions">
+				<button type="submit" className="btn small primary" disabled={!valid}>
+					Save price
+				</button>
+				{m.price?.source === 'override' && (
+					<button type="button" className="btn small" onClick={() => void onSave(null)}>
+						Use the default price
+					</button>
+				)}
+				<button type="button" className="btn small ghost" onClick={onCancel}>
+					Cancel
+				</button>
+			</div>
+		</form>
+	)
+}
+
 function ConnectionDetail({
 	connection: c,
 	provider,
@@ -501,6 +579,7 @@ function ConnectionDetail({
 	const [manual, setManual] = useState('')
 	const [probing, setProbing] = useState<string | null>(null)
 	const [modelQuery, setModelQuery] = useState('')
+	const [pricing, setPricing] = useState<string | null>(null)
 	const presetNote = provider?.presets.find((x) => x.id === c.preset)?.note ?? null
 	if (!provider) return null
 	const needsKey = c.auth === 'api-key'
@@ -622,6 +701,18 @@ function ConnectionDetail({
 						</span>
 						<span className="spacer" />
 						{m.contextWindow && <span className="muted small nowrap">{Math.round(m.contextWindow / 1000)}k ctx</span>}
+						<button
+							className={`btn small ghost nowrap${m.price ? '' : ' muted'}`}
+							title={
+								m.price
+									? `${formatPrice(m.price)} (${PRICE_SOURCE[m.price.source]}). Click to change.`
+									: 'No price known, so runs on this model show no cost. Click to set one.'
+							}
+							aria-expanded={pricing === m.id}
+							onClick={() => setPricing(pricing === m.id ? null : m.id)}
+						>
+							{m.price ? shortPrice(m.price) : 'Set price'}
+						</button>
 						<span className={`src-tag ${m.probe ? (m.probe.ok ? 'ok' : 'bad') : m.source}`} title={sourceTitle(m)}>
 							{m.probe && !m.probe.ok ? 'Failed test' : sourceLabel(m)}
 						</span>
@@ -648,6 +739,19 @@ function ConnectionDetail({
 					</div>
 				))}
 			</div>
+			{(() => {
+				const m = pricing ? c.models.find((x) => x.id === pricing) : undefined
+				return m ? (
+					<PriceEditor
+						key={m.id}
+						model={m}
+						onSave={async (price) => {
+							if (await run(window.review.setModelPrice(c.id, m.id, price))) setPricing(null)
+						}}
+						onCancel={() => setPricing(null)}
+					/>
+				) : null
+			})()}
 			<form
 				className="key-row"
 				onSubmit={async (e) => {

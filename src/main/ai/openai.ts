@@ -12,7 +12,7 @@ import OpenAI, {
 } from 'openai'
 import type { ChatCompletion, ChatCompletionMessageParam } from 'openai/resources/chat/completions/completions'
 import type { ResponseInputItem, Response as OpenAIResponse } from 'openai/resources/responses/responses'
-import type { AiUsage, ProviderKind } from '../../shared/types.ts'
+import type { AiUsage, ModelPrice, ProviderKind } from '../../shared/types.ts'
 import type { ReviewTools } from './lookup.ts'
 import {
 	addUsage,
@@ -113,10 +113,28 @@ async function listOpenRouter(c: OpenAI, o: OpenAIClientOptions, signal: AbortSi
 				contextWindow: numberField(m, 'context_length'),
 				maxOutputTokens: top ? numberField(top, 'max_completion_tokens') : null,
 				structuredOutput: 'yes' as const,
+				price: openRouterPrice(m.pricing),
 			}
 		})
 		.filter((m) => m.id && o)
 		.sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/**
+ * OpenRouter reports US dollars per token as decimal strings. Null when the prompt or completion price is missing or
+ * negative (the auto router, whose price depends on the model it picks).
+ */
+export function openRouterPrice(pricing: unknown): ModelPrice | null {
+	if (!pricing || typeof pricing !== 'object') return null
+	const perMillion = (key: string): number | null => {
+		const v = (pricing as Record<string, unknown>)[key]
+		const n = typeof v === 'string' || typeof v === 'number' ? Number(v) : NaN
+		return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e12) / 1e6 : null
+	}
+	const input = perMillion('prompt')
+	const output = perMillion('completion')
+	if (input === null || output === null) return null
+	return { input, cachedInput: perMillion('input_cache_read'), cacheWrite: perMillion('input_cache_write'), output }
 }
 
 /** False only when the listing says so: a `type` other than chat/text, or output modalities without text. */
@@ -398,16 +416,18 @@ function chatUsage(completion: ChatCompletion): AiUsage | null {
 	// Gateways that route to Anthropic (OmniRoute, LiteLLM…) may leave cached prompt tokens out of prompt_tokens and
 	// report them beside it. Count them, or a cached prompt looks truncated and a valid answer gets discarded.
 	const details = (u?.prompt_tokens_details ?? {}) as Record<string, unknown>
-	const extra = ['cache_creation_tokens', 'cache_creation_input_tokens', 'cache_read_tokens', 'cache_read_input_tokens']
-		.map((k) => (typeof details[k] === 'number' ? (details[k] as number) : 0))
-		.reduce((a, b) => a + b, 0)
-	const cached = u?.prompt_tokens_details?.cached_tokens ?? 0
+	const count = (keys: Array<string>): number =>
+		keys.map((k) => (typeof details[k] === 'number' ? (details[k] as number) : 0)).reduce((a, b) => a + b, 0)
+	const extra = count(['cache_creation_tokens', 'cache_creation_input_tokens', 'cache_read_tokens', 'cache_read_input_tokens'])
+	const cached = Math.max(u?.prompt_tokens_details?.cached_tokens ?? 0, count(['cache_read_tokens', 'cache_read_input_tokens']))
 	const prompt = u?.prompt_tokens ?? 0
 	return u
 		? {
 				// Some gateways include cached tokens in prompt_tokens, others don't; take whichever total is larger.
 				inputTokens: Math.max(prompt, prompt + extra, cached),
 				cachedInputTokens: cached,
+				// OpenRouter reports cache writes as cache_write_tokens, inside prompt_tokens.
+				cacheWriteTokens: count(['cache_creation_tokens', 'cache_creation_input_tokens', 'cache_write_tokens']),
 				outputTokens: u.completion_tokens ?? 0,
 				reasoningTokens: u.completion_tokens_details?.reasoning_tokens ?? 0,
 				totalTokens: u.total_tokens ?? 0,
