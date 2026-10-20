@@ -856,6 +856,7 @@ export interface RunEstimate {
 	cost: { low: number; high: number; estimated: boolean; unpriced: boolean } | null // null: no model has a price
 	notes: Array<string>
 	over: Array<string> // caps already reached: starting asks first
+	unbudgeted: Array<string> // with a budget set: the models of this run without a price, which budgets don't limit
 }
 
 export type AiRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'cancelled'

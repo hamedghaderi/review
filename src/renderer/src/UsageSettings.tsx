@@ -120,8 +120,9 @@ function fromDraft(d: Draft): BudgetSettings | null {
 function Spend({ t }: { t: SpendTotals | undefined }) {
 	if (!t || (t.usd === 0 && !t.inputTokens)) return <span className="muted">nothing spent</span>
 	return (
-		<span className="muted" title={t.unpriced ? 'Some requests had no price, so this is a lower bound.' : undefined}>
-			{t.unpriced ? 'at least ' : ''}${t.usd.toFixed(2)} spent · {tokens(t.inputTokens)} in, {tokens(t.outputTokens)} out
+		<span className="muted" title={t.unpriced ? 'Includes requests without a price, which budgets don’t limit.' : undefined}>
+			{t.unpriced && t.usd === 0 ? 'cost unknown' : `${t.unpriced ? 'at least ' : ''}$${t.usd.toFixed(2)} spent`} · {tokens(t.inputTokens)}{' '}
+			in, {tokens(t.outputTokens)} out
 		</span>
 	)
 }
@@ -230,6 +231,12 @@ function Budgets({ connections }: { connections: Array<ConnectionView> }) {
 					])}
 				</tbody>
 			</table>
+			{view.month.unpriced && (
+				<div className="muted small">
+					“At least” and “cost unknown” include requests to models without a price. Budgets don’t limit those; set a price for a model in
+					its connection to include it.
+				</div>
+			)}
 			{error && <div className="error-text small">{error}</div>}
 			<div className="form-actions">
 				<button type="submit" className="btn small primary" disabled={!next}>

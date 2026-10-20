@@ -358,6 +358,26 @@ export function AiRunControl({
 							suggestions; they never mark files as viewed.
 						</p>
 					</details>
+					{shown && shown.unbudgeted.length > 0 && (
+						<p className="muted small">
+							{shown.unbudgeted.length === 1 ? (
+								<>
+									<span className="mono">{shown.unbudgeted[0]}</span> has no price, so your budgets don’t limit it.
+								</>
+							) : (
+								<>
+									{shown.unbudgeted.map((m, i) => (
+										<span key={m}>
+											{i ? ', ' : ''}
+											<span className="mono">{m}</span>
+										</span>
+									))}{' '}
+									have no price, so your budgets don’t limit them.
+								</>
+							)}{' '}
+							Set a price in Settings → AI providers to include {shown.unbudgeted.length === 1 ? 'it' : 'them'}.
+						</p>
+					)}
 					{shown && shown.over.length > 0 && (
 						<p className="notice small" role="alert">
 							{shown.over.join(' ')} Starting this review goes over it.

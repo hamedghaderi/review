@@ -64,6 +64,7 @@ export interface ModelSource {
 /** Where a run on these connections stands against the budgets (see checkBudget). */
 export interface BudgetSource {
 	check(connections: Array<{ id: string; label: string }>, ignoreCaps?: boolean): BudgetCheck
+	active(): boolean // any budget is set
 }
 
 export interface ComparisonAccess {
@@ -213,7 +214,9 @@ export class AiController {
 			id,
 			label: this.models!.label(id),
 		}))
-		return { ...estimate, over: this.budget?.check(connections).over ?? [] }
+		// Budgets can only count what has a price; with one set, say which models they can't limit.
+		const unbudgeted = this.budget?.active() ? [...new Set(reviewers.filter((r) => !r.price).map((r) => r.model))] : []
+		return { ...estimate, over: this.budget?.check(connections).over ?? [], unbudgeted }
 	}
 
 	/** A fixed configuration whose provider books every response to the usage history. */

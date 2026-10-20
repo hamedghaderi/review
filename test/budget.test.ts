@@ -184,6 +184,7 @@ test('a run over a daily or monthly budget does not start unless you say so; the
 	const controller = new AiController(store, config, () => {})
 	const checked: Array<boolean> = []
 	controller.attachBudget({
+		active: () => true,
 		check: (used, ignoreCaps = false) => {
 			checked.push(ignoreCaps)
 			return checkBudget({ perRun: 5, daily: 1, monthly: null, connections: {} }, spent(1.5, 1.5), used, ignoreCaps)

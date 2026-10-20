@@ -579,7 +579,7 @@ app.whenReady().then(async () => {
 		limits: () => connections.view().limits,
 		label: (id) => connections.view().connections.find((c) => c.id === id)?.label ?? 'a removed connection',
 	})
-	ai.attachBudget({ check: budgetCheck })
+	ai.attachBudget({ check: budgetCheck, active: () => hasBudgets(connections.budgets()) })
 	service.attachAi(ai)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()

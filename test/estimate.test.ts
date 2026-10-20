@@ -159,3 +159,35 @@ test('the controller estimates from model details alone: no provider is built an
 	const passes = await controller.estimate(access, { kind: 'all' }, { kind: 'model', selection: sel, passes: true })
 	assert.ok(passes.requests > all.requests)
 })
+
+test('with a budget set, the estimate names the models budgets cannot limit because they have no price; without one it says nothing', async () => {
+	const { comp, sources } = change()
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'review-estimate-')))
+	await store.load()
+	const controller = new AiController(
+		store,
+		async () => {
+			throw new Error('not used')
+		},
+		() => {},
+	)
+	let price: PricedModel | null = null
+	controller.attachModels({ info: () => ({ limits: MODEL, price }), limits: () => LIMITS, label: () => 'Gateway' })
+	let active = false
+	controller.attachBudget({ active: () => active, check: () => ({ over: [], limit: null }) })
+	const source = (k: string) => sources.find((s) => s.file.key === k)!
+	const access = {
+		comparison: comp,
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText!,
+	}
+	const choice = {
+		kind: 'model' as const,
+		selection: { connectionId: '00000000-0000-4000-8000-000000000000', modelId: 'auto/best-coding' },
+	}
+	assert.deepEqual((await controller.estimate(access, { kind: 'all' }, choice)).unbudgeted, [], 'no budget set: nothing to say')
+	active = true
+	assert.deepEqual((await controller.estimate(access, { kind: 'all' }, choice)).unbudgeted, ['auto/best-coding'])
+	price = PRICE
+	assert.deepEqual((await controller.estimate(access, { kind: 'all' }, choice)).unbudgeted, [], 'a priced model is limited')
+})
