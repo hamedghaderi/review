@@ -32,6 +32,7 @@ interface Props {
 	onPickBranch(b: BranchRef): void
 	onOpenReview(target: ReviewTarget): void
 	onOpenSnapshot(reviewId: string): void
+	onFeedback(): void
 }
 
 type CommitsTarget = Extract<ReviewTarget, { kind: 'commits' }>
@@ -40,6 +41,7 @@ type Item =
 	| { t: 'branch'; b: BranchRef }
 	| { t: 'review'; r: ReviewSummary }
 	| { t: 'commits'; target: CommitsTarget; spec: string }
+	| { t: 'command'; id: CommandId; label: string }
 type Scope = 'all' | 'prs' | 'branches'
 interface Section {
 	title: string
@@ -51,6 +53,13 @@ interface Action {
 	keys?: string
 	run(): void
 }
+
+type CommandId = 'feedback'
+
+// App commands, listed after the search results when every typed word is in their label or keywords.
+const COMMANDS: Array<{ id: CommandId; label: string; keywords: string }> = [
+	{ id: 'feedback', label: 'Send feedback', keywords: 'report bug problem issue idea suggest' },
+]
 
 // Row badges must stay short, or they crowd out the title; the full wording is in the tooltip.
 const INBOX_SHORT: Record<Exclude<InboxStatus, 'reviewed'>, string> = {
@@ -88,6 +97,7 @@ function reviewTitle(r: ReviewSummary): string {
 }
 
 function itemKey(it: Item): string {
+	if (it.t === 'command') return `cmd:${it.id}`
 	return it.t === 'pr' ? `pr:${it.pr.number}` : it.t === 'branch' ? `b:${it.b.ref}` : it.t === 'commits' ? `c:${it.spec}` : `r:${it.r.id}`
 }
 
@@ -223,6 +233,10 @@ export function QuickOpen(props: Props) {
 				items: prItems.slice(0, scope === 'prs' ? 20 : 10).map((pr) => ({ t: 'pr', pr })),
 				error: prError,
 			})
+		if (scope === 'all' && !exact) {
+			const commands = COMMANDS.filter((c) => words.every((w) => `${c.label} ${c.keywords}`.toLowerCase().includes(w)))
+			if (commands.length) out.push({ title: 'Commands', items: commands.map((c) => ({ t: 'command', id: c.id, label: c.label })) })
+		}
 		return out
 	}, [prs, wantPrs, reviews, text, words, scope, filter, exact, repo.branches])
 
@@ -237,6 +251,7 @@ export function QuickOpen(props: Props) {
 			onClose()
 			fn()
 		}
+		if (it.t === 'command') return [{ label: it.label, keys: '↵', run: close(props.onFeedback) }]
 		if (it.t === 'pr') {
 			const pr = it.pr
 			const out: Array<Action> = []
@@ -589,6 +604,15 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 			</>
 		)
 	}
+	if (it.t === 'command')
+		return (
+			<>
+				<span className="palette-title ellipsis">
+					<Highlight text={it.label} words={words} />
+				</span>
+				<span className="palette-sub">opens a new issue on GitHub</span>
+			</>
+		)
 	if (it.t === 'commits') {
 		const t = it.target
 		const one = !t.mergeBase && t.from === `${t.to}^`

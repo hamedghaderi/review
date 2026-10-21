@@ -2805,6 +2805,10 @@ button.palette-action:hover {
 	width: min(640px, 100%);
 	max-height: min(720px, 100%);
 }
+.modal.feedback {
+	width: min(560px, 100%);
+	max-height: min(640px, 100%);
+}
 .modal.gh-settings .settings-main {
 	max-width: none;
 }
@@ -4205,6 +4209,15 @@ button.stack-row:hover {
 	color: var(--accent);
 }
 .repo-tab-hint + .repo-tab-error {
+	margin-left: 0;
+}
+.repo-tab-feedback {
+	align-self: center;
+	margin-left: auto;
+	flex-shrink: 0;
+}
+.repo-tab-hint ~ .repo-tab-feedback,
+.repo-tab-error ~ .repo-tab-feedback {
 	margin-left: 0;
 }
 /* The tab row clips anything outside it, so focus rings on tabs are drawn inside. */

@@ -6,6 +6,7 @@ import {
 	BrowserWindow,
 	dialog,
 	ipcMain,
+	Menu,
 	nativeTheme,
 	Notification,
 	powerMonitor,
@@ -213,6 +214,7 @@ function registerIpc(): void {
 		return github.status()
 	})
 	handle(IPC.updateStatus, async () => pendingUpdate())
+	handle(IPC.systemInfo, async () => systemInfo())
 	handle(IPC.installUpdate, async () => {
 		await installUpdate()
 		return true
@@ -654,6 +656,7 @@ app.whenReady().then(async () => {
 	autoReviewer.resumePaused()
 	setInterval(() => autoReviewer.resumePaused(), 15 * 60_000).unref()
 	registerIpc()
+	setMenu()
 	createWindow()
 	app.on('activate', () => {
 		if (!win) createWindow()
@@ -826,6 +829,27 @@ function present(n: Notification, target: InboxOpen | null): Promise<void> {
 }
 
 /** Brings the window forward (re-creating it if it was closed) and then runs `then` once its page is loaded. */
+/** Electron's standard menus, with "Send Feedback…" under Help in place of Electron's own links. */
+function setMenu(): void {
+	const feedback = (): void => focusWindow((w) => w.webContents.send(IPC.feedbackOpen))
+	Menu.setApplicationMenu(
+		Menu.buildFromTemplate([
+			...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+			{ role: 'fileMenu' },
+			{ role: 'editMenu' },
+			{ role: 'viewMenu' },
+			{ role: 'windowMenu' },
+			{ role: 'help', submenu: [{ label: 'Send Feedback…', click: feedback }] },
+		]),
+	)
+}
+
+/** The operating system and its version, for a feedback report: "macOS 15.1 (arm64)". */
+function systemInfo(): string {
+	const name = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' }[process.platform as string] ?? process.platform
+	return `${name} ${process.getSystemVersion()} (${process.arch})`
+}
+
 function focusWindow(then: (w: BrowserWindow) => void): void {
 	if (!win || win.isDestroyed()) {
 		createWindow()
