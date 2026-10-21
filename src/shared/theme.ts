@@ -62,7 +62,12 @@ export const THEMES: ReadonlyArray<{ id: ThemeId; label: string; description: st
 	{ id: 'rust', label: 'Rust', description: 'Rust orange on paper, like the Rust book.', bg: { light: '#f6f4ef', dark: '#1d1b19' } },
 	{ id: 'go', label: 'Go', description: 'Go’s gopher blue.', bg: { light: '#ffffff', dark: '#202224' } },
 	{ id: 'docker', label: 'Docker', description: 'Docker blue on navy.', bg: { light: '#ffffff', dark: '#0c1424' } },
-	{ id: 'material', label: 'Material', description: 'Material Design 3’s baseline purple.', bg: { light: '#fef7ff', dark: '#141218' } },
+	{
+		id: 'material',
+		label: 'Material',
+		description: 'The Material Theme editor colours: teal on blue-grey, Lighter in light mode.',
+		bg: { light: '#fafafa', dark: '#263238' },
+	},
 ]
 
 /** A stored or sent value, with anything unknown replaced by the default. */
