@@ -2829,6 +2829,9 @@ button.palette-action:hover {
 	gap: 10px 12px;
 	max-width: 560px;
 }
+.font-field {
+	gap: 6px;
+}
 .font-sample {
 	margin: 0;
 	max-width: 560px;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { APPEARANCES, CODE_FONTS, CODE_SIZES, THEMES, UI_FONTS, UI_SCALES, fontStack } from '../../shared/theme.ts'
 import { useTheme } from './theme.ts'
 
@@ -33,7 +33,7 @@ export function AppearanceSettings() {
 					label="Code font"
 					value={theme.codeFont}
 					options={CODE_FONTS}
-					placeholder="Default (SF Mono, Menlo, Consolas)"
+					defaultLabel="Default (SF Mono, Menlo, Consolas)"
 					onCommit={(codeFont) => setTheme({ codeFont })}
 				/>
 				<label className="field">
@@ -50,7 +50,7 @@ export function AppearanceSettings() {
 					label="Interface font"
 					value={theme.uiFont}
 					options={UI_FONTS}
-					placeholder="Default (system font)"
+					defaultLabel="Default (system font)"
 					onCommit={(uiFont) => setTheme({ uiFont })}
 				/>
 				<label className="field">
@@ -72,8 +72,8 @@ export function AppearanceSettings() {
 				{'const ok = items.filter((x) => x.id !== 0) // 0O 1lI {}[]'}
 			</pre>
 			<p className="muted small">
-				Any font installed on this computer can be typed in; one that isn’t installed falls back to the default. The interface size is the
-				same as View › Zoom (⌘+ and ⌘−).
+				Choose Other… to type any font installed on this computer; one that isn’t installed falls back to the default. The interface size is
+				the same as View › Zoom (⌘+ and ⌘−).
 			</p>
 			<h3>Theme</h3>
 			<div className="theme-grid" role="radiogroup" aria-label="Colour theme">
@@ -100,32 +100,64 @@ export function AppearanceSettings() {
 	)
 }
 
-/** A font name with suggestions. It is saved once you stop typing, so the app doesn't re-render on every letter. */
+const OTHER = '\u0000other' // the "Other…" choice; can't clash with a font name, which never has control characters
+
+/**
+ * A font: the default, one of the suggestions, or "Other…" to type any installed font, which is saved once you stop
+ * typing so the app doesn't re-render on every letter.
+ */
 function FontField(props: {
 	label: string
 	value: string
 	options: ReadonlyArray<string>
-	placeholder: string
+	defaultLabel: string
 	onCommit(value: string): void
 }) {
 	const { value, onCommit } = props
-	const [text, setText] = useState(value)
-	useEffect(() => setText(value), [value])
+	const [other, setOther] = useState(() => value !== '' && !props.options.includes(value))
+	const [text, setText] = useState(other ? value : '')
+	const input = useRef<HTMLInputElement>(null)
 	useEffect(() => {
-		if (text.trim() === value) return
+		if (!other || text.trim() === value) return
 		const t = window.setTimeout(() => onCommit(text.trim()), 400)
 		return () => window.clearTimeout(t)
-	}, [text, value, onCommit])
-	const list = `fonts-${props.label.replace(/\W+/g, '-').toLowerCase()}`
+	}, [other, text, value, onCommit])
 	return (
-		<label className="field">
-			<span>{props.label}</span>
-			<input value={text} list={list} placeholder={props.placeholder} spellCheck={false} onChange={(e) => setText(e.target.value)} />
-			<datalist id={list}>
-				{props.options.map((f) => (
-					<option key={f} value={f} />
-				))}
-			</datalist>
-		</label>
+		<div className="field font-field">
+			<label className="field">
+				<span>{props.label}</span>
+				<select
+					value={other ? OTHER : value}
+					onChange={(e) => {
+						if (e.target.value === OTHER) {
+							setOther(true)
+							window.setTimeout(() => input.current?.focus())
+							return
+						}
+						setOther(false)
+						setText('')
+						onCommit(e.target.value)
+					}}
+				>
+					<option value="">{props.defaultLabel}</option>
+					{props.options.map((f) => (
+						<option key={f} value={f}>
+							{f}
+						</option>
+					))}
+					<option value={OTHER}>Other…</option>
+				</select>
+			</label>
+			{other && (
+				<input
+					ref={input}
+					value={text}
+					placeholder="Font name, as installed"
+					aria-label={`${props.label} name`}
+					spellCheck={false}
+					onChange={(e) => setText(e.target.value)}
+				/>
+			)}
+		</div>
 	)
 }
