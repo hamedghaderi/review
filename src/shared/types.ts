@@ -1,6 +1,7 @@
 import type { HeadChecks } from './ci.ts'
 import type { HomeInbox, WatchedPr } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
+import type { ThemeSettings } from './theme.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -1602,6 +1603,9 @@ export const IPC = {
 	skipUpdate: 'update:skip',
 	systemInfo: 'app:system-info',
 	feedbackOpen: 'feedback:open',
+	theme: 'app:theme',
+	setTheme: 'app:set-theme',
+	themeChanged: 'app:theme-changed',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
@@ -1790,6 +1794,11 @@ export interface ReviewApi {
 	systemInfo(): Promise<Result<string>>
 	/** Help › Send Feedback… was chosen in the menu. */
 	onFeedbackOpen(handler: () => void): () => void
+	/** Light or dark and the colour theme, as last chosen (the defaults until then). */
+	theme(): Promise<Result<ThemeSettings>>
+	setTheme(next: ThemeSettings): Promise<Result<ThemeSettings>>
+	/** The theme changed, from the View menu or another part of the app. */
+	onThemeChanged(handler: (next: ThemeSettings) => void): () => void
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
 	installUpdate(): Promise<Result<boolean>>
 	/** Download progress of `installUpdate`, from 0 to 1. */

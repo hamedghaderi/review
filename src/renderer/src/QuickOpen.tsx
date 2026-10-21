@@ -19,6 +19,8 @@ import { ReviewBadge } from './PrReview.tsx'
 import { useMyReviews, usePrGraph } from './prGraph.ts'
 import { isStackBase, isStackStart, mergeFirstTitle, mergeLabel, stackPosition } from './Stack.tsx'
 import { stackGuide, type StackGuide } from '../../shared/prStack.ts'
+import { APPEARANCES, THEMES, type Appearance, type ThemeId } from '../../shared/theme.ts'
+import { changeTheme } from './theme.ts'
 
 interface Props {
 	repo: RepoInfo
@@ -54,12 +56,24 @@ interface Action {
 	run(): void
 }
 
-type CommandId = 'feedback'
+type CommandId = 'feedback' | `appearance:${Appearance}` | `theme:${ThemeId}`
 
 // App commands, listed after the search results when every typed word is in their label or keywords.
 const COMMANDS: Array<{ id: CommandId; label: string; keywords: string }> = [
 	{ id: 'feedback', label: 'Send feedback', keywords: 'report bug problem issue idea suggest' },
+	...APPEARANCES.map((a) => ({
+		id: `appearance:${a.id}` as const,
+		label: `Appearance: ${a.label}`,
+		keywords: 'theme light dark mode look',
+	})),
+	...THEMES.map((t) => ({ id: `theme:${t.id}` as const, label: `Theme: ${t.label}`, keywords: 'colour color look appearance' })),
 ]
+
+function runCommand(id: CommandId, onFeedback: () => void): void {
+	if (id === 'feedback') onFeedback()
+	else if (id.startsWith('appearance:')) void changeTheme({ appearance: id.slice('appearance:'.length) as Appearance })
+	else void changeTheme({ theme: id.slice('theme:'.length) as ThemeId })
+}
 
 // Row badges must stay short, or they crowd out the title; the full wording is in the tooltip.
 const INBOX_SHORT: Record<Exclude<InboxStatus, 'reviewed'>, string> = {
@@ -251,7 +265,7 @@ export function QuickOpen(props: Props) {
 			onClose()
 			fn()
 		}
-		if (it.t === 'command') return [{ label: it.label, keys: '↵', run: close(props.onFeedback) }]
+		if (it.t === 'command') return [{ label: it.label, keys: '↵', run: close(() => runCommand(it.id, props.onFeedback)) }]
 		if (it.t === 'pr') {
 			const pr = it.pr
 			const out: Array<Action> = []
@@ -610,7 +624,7 @@ function Row({ it, words, viewer, guide }: { it: Item; words: Array<string>; vie
 				<span className="palette-title ellipsis">
 					<Highlight text={it.label} words={words} />
 				</span>
-				<span className="palette-sub">opens a new issue on GitHub</span>
+				{it.id === 'feedback' && <span className="palette-sub">opens a new issue on GitHub</span>}
 			</>
 		)
 	if (it.t === 'commits') {

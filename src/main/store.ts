@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AiRun, AutoReviewRecord, BrowserState, Review } from '../shared/types.ts'
 import type { WatchedPr, WatchState } from '../shared/inbox.ts'
+import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 
 export const STORE_VERSION = 2
 
@@ -17,6 +18,7 @@ export interface StoreData {
 	appClones?: Record<string, { repo: string; at: string }> // folders the app cloned itself, by real path: deletable here
 	cloneParent?: string // the folder last chosen for a clone, where the folder picker starts next time
 	skippedVersion?: string // a release you chose not to be told about again
+	theme?: ThemeSettings // light or dark and the colour theme; absent until you choose one
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
 }
@@ -139,6 +141,7 @@ export function migrate(raw: unknown): StoreData {
 		...(Array.isArray(d.mutedRepos) ? { mutedRepos: d.mutedRepos } : {}),
 		...(d.appClones && typeof d.appClones === 'object' ? { appClones: d.appClones } : {}),
 		...(typeof d.cloneParent === 'string' ? { cloneParent: d.cloneParent } : {}),
+		...(d.theme ? { theme: parseTheme(d.theme) } : {}),
 	}
 }
 

@@ -16,6 +16,7 @@ import { sourceLabel, sourceTitle } from './ModelPicker.tsx'
 import { suggestTeam, TeamEditor } from './TeamEditor.tsx'
 import { McpImport, McpServerEditor } from './McpSettings.tsx'
 import { UsageSettings } from './UsageSettings.tsx'
+import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { FINDING_LEVELS, type FindingLevel, type FindingLevelSettings, type ReviewTeam } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
 import { formatPrice } from '../../shared/cost.ts'
@@ -50,10 +51,10 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 	const [error, setError] = useState<string | null>(null)
 	const [mcp, setMcp] = useState<McpSettingsView | null>(null)
 	const [mcpPane, setMcpPaneOnly] = useState<{ kind: 'server'; id: string } | { kind: 'new' } | { kind: 'import' } | null>(null)
-	const [usage, setUsage] = useState(false)
-	// Every other pane is opened through this, so it also closes Usage.
+	const [side, setSide] = useState<'usage' | 'appearance' | null>(null) // a pane that isn't about one connection
+	// Every other pane is opened through this, so it also closes Usage and Appearance.
 	const setMcpPane = (pane: typeof mcpPane): void => {
-		setUsage(false)
+		setSide(null)
 		setMcpPaneOnly(pane)
 	}
 	const dialog = useRef<HTMLDivElement>(null)
@@ -127,7 +128,7 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						{settings.connections.map((c) => (
 							<button
 								key={c.id}
-								className={`conn-item ${c.id === selectedId && !adding && !editingTeam && !mcpPane && !usage ? 'on' : ''}`}
+								className={`conn-item ${c.id === selectedId && !adding && !editingTeam && !mcpPane && !side ? 'on' : ''}`}
 								onClick={() => {
 									setAdding(null)
 									setEditingTeam(null)
@@ -141,12 +142,12 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 							</button>
 						))}
 						<button
-							className={`conn-item ${usage ? 'on' : ''}`}
+							className={`conn-item ${side === 'usage' ? 'on' : ''}`}
 							onClick={() => {
 								setAdding(null)
 								setEditingTeam(null)
 								setMcpPane(null)
-								setUsage(true)
+								setSide('usage')
 							}}
 							title="Tokens and cost of every AI request"
 						>
@@ -244,11 +245,26 @@ export function ProviderSettings({ settings, initialConnectionId, initialTeam = 
 						<button className={`conn-item ${mcpPane?.kind === 'import' ? 'on' : ''}`} onClick={() => showMcp({ kind: 'import' })}>
 							<span className="ellipsis">+ Import from Claude Code</span>
 						</button>
+						<div className="section-title add-title">App</div>
+						<button
+							className={`conn-item ${side === 'appearance' ? 'on' : ''}`}
+							onClick={() => {
+								setAdding(null)
+								setEditingTeam(null)
+								setMcpPane(null)
+								setSide('appearance')
+							}}
+							title="Light or dark, and the colour theme"
+						>
+							<span className="ellipsis">Appearance</span>
+						</button>
 						<div className="app-version muted small selectable">Review {__APP_VERSION__}</div>
 					</nav>
 					<section className="settings-main">
-						{usage ? (
+						{side === 'usage' ? (
 							<UsageSettings connections={settings.connections} />
+						) : side === 'appearance' ? (
+							<AppearanceSettings />
 						) : mcpPane?.kind === 'import' ? (
 							<McpImport repoId={repoId} run={mcpRun} onDone={() => setMcpPane(null)} />
 						) : mcpPane && (mcpPane.kind === 'new' || mcpServer) ? (

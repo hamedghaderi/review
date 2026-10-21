@@ -1,4 +1,6 @@
-:root {
+/* The default theme; [data-theme='review'] lets a preview show it inside another theme (themes.css has the others). */
+:root,
+[data-theme='review'] {
 	color-scheme: light dark;
 	--bg: #ffffff;
 	--chrome: #f7f7fa;
@@ -34,7 +36,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-	:root {
+	:root,
+	[data-theme='review'] {
 		--bg: #18191f;
 		--chrome: #202128;
 		--panel: #1c1d24;
@@ -2804,6 +2807,71 @@ button.palette-action:hover {
 .modal.gh-settings {
 	width: min(640px, 100%);
 	max-height: min(720px, 100%);
+}
+/* Settings · Appearance: each card previews its theme in that theme's own colours. */
+.appearance .seg {
+	align-self: flex-start;
+}
+.theme-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 10px;
+}
+.theme-card {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	gap: 4px;
+	padding: 8px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--panel);
+	text-align: left;
+	cursor: pointer;
+}
+.theme-card:hover {
+	border-color: var(--border-strong);
+}
+.theme-card.on {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent);
+}
+.theme-preview {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--mono);
+	font-size: 11px;
+}
+.theme-line {
+	padding: 1px 6px;
+	border-radius: 3px;
+}
+.theme-line.add {
+	background: var(--add-bg);
+	color: var(--add-fg);
+}
+.theme-line.del {
+	background: var(--del-bg);
+	color: var(--del-fg);
+}
+.theme-chip {
+	align-self: flex-end;
+	margin-top: 4px;
+	padding: 2px 8px;
+	border-radius: 5px;
+	background: var(--accent);
+	color: var(--accent-text);
+	font-family: var(--sans);
+}
+.theme-name {
+	font-weight: 600;
+	font-size: 13px;
 }
 .modal.feedback {
 	width: min(560px, 100%);

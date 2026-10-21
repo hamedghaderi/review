@@ -30,6 +30,7 @@ import { InboxWatcher, type RepoEvent, type WatchEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
+import { APPEARANCES, DEFAULT_THEME, parseTheme, THEMES, themeBackground, type ThemeSettings } from '../shared/theme.ts'
 import { LINK_SCHEME, linkInArgs, parsePrLink, type PrLink } from '../shared/link.ts'
 import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
 import {
@@ -215,6 +216,8 @@ function registerIpc(): void {
 	})
 	handle(IPC.updateStatus, async () => pendingUpdate())
 	handle(IPC.systemInfo, async () => systemInfo())
+	handle(IPC.theme, async () => currentTheme())
+	handle(IPC.setTheme, async (raw: unknown) => setTheme(parseTheme(raw)))
 	handle(IPC.installUpdate, async () => {
 		await installUpdate()
 		return true
@@ -466,7 +469,7 @@ function createWindow(): void {
 		title: 'Review',
 		icon: devIcon, // Windows and Linux; macOS uses the dock icon
 		show: false,
-		backgroundColor: nativeTheme.shouldUseDarkColors ? '#18191F' : '#FFFFFF',
+		backgroundColor: themeBackground(currentTheme(), nativeTheme.shouldUseDarkColors),
 		webPreferences: {
 			preload: join(__dirname, '../preload/index.js'),
 			contextIsolation: true,
@@ -522,6 +525,7 @@ app.whenReady().then(async () => {
 	const dir = app.getPath('userData')
 	store = ReviewStore.in(dir)
 	await store.load()
+	nativeTheme.themeSource = currentTheme().appearance
 	credentials = new CredentialService(dir, safeStorage)
 	await credentials.load()
 	giphy = new GiphyService(credentials)
@@ -837,11 +841,62 @@ function setMenu(): void {
 			...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
 			{ role: 'fileMenu' },
 			{ role: 'editMenu' },
-			{ role: 'viewMenu' },
+			{
+				label: 'View',
+				submenu: [
+					{ role: 'reload' },
+					{ role: 'forceReload' },
+					{ role: 'toggleDevTools' },
+					{ type: 'separator' },
+					{ role: 'resetZoom' },
+					{ role: 'zoomIn' },
+					{ role: 'zoomOut' },
+					{ type: 'separator' },
+					{ role: 'togglefullscreen' },
+					{ type: 'separator' },
+					{ label: 'Theme', submenu: themeMenu() },
+				],
+			},
 			{ role: 'windowMenu' },
 			{ role: 'help', submenu: [{ label: 'Send Feedback…', click: feedback }] },
 		]),
 	)
+}
+
+function currentTheme(): ThemeSettings {
+	return store.read().theme ?? DEFAULT_THEME
+}
+
+/** Saves the choice, applies light or dark to every window, and tells the renderer to switch colours. */
+async function setTheme(next: ThemeSettings): Promise<ThemeSettings> {
+	await store.update((d) => void (d.theme = next))
+	nativeTheme.themeSource = next.appearance
+	setMenu() // the radio items follow
+	if (win && !win.isDestroyed()) {
+		win.setBackgroundColor(themeBackground(next, nativeTheme.shouldUseDarkColors))
+		win.webContents.send(IPC.themeChanged, next)
+	}
+	return next
+}
+
+/** View › Theme: light or dark, then the colour themes, each a radio group showing the current choice. */
+function themeMenu(): Array<Electron.MenuItemConstructorOptions> {
+	const t = currentTheme()
+	return [
+		...APPEARANCES.map((a) => ({
+			label: a.label,
+			type: 'radio' as const,
+			checked: t.appearance === a.id,
+			click: () => void setTheme({ ...currentTheme(), appearance: a.id }),
+		})),
+		{ type: 'separator' },
+		...THEMES.map((x) => ({
+			label: x.label,
+			type: 'radio' as const,
+			checked: t.theme === x.id,
+			click: () => void setTheme({ ...currentTheme(), theme: x.id }),
+		})),
+	]
 }
 
 /** The operating system and its version, for a feedback report: "macOS 15.1 (arm64)". */

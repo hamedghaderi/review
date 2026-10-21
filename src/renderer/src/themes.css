@@ -1,0 +1,200 @@
+/*
+ * Colour themes, chosen in Settings · Appearance, View › Theme or ⌘P. Each sets every colour token in styles.css for
+ * light and for dark; light or dark itself comes from the system, or from the Appearance choice (nativeTheme). The
+ * default theme is the one in styles.css. Text pairs meet WCAG AA, the high-contrast theme AAA for body text.
+ * The selectors match any element, not only the root, so Settings can preview a theme inside another.
+ */
+
+[data-theme='github'] {
+	--bg: #ffffff;
+	--chrome: #f6f8fa;
+	--panel: #f9fafb;
+	--text: #1f2328;
+	--text-2: #59636e;
+	--border: #d1d9e0;
+	--border-strong: #b7c0c9;
+	--hover: #eff2f5;
+	--track: #e9edf1;
+	--track-on: #ffffff;
+	--track-shadow: 0 1px 2px rgb(31 35 40 / 0.12), 0 1px 1px rgb(31 35 40 / 0.06);
+	--accent: #0969da;
+	--accent-text: #ffffff;
+	--accent-soft: #ddf4ff;
+	--accent-line: #80ccff;
+	--add-bg: #dafbe1;
+	--add-num: #aceebb;
+	--add-fg: #116329;
+	--del-bg: #ffebe9;
+	--del-num: #ffcecb;
+	--del-fg: #a40e26;
+	--hunk-bg: #ddf4ff;
+	--sel-bg: #d5e7fc;
+	--warn-bg: #fff8c5;
+	--warn-fg: #7d4e00;
+	--danger: #cf222e;
+	--gh: #8250df;
+	--gh-soft: #fbefff;
+	--ok: #1a7f37;
+}
+
+[data-theme='contrast'] {
+	--bg: #ffffff;
+	--chrome: #f0f0f0;
+	--panel: #fafafa;
+	--text: #000000;
+	--text-2: #333333;
+	--border: #767676;
+	--border-strong: #000000;
+	--hover: #e0e0e0;
+	--track: #d9d9d9;
+	--track-on: #ffffff;
+	--track-shadow: 0 0 0 1px #000000;
+	--accent: #0037b3;
+	--accent-text: #ffffff;
+	--accent-soft: #dbe4ff;
+	--accent-line: #0037b3;
+	--add-bg: #d6f5df;
+	--add-num: #a8e8bb;
+	--add-fg: #004d1a;
+	--del-bg: #ffdede;
+	--del-num: #ffb8b8;
+	--del-fg: #8a0008;
+	--hunk-bg: #e4e4f5;
+	--sel-bg: #c2d3ff;
+	--warn-bg: #ffeaa0;
+	--warn-fg: #4d3500;
+	--danger: #a3000b;
+	--gh: #5a1fa8;
+	--gh-soft: #efe4ff;
+	--ok: #004d1a;
+}
+
+[data-theme='warm'] {
+	--bg: #fbf7f0;
+	--chrome: #f3ede2;
+	--panel: #f7f2e9;
+	--text: #3b3228;
+	--text-2: #6e6151;
+	--border: #e4dccd;
+	--border-strong: #d4c9b6;
+	--hover: #ece4d6;
+	--track: #e9e1d2;
+	--track-on: #fffcf6;
+	--track-shadow: 0 1px 2px rgb(59 50 40 / 0.12), 0 1px 1px rgb(59 50 40 / 0.06);
+	--accent: #a84e24;
+	--accent-text: #ffffff;
+	--accent-soft: #f6e3d8;
+	--accent-line: #e0a382;
+	--add-bg: #e8f1dc;
+	--add-num: #d6e6c3;
+	--add-fg: #3f6a14;
+	--del-bg: #f8e3dc;
+	--del-num: #f1cfc4;
+	--del-fg: #9a3119;
+	--hunk-bg: #f1e9db;
+	--sel-bg: #f0d9c8;
+	--warn-bg: #f8ecc6;
+	--warn-fg: #6e5000;
+	--danger: #a8331b;
+	--gh: #2f5f80;
+	--gh-soft: #e5eef3;
+	--ok: #3f6a14;
+}
+
+@media (prefers-color-scheme: dark) {
+	[data-theme='github'] {
+		--bg: #0d1117;
+		--chrome: #151b23;
+		--panel: #10151c;
+		--text: #f0f6fc;
+		--text-2: #9198a1;
+		--border: #2f363e;
+		--border-strong: #3d444d;
+		--hover: #1c232b;
+		--track: #0a0d12;
+		--track-on: #262c36;
+		--track-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+		--accent: #4493f8;
+		--accent-text: #0d1117;
+		--accent-soft: #132a47;
+		--accent-line: #1f6feb;
+		--add-bg: #12261e;
+		--add-num: #1a3a29;
+		--add-fg: #56d364;
+		--del-bg: #2d1517;
+		--del-num: #451d20;
+		--del-fg: #ff7b72;
+		--hunk-bg: #121d2f;
+		--sel-bg: #1f3a5f;
+		--warn-bg: #2c2410;
+		--warn-fg: #e3b341;
+		--danger: #ff7b72;
+		--gh: #be8fff;
+		--gh-soft: #231a35;
+		--ok: #56d364;
+	}
+
+	[data-theme='contrast'] {
+		--bg: #000000;
+		--chrome: #0b0b0b;
+		--panel: #050505;
+		--text: #ffffff;
+		--text-2: #d4d4d4;
+		--border: #8a8a8a;
+		--border-strong: #ffffff;
+		--hover: #1f1f1f;
+		--track: #000000;
+		--track-on: #262626;
+		--track-shadow: 0 0 0 1px #ffffff;
+		--accent: #8ab4ff;
+		--accent-text: #000000;
+		--accent-soft: #10234d;
+		--accent-line: #8ab4ff;
+		--add-bg: #002b10;
+		--add-num: #00431a;
+		--add-fg: #7dffa0;
+		--del-bg: #3a0006;
+		--del-num: #57000b;
+		--del-fg: #ff9a9a;
+		--hunk-bg: #141433;
+		--sel-bg: #1d3a80;
+		--warn-bg: #332600;
+		--warn-fg: #ffe066;
+		--danger: #ff8f8f;
+		--gh: #d0a8ff;
+		--gh-soft: #24123d;
+		--ok: #7dffa0;
+	}
+
+	[data-theme='warm'] {
+		--bg: #1f1b16;
+		--chrome: #26211b;
+		--panel: #221e18;
+		--text: #ece3d6;
+		--text-2: #a89a88;
+		--border: #3a332a;
+		--border-strong: #4a4136;
+		--hover: #2e2820;
+		--track: #1a1612;
+		--track-on: #352e25;
+		--track-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+		--accent: #e48a5c;
+		--accent-text: #1f1b16;
+		--accent-soft: #3b2a20;
+		--accent-line: #a35f3c;
+		--add-bg: #232a1b;
+		--add-num: #2c3621;
+		--add-fg: #a8cf78;
+		--del-bg: #33201a;
+		--del-num: #42271f;
+		--del-fg: #f39a83;
+		--hunk-bg: #2b251d;
+		--sel-bg: #4a3426;
+		--warn-bg: #3a311a;
+		--warn-fg: #e8c977;
+		--danger: #f08a70;
+		--gh: #8cbbd8;
+		--gh-soft: #1e2a31;
+		--ok: #a8cf78;
+	}
+}
