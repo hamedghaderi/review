@@ -676,8 +676,20 @@ function RunSummary({
 					{run.rechecked!.map((r, i) => (
 						<span key={r.fileKey}>
 							{i ? '; ' : ''}
-							<span className="mono">{r.fileKey}</span> uses {r.names.map((n) => `\`${n}\``).join(', ')}, changed in{' '}
-							<span className="mono">{r.changedIn.join(', ')}</span>
+							<span className="mono">{r.fileKey}</span>
+							{r.names.length > 0 && (
+								<>
+									{' '}
+									uses {r.names.map((n) => `\`${n}\``).join(', ')}, changed in <span className="mono">{r.changedIn.join(', ')}</span>
+								</>
+							)}
+							{r.names.length > 0 && r.cited?.length ? ',' : ''}
+							{r.cited?.length ? (
+								<>
+									{' '}
+									has a finding citing <span className="mono">{r.cited.join(', ')}</span>, which changed
+								</>
+							) : null}
 						</span>
 					))}
 				</div>

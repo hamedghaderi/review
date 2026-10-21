@@ -833,8 +833,9 @@ export interface CarriedRun {
 /** A file whose diff didn't change, reviewed again because its added lines use names whose definitions changed in `changedIn`. */
 export interface RecheckedFile {
 	fileKey: string
-	names: Array<string>
+	names: Array<string> // names its added lines use whose definition changed; empty when only `cited` brought it back
 	changedIn: Array<string> // file keys
+	cited?: Array<string> // file keys whose diff changed that a finding on it cites
 }
 
 /**
