@@ -14,7 +14,9 @@ import {
 	type ReviewLimits,
 	type ReviewRule,
 } from '../../shared/types.ts'
+import { fileRefs } from '../../shared/refs.ts'
 import { NOT_NAMES } from '../symbols.ts'
+import { findingTexts } from './citations.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { earlierState } from './history.ts'
 import { wantedNames } from './related.ts'
@@ -185,13 +187,62 @@ export function usersOfChangedNames(
 	return out
 }
 
+/**
+ * Carried files to review again because a finding the earlier run raised on them cites a file whose diff changed since:
+ * the change may have fixed what it describes, or moved the lines it points at, and only a new review can tell.
+ * `changed` holds the keys of the files whose diff changed.
+ */
+export function citersOfChangedFiles(findings: Array<Finding>, carried: Array<string>, changed: Array<ChangedFile>): Array<RecheckedFile> {
+	const out: Array<RecheckedFile> = []
+	for (const fileKey of carried) {
+		const cited = new Set<string>()
+		for (const f of findings) {
+			if (f.anchor.fileKey !== fileKey) continue
+			for (const t of findingTexts(f))
+				for (const r of fileRefs(t ?? ''))
+					for (const c of changed)
+						if (c.key !== fileKey && [c.newPath, c.oldPath].some((p) => p && (p === r.path || p.endsWith(`/${r.path}`)))) cited.add(c.key)
+		}
+		if (cited.size) out.push({ fileKey, names: [], changedIn: [], cited: [...cited].sort() })
+	}
+	return out
+}
+
+/** Both reasons to review a carried file again, one entry per file. */
+export function mergeRechecks(...lists: Array<Array<RecheckedFile>>): Array<RecheckedFile> {
+	const byFile = new Map<string, RecheckedFile>()
+	for (const r of lists.flat()) {
+		const was = byFile.get(r.fileKey)
+		if (!was) byFile.set(r.fileKey, r)
+		else
+			byFile.set(r.fileKey, {
+				fileKey: r.fileKey,
+				names: [...new Set([...was.names, ...r.names])].sort(),
+				changedIn: [...new Set([...was.changedIn, ...r.changedIn])].sort(),
+				...(was.cited || r.cited ? { cited: [...new Set([...(was.cited ?? []), ...(r.cited ?? [])])].sort() } : {}),
+			})
+	}
+	return [...byFile.values()]
+}
+
 /** Tells the reviewer why an unchanged file is in the request, so it checks the uses against the new definitions. */
 export function recheckFacts(rechecked: Array<RecheckedFile>, from: CarriedRun | null): Array<ContextFact> {
 	const at = from ? ` since the run on ${from.headSha.slice(0, 7)}` : ''
-	return rechecked.map((r) => ({
-		kind: 'structure' as const,
-		title: `Why ${r.fileKey} is reviewed again`,
-		text: `Its diff has not changed${at}, but its added lines use ${r.names.map((n) => `\`${n}\``).join(', ')}, whose definition changed${at} in ${r.changedIn.join(', ')}. Check those uses against the definitions as they are now.`,
-		fileKeys: [r.fileKey],
-	}))
+	return rechecked.map((r) => {
+		const why: Array<string> = []
+		if (r.names.length)
+			why.push(
+				`its added lines use ${r.names.map((n) => `\`${n}\``).join(', ')}, whose definition changed${at} in ${r.changedIn.join(', ')}. Check those uses against the definitions as they are now`,
+			)
+		if (r.cited?.length)
+			why.push(
+				`a finding raised on it before cites ${r.cited.join(', ')}, whose diff changed${at}. Check whether what it describes still holds against those files as they are now, and raise it again only if it does`,
+			)
+		return {
+			kind: 'structure' as const,
+			title: `Why ${r.fileKey} is reviewed again`,
+			text: `Its diff has not changed${at}, but ${why.join('; and ')}.`,
+			fileKeys: [r.fileKey],
+		}
+	})
 }

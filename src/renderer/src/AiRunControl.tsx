@@ -242,13 +242,13 @@ export function AiRunControl({
 							{incremental.recheck.length > 0 && (
 								<>
 									{incremental.recheck.length === 1
-										? 'One of them didn’t change but uses'
-										: `${incremental.recheck.length} of them didn’t change but use`}{' '}
-									names whose definitions did:{' '}
+										? 'One of them didn’t change but depends on'
+										: `${incremental.recheck.length} of them didn’t change but depend on`}{' '}
+									names or files that did:{' '}
 									{incremental.recheck.slice(0, 3).map((r, i) => (
 										<span key={r.fileKey}>
 											{i ? ', ' : ''}
-											<span className="mono">{r.fileKey}</span> ({r.names.slice(0, 3).join(', ')})
+											<span className="mono">{r.fileKey}</span> ({[...r.names, ...(r.cited ?? [])].slice(0, 3).join(', ')})
 										</span>
 									))}
 									{incremental.recheck.length > 3 ? '…' : ''}.{' '}

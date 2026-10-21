@@ -45,7 +45,7 @@ function world() {
 
 const target = { kind: 'branch' as const, headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' }
 
-async function setup() {
+async function setup(edit: (out: ReturnType<typeof defaultScript>) => ReturnType<typeof defaultScript> = (out) => out) {
 	const w = world()
 	const store = ReviewStore.in(tmp())
 	await store.load()
@@ -56,7 +56,7 @@ async function setup() {
 		script: (req) => {
 			if (!req.schema) sent.push(req.batch.excerpts.map((e) => e.file.key))
 			if (!req.schema) inputs.push(req.input)
-			return defaultScript(req)
+			return edit(defaultScript(req))
 		},
 	})
 	const config = async (): Promise<RunConfig> => ({
@@ -247,6 +247,39 @@ test('an unchanged file whose added lines use a name whose definition changed is
 	assert.equal(run.coverage.files.find((f) => f.fileKey === 'b.ts')?.state, 'reviewed')
 	assert.deepEqual(run.rechecked, sig.recheck)
 	assert.match(inputs.join('\n'), /added lines use `computeTotal`, whose definition changed since the run on \w{7} in a\.ts/)
+})
+
+test('an unchanged file with a finding that cites a file whose diff changed is reviewed again', async () => {
+	// The finding on b.ts says its problem lies in a.ts (which changes next) and c.ts (which doesn't).
+	const { w, svc, ai, inputs, repoId } = await setup((out) =>
+		'findings' in out
+			? {
+					...out,
+					findings: out.findings.map((f) =>
+						f.file_path === 'b.ts' ? { ...f, body: 'The value set in `a.ts:6` is never read here; see also c.ts:6.' } : f,
+					),
+				}
+			: out,
+	)
+	const v1 = await svc.loadComparison(repoId, { kind: 'target', target })
+	await finished(ai, await svc.startAi(v1.comparison.id, { kind: 'all' }, MODEL))
+
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'a.ts': w.file('a', 2) }, 'v2')
+	w.run('checkout', '-q', 'main')
+	const v2 = await svc.loadComparison(repoId, { kind: 'target', target, from: v1.comparison.id })
+	const offer = await svc.incrementalOffer(v2.comparison.id, MODEL)
+	assert.ok(offer && offer.refused === null, JSON.stringify(offer))
+	assert.deepEqual(offer.review, ['a.ts', 'b.ts'])
+	assert.deepEqual(offer.carry, ['c.ts'])
+	assert.deepEqual(offer.recheck, [{ fileKey: 'b.ts', names: [], changedIn: [], cited: ['a.ts'] }])
+
+	inputs.length = 0
+	const run = await finished(ai, await svc.startAi(v2.comparison.id, { kind: 'changed' }, MODEL))
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.equal(run.coverage.files.find((f) => f.fileKey === 'b.ts')?.state, 'reviewed')
+	assert.ok(!run.findings.some((f) => f.anchor.fileKey === 'b.ts' && f.carried), 'the old finding on b.ts is not carried')
+	assert.match(inputs.join('\n'), /a finding raised on it before cites a\.ts, whose diff changed since the run on \w{7}/)
 })
 
 test('a setting that makes the review deeper, off for the earlier run and on now, stops carrying; turning one off still carries', async () => {

@@ -95,7 +95,7 @@ import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
-import { carryFindings, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
+import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
 import type { FileSource } from './ai/context.ts'
 
@@ -1258,15 +1258,22 @@ export class ReviewService {
 			}
 		}
 		const planned = planIncremental(earlier, from, before, { files: c.files, blobs: data.blobs })
-		const recheck = usersOfChangedNames(
-			await this.changedSince(data, earlier.headSha, planned.review),
-			await Promise.all(
-				planned.carry
-					.filter((f) => f.state === 'carried')
-					.map(async (f) => ({
-						fileKey: f.fileKey,
-						patch: await this.loadPatch(reviewId, f.fileKey, false).catch((): PatchResult => ({ kind: 'binary' })),
+		const since = await this.changedSince(data, earlier.headSha, planned.review)
+		const carried = planned.carry.filter((f) => f.state === 'carried').map((f) => f.fileKey)
+		const recheck = mergeRechecks(
+			usersOfChangedNames(
+				since,
+				await Promise.all(
+					carried.map(async (fileKey) => ({
+						fileKey,
+						patch: await this.loadPatch(reviewId, fileKey, false).catch((): PatchResult => ({ kind: 'binary' })),
 					})),
+				),
+			),
+			citersOfChangedFiles(
+				earlier.findings,
+				carried,
+				since.map((s) => s.file),
 			),
 		)
 		const again = new Set(recheck.map((r) => r.fileKey))
