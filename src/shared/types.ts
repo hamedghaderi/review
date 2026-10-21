@@ -1600,6 +1600,8 @@ export const IPC = {
 	updateStatus: 'update:status',
 	updateAvailable: 'update:available',
 	skipUpdate: 'update:skip',
+	systemInfo: 'app:system-info',
+	feedbackOpen: 'feedback:open',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
@@ -1784,6 +1786,10 @@ export interface ReviewApi {
 	onUpdateAvailable(handler: (update: AppUpdate) => void): () => void
 	/** Stops announcing this release (a later one is announced again). */
 	skipUpdate(version: string): Promise<Result<boolean>>
+	/** The operating system and its version, for a feedback report. */
+	systemInfo(): Promise<Result<string>>
+	/** Help › Send Feedback… was chosen in the menu. */
+	onFeedbackOpen(handler: () => void): () => void
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
 	installUpdate(): Promise<Result<boolean>>
 	/** Download progress of `installUpdate`, from 0 to 1. */

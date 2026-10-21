@@ -69,6 +69,7 @@ import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { Home, useHomeInbox } from './Home.tsx'
 import { useStored } from './useStored.ts'
+import { FeedbackDialog } from './FeedbackDialog.tsx'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
@@ -157,6 +158,7 @@ export function App() {
 	// Whether a review-code:// link ever reached the app: until one does, the tab row offers the browser extension.
 	const [linked, setLinked] = useStored<'no' | 'yes'>('github.linked', 'no', ['no', 'yes'])
 	const [paletteOpen, setPaletteOpen] = useState(false)
+	const [feedbackOpen, setFeedbackOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
 	const browserRef = useRef<BrowserHandle>(null)
@@ -440,6 +442,7 @@ export function App() {
 			.then(() => takeLinkRef.current())
 	}, [openSession])
 	useEffect(() => window.review.onLinkOpen(() => void takeLinkRef.current()), [])
+	useEffect(() => window.review.onFeedbackOpen(() => setFeedbackOpen(true)), [])
 
 	const sessionRepoRef = useRef<string | null>(null)
 	sessionRepoRef.current = session?.repo.id ?? null
@@ -1211,6 +1214,7 @@ export function App() {
 				home={{ on: home, count: homeInbox ? homeCount(homeInbox.prs) : 0 }}
 				error={tabError}
 				extensionHint={linked === 'no'}
+				onFeedback={() => setFeedbackOpen(true)}
 				onHome={() => setHome(true)}
 				onSelect={(id) => {
 					setHome(false)
@@ -1959,8 +1963,10 @@ export function App() {
 						void openReview(session.repo.id, { kind: 'target', target: t })
 					}}
 					onOpenSnapshot={(id) => void chooseSnapshot(id)}
+					onFeedback={() => setFeedbackOpen(true)}
 				/>
 			)}
+			{feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
 			{settingsOpen && aiSettings && (
 				<ProviderSettings
 					settings={aiSettings}
@@ -1983,6 +1989,7 @@ function RepoTabs(props: {
 	home: { on: boolean; count: number }
 	error: string | null
 	extensionHint: boolean // no browser link has opened a review yet
+	onFeedback(): void
 	onHome(): void
 	onSelect(id: string): void
 	onClose(id: string): void
@@ -2071,6 +2078,13 @@ function RepoTabs(props: {
 					{error} ✕
 				</button>
 			)}
+			<button
+				className="btn small ghost repo-tab-feedback"
+				onClick={props.onFeedback}
+				title="Report a problem or suggest an idea on GitHub"
+			>
+				Feedback
+			</button>
 		</nav>
 	)
 }
