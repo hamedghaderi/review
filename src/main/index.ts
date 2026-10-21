@@ -30,7 +30,7 @@ import { InboxWatcher, type RepoEvent, type WatchEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
-import { APPEARANCES, DEFAULT_THEME, parseTheme, THEMES, themeBackground, type ThemeSettings } from '../shared/theme.ts'
+import { APPEARANCES, DEFAULT_THEME, nextScale, parseTheme, THEMES, themeBackground, type ThemeSettings } from '../shared/theme.ts'
 import { LINK_SCHEME, linkInArgs, parsePrLink, type PrLink } from '../shared/link.ts'
 import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
 import {
@@ -480,6 +480,9 @@ function createWindow(): void {
 		},
 	})
 	win.once('ready-to-show', () => win?.show())
+	win.webContents.on('did-finish-load', () => win?.webContents.setZoomFactor(currentTheme().uiScale / 100))
+	// Ctrl+scroll and pinch zoom step the interface size too.
+	win.webContents.on('zoom-changed', (_e, dir) => void zoom(dir === 'in' ? 1 : -1))
 
 	// Never navigate away from the app or open windows; external http(s) links go to the system browser.
 	win.webContents.setWindowOpenHandler(({ url }) => {
@@ -848,9 +851,11 @@ function setMenu(): void {
 					{ role: 'forceReload' },
 					{ role: 'toggleDevTools' },
 					{ type: 'separator' },
-					{ role: 'resetZoom' },
-					{ role: 'zoomIn' },
-					{ role: 'zoomOut' },
+					// Zoom is the interface size in Settings · Appearance, so it is remembered and both show the same.
+					{ label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => void zoom(0) },
+					{ label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => void zoom(1) },
+					{ label: 'Zoom In', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true, click: () => void zoom(1) },
+					{ label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => void zoom(-1) },
 					{ type: 'separator' },
 					{ role: 'togglefullscreen' },
 					{ type: 'separator' },
@@ -874,9 +879,16 @@ async function setTheme(next: ThemeSettings): Promise<ThemeSettings> {
 	setMenu() // the radio items follow
 	if (win && !win.isDestroyed()) {
 		win.setBackgroundColor(themeBackground(next, nativeTheme.shouldUseDarkColors))
+		win.webContents.setZoomFactor(next.uiScale / 100)
 		win.webContents.send(IPC.themeChanged, next)
 	}
 	return next
+}
+
+/** View › Zoom: one step of the interface size (0: back to 100%). */
+function zoom(dir: -1 | 0 | 1): Promise<ThemeSettings> {
+	const t = currentTheme()
+	return setTheme({ ...t, uiScale: dir === 0 ? DEFAULT_THEME.uiScale : nextScale(t.uiScale, dir) })
 }
 
 /** View › Theme: light or dark, then the colour themes, each a radio group showing the current choice. */

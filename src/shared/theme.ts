@@ -1,5 +1,5 @@
 /**
- * The app's look: light or dark (or follow the system), and a colour theme. The colours themselves are in the
+ * The app's look: light or dark (or follow the system), a colour theme, and fonts. The colours themselves are in the
  * renderer's themes.css; this is what the main process and the renderer agree on.
  */
 export type Appearance = 'system' | 'light' | 'dark'
@@ -22,9 +22,30 @@ export type ThemeId =
 export interface ThemeSettings {
 	appearance: Appearance
 	theme: ThemeId
+	codeFont: string // a font family name for code; '' for the default monospace fonts
+	codeSize: number // px, for code in diffs and files
+	uiFont: string // a font family name for everything else; '' for the system font
+	uiScale: number // percent: the whole window's zoom, which View › Zoom changes too
 }
 
-export const DEFAULT_THEME: ThemeSettings = { appearance: 'system', theme: 'review' }
+export const DEFAULT_THEME: ThemeSettings = { appearance: 'system', theme: 'review', codeFont: '', codeSize: 12, uiFont: '', uiScale: 100 }
+
+export const CODE_SIZES = { min: 10, max: 20 }
+// The same steps as browser zoom, so View › Zoom In and Out move through these.
+export const UI_SCALES: ReadonlyArray<number> = [80, 90, 100, 110, 125, 150]
+
+// Suggestions only: any installed font can be typed in. A font that isn't installed falls back to the defaults.
+export const CODE_FONTS: ReadonlyArray<string> = [
+	'SF Mono',
+	'Menlo',
+	'JetBrains Mono',
+	'Fira Code',
+	'Cascadia Code',
+	'Source Code Pro',
+	'IBM Plex Mono',
+	'Consolas',
+]
+export const UI_FONTS: ReadonlyArray<string> = ['Inter', 'Helvetica Neue', 'Segoe UI', 'Roboto', 'IBM Plex Sans', 'Open Sans']
 
 export const APPEARANCES: ReadonlyArray<{ id: Appearance; label: string }> = [
 	{ id: 'system', label: 'Match system' },
@@ -76,7 +97,36 @@ export function parseTheme(raw: unknown): ThemeSettings {
 	return {
 		appearance: APPEARANCES.some((a) => a.id === v.appearance) ? (v.appearance as Appearance) : DEFAULT_THEME.appearance,
 		theme: THEMES.some((t) => t.id === v.theme) ? (v.theme as ThemeId) : DEFAULT_THEME.theme,
+		codeFont: fontName(v.codeFont),
+		codeSize:
+			typeof v.codeSize === 'number' && Number.isInteger(v.codeSize) && v.codeSize >= CODE_SIZES.min && v.codeSize <= CODE_SIZES.max
+				? v.codeSize
+				: DEFAULT_THEME.codeSize,
+		uiFont: fontName(v.uiFont),
+		uiScale: typeof v.uiScale === 'number' && UI_SCALES.includes(v.uiScale) ? v.uiScale : DEFAULT_THEME.uiScale,
 	}
+}
+
+// A family name goes into CSS, so only letters, digits, spaces and a few marks are kept.
+function fontName(raw: unknown): string {
+	return typeof raw === 'string'
+		? raw
+				.replace(/[^\p{L}\p{N} ._-]/gu, '')
+				.trim()
+				.slice(0, 64)
+		: ''
+}
+
+/** A CSS font-family list: the chosen font first, then the defaults for whatever it doesn't have. */
+export function fontStack(name: string, fallback: string): string {
+	return name ? `"${name}", ${fallback}` : fallback
+}
+
+/** The next step of the interface size for View › Zoom In or Out, staying at the ends. */
+export function nextScale(current: number, dir: 1 | -1): number {
+	const i = UI_SCALES.indexOf(current)
+	const at = i === -1 ? UI_SCALES.indexOf(DEFAULT_THEME.uiScale) : i
+	return UI_SCALES[Math.max(0, Math.min(UI_SCALES.length - 1, at + dir))]
 }
 
 export function themeBackground(s: ThemeSettings, systemDark: boolean): string {
