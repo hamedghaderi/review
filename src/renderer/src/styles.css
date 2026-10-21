@@ -2808,9 +2808,17 @@ button.palette-action:hover {
 	width: min(640px, 100%);
 	max-height: min(720px, 100%);
 }
-/* Settings · Appearance: each card previews its theme in that theme's own colours. */
+/* Settings · Appearance: each card previews its theme in that theme's own colours. The light/dark choices get equal
+   columns, each as wide as the longest label. */
 .appearance .seg {
 	align-self: flex-start;
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+}
+.appearance .seg button {
+	height: 28px;
+	padding: 0 14px;
 }
 .theme-grid {
 	display: grid;
