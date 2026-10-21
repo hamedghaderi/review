@@ -3,7 +3,8 @@
  * renderer's themes.css; this is what the main process and the renderer agree on.
  */
 export type Appearance = 'system' | 'light' | 'dark'
-export type ThemeId = 'review' | 'github' | 'contrast' | 'warm'
+export type ThemeId =
+	'review' | 'github' | 'contrast' | 'warm' | 'laravel' | 'rails' | 'vue' | 'react' | 'django' | 'svelte' | 'rust' | 'go' | 'docker'
 
 export interface ThemeSettings {
 	appearance: Appearance
@@ -39,6 +40,15 @@ export const THEMES: ReadonlyArray<{ id: ThemeId; label: string; description: st
 		description: 'Paper tones that are easier on the eyes for long reviews.',
 		bg: { light: '#fbf7f0', dark: '#1f1b16' },
 	},
+	{ id: 'laravel', label: 'Laravel', description: 'Laravel’s red on warm greys.', bg: { light: '#fdfdfc', dark: '#0a0a0a' } },
+	{ id: 'rails', label: 'Rails', description: 'Rails red on cream, plum in the dark.', bg: { light: '#fbf7f4', dark: '#1b1418' } },
+	{ id: 'vue', label: 'Vue', description: 'Vue’s green with its slate text.', bg: { light: '#ffffff', dark: '#1a1a1a' } },
+	{ id: 'react', label: 'React', description: 'React’s cyan on the react.dev greys.', bg: { light: '#ffffff', dark: '#23272f' } },
+	{ id: 'django', label: 'Django', description: 'Django’s deep green.', bg: { light: '#f7faf8', dark: '#092e20' } },
+	{ id: 'svelte', label: 'Svelte', description: 'Svelte’s orange on neutral greys.', bg: { light: '#ffffff', dark: '#1b1b1f' } },
+	{ id: 'rust', label: 'Rust', description: 'Rust orange on paper, like the Rust book.', bg: { light: '#f6f4ef', dark: '#1d1b19' } },
+	{ id: 'go', label: 'Go', description: 'Go’s gopher blue.', bg: { light: '#ffffff', dark: '#202224' } },
+	{ id: 'docker', label: 'Docker', description: 'Docker blue on navy.', bg: { light: '#ffffff', dark: '#0c1424' } },
 ]
 
 /** A stored or sent value, with anything unknown replaced by the default. */
