@@ -10,6 +10,7 @@ import {
 	type Review,
 	type ReviewApi,
 } from '../shared/types.ts'
+import type { ThemeSettings } from '../shared/theme.ts'
 
 const api: ReviewApi = {
 	openRepository: () => ipcRenderer.invoke(IPC.openRepository),
@@ -157,6 +158,13 @@ const api: ReviewApi = {
 	},
 	skipUpdate: (version) => ipcRenderer.invoke(IPC.skipUpdate, version),
 	systemInfo: () => ipcRenderer.invoke(IPC.systemInfo),
+	theme: () => ipcRenderer.invoke(IPC.theme),
+	setTheme: (next) => ipcRenderer.invoke(IPC.setTheme, next),
+	onThemeChanged: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, next: ThemeSettings): void => handler(next)
+		ipcRenderer.on(IPC.themeChanged, listener)
+		return () => ipcRenderer.removeListener(IPC.themeChanged, listener)
+	},
 	onFeedbackOpen: (handler) => {
 		const listener = (): void => handler()
 		ipcRenderer.on(IPC.feedbackOpen, listener)
