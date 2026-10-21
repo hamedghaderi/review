@@ -4194,6 +4194,19 @@ button.stack-row:hover {
 	border-radius: 6px;
 	cursor: pointer;
 }
+.repo-tab-hint {
+	align-self: center;
+	margin-left: auto;
+	min-width: 0;
+	max-width: 50%;
+	color: var(--text-2);
+}
+.repo-tab-hint:hover {
+	color: var(--accent);
+}
+.repo-tab-hint + .repo-tab-error {
+	margin-left: 0;
+}
 /* The tab row clips anything outside it, so focus rings on tabs are drawn inside. */
 .repo-tab-name:focus-visible,
 .repo-tab-close:focus-visible,
