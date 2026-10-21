@@ -68,6 +68,7 @@ import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { Home, useHomeInbox } from './Home.tsx'
+import { useStored } from './useStored.ts'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
@@ -110,6 +111,8 @@ function githubStatusText(g: GitHubStatus | null): string {
 /** How shortcuts are written on this platform: "⌘" on macOS, "Ctrl+" elsewhere. */
 const MOD_KEY = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
 
+const EXTENSION_URL = 'https://chromewebstore.google.com/detail/open-in-review/ohjjaigipbemjikpgehibpjddclfdjjb'
+
 function isTyping(el: Element | null): boolean {
 	if (!(el instanceof HTMLElement)) return false
 	return (
@@ -151,6 +154,8 @@ export function App() {
 	const [githubOpen, setGithubOpen] = useState<boolean | 'clones'>(false) // 'clones': opened at the app's clones
 	// The start page: every pull request waiting for you, in every repository. Shown at launch when nothing is restored.
 	const [home, setHome] = useState(false)
+	// Whether a review-code:// link ever reached the app: until one does, the tab row offers the browser extension.
+	const [linked, setLinked] = useStored<'no' | 'yes'>('github.linked', 'no', ['no', 'yes'])
 	const [paletteOpen, setPaletteOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
@@ -539,7 +544,9 @@ export function App() {
 	}
 	takeLinkRef.current = async () => {
 		const r = await window.review.takeLink()
-		if (r.ok && r.value) await openLink(r.value)
+		if (!r.ok || !r.value) return
+		setLinked('yes')
+		await openLink(r.value)
 	}
 
 	// Picks the clone for a waiting link; a folder that maps to another GitHub repository keeps the link waiting.
@@ -1203,6 +1210,7 @@ export function App() {
 				activeId={home ? null : (session?.repo.id ?? null)}
 				home={{ on: home, count: homeInbox ? homeCount(homeInbox.prs) : 0 }}
 				error={tabError}
+				extensionHint={linked === 'no'}
 				onHome={() => setHome(true)}
 				onSelect={(id) => {
 					setHome(false)
@@ -1974,6 +1982,7 @@ function RepoTabs(props: {
 	activeId: string | null
 	home: { on: boolean; count: number }
 	error: string | null
+	extensionHint: boolean // no browser link has opened a review yet
 	onHome(): void
 	onSelect(id: string): void
 	onClose(id: string): void
@@ -2046,6 +2055,17 @@ function RepoTabs(props: {
 			<button className="repo-tab-add" aria-label="Open repository" title="Open repository…" onClick={props.onOpen}>
 				+
 			</button>
+			{props.extensionHint && (
+				<a
+					className="repo-tab-hint small ellipsis"
+					href={EXTENSION_URL}
+					target="_blank"
+					rel="noreferrer"
+					title="The Open in Review extension for Chrome. Press Shift+R on a pull request on github.com to open its review here. This goes away once you have opened one that way."
+				>
+					Open pull requests from GitHub with Shift+R: get the Chrome extension ↗
+				</a>
+			)}
 			{error && (
 				<button className="notice repo-tab-error ellipsis" onClick={props.onDismissError} title={`${error}\nDismiss`}>
 					{error} ✕
