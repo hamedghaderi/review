@@ -5,6 +5,7 @@ import { MODEL_CATALOG } from './catalog.ts'
 import { safeEnv, shellEnv } from './mcp.ts'
 import {
 	clip,
+	maxRounds,
 	parseJson,
 	ProviderError,
 	type DiscoveredModel,
@@ -15,6 +16,7 @@ import {
 	type ReviewProvider,
 } from './provider.ts'
 import { REVIEW_JSON_SCHEMA } from './schema.ts'
+import { startToolServer, type ToolServer } from './toolServer.ts'
 
 export interface ClaudeCodeOptions {
 	command: string // "claude", found on the login shell's PATH, or a full path
@@ -24,8 +26,9 @@ export interface ClaudeCodeOptions {
 const LABEL = 'Claude Code'
 
 // Claude Code as a plain model: no built-in tools (it must not read or change the repository), none of the user's MCP
-// servers, hooks, CLAUDE.md, skills or plugins, and no saved session.
-const ISOLATION = ['--tools', '', '--strict-mcp-config', '--safe-mode', '--disable-slash-commands', '--no-session-persistence']
+// servers, and no saved session. No settings files either, which leaves out the user's hooks, plugins and CLAUDE.md.
+// Not --safe-mode, which does the same but also drops the --mcp-config server the lookups come from.
+const ISOLATION = ['--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence']
 
 /** Checks Claude Code is installed and signed in with a Claude plan, then offers the models a plan includes. */
 export function createClaudeCodeAccount(o: ClaudeCodeOptions): ProviderAccount {
@@ -68,22 +71,37 @@ export function createClaudeCodeProvider(o: ClaudeCodeOptions & { model: string;
 		async review(request: ProviderRequest, signal: AbortSignal): Promise<ProviderResponse> {
 			// The runner sends the request again without them, once per reviewer, and says so.
 			if (request.images?.length) throw new ProviderError('unsupported', `${LABEL} connections don't send images yet`)
-			const args = [
-				'-p',
-				'--output-format',
-				'json',
-				'--model',
-				o.model,
-				...ISOLATION,
-				'--system-prompt',
-				request.instructions,
-				'--json-schema',
-				JSON.stringify(request.schema?.json ?? REVIEW_JSON_SCHEMA),
-			]
-			const { stdout, stderr, code } = await run(o, args, request.input, signal)
-			const response = interpretResult(stdout, stderr, code, o.model)
-			// Lookups need Review's tools served to Claude Code over MCP, which comes later (#103).
-			return request.tools ? { ...response, toolsRejected: `${LABEL} connections don't offer lookups yet` } : response
+			// Lookups are served to Claude Code over MCP for this request only, and are the only tools it is allowed.
+			let server: ToolServer | null = null
+			try {
+				if (request.tools) server = await startToolServer(request.tools, signal)
+				const args = [
+					'-p',
+					'--output-format',
+					'json',
+					'--model',
+					o.model,
+					...ISOLATION,
+					...(server
+						? [
+								'--mcp-config',
+								server.configPath,
+								'--allowedTools',
+								server.toolNames.join(','),
+								'--max-turns',
+								String(maxRounds(request.tools) + 2),
+							]
+						: []),
+					'--system-prompt',
+					request.instructions,
+					'--json-schema',
+					JSON.stringify(request.schema?.json ?? REVIEW_JSON_SCHEMA),
+				]
+				const { stdout, stderr, code } = await run(o, args, request.input, signal)
+				return interpretResult(stdout, stderr, code, o.model)
+			} finally {
+				await server?.close()
+			}
 		},
 	}
 }
@@ -116,6 +134,7 @@ export function interpretResult(stdout: string, stderr: string, code: number | n
 		const text = (stderr.trim() || stdout.trim() || `exited with code ${code}`).replace(/\s+/g, ' ')
 		throw classify(text, null, model)
 	}
+	if (r.subtype === 'error_max_turns') throw new ProviderError('incomplete', `${LABEL} used up its turns before answering`)
 	if (r.is_error || r.subtype !== 'success') throw classify(r.result ?? r.subtype ?? 'unknown error', r.api_error_status ?? null, model)
 	const usage = usageOf(r)
 	if (r.structured_output !== undefined && r.structured_output !== null) return { output: r.structured_output, usage }

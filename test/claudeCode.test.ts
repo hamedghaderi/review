@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { sdkAdapters } from '../src/main/ai/adapters.ts'
 import { createClaudeCodeAccount, createClaudeCodeProvider, interpretResult } from '../src/main/ai/claudeCode.ts'
@@ -20,11 +20,20 @@ const cipher: SecretCipher = {
 const LIMITS = { contextWindow: 1_000_000, maxOutputTokens: 128_000 }
 const BATCH = { index: 0, references: [], facts: [], fileKeys: [], overview: '', chars: 0, excerpts: [] }
 
+const SDK = resolve('node_modules/@modelcontextprotocol/sdk/dist/cjs/client')
+
 /**
  * A stand-in for the claude program: records its arguments, stdin, working directory and environment, then prints what
- * the test asked for. `auth status` answers with `status`.
+ * the test asked for. `auth status` answers with `status`. With `lookup`, it first acts as Claude Code's MCP client: it
+ * reads the --mcp-config file, tries the server without the token, then lists the tools and makes the call.
  */
-function fakeClaude(reply: { stdout?: string; stderr?: string; code?: number; status?: unknown }): { command: string; seen(): any } {
+function fakeClaude(reply: {
+	stdout?: string
+	stderr?: string
+	code?: number
+	status?: unknown
+	lookup?: { name: string; arguments: Record<string, unknown> }
+}): { command: string; seen(): any } {
 	const dir = mkdtempSync(join(tmpdir(), 'review-claude-'))
 	const log = join(dir, 'seen.json')
 	const command = join(dir, 'claude')
@@ -34,14 +43,30 @@ function fakeClaude(reply: { stdout?: string; stderr?: string; code?: number; st
 	writeFileSync(
 		script,
 		`const fs = require('node:fs')
+const { Client } = require(${JSON.stringify(join(SDK, 'index.js'))})
+const { StreamableHTTPClientTransport } = require(${JSON.stringify(join(SDK, 'streamableHttp.js'))})
 const args = process.argv.slice(2)
 const input = fs.readFileSync(0, 'utf8')
-fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ args, input, cwd: process.cwd(), env: Object.keys(process.env) }))
+const seen = { args, input, cwd: process.cwd(), env: Object.keys(process.env) }
 const r = ${JSON.stringify(reply)}
-if (args[0] === 'auth') { process.stdout.write(JSON.stringify(r.status ?? { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty' })); process.exit(0) }
-if (r.stderr) process.stderr.write(r.stderr)
-process.stdout.write(r.stdout ?? '')
-process.exit(r.code ?? 0)
+;(async () => {
+	if (args[0] === 'auth') return process.stdout.write(JSON.stringify(r.status ?? { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty' }))
+	if (r.lookup) {
+		const server = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.review
+		seen.withoutToken = (await fetch(server.url, { method: 'POST', body: '{}' })).status
+		const client = new Client({ name: 'fake', version: '1' })
+		await client.connect(new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } }))
+		seen.tools = (await client.listTools()).tools.map((t) => t.name)
+		seen.result = await client.callTool(r.lookup)
+		seen.serverUrl = server.url
+		await client.close()
+	}
+	if (r.stderr) process.stderr.write(r.stderr)
+	process.stdout.write(r.stdout ?? '')
+})().finally(() => {
+	fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify(seen))
+	process.exit(r.code ?? 0) // now: idle keep-alive sockets would hold it open for seconds
+})
 `,
 	)
 	chmodSync(command, 0o755)
@@ -87,19 +112,51 @@ test('Claude Code reviews run claude -p with no tools, no user config and the pr
 	assert.equal(flag('--system-prompt'), 'Review it.')
 	assert.equal(flag('--output-format'), 'json')
 	assert.ok(JSON.parse(flag('--json-schema')).properties.findings)
-	for (const f of ['--strict-mcp-config', '--safe-mode', '--disable-slash-commands', '--no-session-persistence'])
-		assert.ok(seen.args.includes(f), f)
+	// No settings files: the user's hooks, plugins and CLAUDE.md stay out. (--safe-mode would also drop the lookups.)
+	assert.equal(flag('--setting-sources'), '')
+	assert.ok(!seen.args.includes('--safe-mode'))
+	for (const f of ['--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']) assert.ok(seen.args.includes(f), f)
+	assert.ok(!seen.args.includes('--mcp-config'), 'no lookups asked for, no server')
 	// An API key in the app's environment would bill the key instead of the plan.
 	assert.ok(!seen.env.some((k: string) => k.startsWith('ANTHROPIC_')))
 })
 
-test('Claude Code: lookups and images are declined, so the runner continues without them and says so', async () => {
-	const fake = fakeClaude({ stdout: success({ result: 'Here you go:\n```json\n{"findings":[]}\n```' }) })
+test('Claude Code lookups: served over MCP for the request only, behind a token, through the request’s own tools', async () => {
+	const fake = fakeClaude({
+		stdout: success({ result: 'Here you go:\n```json\n{"findings":[]}\n```' }),
+		lookup: { name: 'read_file', arguments: { path: 'src/a.ts' } },
+	})
 	const provider = createClaudeCodeProvider({ command: fake.command, timeoutMs: 10_000, model: 'claude-sonnet-5-5', limits: LIMITS })
-	const tools = {} as ReviewTools // only offered; never called
+	const calls: Array<[string, unknown]> = []
+	const tools: ReviewTools = {
+		definitions: [
+			{ name: 'read_file', description: 'Reads a file.', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
+		],
+		async call(name, args) {
+			calls.push([name, args])
+			return { text: 'export const a = 1', error: false }
+		},
+		exhausted: () => false,
+		log: { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [], seen: [] },
+	}
 	const r = await provider.review({ instructions: 'x', input: 'y', batch: BATCH, tools }, new AbortController().signal)
 	assert.deepEqual(r.output, { findings: [] }) // read from the text when structured_output is missing
-	assert.match(r.toolsRejected ?? '', /lookups/)
+	assert.equal(r.toolsRejected, undefined)
+	const seen = fake.seen()
+	assert.equal(seen.withoutToken, 401)
+	assert.deepEqual(seen.tools, ['read_file'])
+	assert.deepEqual(seen.result.content, [{ type: 'text', text: 'export const a = 1' }])
+	assert.deepEqual(calls, [['read_file', { path: 'src/a.ts' }]])
+	const flag = (name: string) => seen.args[seen.args.indexOf(name) + 1]
+	assert.equal(flag('--allowedTools'), 'mcp__review__read_file')
+	assert.ok(Number(flag('--max-turns')) > 1)
+	// Gone once the request is answered: the config file with its token, and the server.
+	assert.throws(() => readFileSync(flag('--mcp-config')))
+	await assert.rejects(fetch(seen.serverUrl, { method: 'POST', body: '{}' }))
+})
+
+test('Claude Code doesn’t send images yet: the runner sends the request again without them and says so', async () => {
+	const provider = createClaudeCodeProvider({ command: fakeClaude({}).command, timeoutMs: 10_000, model: 'm', limits: LIMITS })
 	await assert.rejects(
 		provider.review(
 			{ instructions: 'x', input: 'y', batch: BATCH, images: [{ name: 'a', mediaType: 'image/png', data: '' }] },
@@ -127,6 +184,7 @@ test('Claude Code errors map to the kinds the runner acts on', async () => {
 	assert.equal(kind(failed('Internal error', 500)), 'server')
 	assert.equal(kind('', 'Error: model claude-nope not found'), 'model-unavailable')
 	assert.equal(kind(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '' })), 'invalid-output')
+	assert.equal(kind(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true })), 'incomplete')
 
 	const missing = createClaudeCodeProvider({ command: '/nonexistent/claude', timeoutMs: 10_000, model: 'm', limits: LIMITS })
 	await assert.rejects(
