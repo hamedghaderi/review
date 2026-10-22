@@ -527,7 +527,7 @@ const PASS_THROUGH = [
 	'TMP',
 ]
 
-function safeEnv(vars: Record<string, string>): Record<string, string> {
+export function safeEnv(vars: Record<string, string>): Record<string, string> {
 	return Object.fromEntries(PASS_THROUGH.flatMap((k) => (vars[k] ? [[k, vars[k]]] : [])))
 }
 
@@ -537,7 +537,7 @@ let shellVars: Promise<Record<string, string>> | null = null
  * The variables of the user's login shell. Apps started from the Dock or Start menu do not get the PATH a terminal has
  * (nvm, Homebrew, volta), so `npx` and friends would not be found; Claude Code's configs also refer to these variables.
  */
-function shellEnv(): Promise<Record<string, string>> {
+export function shellEnv(): Promise<Record<string, string>> {
 	shellVars ??= new Promise((resolve) => {
 		const fallback = Object.fromEntries(Object.entries(baseEnv).filter((e): e is [string, string] => typeof e[1] === 'string'))
 		if (process.platform === 'win32') return resolve(fallback)

@@ -56,7 +56,9 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 	const ref = useRef<HTMLDivElement>(null)
 	const input = useRef<HTMLInputElement>(null)
 
-	const connections = settings?.connections.filter(usable) ?? []
+	// CLI connections review only: each request starts a process, too slow for questions.
+	const cli = new Set(settings?.providers.filter((p) => p.cli).map((p) => p.kind))
+	const connections = settings?.connections.filter((c) => usable(c) && (onSelectTeam || !cli.has(c.kind))) ?? []
 	const activeTeam =
 		onSelectTeam && settings?.reviewer?.kind === 'team'
 			? settings.teams.find((t) => t.id === (settings.reviewer as { teamId: string }).teamId)

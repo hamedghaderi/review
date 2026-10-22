@@ -170,8 +170,10 @@ export class ConnectionService {
 
 	/** Remembers the model for questions (Ask AI), without changing what runs reviews. */
 	async selectAskModel(selection: ModelSelection): Promise<void> {
-		if (!this.connectionView(this.get(selection.connectionId)).models.some((m) => m.id === selection.modelId))
+		const conn = this.get(selection.connectionId)
+		if (!this.connectionView(conn).models.some((m) => m.id === selection.modelId))
 			throw new AppFail('invalid-input', 'That model is not offered by this connection.')
+		if (descriptor(conn.kind).cli) throw new AppFail('invalid-input', `${conn.label} runs reviews only, not questions.`)
 		await this.file.update((f) => {
 			f.askModel = selection
 		})
@@ -194,7 +196,11 @@ export class ConnectionService {
 		const auth = input.auth ?? preset?.auth ?? desc.authMethods[0]
 		if (!desc.authMethods.includes(auth))
 			throw new AppFail('invalid-input', 'That authentication method is not available for this provider.')
-		const baseUrl = desc.endpointEditable ? normaliseUrl(input.baseUrl ?? preset?.baseUrl ?? '') : (desc.defaultBaseUrl as string)
+		const baseUrl = !desc.endpointEditable
+			? (desc.defaultBaseUrl as string)
+			: desc.cli
+				? normaliseCommand(input.baseUrl ?? '', desc.defaultBaseUrl as string)
+				: normaliseUrl(input.baseUrl ?? preset?.baseUrl ?? '')
 		const conn: StoredConnection = {
 			id: randomUUID(),
 			kind: input.kind,
@@ -226,7 +232,7 @@ export class ConnectionService {
 		if (patch.label !== undefined) next.label = patch.label.trim().slice(0, 80) || desc.label
 		if (patch.baseUrl !== undefined) {
 			if (!desc.endpointEditable) throw new AppFail('invalid-input', 'This provider’s endpoint cannot be changed.')
-			const url = normaliseUrl(patch.baseUrl)
+			const url = desc.cli ? normaliseCommand(patch.baseUrl, desc.defaultBaseUrl as string) : normaliseUrl(patch.baseUrl)
 			if (url !== conn.baseUrl) {
 				next.baseUrl = url
 				next.preset = null
@@ -734,8 +740,9 @@ export class ConnectionService {
  * model is offered; without a team, the chosen model.
  */
 export function questionModel(v: Omit<AiSettingsView, 'questionModel'>, picked: ModelSelection | null = null): ModelSelection | null {
+	// CLI connections start a process per request, too slow for questions, so they never answer them.
 	const offered = (connectionId: string, modelId: string): boolean =>
-		v.connections.some((c) => c.id === connectionId && c.models.some((m) => m.id === modelId))
+		v.connections.some((c) => c.id === connectionId && !descriptor(c.kind).cli && c.models.some((m) => m.id === modelId))
 	if (picked && offered(picked.connectionId, picked.modelId)) return picked
 	const r = v.reviewer
 	if (r?.kind === 'team') {
@@ -743,13 +750,14 @@ export function questionModel(v: Omit<AiSettingsView, 'questionModel'>, picked: 
 		const pick = [...members.filter((m) => m.rules.includes('breaking-change')), ...members].find((m) => offered(m.connectionId, m.modelId))
 		if (pick) return { connectionId: pick.connectionId, modelId: pick.modelId }
 	}
-	return v.selection
+	return v.selection && offered(v.selection.connectionId, v.selection.modelId) ? v.selection : null
 }
 
-/** Your price, else the provider's, else free on a local server, else the catalog's; null when none is known. */
+/** Your price, else nothing per token on a CLI's plan, else the provider's, else free on a local server, else the catalog's; null when none is known. */
 function modelPrice(c: StoredConnection, modelId: string): PricedModel | null {
 	const override = c.prices && Object.hasOwn(c.prices, modelId) ? c.prices[modelId] : undefined
 	if (override) return { ...override, source: 'override' }
+	if (descriptor(c.kind).cli) return { input: 0, cachedInput: null, cacheWrite: null, output: 0, source: 'subscription' }
 	const listed = c.models.find((m) => m.id === modelId)?.price
 	if (listed) return { ...listed, source: 'provider' }
 	if (c.kind === 'fixture' || descriptor(c.kind).presets.find((p) => p.id === c.preset)?.free)
@@ -794,6 +802,13 @@ export function normaliseUrl(raw: string): string {
 		)
 	}
 	return url.toString().replace(/\/+$/, '')
+}
+
+/** A CLI connection's program: a bare name looked up on the login shell's PATH, or a full path. Never run through a shell. */
+export function normaliseCommand(raw: string, fallback: string): string {
+	const c = raw.trim() || fallback
+	if (/^[\w.+-]{1,100}$/.test(c) || (/^(\/|[A-Za-z]:\\)/.test(c) && c.length <= 1000 && !/[\0\n\r]/.test(c))) return c
+	throw new AppFail('invalid-input', `Enter the program’s name, for example ${fallback}, or its full path.`)
 }
 
 function isPrivateIp(host: string): boolean {

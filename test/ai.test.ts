@@ -1156,7 +1156,7 @@ test('ask about code: the selected lines, the change and the file around them go
 
 test('questions about code go to one model: with a team, its callers member, else its first offered member; otherwise the chosen model', async () => {
 	const { questionModel } = await import('../src/main/ai/connections.ts')
-	const conn = (id: string, models: Array<string>) => ({ id, models: models.map((m) => ({ id: m })) })
+	const conn = (id: string, models: Array<string>) => ({ id, kind: 'openai' as const, models: models.map((m) => ({ id: m })) })
 	const team = {
 		id: 't',
 		name: 'Max Deep',

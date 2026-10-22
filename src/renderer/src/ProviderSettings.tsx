@@ -461,14 +461,20 @@ function EndpointFields(p: EndpointProps) {
 			</label>
 			{p.provider.endpointEditable && (
 				<label className="field">
-					<span>Endpoint</span>
+					<span>{p.provider.cli ? 'Program' : 'Endpoint'}</span>
 					<input
 						className="mono"
 						value={p.baseUrl}
 						onChange={(e) => p.setBaseUrl(e.target.value)}
-						placeholder="http://localhost:11434/v1"
+						placeholder={p.provider.cli ? (p.provider.defaultBaseUrl ?? '') : 'http://localhost:11434/v1'}
 						spellCheck={false}
 					/>
+					{p.provider.cli && (
+						<small className="muted">
+							Found on your shell’s PATH. If Review can’t find it, enter the full path (run “which {p.provider.defaultBaseUrl}” in a
+							terminal).
+						</small>
+					)}
 				</label>
 			)}
 			{p.provider.protocols.length > 1 && (
@@ -522,6 +528,7 @@ const PRICE_SOURCE: Record<NonNullable<ModelView['price']>['source'], string> = 
 	provider: 'reported by the provider',
 	override: 'your price',
 	local: 'local server, free',
+	subscription: 'counts against your plan’s usage limits, not billed per token',
 }
 
 function priceSource(p: NonNullable<ModelView['price']>): string {
@@ -529,7 +536,8 @@ function priceSource(p: NonNullable<ModelView['price']>): string {
 }
 
 /** "$2 / $10": dollars per million input and output tokens. */
-function shortPrice(p: ModelPrice): string {
+function shortPrice(p: ModelPrice | NonNullable<ModelView['price']>): string {
+	if ('source' in p && p.source === 'subscription') return 'Plan'
 	if (p.input === 0 && p.output === 0) return 'Free'
 	const n = (x: number): string => `$${Number(x.toFixed(4))}`
 	return `${n(p.input)} / ${n(p.output)}`

@@ -191,3 +191,16 @@ test('with a budget set, the estimate names the models budgets cannot limit beca
 	price = PRICE
 	assert.deepEqual((await controller.estimate(access, { kind: 'all' }, choice)).unbudgeted, [], 'a priced model is limited')
 })
+
+test('estimate: Claude Code requests are counted against the plan, not priced', () => {
+	const { comp, sources } = change()
+	const plan: PricedModel = { input: 0, cachedInput: null, cacheWrite: null, output: 0, source: 'subscription' }
+	const alone = estimateRun(comp, sources, LIMITS, [one({ price: plan })])
+	assert.ok(alone.requests > 0)
+	assert.equal(alone.cost, null)
+	assert.ok(alone.notes.some((n) => /Claude plan/.test(n)))
+	// Beside a priced reviewer, the cost is that reviewer's alone and is not marked as missing a price.
+	const mixed = estimateRun(comp, sources, LIMITS, [one({ price: plan }), one({ role: 'Security' })])
+	const priced = estimateRun(comp, sources, LIMITS, [one({ role: 'Security' })])
+	assert.deepEqual(mixed.cost, priced.cost)
+})
