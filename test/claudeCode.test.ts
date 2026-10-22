@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { sdkAdapters } from '../src/main/ai/adapters.ts'
-import { createClaudeCodeAccount, createClaudeCodeProvider, interpretResult } from '../src/main/ai/claudeCode.ts'
+import { createClaudeCodeAccount, createClaudeCodeProvider, interpretResult, planLimit } from '../src/main/ai/claudeCode.ts'
 import { ConnectionService, normaliseCommand } from '../src/main/ai/connections.ts'
 import { CredentialService, type SecretCipher } from '../src/main/ai/credentials.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
@@ -18,6 +18,9 @@ const cipher: SecretCipher = {
 }
 
 const LIMITS = { contextWindow: 1_000_000, maxOutputTokens: 128_000 }
+// Generous: on a busy machine a fake's exit has been seen to reach the app seconds late (cause unknown), which a
+// tight limit would report as a timeout.
+const TIMEOUT = 60_000
 const BATCH = { index: 0, references: [], facts: [], fileKeys: [], overview: '', chars: 0, excerpts: [] }
 
 const SDK = resolve('node_modules/@modelcontextprotocol/sdk/dist/cjs/client')
@@ -91,7 +94,7 @@ const success = (extra: Record<string, unknown>) =>
 
 test('Claude Code reviews run claude -p with no tools, no user config and the prompt on stdin, outside the repository', async () => {
 	const fake = fakeClaude({ stdout: success({ structured_output: { findings: [] } }) })
-	const provider = createClaudeCodeProvider({ command: fake.command, timeoutMs: 10_000, model: 'claude-opus-5-5', limits: LIMITS })
+	const provider = createClaudeCodeProvider({ command: fake.command, timeoutMs: TIMEOUT, model: 'claude-opus-5-5', limits: LIMITS })
 	const response = await provider.review({ instructions: 'Review it.', input: 'the diff', batch: BATCH }, new AbortController().signal)
 	assert.deepEqual(response.output, { findings: [] })
 	assert.deepEqual(response.usage, {
@@ -126,7 +129,7 @@ test('Claude Code lookups: served over MCP for the request only, behind a token,
 		stdout: success({ result: 'Here you go:\n```json\n{"findings":[]}\n```' }),
 		lookup: { name: 'read_file', arguments: { path: 'src/a.ts' } },
 	})
-	const provider = createClaudeCodeProvider({ command: fake.command, timeoutMs: 10_000, model: 'claude-sonnet-5-5', limits: LIMITS })
+	const provider = createClaudeCodeProvider({ command: fake.command, timeoutMs: TIMEOUT, model: 'claude-sonnet-5-5', limits: LIMITS })
 	const calls: Array<[string, unknown]> = []
 	const tools: ReviewTools = {
 		definitions: [
@@ -156,7 +159,7 @@ test('Claude Code lookups: served over MCP for the request only, behind a token,
 })
 
 test('Claude Code doesn’t send images yet: the runner sends the request again without them and says so', async () => {
-	const provider = createClaudeCodeProvider({ command: fakeClaude({}).command, timeoutMs: 10_000, model: 'm', limits: LIMITS })
+	const provider = createClaudeCodeProvider({ command: fakeClaude({}).command, timeoutMs: TIMEOUT, model: 'm', limits: LIMITS })
 	await assert.rejects(
 		provider.review(
 			{ instructions: 'x', input: 'y', batch: BATCH, images: [{ name: 'a', mediaType: 'image/png', data: '' }] },
@@ -177,7 +180,8 @@ test('Claude Code errors map to the kinds the runner acts on', async () => {
 	}
 	const failed = (result: string, status: number | null = null) =>
 		JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result, api_error_status: status })
-	assert.equal(kind(failed('Claude AI usage limit reached|1761152400')), 'rate-limit')
+	assert.equal(kind(failed('Claude AI usage limit reached|1761152400')), 'quota')
+	assert.equal(kind(failed('You’ve hit your limit · resets 6pm (Europe/Amsterdam)', 429)), 'quota')
 	assert.equal(kind(failed('Rate limited', 429)), 'rate-limit')
 	assert.equal(kind(failed('Invalid API key · Please run /login')), 'auth')
 	assert.equal(kind(failed('Prompt is too long')), 'context-exceeded')
@@ -186,7 +190,7 @@ test('Claude Code errors map to the kinds the runner acts on', async () => {
 	assert.equal(kind(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '' })), 'invalid-output')
 	assert.equal(kind(JSON.stringify({ type: 'result', subtype: 'error_max_turns', is_error: true })), 'incomplete')
 
-	const missing = createClaudeCodeProvider({ command: '/nonexistent/claude', timeoutMs: 10_000, model: 'm', limits: LIMITS })
+	const missing = createClaudeCodeProvider({ command: '/nonexistent/claude', timeoutMs: TIMEOUT, model: 'm', limits: LIMITS })
 	await assert.rejects(
 		missing.review({ instructions: 'x', input: 'y', batch: BATCH }, new AbortController().signal),
 		(e: ProviderError) => e.kind === 'unsupported' && /not found/.test(e.message),
@@ -195,7 +199,7 @@ test('Claude Code errors map to the kinds the runner acts on', async () => {
 
 test('Test connection accepts Claude Code only when it is signed in with a Claude plan', async () => {
 	const models = (status: unknown) =>
-		createClaudeCodeAccount({ command: fakeClaude({ status }).command, timeoutMs: 10_000 }).listModels(new AbortController().signal)
+		createClaudeCodeAccount({ command: fakeClaude({ status }).command, timeoutMs: TIMEOUT }).listModels(new AbortController().signal)
 	const listed = await models({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty' })
 	assert.ok(listed.length > 0 && listed.every((m) => m.structuredOutput === 'yes'))
 	await assert.rejects(models({ loggedIn: false }), (e: ProviderError) => e.kind === 'auth' && /not signed in/.test(e.message))
@@ -229,4 +233,76 @@ test('a Claude Code connection: a program not a URL, priced as the plan, never a
 	assert.deepEqual(connections.view().selection, { connectionId: cc.id, modelId: opus.id })
 	assert.equal(connections.view().questionModel, null)
 	await assert.rejects(connections.selectAskModel({ connectionId: cc.id, modelId: opus.id }), /reviews only/)
+})
+
+test('the plan’s usage limit is told apart from a brief rate limit, with when it resets', () => {
+	const now = Date.UTC(2026, 9, 22, 12)
+	const epoch = planLimit('Claude AI usage limit reached|' + (now / 1000 + 3600), now)!
+	assert.equal(epoch.kind, 'quota')
+	assert.equal(epoch.retryAfterMs, 3_600_000)
+	assert.match(epoch.message, /usage limit is reached; it resets at \d{1,2}.\d\d( ?[AP]M)?\./i)
+	assert.match(planLimit('You’ve hit your limit · resets 6pm (Europe/Amsterdam)')!.message, /it resets 6pm \(Europe\/Amsterdam\)\./)
+	assert.match(planLimit('5-hour limit reached ∙ resets at 18:00')!.message, /it resets at 18:00\./)
+	assert.match(planLimit('Out of usage credits')!.message, /usage limit is reached\. Requests/)
+	assert.equal(planLimit('You’ve hit your limit · resets 6pm')!.retryAfterMs, null, 'a wall-clock time in words: the wait is not guessed')
+	assert.equal(planLimit('Rate limited, please retry'), null)
+	assert.equal(planLimit('API Error: 529 overloaded'), null)
+})
+
+test('every run on one Claude Code connection shares its gate: two at once, and a reached limit stops the others unsent', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-gate-'))
+	const credentials = new CredentialService(dir, cipher)
+	await credentials.load()
+	const connections = new ConnectionService(dir, credentials, sdkAdapters, { showDevelopment: true })
+	await connections.load()
+	const runs = mkdtempSync(join(tmpdir(), 'review-gate-log-'))
+	// Each request records when it starts and ends; with "quota" in the prompt it reports the plan's limit.
+	const script = join(runs, 'claude.cjs')
+	const command = join(runs, 'claude')
+	writeFileSync(command, `#!/bin/sh\nexec '${process.execPath.replace(/'/g, `'\\''`)}' '${script}' "$@"\n`)
+	writeFileSync(
+		script,
+		`const fs = require('node:fs')
+const args = process.argv.slice(2)
+if (args[0] === 'auth') { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty' })); process.exit(0) }
+const input = fs.readFileSync(0, 'utf8')
+const log = ${JSON.stringify(join(runs, 'log'))}
+fs.appendFileSync(log, 'start ' + Date.now() + '\\n')
+setTimeout(() => {
+	fs.appendFileSync(log, 'end ' + Date.now() + '\\n')
+	const quota = input.includes('quota')
+	process.stdout.write(JSON.stringify(quota
+		? { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'You’ve hit your limit · resets 6pm (Europe/Amsterdam)' }
+		: { type: 'result', subtype: 'success', is_error: false, structured_output: { findings: [] } }))
+	process.exit(0)
+}, 300)
+`,
+	)
+	chmodSync(command, 0o755)
+	const cc = await connections.create({ kind: 'claude-code', baseUrl: command })
+	await connections.test(cc.id)
+	// Two runs on different models of the one login: say, two team members.
+	const a = (await connections.runConfig({ connectionId: cc.id, modelId: 'claude-opus-5-5' })).provider
+	const b = (await connections.runConfig({ connectionId: cc.id, modelId: 'claude-sonnet-5-5' })).provider
+	const signal = new AbortController().signal
+	const ask = (p: typeof a, input = 'diff') => p.review({ instructions: 'x', input, batch: BATCH }, signal)
+	await Promise.all([ask(a), ask(b), ask(a), ask(b)])
+	const events = readFileSync(join(runs, 'log'), 'utf8')
+		.trim()
+		.split('\n')
+		.map((l) => l.split(' '))
+		.map(([k, t]) => ({ k, t: Number(t) }))
+		.sort((x, y) => x.t - y.t)
+	let open = 0
+	let most = 0
+	for (const e of events) most = Math.max(most, (open += e.k === 'start' ? 1 : -1))
+	assert.equal(events.length, 8)
+	assert.equal(most, 2)
+
+	writeFileSync(join(runs, 'log'), '')
+	await assert.rejects(ask(a, 'quota'), (e: ProviderError) => e.kind === 'quota' && /resets 6pm/.test(e.message))
+	await assert.rejects(ask(b), (e: ProviderError) => e.kind === 'quota', 'the other member stops too')
+	assert.equal(readFileSync(join(runs, 'log'), 'utf8').match(/start/g)?.length, 1, 'without starting Claude Code again')
+	await connections.test(cc.id) // testing the connection again tries again
+	assert.deepEqual((await ask(b)).output, { findings: [] })
 })

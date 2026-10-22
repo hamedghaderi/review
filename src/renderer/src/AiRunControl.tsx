@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AiRun, AiSettingsView, AiStartScope, ChangedFile, IncrementalOffer, ReviewerChoice, RunEstimate } from '../../shared/types.ts'
+import {
+	CLI_CONCURRENCY,
+	sharedLogins,
+	type AiRun,
+	type AiSettingsView,
+	type AiStartScope,
+	type ChangedFile,
+	type IncrementalOffer,
+	type ReviewerChoice,
+	type RunEstimate,
+} from '../../shared/types.ts'
 import { formatCostRange, formatTokenRange } from '../../shared/cost.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
@@ -177,6 +187,9 @@ export function AiRunControl({
 					? (connection.statusDetail ?? `${connection.label} is not connected.`)
 					: null
 	const teamConnections = team ? team.members.map((m) => settings?.connections.find((c) => c.id === m.connectionId)) : []
+	// Several reviewers on one CLI login share its plan's limits: a team's members, or one model's focused passes.
+	const cliLogin = !!connection && !!settings?.providers.find((p) => p.kind === connection.kind)?.cli
+	const shared = team && settings ? sharedLogins(settings, team.members) : []
 	const limits = settings?.limits
 	return (
 		<div className="ai-control" ref={ref}>
@@ -261,17 +274,24 @@ export function AiRunControl({
 						offer?.refused && effectiveScope === 'all' && <p className="muted small">Reviews every file again: {offer.refused}</p>
 					)}
 					{team ? (
-						<ul className="team-members small" title="Each reviewer checks only its rules, all at the same time">
-							{team.members.map((m, i) => (
-								<li
-									key={m.id}
-									className="ellipsis"
-									title={`${teamConnections[i]?.label ?? '?'} · ${m.modelId}\n${m.rules.map((r) => RULE_LABEL[r]).join(', ')}`}
-								>
-									<b>{m.role}</b> <span className="muted mono">{m.modelId}</span>
-								</li>
+						<>
+							<ul className="team-members small" title="Each reviewer checks only its rules, all at the same time">
+								{team.members.map((m, i) => (
+									<li
+										key={m.id}
+										className="ellipsis"
+										title={`${teamConnections[i]?.label ?? '?'} · ${m.modelId}\n${m.rules.map((r) => RULE_LABEL[r]).join(', ')}`}
+									>
+										<b>{m.role}</b> <span className="muted mono">{m.modelId}</span>
+									</li>
+								))}
+							</ul>
+							{shared.map((g) => (
+								<p key={g.label} className="small warn-text">
+									{g.roles.join(', ')} share {g.label}’s plan limits and take turns, {CLI_CONCURRENCY} requests at a time.
+								</p>
 							))}
-						</ul>
+						</>
 					) : (
 						<>
 							<div className="small ellipsis">
@@ -292,6 +312,11 @@ export function AiRunControl({
 								/>
 								<span>Focused passes</span>
 							</label>
+							{passes && cliLogin && (
+								<p className="small warn-text">
+									The four passes share your plan’s usage limits and take turns, {CLI_CONCURRENCY} requests at a time.
+								</p>
+							)}
 							<label
 								className="option passes"
 								title="Check only bugs and security, skipping conventions, naming, leftover code and test value. Uses fewer tokens; the other rules show as not checked. Applies to this run only."

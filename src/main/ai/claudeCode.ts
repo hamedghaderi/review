@@ -160,14 +160,37 @@ function classify(message: string, status: number | null, model: string): Provid
 	if (status === 401 || /not (signed|logged) in|\/login|invalid api key|authenticat/i.test(m))
 		return new ProviderError('auth', `${LABEL} is not signed in. Run “claude auth login” in a terminal, then test again.`)
 	if (status === 403) return new ProviderError('permission', `${LABEL} was denied access: ${m}`)
-	if (status === 429 || status === 529 || /usage limit|rate limit|overloaded/i.test(m))
-		return new ProviderError('rate-limit', `${LABEL}: ${m}`)
+	const quota = planLimit(message)
+	if (quota) return quota
+	if (status === 429 || status === 529 || /rate limit|overloaded/i.test(m)) return new ProviderError('rate-limit', `${LABEL}: ${m}`)
 	if (/prompt is too long|context window|too many tokens/i.test(m)) return new ProviderError('context-exceeded', `${LABEL}: ${m}`)
 	if (status === 404 || (/model/i.test(m) && /not found|invalid|not available|does not exist/i.test(m)))
 		return new ProviderError('model-unavailable', `Model "${model}" is not available in ${LABEL}: ${m}`)
 	if (status !== null && status >= 500) return new ProviderError('server', `${LABEL} server error (${status})`)
 	if (status !== null && status >= 400) return new ProviderError('bad-request', `${LABEL} rejected the request (${status}): ${m}`)
 	return new ProviderError('server', `${LABEL} failed: ${m}`)
+}
+
+/**
+ * The plan's usage limit, as Claude Code words it ("You've hit your limit · resets 6pm (Europe/Amsterdam)", "Claude AI
+ * usage limit reached|1761152400", "Out of usage credits"). Null for anything else, such as a brief rate limit, which a
+ * retry gets past. The reset time is quoted as Claude Code wrote it; only the epoch form gives the exact wait.
+ */
+export function planLimit(message: string, now = Date.now()): ProviderError | null {
+	if (!/hit your .{0,20}limit|usage limit|limit reached|out of usage credits/i.test(message)) return null
+	const epoch = /\|(\d{9,11})\b/.exec(message)
+	if (epoch) {
+		const at = new Date(Number(epoch[1]) * 1000)
+		const day = at.toDateString() === new Date(now).toDateString() ? '' : ` on ${at.toLocaleDateString([], { weekday: 'long' })}`
+		const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+		return new ProviderError('quota', quotaMessage(`at ${time}${day}`), Math.max(0, at.getTime() - now))
+	}
+	const resets = /resets\s+((?:at|in)\s+)?([^·∙\n]+?)\s*(?:[·∙]|$)/i.exec(message)
+	return new ProviderError('quota', quotaMessage(resets ? `${resets[1] ?? ''}${resets[2]}`.trim() : null))
+}
+
+function quotaMessage(resets: string | null): string {
+	return `Your Claude plan’s usage limit is reached${resets ? `; it resets ${resets}` : ''}. Requests to ${LABEL} stop until then.`
 }
 
 /**
