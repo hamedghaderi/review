@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
 import {
+	CLI_CONCURRENCY,
 	DEFAULT_TEAM_ROLES,
 	REVIEW_RULES,
+	sharedLogins,
 	type AiSettingsView,
 	type ConnectionView,
 	type ReviewRule,
@@ -223,6 +225,12 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 					+ Add reviewer
 				</button>
 			</div>
+			{sharedLogins(settings, team.members).map((g) => (
+				<p key={g.label} className="notice small">
+					{g.roles.join(', ')} all use {g.label}, so they share one plan’s usage limits and take turns: {CLI_CONCURRENCY} requests at a
+					time. The review takes longer, and reaching the limit stops all of them.
+				</p>
+			))}
 
 			<h3 className="small-h">Who checks what</h3>
 			<table className="rule-table small">

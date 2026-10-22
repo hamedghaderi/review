@@ -1334,6 +1334,24 @@ export interface ProviderDescriptor {
 	development: boolean
 }
 
+/** Requests at once on one CLI login: its plan's limits are shared by every reviewer, pass and run that uses it. */
+export const CLI_CONCURRENCY = 2
+
+/**
+ * Team members on the same CLI login, by connection, when more than one shares it: they share its plan's usage limits
+ * and its requests at once.
+ */
+export function sharedLogins(
+	settings: Pick<AiSettingsView, 'providers' | 'connections'>,
+	members: ReadonlyArray<{ role: string; connectionId: string }>,
+): Array<{ label: string; roles: Array<string> }> {
+	const cli = new Set(settings.providers.filter((p) => p.cli).map((p) => p.kind))
+	return settings.connections
+		.filter((c) => cli.has(c.kind))
+		.map((c) => ({ label: c.label, roles: members.filter((m) => m.connectionId === c.id).map((m) => m.role) }))
+		.filter((g) => g.roles.length > 1)
+}
+
 export type ConnectionStatus = 'not-connected' | 'connected' | 'testing' | 'failed'
 export type CredentialState = 'saved' | 'session' | 'none' | 'not-required' | 'unreadable'
 export type ModelSource = 'discovered' | 'catalog' | 'manual'

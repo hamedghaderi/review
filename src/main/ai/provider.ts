@@ -69,6 +69,7 @@ export type ProviderErrorKind =
 	| 'auth'
 	| 'permission'
 	| 'rate-limit'
+	| 'quota' // a plan's usage limit (a CLI's subscription): retrying won't help until it resets; retryAfterMs is the wait, when known
 	| 'timeout'
 	| 'network'
 	| 'server'
@@ -82,7 +83,7 @@ export type ProviderErrorKind =
 	| 'cancelled'
 
 const RETRYABLE: ReadonlySet<ProviderErrorKind> = new Set(['rate-limit', 'timeout', 'network', 'server'])
-const FATAL: ReadonlySet<ProviderErrorKind> = new Set(['auth', 'permission', 'bad-request', 'model-unavailable', 'unsupported'])
+const FATAL: ReadonlySet<ProviderErrorKind> = new Set(['auth', 'permission', 'bad-request', 'model-unavailable', 'unsupported', 'quota'])
 
 export class ProviderError extends Error {
 	kind: ProviderErrorKind

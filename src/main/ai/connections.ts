@@ -29,6 +29,7 @@ import { JsonStore } from '../store.ts'
 import type { AdapterFactory, ResolvedConnection } from './adapters.ts'
 import { NO_BUDGETS } from './budget.ts'
 import { CATALOG_UPDATED, catalogMatch, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
+import { CliGate } from './cliGate.ts'
 import type { CredentialService } from './credentials.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from './prompt.ts'
 import { ProviderError, type DiscoveredModel, type ModelLimits, type ReviewProvider } from './provider.ts'
@@ -115,6 +116,7 @@ export class ConnectionService {
 	private listeners = new Set<(view: AiSettingsView) => void>()
 	private removalListeners = new Set<(connectionId: string) => void>()
 	private showDevelopment: boolean
+	private gates = new Map<string, CliGate>() // CLI connections: one plan's limits, shared by every run on them
 
 	constructor(dir: string, credentials: CredentialService, adapters: AdapterFactory, options: { showDevelopment: boolean }) {
 		this.file = new JsonStore<SettingsFile>(join(dir, 'ai-settings.json'), emptySettings, migrateSettings)
@@ -262,6 +264,7 @@ export class ConnectionService {
 			next.modelsFetchedAt = null
 			await this.credentials.remove(id)
 			this.notifyRemoved(id) // cancels runs that were using the old endpoint
+			this.gates.delete(id)
 		}
 		await this.file.update((f) => {
 			const i = f.connections.findIndex((c) => c.id === id)
@@ -273,6 +276,7 @@ export class ConnectionService {
 	async remove(id: string): Promise<void> {
 		this.get(id)
 		this.notifyRemoved(id)
+		this.gates.delete(id)
 		await this.credentials.remove(id)
 		await this.file.update((f) => {
 			f.connections = f.connections.filter((c) => c.id !== id)
@@ -307,6 +311,7 @@ export class ConnectionService {
 	async test(id: string): Promise<void> {
 		const conn = this.get(id)
 		if (this.testing.has(id)) return
+		this.gates.get(id)?.clear() // testing again is how you say a usage limit should be tried again
 		this.testing.add(id)
 		this.emit()
 		const revision = conn.revision
@@ -609,10 +614,14 @@ export class ConnectionService {
 
 	private async buildProvider(conn: StoredConnection, modelId: string, timeoutMs: number): Promise<ReviewProvider> {
 		const resolved = await this.resolve(conn, timeoutMs)
+		let provider = this.adapters.provider(resolved, modelId, this.modelLimits(conn, modelId))
+		if (descriptor(conn.kind).cli) {
+			const gate = this.gates.get(conn.id) ?? new CliGate()
+			this.gates.set(conn.id, gate)
+			provider = gate.wrap(provider)
+		}
 		// The price is fixed with the rest of the configuration, so a run is costed at the price it started with.
-		return Object.assign(this.adapters.provider(resolved, modelId, this.modelLimits(conn, modelId)), {
-			price: modelPrice(conn, modelId),
-		})
+		return Object.assign(provider, { price: modelPrice(conn, modelId) })
 	}
 
 	private async resolve(conn: StoredConnection, timeoutMs: number): Promise<ResolvedConnection> {
