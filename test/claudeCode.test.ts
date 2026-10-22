@@ -5,7 +5,9 @@ import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { sdkAdapters } from '../src/main/ai/adapters.ts'
 import { createClaudeCodeAccount, createClaudeCodeProvider, interpretResult, planLimit } from '../src/main/ai/claudeCode.ts'
+import { MODEL_CATALOG } from '../src/main/ai/catalog.ts'
 import { ConnectionService, normaliseCommand } from '../src/main/ai/connections.ts'
+import { baseModel, effortsFor, listed, withEffort } from '../src/renderer/src/efforts.ts'
 import { CredentialService, type SecretCipher } from '../src/main/ai/credentials.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
 import type { ReviewTools } from '../src/main/ai/lookup.ts'
@@ -233,6 +235,25 @@ test('a Claude Code connection: a program not a URL, priced as the plan, never a
 	assert.deepEqual(connections.view().selection, { connectionId: cc.id, modelId: opus.id })
 	assert.equal(connections.view().questionModel, null)
 	await assert.rejects(connections.selectAskModel({ connectionId: cc.id, modelId: opus.id }), /reviews only/)
+
+	// Every model is offered at each effort Claude Code takes, chosen beside it rather than listed.
+	const offered = connections.view().connections[0]
+	const high = offered.models.find((m) => m.id === 'claude-opus-5-5-high')!
+	assert.deepEqual([high.variantOf, high.effort, high.label], ['claude-opus-5-5', 'high', 'Claude Opus 5.5 · high'])
+	assert.deepEqual(
+		offered.models.filter(listed).map((m) => m.id),
+		MODEL_CATALOG['claude-code']!.map((m) => m.id),
+	)
+	assert.deepEqual(effortsFor(offered, 'claude-opus-5-5'), ['low', 'medium', 'high', 'xhigh', 'max'])
+	assert.equal(withEffort(offered, 'claude-opus-5-5', 'xhigh'), 'claude-opus-5-5-xhigh')
+	assert.equal(withEffort(offered, 'claude-opus-5-5', null), 'claude-opus-5-5')
+	assert.equal(withEffort(offered, 'claude-opus-5-5', 'ultra'), 'claude-opus-5-5', 'an effort the model lacks: its default')
+	assert.equal(baseModel(offered, 'claude-opus-5-5-xhigh'), 'claude-opus-5-5')
+	// A variant runs without being added first, with the window and plan pricing of its model.
+	const run = await connections.runConfig({ connectionId: cc.id, modelId: 'claude-opus-5-5-high' })
+	assert.equal(run.provider.model, 'claude-opus-5-5-high')
+	assert.equal(run.provider.limits.contextWindow, 1_000_000)
+	assert.equal(run.provider.price?.source, 'subscription')
 
 	// A model at another effort, added by hand: named and sized after the model it runs, usable in a team like any other.
 	await connections.addModel(cc.id, 'claude-opus-5-5-max')

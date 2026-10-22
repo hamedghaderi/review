@@ -634,8 +634,11 @@ function ConnectionDetail({
 	if (!provider) return null
 	const needsKey = c.auth === 'api-key'
 	const endpointChanges = baseUrl !== c.baseUrl || protocol !== c.protocol || auth !== c.auth
+	// Variants offered for each effort are chosen beside the model, not listed; ones you added yourself are.
 	const models = c.models.filter(
-		(m) => !modelQuery || m.id.toLowerCase().includes(modelQuery.toLowerCase()) || m.label.toLowerCase().includes(modelQuery.toLowerCase()),
+		(m) =>
+			(!m.variantOf || m.source === 'manual') &&
+			(!modelQuery || m.id.toLowerCase().includes(modelQuery.toLowerCase()) || m.label.toLowerCase().includes(modelQuery.toLowerCase())),
 	)
 
 	return (
@@ -813,12 +816,7 @@ function ConnectionDetail({
 					className="mono"
 					value={manual}
 					onChange={(e) => setManual(e.target.value)}
-					placeholder={
-						provider.efforts.length
-							? `Add a model, or one at another effort: ${c.models[0]?.id ?? 'model'}-high`
-							: 'Add a model ID manually'
-					}
-					title={provider.efforts.length ? `Effort levels: ${provider.efforts.join(', ')}` : undefined}
+					placeholder="Add a model ID manually"
 					spellCheck={false}
 					aria-label="Model ID"
 				/>

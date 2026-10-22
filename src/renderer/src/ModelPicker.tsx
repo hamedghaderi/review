@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AiSettingsView, ConnectionView, ModelSelection, ModelView } from '../../shared/types.ts'
+import { baseModel, effortOf, listed, withEffort } from './efforts.ts'
 
 interface Props {
 	settings: AiSettingsView | null
@@ -75,7 +76,8 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 			.map((c) => ({
 				connection: c,
 				models: c.models.filter(
-					(m) => !q || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q) || c.label.toLowerCase().includes(q),
+					(m) =>
+						listed(m) && (!q || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q) || c.label.toLowerCase().includes(q)),
 				),
 			}))
 			.filter((g) => g.models.length > 0)
@@ -93,7 +95,7 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 				flat.findIndex((f) =>
 					'teamId' in f
 						? f.teamId === activeTeam?.id
-						: !activeTeam && f.connectionId === selection?.connectionId && f.modelId === selection?.modelId,
+						: !activeTeam && f.connectionId === selection?.connectionId && f.modelId === baseModel(current, selection.modelId),
 				),
 			),
 		)
@@ -131,7 +133,11 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 		const f = flat[i]
 		if (!f) return
 		if ('teamId' in f) onSelectTeam?.(f.teamId)
-		else onSelect(f)
+		else {
+			// The list shows models without their effort: picking one keeps the effort chosen, where it takes it.
+			const to = connections.find((c) => c.id === f.connectionId)
+			onSelect({ ...f, modelId: withEffort(to, f.modelId, selection ? effortOf(current, selection.modelId) : null) })
+		}
 		setOpen(false)
 	}
 

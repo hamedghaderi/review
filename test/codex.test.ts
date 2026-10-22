@@ -110,6 +110,9 @@ test('a Codex model can’t be added at an effort it doesn’t take, which Codex
 	await connections.load()
 	const cx = await connections.create({ kind: 'codex', baseUrl: fakeCodex({}).command })
 	await connections.addModel(cx.id, 'gpt-6-sol-ultra')
+	const offered = connections.view().connections[0]
+	assert.ok(!offered.models.some((m) => m.id === 'gpt-6-luna-ultra'), 'not offered either')
+	assert.ok(offered.models.some((m) => m.id === 'gpt-6-sol-ultra'))
 	await assert.rejects(connections.addModel(cx.id, 'gpt-6-luna-ultra'), /GPT-6 Luna doesn’t take the effort “ultra”/)
 	await connections.addModel(cx.id, 'gpt-6-luna-max')
 	assert.deepEqual(

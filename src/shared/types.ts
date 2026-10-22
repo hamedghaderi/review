@@ -1374,6 +1374,10 @@ export interface ModelView {
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	probe: ModelProbe | null
 	price: PricedModel | null // null: unknown, so its cost is not shown
+	// A CLI model at another effort ("gpt-6-sol-high"): the model it runs and the effort. Pickers list the base model and
+	// offer its efforts beside it; absent for every other model.
+	variantOf?: string | null
+	effort?: string | null
 }
 
 export interface ConnectionView {

@@ -723,7 +723,7 @@ export class ConnectionService {
 				price: modelPrice(c, cat.id),
 			})
 		}
-		return out
+		return descriptor(c.kind).cli ? withVariants(c, out) : out
 	}
 
 	private validSelection(sel: ModelSelection | null, connections: Array<ConnectionView>): ModelSelection | null {
@@ -789,6 +789,26 @@ function modelPrice(c: StoredConnection, modelId: string): PricedModel | null {
 		if (hit) return { ...hit.price, source: 'catalog', listedAs: hit.id }
 	}
 	return null
+}
+
+/**
+ * A CLI connection offers each model at every effort it takes, as "gpt-6-sol-high", so a team member or a run can pick
+ * one without adding it first. Variants added by hand before are marked the same way.
+ */
+function withVariants(c: StoredConnection, models: Array<ModelView>): Array<ModelView> {
+	const out = models.map((m) => {
+		const v = cliVariant(c.kind, m.id)
+		return v.effort && models.some((b) => b.id === v.model) ? { ...m, variantOf: v.model, effort: v.effort } : m
+	})
+	for (const base of out.filter((m) => !m.variantOf)) {
+		const levels = MODEL_CATALOG[c.kind]?.find((x) => x.id === base.id)?.efforts ?? descriptor(c.kind).efforts
+		for (const effort of levels) {
+			const id = `${base.id}-${effort}`
+			if (out.some((m) => m.id === id)) continue
+			out.push({ ...base, id, label: `${base.label} · ${effort}`, probe: null, price: modelPrice(c, id), variantOf: base.id, effort })
+		}
+	}
+	return out
 }
 
 function endpointKey(c: StoredConnection): string {

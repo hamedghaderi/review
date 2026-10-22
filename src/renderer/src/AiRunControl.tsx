@@ -6,6 +6,7 @@ import {
 	type AiSettingsView,
 	type AiStartScope,
 	type ChangedFile,
+	type ModelSelection,
 	type IncrementalOffer,
 	type ReviewerChoice,
 	type RunEstimate,
@@ -14,6 +15,7 @@ import { formatCostRange, formatTokenRange } from '../../shared/cost.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { baseModel, effortOf, effortsFor, withEffort } from './efforts.ts'
 import { personaOf, REVIEW_PERSONAS, type PersonaId } from '../../shared/personas.ts'
 
 interface Props {
@@ -31,6 +33,8 @@ interface Props {
 	onOpened?(): void
 	onStart(scope: AiStartScope, passes: boolean, bugsOnly: boolean, persona: PersonaId | null, overBudget: boolean): void
 	onCancel(): void
+	/** Changes the model the next run uses, as choosing another effort does. */
+	onSelectModel(selection: ModelSelection): void
 }
 
 /** Header control: opens a confirmation popover showing scope, provider and model; nothing is sent before "Start". */
@@ -47,6 +51,7 @@ export function AiRunControl({
 	onOpened,
 	onStart,
 	onCancel,
+	onSelectModel,
 }: Props) {
 	const selection = reviewer.kind === 'model' ? reviewer.selection : null
 	const team = reviewer.kind === 'team' ? settings?.teams.find((t) => t.id === reviewer.teamId) : undefined
@@ -175,6 +180,7 @@ export function AiRunControl({
 
 	const connection = selection ? settings?.connections.find((c) => c.id === selection.connectionId) : undefined
 	const model = connection?.models.find((m) => m.id === selection?.modelId)
+	const efforts = selection ? effortsFor(connection, baseModel(connection, selection.modelId)) : []
 	const fixture = connection?.kind === 'fixture'
 	const local = connection ? /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(connection.baseUrl) : false
 	const problem = team
@@ -342,6 +348,27 @@ export function AiRunControl({
 									))}
 								</select>
 							</label>
+							{efforts.length > 0 && selection && (
+								<label className="option lens" title="How hard the model thinks. Higher is slower and uses more of your plan’s limits.">
+									<span>Effort</span>
+									<select
+										value={effortOf(connection, selection.modelId) ?? ''}
+										onChange={(e) =>
+											onSelectModel({
+												connectionId: selection.connectionId,
+												modelId: withEffort(connection, baseModel(connection, selection.modelId), e.target.value || null),
+											})
+										}
+									>
+										<option value="">Default</option>
+										{efforts.map((x) => (
+											<option key={x} value={x}>
+												{x}
+											</option>
+										))}
+									</select>
+								</label>
+							)}
 						</>
 					)}
 					<RunCost estimate={shown} />
