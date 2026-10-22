@@ -1298,8 +1298,9 @@ export interface AiRun {
 	history?: FindingHistory | null // compared with the newest finished run on an earlier snapshot, when there is one
 }
 
-export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'claude-code' | 'fixture'
-export type ProviderProtocol = 'openai-responses' | 'openai-chat' | 'anthropic-messages' | 'gemini-generate' | 'claude-cli' | 'fixture'
+export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'claude-code' | 'codex' | 'fixture'
+export type ProviderProtocol =
+	'openai-responses' | 'openai-chat' | 'anthropic-messages' | 'gemini-generate' | 'claude-cli' | 'codex-cli' | 'fixture'
 export type AuthMethod = 'api-key' | 'none'
 
 export interface EndpointPreset {

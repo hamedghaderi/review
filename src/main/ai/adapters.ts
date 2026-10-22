@@ -1,6 +1,7 @@
 import type { ProviderKind, ProviderProtocol } from '../../shared/types.ts'
 import { createAnthropicAccount, createAnthropicProvider } from './anthropic.ts'
 import { createClaudeCodeAccount, createClaudeCodeProvider } from './claudeCode.ts'
+import { createCodexAccount, createCodexProvider } from './codex.ts'
 import { createFakeAccount, createFakeProvider } from './fake.ts'
 import { createGeminiAccount, createGeminiProvider } from './gemini.ts'
 import { createOpenAIAccount, createOpenAIChatProvider, createOpenAIResponsesProvider } from './openai.ts'
@@ -39,6 +40,8 @@ export const sdkAdapters: AdapterFactory = {
 				return createGeminiAccount({ apiKey: requireKey(c), baseURL: c.baseUrl, timeoutMs: c.timeoutMs })
 			case 'claude-cli':
 				return createClaudeCodeAccount({ command: c.baseUrl, timeoutMs: c.timeoutMs })
+			case 'codex-cli':
+				return createCodexAccount({ command: c.baseUrl, timeoutMs: c.timeoutMs })
 			case 'fixture':
 				return createFakeAccount()
 		}
@@ -83,6 +86,8 @@ export const sdkAdapters: AdapterFactory = {
 				return createGeminiProvider({ apiKey: requireKey(c), baseURL: c.baseUrl, timeoutMs: c.timeoutMs, model, limits, maxOutputTokens })
 			case 'claude-cli':
 				return createClaudeCodeProvider({ command: c.baseUrl, timeoutMs: c.timeoutMs, model, limits })
+			case 'codex-cli':
+				return createCodexProvider({ command: c.baseUrl, timeoutMs: c.timeoutMs, model, limits })
 			case 'fixture':
 				return createFakeProvider({ delayMs: 600, model, limits })
 		}

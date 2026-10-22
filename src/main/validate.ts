@@ -424,8 +424,16 @@ export function comparisonId(v: unknown): string {
 	return s
 }
 
-const PROVIDER_KINDS = ['openai', 'anthropic', 'gemini', 'openrouter', 'custom', 'claude-code', 'fixture'] as const
-const PROTOCOLS = ['openai-responses', 'openai-chat', 'anthropic-messages', 'gemini-generate', 'claude-cli', 'fixture'] as const
+const PROVIDER_KINDS = ['openai', 'anthropic', 'gemini', 'openrouter', 'custom', 'claude-code', 'codex', 'fixture'] as const
+const PROTOCOLS = [
+	'openai-responses',
+	'openai-chat',
+	'anthropic-messages',
+	'gemini-generate',
+	'claude-cli',
+	'codex-cli',
+	'fixture',
+] as const
 const AUTH_METHODS = ['api-key', 'none'] as const
 
 function oneOf<T extends string>(v: unknown, allowed: ReadonlyArray<T>, what: string): T {
