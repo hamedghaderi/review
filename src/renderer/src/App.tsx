@@ -1344,6 +1344,7 @@ export function App() {
 											onOpened={() => setRunPromptFor(null)}
 											onStart={(scope, passes, bugsOnly, persona, overBudget) => void startAi(scope, passes, bugsOnly, persona, overBudget)}
 											onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
+											onSelectModel={(sel) => void selectModel(sel)}
 										/>
 									)}
 								</div>

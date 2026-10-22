@@ -1326,6 +1326,8 @@ export interface ProviderDescriptor {
 	// Runs the user's own signed-in CLI: the endpoint is the program to run, requests count against the CLI's subscription
 	// instead of being billed per token, and it reviews only (each request starts a process, too slow for questions).
 	cli: boolean
+	// The effort levels a CLI takes as a suffix on a model's name ("gpt-6-sol-high"); empty for the others.
+	efforts: Array<string>
 	protocols: Array<{ protocol: ProviderProtocol; label: string }> // more than one = user chooses
 	presets: Array<EndpointPreset>
 	keyPlaceholder: string
@@ -1372,6 +1374,10 @@ export interface ModelView {
 	structuredOutput: 'yes' | 'no' | 'unknown'
 	probe: ModelProbe | null
 	price: PricedModel | null // null: unknown, so its cost is not shown
+	// A CLI model at another effort ("gpt-6-sol-high"): the model it runs and the effort. Pickers list the base model and
+	// offer its efforts beside it; absent for every other model.
+	variantOf?: string | null
+	effort?: string | null
 }
 
 export interface ConnectionView {

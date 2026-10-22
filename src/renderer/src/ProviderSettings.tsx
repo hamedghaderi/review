@@ -634,8 +634,11 @@ function ConnectionDetail({
 	if (!provider) return null
 	const needsKey = c.auth === 'api-key'
 	const endpointChanges = baseUrl !== c.baseUrl || protocol !== c.protocol || auth !== c.auth
+	// Variants offered for each effort are chosen beside the model, not listed; ones you added yourself are.
 	const models = c.models.filter(
-		(m) => !modelQuery || m.id.toLowerCase().includes(modelQuery.toLowerCase()) || m.label.toLowerCase().includes(modelQuery.toLowerCase()),
+		(m) =>
+			(!m.variantOf || m.source === 'manual') &&
+			(!modelQuery || m.id.toLowerCase().includes(modelQuery.toLowerCase()) || m.label.toLowerCase().includes(modelQuery.toLowerCase())),
 	)
 
 	return (

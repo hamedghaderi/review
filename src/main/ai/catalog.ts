@@ -14,6 +14,7 @@ export interface CatalogModel {
 	contextWindow: number
 	maxOutputTokens: number
 	price: ModelPrice | null
+	efforts?: Array<string> // a CLI model that takes fewer effort levels than its CLI does; absent: all of them
 }
 
 const price = (input: number, cachedInput: number, output: number, cacheWrite: number | null = null): ModelPrice => ({
@@ -89,7 +90,15 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', contextWindow: 500_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'gpt-6-sol', label: 'GPT-6 Sol', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
-		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
+		// No "ultra": Codex accepts it for Luna without a word and runs some other effort.
+		{
+			id: 'gpt-6-luna',
+			label: 'GPT-6 Luna',
+			contextWindow: 272_000,
+			maxOutputTokens: 128_000,
+			price: null,
+			efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+		},
 	],
 	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000, price: price(0, 0, 0) }],
 }
@@ -178,6 +187,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: false,
+		efforts: [],
 	},
 	{
 		kind: 'anthropic',
@@ -195,6 +205,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: false,
+		efforts: [],
 	},
 	{
 		kind: 'gemini',
@@ -212,6 +223,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: false,
+		efforts: [],
 	},
 	{
 		kind: 'openrouter',
@@ -229,6 +241,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: false,
+		efforts: [],
 	},
 	{
 		kind: 'custom',
@@ -250,6 +263,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: true,
 		development: false,
 		cli: false,
+		efforts: [],
 	},
 	{
 		kind: 'claude-code',
@@ -269,6 +283,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: true,
+		efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
 	},
 	{
 		kind: 'codex',
@@ -288,6 +303,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: false,
 		cli: true,
+		efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 	},
 	{
 		kind: 'fixture',
@@ -305,8 +321,18 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		contextWindowEditable: false,
 		development: true,
 		cli: false,
+		efforts: [],
 	},
 ]
+
+/**
+ * A CLI model with its effort as a suffix, "gpt-6-sol-high", split into the model the CLI is asked for and the effort
+ * it runs at. Names without one of the CLI's levels at the end are the model itself, at the CLI's default effort.
+ */
+export function cliVariant(kind: ProviderKind, id: string): { model: string; effort: string | null } {
+	const m = /^(.+)-([a-z]+)$/.exec(id)
+	return m && descriptor(kind).efforts.includes(m[2]) ? { model: m[1], effort: m[2] } : { model: id, effort: null }
+}
 
 export function descriptor(kind: ProviderKind): ProviderDescriptor {
 	const d = PROVIDERS.find((p) => p.kind === kind)

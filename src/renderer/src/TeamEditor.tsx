@@ -11,6 +11,7 @@ import {
 	type TeamMember,
 } from '../../shared/types.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
+import { baseModel, effortOf, effortsFor, listed, withEffort } from './efforts.ts'
 import { personaOf, REVIEW_PERSONAS, type PersonaId } from '../../shared/personas.ts'
 
 // Model names that suit each default role; models are filled in by `suggestTeam`.
@@ -62,7 +63,9 @@ function usable(c: ConnectionView): boolean {
  * current model.
  */
 export function suggestTeam(settings: AiSettingsView, personas = false): ReviewTeam {
-	const options = settings.connections.filter(usable).flatMap((c) => c.models.map((m) => ({ connectionId: c.id, modelId: m.id })))
+	const options = settings.connections
+		.filter(usable)
+		.flatMap((c) => c.models.filter(listed).map((m) => ({ connectionId: c.id, modelId: m.id })))
 	const fallback = settings.selection ?? options[0] ?? { connectionId: '', modelId: '' }
 	const used = new Set<string>()
 	const members: Array<TeamMember> = (personas ? PERSONA_ROLES : DEFAULT_ROLES).map((r) => {
@@ -152,6 +155,8 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 
 			{team.members.map((m) => {
 				const conn = connections.find((c) => c.id === m.connectionId)
+				const base = baseModel(conn, m.modelId)
+				const efforts = effortsFor(conn, base)
 				return (
 					<div key={m.id} className="member-card">
 						<div className="member-head">
@@ -163,17 +168,19 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 								maxLength={60}
 							/>
 							<select
-								value={`${m.connectionId}\u0000${m.modelId}`}
+								value={`${m.connectionId}\u0000${base}`}
 								onChange={(e) => {
 									const [connectionId, modelId] = e.target.value.split('\u0000')
-									set(m.id, { connectionId, modelId })
+									// Another model keeps the effort chosen, where it takes it.
+									const next = connections.find((c) => c.id === connectionId)
+									set(m.id, { connectionId, modelId: withEffort(next, modelId, effortOf(conn, m.modelId)) })
 								}}
 								aria-label={`Model for ${m.role}`}
 							>
 								{!conn && <option value={`${m.connectionId}\u0000${m.modelId}`}>Choose a model…</option>}
 								{connections.map((c) => (
 									<optgroup key={c.id} label={c.label}>
-										{c.models.map((x) => (
+										{c.models.filter(listed).map((x) => (
 											<option key={x.id} value={`${c.id}\u0000${x.id}`}>
 												{x.label}
 											</option>
@@ -190,6 +197,23 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 								✕
 							</button>
 						</div>
+						{efforts.length > 0 && (
+							<label className="member-lens small" title="How hard the model thinks. Higher is slower and uses more of your plan’s limits.">
+								<span className="muted">Effort</span>
+								<select
+									value={effortOf(conn, m.modelId) ?? ''}
+									onChange={(e) => set(m.id, { modelId: withEffort(conn, base, e.target.value || null) })}
+									aria-label={`Effort for ${m.role}`}
+								>
+									<option value="">Default</option>
+									{efforts.map((x) => (
+										<option key={x} value={x}>
+											{x}
+										</option>
+									))}
+								</select>
+							</label>
+						)}
 						<label className="member-lens small" title={personaOf(m.persona)?.summary ?? 'No lens: the reviewer checks its rules evenly.'}>
 							<span className="muted">Lens</span>
 							<select

@@ -28,7 +28,7 @@ import { AppFail } from '../git.ts'
 import { JsonStore } from '../store.ts'
 import type { AdapterFactory, ResolvedConnection } from './adapters.ts'
 import { NO_BUDGETS } from './budget.ts'
-import { CATALOG_UPDATED, catalogMatch, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
+import { CATALOG_UPDATED, catalogMatch, cliVariant, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
 import { CliGate } from './cliGate.ts'
 import type { CredentialService } from './credentials.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from './prompt.ts'
@@ -388,11 +388,19 @@ export class ConnectionService {
 		const conn = this.get(id)
 		if (!/^[\w.:/@+\-]{1,200}$/.test(modelId)) throw new AppFail('invalid-input', 'Model IDs may contain letters, digits and . : / @ + - _')
 		if (conn.models.some((m) => m.id === modelId)) return
+		// A CLI model at another effort ("gpt-6-sol-high") is named after the model it runs: "GPT-6 Sol · high".
+		const variant = cliVariant(conn.kind, modelId)
+		const base = variant.effort ? MODEL_CATALOG[conn.kind]?.find((m) => m.id === variant.model) : undefined
+		if (variant.effort && base?.efforts && !base.efforts.includes(variant.effort))
+			throw new AppFail(
+				'invalid-input',
+				`${base.label} doesn’t take the effort “${variant.effort}”. Choose from: ${base.efforts.join(', ')}.`,
+			)
 		await this.file.update((f) => {
 			const c = f.connections.find((x) => x.id === id)
 			c?.models.push({
 				id: modelId,
-				label: modelId,
+				label: base ? `${base.label} · ${variant.effort}` : modelId,
 				source: 'manual',
 				contextWindow: null,
 				maxOutputTokens: null,
@@ -639,7 +647,9 @@ export class ConnectionService {
 
 	private modelLimits(conn: StoredConnection, modelId: string): ModelLimits {
 		const stored = conn.models.find((m) => m.id === modelId)
-		const cat = MODEL_CATALOG[conn.kind]?.find((m) => m.id === modelId)
+		// A CLI model at another effort has the limits of the model it runs.
+		const catalogId = cliVariant(conn.kind, modelId).model
+		const cat = MODEL_CATALOG[conn.kind]?.find((m) => m.id === catalogId)
 		const contextWindow = conn.contextWindow ?? stored?.contextWindow ?? cat?.contextWindow ?? FALLBACK_LIMITS.contextWindow
 		const maxOutputTokens =
 			stored?.maxOutputTokens ?? cat?.maxOutputTokens ?? Math.min(FALLBACK_LIMITS.maxOutputTokens, Math.floor(contextWindow / 4))
@@ -713,7 +723,7 @@ export class ConnectionService {
 				price: modelPrice(c, cat.id),
 			})
 		}
-		return out
+		return descriptor(c.kind).cli ? withVariants(c, out) : out
 	}
 
 	private validSelection(sel: ModelSelection | null, connections: Array<ConnectionView>): ModelSelection | null {
@@ -779,6 +789,26 @@ function modelPrice(c: StoredConnection, modelId: string): PricedModel | null {
 		if (hit) return { ...hit.price, source: 'catalog', listedAs: hit.id }
 	}
 	return null
+}
+
+/**
+ * A CLI connection offers each model at every effort it takes, as "gpt-6-sol-high", so a team member or a run can pick
+ * one without adding it first. Variants added by hand before are marked the same way.
+ */
+function withVariants(c: StoredConnection, models: Array<ModelView>): Array<ModelView> {
+	const out = models.map((m) => {
+		const v = cliVariant(c.kind, m.id)
+		return v.effort && models.some((b) => b.id === v.model) ? { ...m, variantOf: v.model, effort: v.effort } : m
+	})
+	for (const base of out.filter((m) => !m.variantOf)) {
+		const levels = MODEL_CATALOG[c.kind]?.find((x) => x.id === base.id)?.efforts ?? descriptor(c.kind).efforts
+		for (const effort of levels) {
+			const id = `${base.id}-${effort}`
+			if (out.some((m) => m.id === id)) continue
+			out.push({ ...base, id, label: `${base.label} · ${effort}`, probe: null, price: modelPrice(c, id), variantOf: base.id, effort })
+		}
+	}
+	return out
 }
 
 function endpointKey(c: StoredConnection): string {

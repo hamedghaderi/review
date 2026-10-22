@@ -1,5 +1,5 @@
 import type { AiUsage } from '../../shared/types.ts'
-import { MODEL_CATALOG } from './catalog.ts'
+import { cliVariant, MODEL_CATALOG } from './catalog.ts'
 import { runCli, type CliOutput } from './cliProcess.ts'
 import {
 	clip,
@@ -59,6 +59,7 @@ export function createClaudeCodeAccount(o: ClaudeCodeOptions): ProviderAccount {
 }
 
 export function createClaudeCodeProvider(o: ClaudeCodeOptions & { model: string; limits: ModelLimits }): ReviewProvider {
+	const variant = cliVariant('claude-code', o.model) // "claude-opus-5-5-max": Opus at --effort max
 	return {
 		id: 'claude-code',
 		label: LABEL,
@@ -78,7 +79,8 @@ export function createClaudeCodeProvider(o: ClaudeCodeOptions & { model: string;
 					'--output-format',
 					'json',
 					'--model',
-					o.model,
+					variant.model,
+					...(variant.effort ? ['--effort', variant.effort] : []),
 					...ISOLATION,
 					...(server
 						? [
