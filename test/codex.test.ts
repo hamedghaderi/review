@@ -3,10 +3,20 @@ import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
+import { sdkAdapters } from '../src/main/ai/adapters.ts'
+import { cliVariant } from '../src/main/ai/catalog.ts'
+import { ConnectionService } from '../src/main/ai/connections.ts'
+import { CredentialService, type SecretCipher } from '../src/main/ai/credentials.ts'
 import { createCodexAccount, createCodexProvider, interpretEvents, planLimit } from '../src/main/ai/codex.ts'
 import type { ReviewTools } from '../src/main/ai/lookup.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
 
+const cipher: SecretCipher = {
+	isAsyncEncryptionAvailable: async () => true,
+	encryptStringAsync: async (s) => Buffer.from(s),
+	decryptStringAsync: async (b) => ({ result: b.toString(), shouldReEncrypt: false }),
+	getSelectedStorageBackend: () => 'keychain',
+}
 const LIMITS = { contextWindow: 272_000, maxOutputTokens: 128_000 }
 const BATCH = { index: 0, references: [], facts: [], fileKeys: [], overview: '', chars: 0, excerpts: [] }
 // Generous: on a busy machine a fake's exit has been seen to reach the app seconds late (see claudeCode.test.ts).
@@ -79,6 +89,37 @@ const answered = (text: string) => [
 	{ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text } },
 	{ type: 'turn.completed', usage: { input_tokens: 120, cached_input_tokens: 80, output_tokens: 30, reasoning_output_tokens: 9 } },
 ]
+
+test('a Codex model named with an effort runs the model at that reasoning effort', async () => {
+	const fake = fakeCodex({ events: answered('{"findings":[]}') })
+	const provider = createCodexProvider({ command: fake.command, timeoutMs: TIMEOUT, model: 'gpt-6-sol-xhigh', limits: LIMITS })
+	await provider.review({ instructions: 'x', input: 'y', batch: BATCH }, new AbortController().signal)
+	const seen = fake.seen()
+	assert.equal(seen.args[seen.args.indexOf('--model') + 1], 'gpt-6-sol')
+	assert.equal(seen.config.model_reasoning_effort, '"xhigh"')
+	assert.equal(cliVariant('codex', 'gpt-6-luna').effort, null)
+	assert.deepEqual(cliVariant('codex', 'gpt-6.1-sol-ultra'), { model: 'gpt-6.1-sol', effort: 'ultra' })
+	assert.deepEqual(cliVariant('openai', 'gpt-6-sol-high'), { model: 'gpt-6-sol-high', effort: null }, 'API models are named as they are')
+})
+
+test('a Codex model can’t be added at an effort it doesn’t take, which Codex would silently replace', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-codex-conn-'))
+	const credentials = new CredentialService(dir, cipher)
+	await credentials.load()
+	const connections = new ConnectionService(dir, credentials, sdkAdapters, { showDevelopment: true })
+	await connections.load()
+	const cx = await connections.create({ kind: 'codex', baseUrl: fakeCodex({}).command })
+	await connections.addModel(cx.id, 'gpt-6-sol-ultra')
+	await assert.rejects(connections.addModel(cx.id, 'gpt-6-luna-ultra'), /GPT-6 Luna doesn’t take the effort “ultra”/)
+	await connections.addModel(cx.id, 'gpt-6-luna-max')
+	assert.deepEqual(
+		connections
+			.view()
+			.connections[0].models.filter((m) => m.source === 'manual')
+			.map((m) => m.label),
+		['GPT-6 Sol · ultra', 'GPT-6 Luna · max'],
+	)
+})
 
 test('Codex reviews run codex exec isolated: no shell, user config, AGENTS.md or agents, instructions and schema from files', async () => {
 	const fake = fakeCodex({ events: answered('{"findings":[]}') })

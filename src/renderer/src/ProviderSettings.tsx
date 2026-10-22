@@ -813,7 +813,12 @@ function ConnectionDetail({
 					className="mono"
 					value={manual}
 					onChange={(e) => setManual(e.target.value)}
-					placeholder="Add a model ID manually"
+					placeholder={
+						provider.efforts.length
+							? `Add a model, or one at another effort: ${c.models[0]?.id ?? 'model'}-high`
+							: 'Add a model ID manually'
+					}
+					title={provider.efforts.length ? `Effort levels: ${provider.efforts.join(', ')}` : undefined}
 					spellCheck={false}
 					aria-label="Model ID"
 				/>

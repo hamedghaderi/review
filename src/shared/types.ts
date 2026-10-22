@@ -1326,6 +1326,8 @@ export interface ProviderDescriptor {
 	// Runs the user's own signed-in CLI: the endpoint is the program to run, requests count against the CLI's subscription
 	// instead of being billed per token, and it reviews only (each request starts a process, too slow for questions).
 	cli: boolean
+	// The effort levels a CLI takes as a suffix on a model's name ("gpt-6-sol-high"); empty for the others.
+	efforts: Array<string>
 	protocols: Array<{ protocol: ProviderProtocol; label: string }> // more than one = user chooses
 	presets: Array<EndpointPreset>
 	keyPlaceholder: string

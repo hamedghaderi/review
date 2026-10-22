@@ -28,7 +28,7 @@ import { AppFail } from '../git.ts'
 import { JsonStore } from '../store.ts'
 import type { AdapterFactory, ResolvedConnection } from './adapters.ts'
 import { NO_BUDGETS } from './budget.ts'
-import { CATALOG_UPDATED, catalogMatch, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
+import { CATALOG_UPDATED, catalogMatch, cliVariant, descriptor, MODEL_CATALOG, PROVIDERS } from './catalog.ts'
 import { CliGate } from './cliGate.ts'
 import type { CredentialService } from './credentials.ts'
 import { DEFAULT_LEVELS, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from './prompt.ts'
@@ -388,11 +388,19 @@ export class ConnectionService {
 		const conn = this.get(id)
 		if (!/^[\w.:/@+\-]{1,200}$/.test(modelId)) throw new AppFail('invalid-input', 'Model IDs may contain letters, digits and . : / @ + - _')
 		if (conn.models.some((m) => m.id === modelId)) return
+		// A CLI model at another effort ("gpt-6-sol-high") is named after the model it runs: "GPT-6 Sol · high".
+		const variant = cliVariant(conn.kind, modelId)
+		const base = variant.effort ? MODEL_CATALOG[conn.kind]?.find((m) => m.id === variant.model) : undefined
+		if (variant.effort && base?.efforts && !base.efforts.includes(variant.effort))
+			throw new AppFail(
+				'invalid-input',
+				`${base.label} doesn’t take the effort “${variant.effort}”. Choose from: ${base.efforts.join(', ')}.`,
+			)
 		await this.file.update((f) => {
 			const c = f.connections.find((x) => x.id === id)
 			c?.models.push({
 				id: modelId,
-				label: modelId,
+				label: base ? `${base.label} · ${variant.effort}` : modelId,
 				source: 'manual',
 				contextWindow: null,
 				maxOutputTokens: null,
@@ -639,7 +647,9 @@ export class ConnectionService {
 
 	private modelLimits(conn: StoredConnection, modelId: string): ModelLimits {
 		const stored = conn.models.find((m) => m.id === modelId)
-		const cat = MODEL_CATALOG[conn.kind]?.find((m) => m.id === modelId)
+		// A CLI model at another effort has the limits of the model it runs.
+		const catalogId = cliVariant(conn.kind, modelId).model
+		const cat = MODEL_CATALOG[conn.kind]?.find((m) => m.id === catalogId)
 		const contextWindow = conn.contextWindow ?? stored?.contextWindow ?? cat?.contextWindow ?? FALLBACK_LIMITS.contextWindow
 		const maxOutputTokens =
 			stored?.maxOutputTokens ?? cat?.maxOutputTokens ?? Math.min(FALLBACK_LIMITS.maxOutputTokens, Math.floor(contextWindow / 4))

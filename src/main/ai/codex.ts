@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import semver from 'semver'
 import type { AiUsage } from '../../shared/types.ts'
-import { MODEL_CATALOG } from './catalog.ts'
+import { cliVariant, MODEL_CATALOG } from './catalog.ts'
 import { runCli, type CliOutput } from './cliProcess.ts'
 import {
 	clip,
@@ -114,6 +114,7 @@ export function createCodexAccount(o: CodexOptions): ProviderAccount {
 }
 
 export function createCodexProvider(o: CodexOptions & { model: string; limits: ModelLimits }): ReviewProvider {
+	const variant = cliVariant('codex', o.model) // "gpt-6-sol-high": GPT-6 Sol at reasoning effort high
 	return {
 		id: 'codex',
 		label: LABEL,
@@ -150,7 +151,8 @@ export function createCodexProvider(o: CodexOptions & { model: string; limits: M
 					`model_instructions_file=${JSON.stringify(instructions)}`,
 					...mcp,
 					'--model',
-					o.model,
+					variant.model,
+					...(variant.effort ? ['-c', `model_reasoning_effort=${JSON.stringify(variant.effort)}`] : []),
 					'--output-schema',
 					schema,
 					'-', // the prompt, from stdin
