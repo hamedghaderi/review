@@ -84,6 +84,13 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 	],
+	// The models Codex offers with a ChatGPT login, from its own model list (2026-10-22). No price, as for Claude Code.
+	codex: [
+		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', contextWindow: 500_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'gpt-6-sol', label: 'GPT-6 Sol', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
+	],
 	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000, price: price(0, 0, 0) }],
 }
 
@@ -259,6 +266,25 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		keyHelpUrl: 'https://docs.claude.com/en/docs/claude-code/setup',
 		testExplains:
 			'Test connection runs “claude auth status” to check Claude Code is installed and signed in with a Claude plan. It does not run inference; use “Test model” for that.',
+		contextWindowEditable: false,
+		development: false,
+		cli: true,
+	},
+	{
+		kind: 'codex',
+		label: 'Codex',
+		description:
+			'Reviews with your ChatGPT plan through the Codex CLI you have installed and signed in to. Requests count against the plan’s usage limits instead of being billed per token.',
+		authMethods: ['none'],
+		multiple: false,
+		endpointEditable: true,
+		defaultBaseUrl: 'codex',
+		protocols: [{ protocol: 'codex-cli', label: 'Codex CLI (codex exec)' }],
+		presets: [],
+		keyPlaceholder: '',
+		keyHelpUrl: 'https://developers.openai.com/codex/cli',
+		testExplains:
+			'Test connection checks the Codex version and runs “codex login status” to check it is signed in with ChatGPT. It does not run inference; use “Test model” for that.',
 		contextWindowEditable: false,
 		development: false,
 		cli: true,

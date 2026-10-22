@@ -103,7 +103,8 @@ export function estimateRun(
 	if (limits.verify !== false) notes.push(`Double-checking blocking findings adds up to ${MAX_VERIFIED} requests, not counted here.`)
 	if (limits.groupDuplicates) notes.push('Grouping duplicate findings adds one request, not counted here.')
 	if (total.unpriced) notes.push('Some models have no price, so the cost leaves them out.')
-	if (total.subscription) notes.push('Claude Code requests count against your Claude plan’s usage limits; they have no price here.')
+	if (total.subscription)
+		notes.push('Requests through Claude Code or Codex count against your plan’s usage limits; they have no price here.')
 	return {
 		requests: total.requests,
 		files: sentFiles.size,

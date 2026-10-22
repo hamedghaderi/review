@@ -198,7 +198,7 @@ test('estimate: Claude Code requests are counted against the plan, not priced', 
 	const alone = estimateRun(comp, sources, LIMITS, [one({ price: plan })])
 	assert.ok(alone.requests > 0)
 	assert.equal(alone.cost, null)
-	assert.ok(alone.notes.some((n) => /Claude plan/.test(n)))
+	assert.ok(alone.notes.some((n) => /plan’s usage limits/.test(n)))
 	// Beside a priced reviewer, the cost is that reviewer's alone and is not marked as missing a price.
 	const mixed = estimateRun(comp, sources, LIMITS, [one({ price: plan }), one({ role: 'Security' })])
 	const priced = estimateRun(comp, sources, LIMITS, [one({ role: 'Security' })])

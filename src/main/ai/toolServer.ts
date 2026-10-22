@@ -12,10 +12,15 @@ import type { ReviewTools } from './lookup.ts'
 export const TOOL_SERVER_NAME = 'review'
 
 export interface ToolServer {
-	/** A file holding the `--mcp-config` JSON for this server; written owner-only, since it holds the token. */
+	/** A file holding the `--mcp-config` JSON for this server (Claude Code); written owner-only, since it holds the token. */
 	configPath: string
-	/** The tools as a CLI names them: `mcp__review__read_file`. */
+	/** The tools as Claude Code names them: `mcp__review__read_file`. */
 	toolNames: Array<string>
+	/** For CLIs configured with a URL and a bearer token (Codex), which they read from an environment variable. */
+	url: string
+	token: string
+	/** The tools as the server lists them: `read_file`. */
+	names: Array<string>
 	close(): Promise<void>
 }
 
@@ -74,7 +79,8 @@ export async function startToolServer(tools: ReviewTools, signal: AbortSignal): 
 		const configPath = join(dir, 'mcp.json')
 		const config = { mcpServers: { [TOOL_SERVER_NAME]: { type: 'http', url, headers: { Authorization: `Bearer ${token}` } } } }
 		await writeFile(configPath, JSON.stringify(config), { mode: 0o600 })
-		return { configPath, toolNames: tools.definitions.map((t) => `mcp__${TOOL_SERVER_NAME}__${t.name}`), close }
+		const names = tools.definitions.map((t) => t.name)
+		return { configPath, toolNames: names.map((n) => `mcp__${TOOL_SERVER_NAME}__${n}`), url, token, names, close }
 	} catch (e) {
 		await close()
 		throw e

@@ -1,8 +1,6 @@
-import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
 import type { AiUsage } from '../../shared/types.ts'
 import { MODEL_CATALOG } from './catalog.ts'
-import { safeEnv, shellEnv } from './mcp.ts'
+import { runCli, type CliOutput } from './cliProcess.ts'
 import {
 	clip,
 	maxRounds,
@@ -193,60 +191,8 @@ function quotaMessage(resets: string | null): string {
 	return `Your Claude plan’s usage limit is reached${resets ? `; it resets ${resets}` : ''}. Requests to ${LABEL} stop until then.`
 }
 
-/**
- * Runs the CLI with the login shell's PATH (an app opened from the Dock has a bare one) and only the variables a
- * program needs to find itself and its config: no ANTHROPIC_API_KEY, which would bill the key instead of the plan.
- */
-async function run(
-	o: ClaudeCodeOptions,
-	args: Array<string>,
-	input: string,
-	signal: AbortSignal,
-): Promise<{ stdout: string; stderr: string; code: number | null }> {
-	const vars = await shellEnv()
-	const env = { ...safeEnv(vars), ...(vars.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: vars.CLAUDE_CONFIG_DIR } : {}) }
-	return new Promise((resolve, reject) => {
-		if (signal.aborted) return reject(new ProviderError('cancelled', 'Request cancelled'))
-		// An empty working directory: nothing of the reviewed repository for Claude Code to pick up.
-		const child = spawn(o.command, args, { cwd: tmpdir(), env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-		const out: Array<Buffer> = []
-		const err: Array<Buffer> = []
-		let settled = false
-		const finish = (fn: () => void): void => {
-			if (settled) return
-			settled = true
-			clearTimeout(timer)
-			signal.removeEventListener('abort', abort)
-			fn()
-		}
-		const abort = (): void => {
-			child.kill()
-			finish(() => reject(new ProviderError('cancelled', 'Request cancelled')))
-		}
-		const timer = setTimeout(() => {
-			child.kill()
-			finish(() => reject(new ProviderError('timeout', `${LABEL} did not respond before the timeout`)))
-		}, o.timeoutMs)
-		signal.addEventListener('abort', abort, { once: true })
-		child.stdout.on('data', (b: Buffer) => out.push(b))
-		child.stderr.on('data', (b: Buffer) => err.push(b))
-		child.on('error', (e: NodeJS.ErrnoException) =>
-			finish(() =>
-				reject(
-					e.code === 'ENOENT'
-						? new ProviderError(
-								'unsupported',
-								`${LABEL} was not found (“${o.command}”). Install it, or set the full path to “claude” in Settings → AI providers.`,
-							)
-						: new ProviderError('network', `Could not start ${LABEL}: ${clip(e.message)}`),
-				),
-			),
-		)
-		child.on('close', (code) =>
-			finish(() => resolve({ stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8'), code })),
-		)
-		// A closed pipe (the CLI exited early) surfaces through "close" with the CLI's own message.
-		child.stdin.on('error', () => {})
-		child.stdin.end(input)
-	})
+function run(o: ClaudeCodeOptions, args: Array<string>, input: string, signal: AbortSignal): Promise<CliOutput> {
+	const env = (vars: Record<string, string>): Record<string, string> =>
+		vars.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: vars.CLAUDE_CONFIG_DIR } : {}
+	return runCli({ label: LABEL, command: o.command, timeoutMs: o.timeoutMs, env }, args, input, signal)
 }
