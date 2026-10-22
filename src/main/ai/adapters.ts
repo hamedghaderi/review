@@ -1,5 +1,6 @@
 import type { ProviderKind, ProviderProtocol } from '../../shared/types.ts'
 import { createAnthropicAccount, createAnthropicProvider } from './anthropic.ts'
+import { createClaudeCodeAccount, createClaudeCodeProvider } from './claudeCode.ts'
 import { createFakeAccount, createFakeProvider } from './fake.ts'
 import { createGeminiAccount, createGeminiProvider } from './gemini.ts'
 import { createOpenAIAccount, createOpenAIChatProvider, createOpenAIResponsesProvider } from './openai.ts'
@@ -10,7 +11,7 @@ export interface ResolvedConnection {
 	kind: ProviderKind
 	label: string
 	protocol: ProviderProtocol
-	baseUrl: string
+	baseUrl: string // the program to run for a CLI connection
 	apiKey: string | null
 	timeoutMs: number
 }
@@ -36,6 +37,8 @@ export const sdkAdapters: AdapterFactory = {
 				return createAnthropicAccount({ apiKey: requireKey(c), baseURL: c.baseUrl, timeoutMs: c.timeoutMs })
 			case 'gemini-generate':
 				return createGeminiAccount({ apiKey: requireKey(c), baseURL: c.baseUrl, timeoutMs: c.timeoutMs })
+			case 'claude-cli':
+				return createClaudeCodeAccount({ command: c.baseUrl, timeoutMs: c.timeoutMs })
 			case 'fixture':
 				return createFakeAccount()
 		}
@@ -78,6 +81,8 @@ export const sdkAdapters: AdapterFactory = {
 				})
 			case 'gemini-generate':
 				return createGeminiProvider({ apiKey: requireKey(c), baseURL: c.baseUrl, timeoutMs: c.timeoutMs, model, limits, maxOutputTokens })
+			case 'claude-cli':
+				return createClaudeCodeProvider({ command: c.baseUrl, timeoutMs: c.timeoutMs, model, limits })
 			case 'fixture':
 				return createFakeProvider({ delayMs: 600, model, limits })
 		}

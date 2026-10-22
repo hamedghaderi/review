@@ -60,6 +60,7 @@ export function estimateRun(
 		priced: false,
 		unpriced: false,
 		estimated: false,
+		subscription: false,
 	}
 	const sentFiles = new Set<string>()
 	for (const { r, limits: l } of fits) {
@@ -77,6 +78,11 @@ export function estimateRun(
 		total.input.high += input.high
 		total.output.low += output.low
 		total.output.high += output.high
+		// A CLI's plan has usage limits, not a price: its requests are counted, not costed.
+		if (r.price?.source === 'subscription') {
+			if (n) total.subscription = true
+			continue
+		}
 		if (!r.price) {
 			if (n) total.unpriced = true
 			continue
@@ -97,6 +103,7 @@ export function estimateRun(
 	if (limits.verify !== false) notes.push(`Double-checking blocking findings adds up to ${MAX_VERIFIED} requests, not counted here.`)
 	if (limits.groupDuplicates) notes.push('Grouping duplicate findings adds one request, not counted here.')
 	if (total.unpriced) notes.push('Some models have no price, so the cost leaves them out.')
+	if (total.subscription) notes.push('Claude Code requests count against your Claude plan’s usage limits; they have no price here.')
 	return {
 		requests: total.requests,
 		files: sentFiles.size,

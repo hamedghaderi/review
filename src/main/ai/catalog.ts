@@ -77,6 +77,13 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 			price: price(0.3, 0.03, 2.5),
 		},
 	],
+	// The models Claude Code offers on a Claude plan. No price: it counts against the plan's limits, not per token.
+	'claude-code': [
+		{ id: 'claude-fable-5-1', label: 'Claude Fable 5.1', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
+	],
 	fixture: [{ id: 'fixture-v1', label: 'Fixture v1', contextWindow: 200_000, maxOutputTokens: 32_000, price: price(0, 0, 0) }],
 }
 
@@ -163,6 +170,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		testExplains: LIST_MODELS,
 		contextWindowEditable: false,
 		development: false,
+		cli: false,
 	},
 	{
 		kind: 'anthropic',
@@ -179,6 +187,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		testExplains: LIST_MODELS,
 		contextWindowEditable: false,
 		development: false,
+		cli: false,
 	},
 	{
 		kind: 'gemini',
@@ -195,6 +204,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		testExplains: LIST_MODELS,
 		contextWindowEditable: false,
 		development: false,
+		cli: false,
 	},
 	{
 		kind: 'openrouter',
@@ -211,6 +221,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		testExplains: 'Test connection checks the key with OpenRouter and loads the model list. It does not run inference.',
 		contextWindowEditable: false,
 		development: false,
+		cli: false,
 	},
 	{
 		kind: 'custom',
@@ -231,6 +242,26 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 			'Test connection requests the /models list from this endpoint. It does not run inference; use "Test model" to send a tiny synthetic request that checks structured output.',
 		contextWindowEditable: true,
 		development: false,
+		cli: false,
+	},
+	{
+		kind: 'claude-code',
+		label: 'Claude Code',
+		description:
+			'Reviews with your Claude plan through the Claude Code you have installed and signed in to. Requests count against the plan’s usage limits instead of being billed per token.',
+		authMethods: ['none'],
+		multiple: false,
+		endpointEditable: true,
+		defaultBaseUrl: 'claude',
+		protocols: [{ protocol: 'claude-cli', label: 'Claude Code (claude -p)' }],
+		presets: [],
+		keyPlaceholder: '',
+		keyHelpUrl: 'https://docs.claude.com/en/docs/claude-code/setup',
+		testExplains:
+			'Test connection runs “claude auth status” to check Claude Code is installed and signed in with a Claude plan. It does not run inference; use “Test model” for that.',
+		contextWindowEditable: false,
+		development: false,
+		cli: true,
 	},
 	{
 		kind: 'fixture',
@@ -247,6 +278,7 @@ export const PROVIDERS: Array<ProviderDescriptor> = [
 		testExplains: 'The fixture provider is always available.',
 		contextWindowEditable: false,
 		development: true,
+		cli: false,
 	},
 ]
 

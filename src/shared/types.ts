@@ -1144,8 +1144,8 @@ export interface ModelPrice {
 }
 
 // catalog: shipped with the app, may be out of date; provider: reported by the provider's model list (OpenRouter);
-// override: entered by you; local: a local server, free.
-export type PriceSource = 'catalog' | 'provider' | 'override' | 'local'
+// override: entered by you; local: a local server, free; subscription: counts against a CLI's plan limits, not billed per token.
+export type PriceSource = 'catalog' | 'provider' | 'override' | 'local' | 'subscription'
 
 export interface PricedModel extends ModelPrice {
 	source: PriceSource
@@ -1298,8 +1298,8 @@ export interface AiRun {
 	history?: FindingHistory | null // compared with the newest finished run on an earlier snapshot, when there is one
 }
 
-export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'fixture'
-export type ProviderProtocol = 'openai-responses' | 'openai-chat' | 'anthropic-messages' | 'gemini-generate' | 'fixture'
+export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'claude-code' | 'fixture'
+export type ProviderProtocol = 'openai-responses' | 'openai-chat' | 'anthropic-messages' | 'gemini-generate' | 'claude-cli' | 'fixture'
 export type AuthMethod = 'api-key' | 'none'
 
 export interface EndpointPreset {
@@ -1322,6 +1322,9 @@ export interface ProviderDescriptor {
 	multiple: boolean // several connections of this kind are allowed
 	endpointEditable: boolean
 	defaultBaseUrl: string | null
+	// Runs the user's own signed-in CLI: the endpoint is the program to run, requests count against the CLI's subscription
+	// instead of being billed per token, and it reviews only (each request starts a process, too slow for questions).
+	cli: boolean
 	protocols: Array<{ protocol: ProviderProtocol; label: string }> // more than one = user chooses
 	presets: Array<EndpointPreset>
 	keyPlaceholder: string
