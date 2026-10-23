@@ -23,7 +23,10 @@ const pr = (number: number, mine: Partial<PrReviewer> | null = null, over: Parti
 	url: `u${number}`,
 	reviewRequested: null,
 	reviewers: [],
-	review: { decision: null, reviewers: mine ? [{ login: 'Me', verdict: 'commented', at: null, stale: false, ...mine }] : [] },
+	review: {
+		decision: null,
+		reviewers: mine ? [{ login: 'Me', verdict: 'commented', at: null, stale: false, behind: false, ...mine }] : [],
+	},
 	...over,
 })
 
@@ -31,7 +34,12 @@ test('inbox status: new until looked at, re-requested after your review, new com
 	assert.equal(inboxStatus(pr(1), 'me', true, false), 'new')
 	assert.equal(inboxStatus(pr(1), 'me', true, true), 'waiting')
 	assert.equal(inboxStatus(pr(1, {}), 'me', true, false), 're-requested', 'requested again after reviewing (login case ignored)')
-	assert.equal(inboxStatus(pr(1, { stale: true }), 'me', false, true), 'updated')
+	assert.equal(inboxStatus(pr(1, { stale: true, behind: true }), 'me', false, true), 'updated')
+	assert.equal(
+		inboxStatus(pr(1, { verdict: 'approved', stale: true, behind: false }), 'me', false, true),
+		'reviewed',
+		'an approval on an older commit, then a comment on the head: seen',
+	)
 	assert.equal(inboxStatus(pr(1, {}), 'me', false, true), 'reviewed')
 	assert.equal(inboxStatus(pr(1), 'me', false, true), null, 'neither requested nor reviewed: not in the inbox')
 	const sorted = sortInbox([

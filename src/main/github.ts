@@ -459,7 +459,7 @@ export class GitHubService {
 				reviewed: !!mine,
 				requested: isRequested,
 				head: n.headRefOid ?? null,
-				stale: !!mine?.stale,
+				stale: !!mine?.behind,
 				verdict: mine?.verdict ?? null,
 				updatedAt: n.updatedAt,
 			}
@@ -1518,7 +1518,8 @@ const VERDICT_ORDER: Record<ReviewVerdict, number> = { 'changes-requested': 0, a
 /**
  * Each person's standing review. An approval or change request stands until that person approves, requests changes or
  * is dismissed again; a later comment review doesn't undo it (as on GitHub). The PR author's own replies and pending
- * reviews don't count. `stale`: given on an older commit than `head`.
+ * reviews don't count. `stale`: given on an older commit than `head`. `behind`: the person's latest review of any kind is
+ * on an older commit, so a comment on the new head after an approval counts as having seen it.
  */
 export function summarizeReviews(
 	raw: Array<{ login: string | null; state: string; at: string | null; commit: string | null }>,
@@ -1527,12 +1528,18 @@ export function summarizeReviews(
 	decision: string | null,
 ): PrReviewState {
 	const by = new Map<string, PrReviewer>()
+	const last = new Map<string, string | null>() // each person's latest reviewed commit, whatever the review said
 	const sorted = raw.filter((r) => r.login && r.login !== author && VERDICT[r.state]).sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
 	for (const r of sorted) {
+		last.set(r.login!, r.commit)
 		const verdict = VERDICT[r.state]
 		const cur = by.get(r.login!)
 		if (cur && verdict === 'commented' && cur.verdict !== 'commented') continue
-		by.set(r.login!, { login: r.login!, verdict, at: r.at, stale: !!head && !!r.commit && r.commit !== head })
+		by.set(r.login!, { login: r.login!, verdict, at: r.at, stale: !!head && !!r.commit && r.commit !== head, behind: false })
+	}
+	for (const [login, x] of by) {
+		const commit = last.get(login)
+		x.behind = !!head && !!commit && commit !== head
 	}
 	return {
 		decision:

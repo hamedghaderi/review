@@ -8,7 +8,7 @@ export function inboxStatus(pr: PrSummary, viewer: string | null, requested: boo
 	const mine = viewer ? pr.review?.reviewers.find((r) => r.login.toLowerCase() === viewer.toLowerCase()) : undefined
 	if (requested) return mine ? 're-requested' : seen ? 'waiting' : 'new'
 	if (!mine) return null
-	return mine.stale ? 'updated' : 'reviewed'
+	return mine.behind ? 'updated' : 'reviewed'
 }
 
 export const INBOX_ORDER: Record<InboxStatus, number> = { 're-requested': 0, new: 1, waiting: 2, updated: 3, reviewed: 4 }
