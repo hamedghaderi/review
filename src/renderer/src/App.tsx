@@ -70,6 +70,7 @@ import { AiOrb } from './AiOrb.tsx'
 import { Home, useHomeInbox } from './Home.tsx'
 import { useStored } from './useStored.ts'
 import { FeedbackDialog } from './FeedbackDialog.tsx'
+import { Outcomes } from './Outcomes.tsx'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
@@ -154,7 +155,10 @@ export function App() {
 	const [updateError, setUpdateError] = useState<string | null>(null)
 	const [githubOpen, setGithubOpen] = useState<boolean | 'clones'>(false) // 'clones': opened at the app's clones
 	// The start page: every pull request waiting for you, in every repository. Shown at launch when nothing is restored.
-	const [home, setHome] = useState(false)
+	// Home and Outcomes are pages across all repositories, shown instead of the repository on screen.
+	const [page, setPage] = useState<'home' | 'outcomes' | null>(null)
+	const home = page !== null
+	const setHome = useCallback((on: boolean) => setPage(on ? 'home' : null), [])
 	// Whether a review-code:// link ever reached the app: until one does, the tab row offers the browser extension.
 	const [linked, setLinked] = useStored<'no' | 'yes'>('github.linked', 'no', ['no', 'yes'])
 	const [paletteOpen, setPaletteOpen] = useState(false)
@@ -1211,7 +1215,9 @@ export function App() {
 			<RepoTabs
 				tabs={tabs}
 				activeId={home ? null : (session?.repo.id ?? null)}
-				home={{ on: home, count: homeInbox ? homeCount(homeInbox.prs) : 0 }}
+				home={{ on: page === 'home', count: homeInbox ? homeCount(homeInbox.prs) : 0 }}
+				outcomes={page === 'outcomes'}
+				onOutcomes={() => setPage('outcomes')}
 				error={tabError}
 				extensionHint={linked === 'no'}
 				onFeedback={() => setFeedbackOpen(true)}
@@ -1593,7 +1599,11 @@ export function App() {
 				</div>
 			)}
 
-			{home ? (
+			{page === 'outcomes' ? (
+				<main className="body home-body">
+					<Outcomes />
+				</main>
+			) : home ? (
 				<main className="body home-body">
 					<Home
 						inbox={homeInbox}
@@ -1988,10 +1998,12 @@ function RepoTabs(props: {
 	tabs: Array<RepoTab>
 	activeId: string | null
 	home: { on: boolean; count: number }
+	outcomes: boolean
 	error: string | null
 	extensionHint: boolean // no browser link has opened a review yet
 	onFeedback(): void
 	onHome(): void
+	onOutcomes(): void
 	onSelect(id: string): void
 	onClose(id: string): void
 	onOpen(): void
@@ -2005,7 +2017,7 @@ function RepoTabs(props: {
 		const el = nav.current
 		if (el && el.contains(document.activeElement) && document.activeElement?.getAttribute('role') === 'tab')
 			el.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus()
-	}, [activeId, props.home.on])
+	}, [activeId, props.home.on, props.outcomes])
 	const label = (t: RepoTab): string => {
 		if (tabs.filter((x) => x.name === t.name).length < 2) return t.name
 		const parent = t.root.split(/[\\/]/).slice(-2, -1)[0]
@@ -2030,6 +2042,17 @@ function RepoTabs(props: {
 							{props.home.count}
 						</span>
 					)}
+				</div>
+				<div className={`repo-tab home-tab${props.outcomes ? ' on' : ''}`}>
+					<button
+						role="tab"
+						aria-selected={props.outcomes}
+						className="repo-tab-name"
+						title="What became of the AI’s findings: accepted, dismissed and fixed, by model and rule"
+						onClick={props.onOutcomes}
+					>
+						Outcomes
+					</button>
 				</div>
 				{tabs.map((t, i) => (
 					<div key={t.id} className={`repo-tab${t.id === activeId ? ' on' : ''}`}>

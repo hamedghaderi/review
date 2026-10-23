@@ -330,6 +330,18 @@ Select lines you don't understand (drag across the code, or click a line number 
 
 **Write failing test** asks the same model for one test that should fail on the head commit while the finding holds, and pass once it is fixed. It gets the same code as Verify, plus up to two existing tests that import the finding's file, so it can follow the project's framework and style (with lookups on, it can look for others). The card shows where the file would go, what the test checks, and the code with a **Copy test** button. The app never saves it to your working tree or runs it: run it yourself to see whether it fails. When the model says no test can show the finding (it needs a real external service, for example), the card says why. Writing it again replaces the test.
 
+### Outcomes
+
+**Outcomes** (next to Home in the tab row) shows what became of the AI's findings in every repository on this computer, so you can see which models and rules are worth their cost. It only reads what your reviews already store; nothing is sent anywhere.
+
+- **What counts as one problem:** a finding raised again by a re-run, carried into a newer snapshot or matched to a finding of an earlier snapshot is the same problem, and so are findings folded under one as the same problem. Each counts once. In a team, every member that reported it gets it once, so the rows by model can add up to more than the total.
+- **Accepted:** you made a comment or draft from it. **Dismissed** is split by your reason (**Wrong** has its own column). **Undecided** is neither, including findings only an automatic review added. **Probably fixed:** its lines changed in a later snapshot and the next run didn't raise it again (see finding history), or Check it's fixed said it is gone. **Likely wrong:** the newest double-check of it said so.
+- **Rates** are of the problems you accepted or dismissed, never of undecided ones, and are only shown once a row has 10 of those. **Per accepted** is what that model's or team's runs cost in the period, with or without findings, divided by the problems accepted; it reads "at least" when some runs had no price.
+- **Defects** are bug, security, error handling, breaking change and performance findings; **design** is the rest. Runs from before findings had a rule are **Uncategorised**.
+- Filter by period, repository, model, kind of finding and prompt version. The reviewer prompt changes between releases, so compare models on one version to leave that out.
+
+The models weren't assigned to changes at random (you may give the hardest ones to one model), and "accepted" is your decision, not the pull request author's, so a difference between rows is a hint rather than a measurement. Fixture runs aren't counted.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

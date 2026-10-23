@@ -1242,6 +1242,59 @@ export interface UsageGroup {
 	totals: UsageTotals
 }
 
+export type OutcomePeriod = '30d' | '12m' | 'all'
+// defect: bug, security, error handling, breaking change, performance; design: the rest; uncategorised: runs before
+// prompt reviewer-2026-10-01, whose findings have no rule.
+export type OutcomeGroup = 'defect' | 'design' | 'uncategorised'
+
+/** Which runs count. Null: all. `model` is an OutcomeRow key from `models`. */
+export interface OutcomeFilter {
+	period: OutcomePeriod
+	repoId: string | null
+	promptVersion: string | null
+	group: OutcomeGroup | null
+	model: string | null
+}
+
+/**
+ * What became of the problems raised, each counted once however many runs, snapshots or team members raised it.
+ * accepted + dismissed + undecided + auto = raised; fixed, checked, likelyWrong and reproduced overlap with those.
+ */
+export interface OutcomeCounts {
+	raised: number
+	accepted: number // a comment or draft was made from it
+	dismissed: Record<DismissReason | 'unspecified', number> // unspecified: dismissed before reasons were asked
+	undecided: number
+	auto: number // added as a comment by an automatic review, and never decided by you
+	fixed: number // probably fixed: gone in a later snapshot after its lines changed
+	checked: number // double-checked (after the run, or with Verify)
+	likelyWrong: number // the newest double-check said likely wrong
+	reproduced: number // a failing test was written for it
+}
+
+export interface OutcomeRow {
+	key: string
+	label: string
+	detail: string | null // the connection, for models; "Team" for teams
+	counts: OutcomeCounts
+	cost: AiCost | null // what its runs cost; null with a group filter, which can't split cost
+}
+
+/** The Outcomes page: from every repository's reviews and runs on this computer. */
+export interface OutcomeSummary {
+	filter: OutcomeFilter
+	total: OutcomeCounts
+	cost: AiCost | null
+	models: Array<OutcomeRow> // a problem counts once for every model that raised it
+	setups: Array<OutcomeRow> // single-model runs by model, team runs by team
+	rules: Array<OutcomeRow & { group: OutcomeGroup }>
+	groups: Array<OutcomeRow & { group: OutcomeGroup }>
+	repos: Array<{ id: string; label: string }> // every repository with runs, for the filter
+	promptVersions: Array<string> // newest first
+	allModels: Array<{ key: string; label: string; detail: string | null }> // for the filter, whatever else is filtered
+	minDecided: number // below this many accepted or dismissed, rows show counts only
+}
+
 export interface AiRun {
 	id: string
 	reviewId: string
@@ -1612,6 +1665,7 @@ export const IPC = {
 	aiSelectTeam: 'ai:team-select',
 	aiStart: 'ai:start',
 	aiBudget: 'ai:budget',
+	aiOutcomes: 'ai:outcomes',
 	aiSetBudgets: 'ai:budget-set',
 	aiIncremental: 'ai:incremental',
 	aiEstimate: 'ai:estimate',
@@ -1762,6 +1816,8 @@ export interface ReviewApi {
 	/** Tokens and cost of every AI request, from the usage history. */
 	aiUsage(by: UsagePeriod): Promise<Result<UsageSummary>>
 	aiBudget(): Promise<Result<BudgetView>>
+	/** What became of AI findings, from every repository's reviews and runs (the Outcomes page). */
+	aiOutcomes(filter: OutcomeFilter): Promise<Result<OutcomeSummary>>
 	setBudgets(budgets: BudgetSettings): Promise<Result<BudgetView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */

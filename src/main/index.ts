@@ -67,6 +67,7 @@ import {
 	reviewTeam,
 	str,
 	usagePeriod,
+	outcomeFilter,
 	budgetSettings,
 } from './validate.ts'
 
@@ -429,6 +430,7 @@ function registerIpc(): void {
 	)
 	handle(IPC.aiUsage, async (by: unknown) => usage.summary(usagePeriod(by)))
 	handle(IPC.aiBudget, async () => budgetView())
+	handle(IPC.aiOutcomes, async (filter: unknown) => service.outcomes(outcomeFilter(filter)))
 	handle(IPC.aiSetBudgets, async (b: unknown) => {
 		await connections.setBudgets(budgetSettings(b))
 		// A higher cap can let paused automatic reviews go ahead.

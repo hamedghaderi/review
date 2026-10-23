@@ -23,6 +23,8 @@ import type {
 	ReviewLimits,
 	ReviewRule,
 	UsagePeriod,
+	OutcomeFilter,
+	OutcomeGroup,
 } from '../shared/types.ts'
 import { PERSONA_IDS } from '../shared/personas.ts'
 import { isImageType } from './contextImages.ts'
@@ -598,6 +600,18 @@ export function budgetSettings(v: unknown): BudgetSettings {
 
 export function usagePeriod(v: unknown): UsagePeriod {
 	return oneOf(v, ['day', 'month'], 'usage period')
+}
+
+export function outcomeFilter(v: unknown): OutcomeFilter {
+	const o = obj(v, 'outcome filter')
+	const key = (x: unknown, what: string) => (x === null ? null : str(x, what, 512))
+	return {
+		period: oneOf(o.period, ['30d', '12m', 'all'], 'outcome period'),
+		repoId: key(o.repoId, 'repository'),
+		promptVersion: key(o.promptVersion, 'prompt version'),
+		group: o.group === null ? null : oneOf<OutcomeGroup>(o.group, ['defect', 'design', 'uncategorised'], 'finding group'),
+		model: key(o.model, 'model'),
+	}
 }
 
 /** Dollars per million tokens; null clears your price. */

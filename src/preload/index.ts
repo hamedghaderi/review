@@ -108,6 +108,7 @@ const api: ReviewApi = {
 	setModelPrice: (id, model, price) => ipcRenderer.invoke(IPC.aiSetModelPrice, id, model, price),
 	aiUsage: (by) => ipcRenderer.invoke(IPC.aiUsage, by),
 	aiBudget: () => ipcRenderer.invoke(IPC.aiBudget),
+	aiOutcomes: (filter) => ipcRenderer.invoke(IPC.aiOutcomes, filter),
 	setBudgets: (budgets) => ipcRenderer.invoke(IPC.aiSetBudgets, budgets),
 	removeModel: (id, model) => ipcRenderer.invoke(IPC.aiRemoveModel, id, model),
 	probeModel: (id, model) => ipcRenderer.invoke(IPC.aiProbeModel, id, model),

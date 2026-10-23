@@ -4925,6 +4925,20 @@ button.stack-row:hover {
 .home-filter {
 	max-width: 320px;
 }
+.outcomes {
+	max-width: 1080px;
+}
+.outcomes .home-tools select {
+	max-width: 260px;
+}
+.outcomes .usage-total {
+	flex-wrap: wrap;
+	margin-bottom: 8px;
+}
+.outcomes-table th:first-child,
+.outcomes-table td:first-child {
+	width: 24%;
+}
 .home-check {
 	display: inline-flex;
 	align-items: center;
