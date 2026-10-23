@@ -11,6 +11,7 @@ import {
 	type ReviewApi,
 } from '../shared/types.ts'
 import type { ThemeSettings } from '../shared/theme.ts'
+import type { KeymapOverrides } from '../shared/keymap.ts'
 
 const api: ReviewApi = {
 	openRepository: () => ipcRenderer.invoke(IPC.openRepository),
@@ -170,6 +171,19 @@ const api: ReviewApi = {
 		const listener = (): void => handler()
 		ipcRenderer.on(IPC.feedbackOpen, listener)
 		return () => ipcRenderer.removeListener(IPC.feedbackOpen, listener)
+	},
+	keymap: () => ipcRenderer.invoke(IPC.keymap),
+	setKeymap: (next) => ipcRenderer.invoke(IPC.setKeymap, next),
+	onKeymapChanged: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, next: KeymapOverrides): void => handler(next)
+		ipcRenderer.on(IPC.keymapChanged, listener)
+		return () => ipcRenderer.removeListener(IPC.keymapChanged, listener)
+	},
+	keymapRecording: (on) => ipcRenderer.invoke(IPC.keymapRecording, on),
+	onSidebarToggle: (handler) => {
+		const listener = (): void => handler()
+		ipcRenderer.on(IPC.sidebarToggle, listener)
+		return () => ipcRenderer.removeListener(IPC.sidebarToggle, listener)
 	},
 	installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
 	onUpdateProgress: (handler) => {

@@ -457,7 +457,7 @@ export function mapError(error: unknown, label = 'OpenAI', secret: string | null
 	if (error instanceof APIConnectionTimeoutError) return new ProviderError('timeout', `${label} did not respond before the timeout`)
 	if (error instanceof APIConnectionError) return new ProviderError('network', `Could not reach ${label}: ${detail(error)}`)
 	if (error instanceof AuthenticationError)
-		return new ProviderError('auth', `${label} rejected the API key (401). Replace the key in Settings → AI providers.`)
+		return new ProviderError('auth', `${label} rejected the API key (401). Replace the key in Settings → AI review → Providers.`)
 	if (error instanceof PermissionDeniedError) return new ProviderError('permission', `${label} denied access (403): ${detail(error)}`)
 	if (error instanceof RateLimitError) {
 		return error.code === 'insufficient_quota'

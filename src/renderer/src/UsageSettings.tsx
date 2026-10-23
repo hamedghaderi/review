@@ -84,7 +84,7 @@ function Rows({
 	)
 }
 
-/** Settings → AI providers → Usage: what AI requests cost, from the usage history. */
+/** Settings → AI review → Usage: what AI requests cost, from the usage history. */
 type Draft = { perRun: string; daily: string; monthly: string; connections: Record<string, { daily: string; monthly: string }> }
 
 const field = (x: number | null): string => (x === null ? '' : String(x))

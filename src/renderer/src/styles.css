@@ -246,8 +246,15 @@ input[type='checkbox'] {
 /* Layout */
 .app {
 	display: flex;
-	flex-direction: column;
 	height: 100%;
+}
+/* Everything right of the sidebar. */
+.app-main {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
 }
 .header {
 	display: flex;
@@ -1820,12 +1827,134 @@ a.ic-state:hover {
 	flex-direction: column;
 	gap: 2px;
 }
-.settings-nav .add-title {
-	margin-top: 14px;
+.settings-search {
+	height: 28px;
+	margin-bottom: 6px;
+	padding: 0 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	user-select: text;
 }
-.settings-nav .app-version {
-	margin-top: auto;
-	padding: 14px 8px 2px;
+/* The page tree, as in JetBrains IDEs: groups fold, the chosen page is highlighted. */
+.settings-tree {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	outline: none;
+}
+.tree-row {
+	display: flex;
+	align-items: center;
+	height: 26px;
+	border-radius: 6px;
+	min-width: 0;
+}
+.tree-row:hover {
+	background: var(--hover);
+}
+.tree-row.on {
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+.settings-tree:focus-visible .tree-row.on {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+.tree-fold {
+	flex-shrink: 0;
+	width: 16px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--text-2);
+	font-size: 12px;
+	cursor: pointer;
+}
+.tree-fold:disabled {
+	cursor: default;
+}
+.tree-label {
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 100%;
+	min-width: 0;
+	padding: 0 6px 0 2px;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.tree-label .ellipsis {
+	flex: 1;
+}
+.settings-page {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+.settings-crumbs {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+	padding: 10px 18px;
+	border-bottom: 1px solid var(--border);
+	color: var(--text-2);
+	font-size: 13px;
+}
+.settings-crumbs .crumb-on {
+	color: var(--text);
+	font-weight: 600;
+}
+.crumb-sep {
+	color: var(--text-2);
+}
+.settings-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 14px 18px;
+}
+/* The scroll area pads every page, so pages that bring their own padding drop it. */
+.settings-scroll > .settings-main {
+	overflow: visible;
+	padding: 0;
+}
+/* Finding levels and review input were folding sections under the old dialog; here each is a whole page. */
+.settings-scroll .limits {
+	border-top: 0;
+	padding: 0;
+}
+/* Lists of items on an overview page (providers, teams, MCP servers), and the providers that can be added. */
+.settings-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+}
+.add-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+	gap: 6px;
+}
+.btn.add-card {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	justify-content: flex-start;
+	min-width: 0;
+}
+.form-actions.start {
+	justify-content: flex-start;
 }
 .conn-item {
 	display: flex;
@@ -2807,10 +2936,6 @@ button.palette-action:hover {
 .palette-action-item.active {
 	background: var(--hover);
 }
-.modal.gh-settings {
-	width: min(640px, 100%);
-	max-height: min(720px, 100%);
-}
 /* Settings · Appearance: each card previews its theme in that theme's own colours. The light/dark choices get equal
    columns, each as wide as the longest label. */
 .appearance .seg {
@@ -2906,9 +3031,6 @@ button.palette-action:hover {
 .modal.feedback {
 	width: min(560px, 100%);
 	max-height: min(640px, 100%);
-}
-.modal.gh-settings .settings-main {
-	max-width: none;
 }
 
 /* Publish */
@@ -4185,67 +4307,115 @@ button.stack-row:hover {
 	min-width: 0;
 }
 
-/* Repository tabs: a segmented control, one segment per open repository; the selected one is raised. */
-.repo-tabs {
+/* The left sidebar: Home and Outcomes, one vertical tab per open repository, then GitHub, Settings and Feedback.
+   Collapsed, only the icons (and each repository's initial) show. */
+.sidebar {
 	display: flex;
-	align-items: center;
-	gap: 6px;
-	min-height: 40px;
-	padding: 4px 8px;
-	background: var(--chrome);
-	border-bottom: 1px solid var(--border);
+	flex-direction: column;
 	flex-shrink: 0;
-	min-width: 0;
+	width: 216px;
+	min-height: 0;
+	padding: 6px;
+	gap: 4px;
+	background: var(--chrome);
+	border-right: 1px solid var(--border);
 }
-.repo-tab-list {
+.sidebar.collapsed {
+	width: 48px;
+}
+.sidebar-top {
 	display: flex;
-	align-items: center;
-	gap: 2px;
-	min-width: 0;
-	padding: 3px;
-	border-radius: 8px;
-	background: var(--track);
-	overflow-x: auto;
-	scrollbar-width: none;
 }
-.repo-tab {
-	display: flex;
-	align-items: center;
-	flex: 0 1 auto;
-	min-width: 72px;
-	max-width: 220px;
-	height: 26px;
-	border-radius: 6px;
-	color: var(--text-2);
-}
-.repo-tab:not(.on):hover {
-	color: var(--text);
-}
-.repo-tab.on {
-	background: var(--track-on);
-	box-shadow: var(--track-shadow);
-	color: var(--text);
-}
-.repo-tab-name {
+.side-list {
 	flex: 1;
-	height: 100%;
-	padding: 0 4px 0 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	min-height: 0;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+.sidebar-bottom {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-top: 4px;
+	border-top: 1px solid var(--border);
+}
+.side-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-width: 0;
+	height: 30px;
+	padding: 0 8px;
 	border: 0;
+	border-radius: 6px;
 	background: transparent;
-	color: inherit;
+	color: var(--text-2);
 	font: inherit;
-	font-size: 12px;
-	text-align: center;
+	font-size: 13px;
+	text-align: left;
 	cursor: pointer;
 }
-.repo-tab.on .repo-tab-name {
+.side-item:hover {
+	background: var(--hover);
+	color: var(--text);
+}
+.side-item:focus-visible {
+	outline-offset: -2px;
+}
+.side-toggle {
+	width: auto;
+}
+.side-icon {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+}
+.side-item > svg {
+	flex-shrink: 0;
+}
+.side-label {
+	flex: 1;
+	min-width: 0;
+}
+.side-initial {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	background: var(--track);
+	color: var(--text);
+	font-size: 11px;
 	font-weight: 600;
 }
-.repo-tab-count {
+.side-tab {
+	position: relative;
+	display: flex;
+	align-items: center;
+	border-radius: 6px;
+}
+.side-tab.on .side-item {
+	background: var(--sel-bg);
+	color: var(--text);
+	font-weight: 600;
+}
+.side-tab.on .side-initial {
+	background: var(--accent);
+	color: var(--accent-text);
+}
+.side-count {
 	flex-shrink: 0;
 	min-width: 16px;
 	height: 16px;
-	margin-right: 2px;
 	padding: 0 5px;
 	border-radius: 8px;
 	background: var(--accent);
@@ -4256,12 +4426,12 @@ button.stack-row:hover {
 	text-align: center;
 	font-variant-numeric: tabular-nums;
 }
-.repo-tab-close,
-.repo-tab-add {
-	flex-shrink: 0;
+/* Close sits over the count on hover, as in browsers' vertical tabs. */
+.side-close {
+	position: absolute;
+	right: 5px;
 	width: 20px;
 	height: 20px;
-	margin-right: 4px;
 	padding: 0;
 	border: 0;
 	border-radius: 4px;
@@ -4270,62 +4440,90 @@ button.stack-row:hover {
 	font-size: 14px;
 	line-height: 1;
 	cursor: pointer;
-}
-.repo-tab-close {
 	visibility: hidden;
 }
-.repo-tab.on .repo-tab-close,
-.repo-tab:hover .repo-tab-close,
-.repo-tab-close:focus-visible {
+.side-tab:hover .side-close,
+.side-close:focus-visible {
 	visibility: visible;
+	background: var(--hover);
 }
-.repo-tab-close:hover,
-.repo-tab-add:hover {
-	background: color-mix(in srgb, var(--text) 10%, transparent);
+.side-tab.on:hover .side-close {
+	background: var(--sel-bg);
+}
+.side-close:hover {
 	color: var(--text);
 }
-.repo-tab-add {
-	align-self: center;
-	font-size: 16px;
+.side-tab:hover .side-count {
+	visibility: hidden;
 }
-.repo-tab-error {
-	align-self: center;
-	margin-left: auto;
-	max-width: 50%;
-	border: 0;
-	border-radius: 6px;
-	cursor: pointer;
+.side-section {
+	padding: 12px 8px 4px;
 }
-.repo-tab-hint {
-	align-self: center;
-	margin-left: auto;
-	min-width: 0;
-	max-width: 50%;
+.side-section-title {
+	color: var(--text-2);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.side-add {
 	color: var(--text-2);
 }
-.repo-tab-hint:hover {
+.side-error {
+	margin: 0;
+	border: 0;
+	border-radius: 6px;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+}
+.side-hint {
+	padding: 6px 8px;
+	color: var(--text-2);
+	line-height: 1.4;
+}
+.side-hint:hover {
 	color: var(--accent);
 }
-.repo-tab-hint + .repo-tab-error {
-	margin-left: 0;
+/* GitHub's connection: a dot on the mark (green connected, red failed, none otherwise). */
+.side-gh.anonymous,
+.side-gh.offline {
+	color: var(--text-2);
 }
-.repo-tab-feedback {
-	align-self: center;
-	margin-left: auto;
-	flex-shrink: 0;
+.side-gh .gh-dot {
+	right: -3px;
+	bottom: -3px;
 }
-.repo-tab-hint ~ .repo-tab-feedback,
-.repo-tab-error ~ .repo-tab-feedback {
-	margin-left: 0;
+.sidebar.collapsed .side-label,
+.sidebar.collapsed .side-section,
+.sidebar.collapsed .side-hint {
+	display: none;
 }
-/* The tab row clips anything outside it, so focus rings on tabs are drawn inside. */
-.repo-tab-name:focus-visible,
-.repo-tab-close:focus-visible,
-.repo-tab-add:focus-visible {
-	outline-offset: -2px;
+.sidebar.collapsed .side-item {
+	justify-content: center;
+	padding: 0;
 }
-.repo-tab-name:focus-visible {
-	border-radius: 6px 0 0 6px;
+.sidebar.collapsed .side-toggle {
+	width: 100%;
+}
+/* Collapsed, a count shrinks to a badge on the icon's corner. */
+.sidebar.collapsed .side-count {
+	position: absolute;
+	top: 1px;
+	right: 1px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	font-size: 9px;
+	line-height: 14px;
+	pointer-events: none;
+}
+.sidebar.collapsed .side-tab:hover .side-count {
+	visibility: visible;
+}
+.sidebar.collapsed .side-list {
+	scrollbar-width: none;
 }
 
 /* Context tab: notes and text files for the AI reviewer. */
@@ -4536,11 +4734,13 @@ button.stack-row:hover {
 	box-shadow: 0 0 0 2px var(--chrome);
 	display: none;
 }
-.gh-status.connected .gh-dot {
+.gh-status.connected .gh-dot,
+.side-gh.connected .gh-dot {
 	display: block;
 	background: var(--ok);
 }
-.gh-status.failed .gh-dot {
+.gh-status.failed .gh-dot,
+.side-gh.failed .gh-dot {
 	display: block;
 	background: var(--danger);
 }
@@ -4871,17 +5071,6 @@ button.stack-row:hover {
 }
 
 /* The start page: pull requests waiting for you, in every repository. */
-.repo-tab.home-tab {
-	flex-shrink: 0;
-	min-width: 0;
-}
-.repo-tab.home-tab .repo-tab-name {
-	padding-right: 10px;
-}
-.repo-tab.home-tab .repo-tab-count {
-	margin-left: -6px;
-	margin-right: 6px;
-}
 .home-body {
 	overflow-y: auto;
 }
@@ -5023,4 +5212,97 @@ button.stack-row:hover {
 	flex: 1;
 	flex-direction: column;
 	min-width: 0;
+}
+
+/* Settings › Keymap: one row per action, its shortcuts as chips; a shortcut two actions share is marked on both. */
+.keymap {
+	max-width: 760px;
+}
+.keymap-head {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+.keymap-search {
+	flex: 1;
+	height: 28px;
+	padding: 0 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	user-select: text;
+}
+.keymap-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.keymap-table td {
+	padding: 6px 4px;
+	border-top: 1px solid var(--border);
+	vertical-align: middle;
+}
+.keymap-group {
+	padding: 14px 4px 4px;
+	color: var(--text-2);
+	font-size: 11px;
+	font-weight: 600;
+	text-align: left;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.keymap-action {
+	width: 42%;
+}
+.keymap-keys {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+.keymap-reset {
+	width: 1%;
+	white-space: nowrap;
+	text-align: right;
+}
+.key-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 1px 2px 1px 0;
+	border-radius: 5px;
+}
+.key-chip.clash kbd {
+	border-color: var(--warn-fg);
+	color: var(--warn-fg);
+}
+.key-chip.recording {
+	padding: 2px 8px;
+	border: 1px dashed var(--accent);
+	color: var(--accent);
+	font-size: 12px;
+}
+.key-remove {
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	line-height: 1;
+	cursor: pointer;
+	visibility: hidden;
+}
+.key-chip:hover .key-remove,
+.key-remove:focus-visible {
+	visibility: visible;
+}
+.key-remove:hover {
+	background: var(--hover);
+	color: var(--text);
+}
+.key-chip kbd {
+	padding: 2px 6px;
+	font-size: 12px;
+	color: var(--text);
 }

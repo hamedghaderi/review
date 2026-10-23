@@ -30,6 +30,7 @@ import { InboxWatcher, type RepoEvent, type WatchEvent } from './inboxWatch.ts'
 import { GiphyService } from './giphy.ts'
 import { ReviewService } from './service.ts'
 import { ReviewStore } from './store.ts'
+import { parseKeymap, resolveKeymap, toAccelerator, type KeymapOverrides } from '../shared/keymap.ts'
 import { APPEARANCES, DEFAULT_THEME, nextScale, parseTheme, THEMES, themeBackground, type ThemeSettings } from '../shared/theme.ts'
 import { LINK_SCHEME, linkInArgs, parsePrLink, type PrLink } from '../shared/link.ts'
 import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
@@ -84,6 +85,8 @@ let autoReviewer: AutoReviewer
 let giphy: GiphyService
 let usage: UsageLog
 let quitting = false
+let recording = false // a new shortcut is being recorded in Settings › Keymap
+const IS_MAC = process.platform === 'darwin'
 // How old a connection's model list may be before it is re-listed in the background, and when the model picker opens.
 const MODELS_MAX_AGE_MS = 5 * 60_000
 const PICKER_MODELS_MAX_AGE_MS = 30_000
@@ -219,6 +222,13 @@ function registerIpc(): void {
 	handle(IPC.systemInfo, async () => systemInfo())
 	handle(IPC.theme, async () => currentTheme())
 	handle(IPC.setTheme, async (raw: unknown) => setTheme(parseTheme(raw)))
+	handle(IPC.keymap, async () => store.read().keymap ?? {})
+	handle(IPC.setKeymap, async (raw: unknown) => setKeymap(parseKeymap(raw, IS_MAC)))
+	handle(IPC.keymapRecording, async (on: unknown) => {
+		recording = on === true
+		setMenu()
+		return recording
+	})
 	handle(IPC.installUpdate, async () => {
 		await installUpdate()
 		return true
@@ -838,9 +848,20 @@ function present(n: Notification, target: InboxOpen | null): Promise<void> {
 }
 
 /** Brings the window forward (re-creating it if it was closed) and then runs `then` once its page is loaded. */
-/** Electron's standard menus, with "Send Feedback…" under Help in place of Electron's own links. */
+/** Electron's standard menus, with "Send Feedback…" under Help in place of Electron's own links, and the sidebar under View. */
 function setMenu(): void {
 	const feedback = (): void => focusWindow((w) => w.webContents.send(IPC.feedbackOpen))
+	const sidebar = (): void => focusWindow((w) => w.webContents.send(IPC.sidebarToggle))
+	// The menu's shortcuts come from the keymap: the first binding is shown, the others work hidden. None while one is
+	// being recorded, so the press reaches the page.
+	const keys = resolveKeymap(store.read().keymap ?? {}, IS_MAC)
+	const item = (id: string, opts: Electron.MenuItemConstructorOptions): Array<Electron.MenuItemConstructorOptions> => {
+		const accels = recording ? [] : keys[id].map((b) => toAccelerator(b, IS_MAC)).filter((a): a is string => !!a)
+		return [
+			{ ...opts, ...(accels[0] ? { accelerator: accels[0] } : {}) },
+			...accels.slice(1).map((accelerator) => ({ ...opts, accelerator, visible: false, acceleratorWorksWhenHidden: true })),
+		]
+	}
 	Menu.setApplicationMenu(
 		Menu.buildFromTemplate([
 			...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
@@ -853,11 +874,12 @@ function setMenu(): void {
 					{ role: 'forceReload' },
 					{ role: 'toggleDevTools' },
 					{ type: 'separator' },
+					...item('sidebar', { label: 'Toggle Sidebar', click: sidebar }),
+					{ type: 'separator' },
 					// Zoom is the interface size in Settings · Appearance, so it is remembered and both show the same.
-					{ label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => void zoom(0) },
-					{ label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => void zoom(1) },
-					{ label: 'Zoom In', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true, click: () => void zoom(1) },
-					{ label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => void zoom(-1) },
+					...item('zoomReset', { label: 'Actual Size', click: () => void zoom(0) }),
+					...item('zoomIn', { label: 'Zoom In', click: () => void zoom(1) }),
+					...item('zoomOut', { label: 'Zoom Out', click: () => void zoom(-1) }),
 					{ type: 'separator' },
 					{ role: 'togglefullscreen' },
 					{ type: 'separator' },
@@ -868,6 +890,17 @@ function setMenu(): void {
 			{ role: 'help', submenu: [{ label: 'Send Feedback…', click: feedback }] },
 		]),
 	)
+}
+
+/** Saves your shortcut changes, puts the menu's on the menu, and tells the renderer. */
+async function setKeymap(next: KeymapOverrides): Promise<KeymapOverrides> {
+	await store.update((d) => {
+		if (Object.keys(next).length) d.keymap = next
+		else delete d.keymap
+	})
+	setMenu()
+	for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.keymapChanged, next)
+	return next
 }
 
 function currentTheme(): ThemeSettings {

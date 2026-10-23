@@ -199,7 +199,7 @@ export function mapAnthropicError(error: unknown, secret: string | null, model?:
 	if (error instanceof APIConnectionTimeoutError) return new ProviderError('timeout', `${LABEL} did not respond before the timeout`)
 	if (error instanceof APIConnectionError) return new ProviderError('network', `Could not reach ${LABEL}: ${detail(error)}`)
 	if (error instanceof AuthenticationError)
-		return new ProviderError('auth', `${LABEL} rejected the API key (401). Replace the key in Settings → AI providers.`)
+		return new ProviderError('auth', `${LABEL} rejected the API key (401). Replace the key in Settings → AI review → Providers.`)
 	if (error instanceof PermissionDeniedError) return new ProviderError('permission', `${LABEL} denied access (403): ${detail(error)}`)
 	if (error instanceof RateLimitError) return new ProviderError('rate-limit', `${LABEL} rate limit reached (429)`, retryAfter(error))
 	if (error instanceof NotFoundError)

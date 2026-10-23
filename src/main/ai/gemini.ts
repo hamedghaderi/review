@@ -179,8 +179,9 @@ export function mapGeminiError(error: unknown, secret: string | null, model?: st
 		const m = detail(error)
 		const s = error.status
 		if (s === 400 && /API key not valid|API_KEY_INVALID/i.test(m))
-			return new ProviderError('auth', `${LABEL} rejected the API key. Replace the key in Settings → AI providers.`)
-		if (s === 401) return new ProviderError('auth', `${LABEL} rejected the API key (401). Replace the key in Settings → AI providers.`)
+			return new ProviderError('auth', `${LABEL} rejected the API key. Replace the key in Settings → AI review → Providers.`)
+		if (s === 401)
+			return new ProviderError('auth', `${LABEL} rejected the API key (401). Replace the key in Settings → AI review → Providers.`)
 		if (s === 403) return new ProviderError('permission', `${LABEL} denied access (403): ${m}`)
 		if (s === 404) return new ProviderError('model-unavailable', `Model "${model ?? '?'}" is not available on ${LABEL} (404)`)
 		if (s === 429)

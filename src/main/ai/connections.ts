@@ -592,7 +592,7 @@ export class ConnectionService {
 		if (view.status !== 'connected' && conn.kind !== 'fixture') {
 			throw new AppFail(
 				'ai-unavailable',
-				`${conn.label} is not connected${view.statusDetail ? `: ${view.statusDetail}` : ''}. Open Settings → AI providers.`,
+				`${conn.label} is not connected${view.statusDetail ? `: ${view.statusDetail}` : ''}. Open Settings → AI review → Providers.`,
 			)
 		}
 		if (!view.models.some((m) => m.id === selection.modelId)) {
@@ -640,7 +640,7 @@ export class ConnectionService {
 			else if (read.state === 'unreadable') throw new ProviderError('auth', read.reason)
 			else if (read.state === 'endpoint-changed')
 				throw new ProviderError('auth', 'The endpoint changed since the key was entered. Enter the key again for the new endpoint.')
-			else throw new ProviderError('auth', `${conn.label} needs an API key. Add one in Settings → AI providers.`)
+			else throw new ProviderError('auth', `${conn.label} needs an API key. Add one in Settings → AI review → Providers.`)
 		}
 		return { kind: conn.kind, label: conn.label, protocol: conn.protocol, baseUrl: conn.baseUrl, apiKey, timeoutMs }
 	}

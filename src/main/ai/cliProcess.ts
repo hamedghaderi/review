@@ -55,7 +55,7 @@ export async function runCli(p: CliProgram, args: Array<string>, input: string, 
 					e.code === 'ENOENT'
 						? new ProviderError(
 								'unsupported',
-								`${p.label} was not found (“${p.command}”). Install it, or set the full path to it in Settings → AI providers.`,
+								`${p.label} was not found (“${p.command}”). Install it, or set the full path to it in Settings → AI review → Providers.`,
 							)
 						: new ProviderError('network', `Could not start ${p.label}: ${clip(e.message)}`),
 				),

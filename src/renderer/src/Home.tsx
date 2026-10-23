@@ -64,7 +64,7 @@ export function Home(props: {
 	const [repo, setRepo] = useState<string | null>(null) // lower case; null: all repositories
 	const [muted, setMuted] = useStored<'hide' | 'show'>('home.muted', 'hide', ['hide', 'show'])
 	const [refreshing, setRefreshing] = useState(false)
-	// How many clones the app made, for the button that lists them (with Delete) in Settings · GitHub.
+	// How many clones the app made, for the button that lists them (with Delete) in Settings → GitHub → Clones.
 	const [clones, setClones] = useState(0)
 	useEffect(() => void window.review.appClones().then((r) => r.ok && setClones(r.value.length)), [inbox])
 	const refresh = useCallback(async () => {
