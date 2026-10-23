@@ -45,6 +45,7 @@ import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
 import { useStored } from './useStored.ts'
 import { personaOf } from '../../shared/personas.ts'
+import { isKey, keyLabel } from './keymap.ts'
 
 interface Props {
 	runs: Array<AiRun>
@@ -233,24 +234,27 @@ export function FindingsPanel({
 		onOpenRef,
 	)
 
-	// Keyboard triage while the Findings panel is shown: j/k move, a adds to the review, d picks a dismiss reason (1-4).
+	// Keyboard triage while the Findings panel is shown, with the keys from Settings › Keymap (j/k move, a adds to the
+	// review, d opens the dismiss reasons by default); then 1-4 picks a reason.
 	const keys = useRef({ shown, selectedFindingId, dismissMenu })
 	keys.current = { shown, selectedFindingId, dismissMenu }
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			const t = e.target as HTMLElement | null
-			if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector('.modal')) return
-			if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+			if (document.querySelector('.modal')) return
+			const plain = !e.metaKey && !e.ctrlKey && !e.altKey
+			if (plain && t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
 			const { shown: list, selectedFindingId: sel, dismissMenu: menu } = keys.current
 			const at = list.findIndex((it) => it.f.id === sel)
 			const cur = at >= 0 ? list[at] : null
 			const k = e.key
-			if (k === 'j' || k === 'k') {
-				const next = list[at < 0 ? 0 : Math.max(0, Math.min(list.length - 1, at + (k === 'j' ? 1 : -1)))]
+			const down = isKey(e, 'findingNext')
+			if (down || isKey(e, 'findingPrev')) {
+				const next = list[at < 0 ? 0 : Math.max(0, Math.min(list.length - 1, at + (down ? 1 : -1)))]
 				if (next) onOpen(next.f)
-			} else if (k === 'a' && cur?.state === 'open') onAccept(cur.f)
-			else if (k === 'd' && cur?.state === 'open') setDismissMenu(menu === cur.f.id ? null : cur.f.id)
-			else if (menu && cur && cur.f.id === menu && /^[1-4]$/.test(k)) {
+			} else if (isKey(e, 'findingAccept') && cur?.state === 'open') onAccept(cur.f)
+			else if (isKey(e, 'findingDismiss') && cur?.state === 'open') setDismissMenu(menu === cur.f.id ? null : cur.f.id)
+			else if (plain && menu && cur && cur.f.id === menu && /^[1-4]$/.test(k)) {
 				setDismissMenu(null)
 				onDismiss(cur.f, DISMISS_REASONS[Number(k) - 1])
 			} else if (k === 'Escape' && menu) setDismissMenu(null)
@@ -1581,10 +1585,19 @@ function FindingCard(p: CardProps) {
 			<div className="finding-actions">
 				{state === 'open' && (
 					<>
-						<button className="btn small ghost" onClick={p.onToggleDismissMenu} aria-expanded={p.dismissMenu} title="Dismiss (d)">
+						<button
+							className="btn small ghost"
+							onClick={p.onToggleDismissMenu}
+							aria-expanded={p.dismissMenu}
+							title={keyLabel('findingDismiss') ? `Dismiss (${keyLabel('findingDismiss')})` : 'Dismiss'}
+						>
 							Dismiss ▾
 						</button>
-						<button className="btn small primary" onClick={onAccept} title="Add to review (a)">
+						<button
+							className="btn small primary"
+							onClick={onAccept}
+							title={keyLabel('findingAccept') ? `Add to review (${keyLabel('findingAccept')})` : 'Add to review'}
+						>
 							Add to review
 						</button>
 					</>

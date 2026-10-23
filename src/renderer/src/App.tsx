@@ -61,7 +61,7 @@ import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
 import { FileView, type OutsideFile } from './FileView.tsx'
 import type { RefTarget } from './RefText.tsx'
-import { byProximity, IS_MAC, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
+import { byProximity, SymbolPopover, type SymbolPop, type SymbolRequest } from './SymbolNav.tsx'
 import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
@@ -71,6 +71,7 @@ import { useStored } from './useStored.ts'
 import { FeedbackDialog } from './FeedbackDialog.tsx'
 import { Outcomes } from './Outcomes.tsx'
 import { Sidebar } from './Sidebar.tsx'
+import { isKey, keyLabel, useKeymap } from './keymap.ts'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
@@ -157,13 +158,14 @@ export function App() {
 	const setHome = useCallback((on: boolean) => setPage(on ? 'home' : null), [])
 	// Whether a review-code:// link ever reached the app: until one does, the tab row offers the browser extension.
 	const [linked, setLinked] = useStored<'no' | 'yes'>('github.linked', 'no', ['no', 'yes'])
-	// The left sidebar, collapsed to icons or not (View › Toggle Sidebar, ⌘B / Ctrl+B).
+	// The left sidebar, collapsed to icons or not (⌘B / Ctrl+B).
 	const [sidebar, setSidebar] = useStored<'expanded' | 'collapsed'>('sidebar', 'expanded', ['expanded', 'collapsed'])
 	const sidebarRef = useRef(sidebar)
 	sidebarRef.current = sidebar
 	const setSidebarRef = useRef(setSidebar)
 	setSidebarRef.current = setSidebar
 	const [paletteOpen, setPaletteOpen] = useState(false)
+	useKeymap() // shortcut labels follow Settings › Keymap
 	const [feedbackOpen, setFeedbackOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
@@ -734,48 +736,36 @@ export function App() {
 		}
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Global shortcuts: Cmd/Ctrl+, settings, Cmd/Ctrl+P quick open, Cmd/Ctrl+0 Home, Cmd/Ctrl+1–9 repository tabs, "/" focuses the visible
-	// search unless typing somewhere.
+	// Global shortcuts, as set in Settings › Keymap: settings, Home and Outcomes work from anywhere; quick open, the
+	// repositories and search need one open. A shortcut without ⌘/Ctrl/Alt never fires while typing.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			if (document.querySelector('.modal')) return
-			// Settings opens from anywhere, even before a repository is open (the usual ⌘, on macOS, Ctrl+, elsewhere).
-			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ',') {
+			if (!e.metaKey && !e.ctrlKey && !e.altKey && isTyping(document.activeElement)) return
+			const run = (f: () => void): void => {
 				e.preventDefault()
-				openSettings()
-				return
+				f()
 			}
-			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === '0') {
-				e.preventDefault()
-				setHome(true)
-				return
-			}
+			if (isKey(e, 'settings')) return run(() => openSettings())
+			if (isKey(e, 'home')) return run(() => setHome(true))
+			if (isKey(e, 'outcomes')) return run(() => setPage('outcomes'))
 			if (!sessionRef.current) return
-			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'p') {
-				e.preventDefault()
-				setPaletteOpen(true)
-			} else if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
-				// 9 is the last tab, as in browsers.
-				const list = tabsRef.current
-				const tab = e.key === '9' ? list[list.length - 1] : list[Number(e.key) - 1]
-				if (!tab) return
-				e.preventDefault()
-				setHome(false)
-				void switchRepoRef.current(tab.id)
-			} else if (
-				e.key === '/' &&
-				!e.metaKey &&
-				!e.ctrlKey &&
-				!e.altKey &&
-				!isTyping(document.activeElement) &&
-				!document.querySelector('.palette')
-			) {
+			if (isKey(e, 'quickOpen')) return run(() => setPaletteOpen(true))
+			const list = tabsRef.current
+			const n = [1, 2, 3, 4, 5, 6, 7, 8].find((i) => isKey(e, `repo${i}`))
+			const tab = n ? list[n - 1] : isKey(e, 'repoLast') ? list[list.length - 1] : undefined
+			if (tab)
+				return run(() => {
+					setHome(false)
+					void switchRepoRef.current(tab.id)
+				})
+			if (isKey(e, 'search') && !document.querySelector('.palette')) {
 				const el = [...document.querySelectorAll<HTMLInputElement>('[data-search]')].find((x) => x.offsetParent !== null)
-				if (el) {
-					e.preventDefault()
-					el.focus()
-					el.select()
-				}
+				if (el)
+					run(() => {
+						el.focus()
+						el.select()
+					})
 			}
 		}
 		window.addEventListener('keydown', onKey)
@@ -1166,8 +1156,8 @@ export function App() {
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			if (document.querySelector('.modal') || isTyping(document.activeElement)) return
-			const back = IS_MAC ? e.metaKey && !e.altKey && !e.ctrlKey && e.key === '[' : e.altKey && !e.ctrlKey && e.key === 'ArrowLeft'
-			const fwd = IS_MAC ? e.metaKey && !e.altKey && !e.ctrlKey && e.key === ']' : e.altKey && !e.ctrlKey && e.key === 'ArrowRight'
+			const back = isKey(e, 'back')
+			const fwd = isKey(e, 'forward')
 			if (!back && !fwd) return
 			e.preventDefault()
 			travelRef.current(back ? 'back' : 'forward')
@@ -1324,7 +1314,7 @@ export function App() {
 									<button
 										className="btn ghost icon"
 										onClick={() => setPaletteOpen(true)}
-										title="Go to a pull request or branch (⌘P / Ctrl+P)"
+										title={`Go to a pull request or branch${keyLabel('quickOpen') ? ` (${keyLabel('quickOpen')})` : ''}`}
 										aria-label="Go to"
 									>
 										<svg

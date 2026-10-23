@@ -1,8 +1,9 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { GitHubStatus, RepoTab } from '../../shared/types.ts'
+import { keyLabel, useKeymap } from './keymap.ts'
 
-/** How shortcuts are written on this platform: "⌘" on macOS, "Ctrl+" elsewhere. */
-const MOD_KEY = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl+'
+/** The tooltip, with the action's shortcut on a line of its own when it has one. */
+const withKey = (text: string, id: string): string => (keyLabel(id) ? `${text}\n${keyLabel(id)}` : text)
 
 /**
  * The app's left sidebar: Home and Outcomes pinned at the top, one vertical tab per open repository under them, and
@@ -30,6 +31,7 @@ export function Sidebar(props: {
 	onDismissError(): void
 }) {
 	const { tabs, activeId, collapsed } = props
+	useKeymap()
 	// When focus is in the list, it follows the selected entry, so a shortcut never leaves the ring on the old one.
 	const nav = useRef<HTMLElement>(null)
 	useEffect(() => {
@@ -51,7 +53,7 @@ export function Sidebar(props: {
 					onClick={props.onToggle}
 					aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
 					aria-expanded={!collapsed}
-					title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (${MOD_KEY}B)`}
+					title={withKey(`${collapsed ? 'Expand' : 'Collapse'} sidebar`, 'sidebar')}
 				>
 					<Icon>
 						<rect x="3" y="3" width="18" height="18" rx="2" />
@@ -66,7 +68,7 @@ export function Sidebar(props: {
 					label="Home"
 					count={props.homeCount}
 					countTitle={`${props.homeCount} waiting for you`}
-					title={`Pull requests waiting for you in all repositories\n${MOD_KEY}0`}
+					title={withKey('Pull requests waiting for you in all repositories', 'home')}
 					icon={
 						<Icon>
 							<path d="M3 10.5 12 3l9 7.5" />
@@ -79,7 +81,7 @@ export function Sidebar(props: {
 					on={props.page === 'outcomes'}
 					collapsed={collapsed}
 					label="Outcomes"
-					title="What became of the AI’s findings: accepted, dismissed and fixed, by model and rule"
+					title={withKey('What became of the AI’s findings: accepted, dismissed and fixed, by model and rule', 'outcomes')}
 					icon={
 						<Icon>
 							<path d="M3 3v18h18" />
@@ -99,7 +101,7 @@ export function Sidebar(props: {
 						label={label(t)}
 						count={t.requests}
 						countTitle={`${t.requests} open review request${t.requests === 1 ? '' : 's'}`}
-						title={`${t.root}${i < 8 ? `\n${MOD_KEY}${i + 1}` : ''}`}
+						title={i < 8 ? withKey(t.root, `repo${i + 1}`) : i === tabs.length - 1 ? withKey(t.root, 'repoLast') : t.root}
 						icon={<span className="side-initial">{t.name.slice(0, 1).toUpperCase()}</span>}
 						onClick={() => props.onSelect(t.id)}
 						onClose={() => props.onClose(t.id)}
@@ -144,7 +146,7 @@ export function Sidebar(props: {
 					</span>
 					<span className="side-label">GitHub</span>
 				</button>
-				<button className="side-item" onClick={props.onSettings} title={`Settings (${MOD_KEY},)`} aria-label="Settings">
+				<button className="side-item" onClick={props.onSettings} title={withKey('Settings', 'settings')} aria-label="Settings">
 					<Icon>
 						<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
 						<circle cx="12" cy="12" r="3" />

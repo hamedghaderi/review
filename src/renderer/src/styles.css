@@ -5213,3 +5213,96 @@ button.stack-row:hover {
 	flex-direction: column;
 	min-width: 0;
 }
+
+/* Settings › Keymap: one row per action, its shortcuts as chips; a shortcut two actions share is marked on both. */
+.keymap {
+	max-width: 760px;
+}
+.keymap-head {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+.keymap-search {
+	flex: 1;
+	height: 28px;
+	padding: 0 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	user-select: text;
+}
+.keymap-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.keymap-table td {
+	padding: 6px 4px;
+	border-top: 1px solid var(--border);
+	vertical-align: middle;
+}
+.keymap-group {
+	padding: 14px 4px 4px;
+	color: var(--text-2);
+	font-size: 11px;
+	font-weight: 600;
+	text-align: left;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.keymap-action {
+	width: 42%;
+}
+.keymap-keys {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+.keymap-reset {
+	width: 1%;
+	white-space: nowrap;
+	text-align: right;
+}
+.key-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 1px 2px 1px 0;
+	border-radius: 5px;
+}
+.key-chip.clash kbd {
+	border-color: var(--warn-fg);
+	color: var(--warn-fg);
+}
+.key-chip.recording {
+	padding: 2px 8px;
+	border: 1px dashed var(--accent);
+	color: var(--accent);
+	font-size: 12px;
+}
+.key-remove {
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	line-height: 1;
+	cursor: pointer;
+	visibility: hidden;
+}
+.key-chip:hover .key-remove,
+.key-remove:focus-visible {
+	visibility: visible;
+}
+.key-remove:hover {
+	background: var(--hover);
+	color: var(--text);
+}
+.key-chip kbd {
+	padding: 2px 6px;
+	font-size: 12px;
+	color: var(--text);
+}
