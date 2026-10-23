@@ -1685,6 +1685,7 @@ export const IPC = {
 	skipUpdate: 'update:skip',
 	systemInfo: 'app:system-info',
 	feedbackOpen: 'feedback:open',
+	sidebarToggle: 'sidebar:toggle',
 	theme: 'app:theme',
 	setTheme: 'app:set-theme',
 	themeChanged: 'app:theme-changed',
@@ -1878,6 +1879,8 @@ export interface ReviewApi {
 	systemInfo(): Promise<Result<string>>
 	/** Help › Send Feedback… was chosen in the menu. */
 	onFeedbackOpen(handler: () => void): () => void
+	/** View › Toggle Sidebar was chosen in the menu (or ⌘B / Ctrl+B pressed). */
+	onSidebarToggle(handler: () => void): () => void
 	/** Light or dark and the colour theme, as last chosen (the defaults until then). */
 	theme(): Promise<Result<ThemeSettings>>
 	setTheme(next: ThemeSettings): Promise<Result<ThemeSettings>>

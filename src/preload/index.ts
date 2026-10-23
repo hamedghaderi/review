@@ -171,6 +171,11 @@ const api: ReviewApi = {
 		ipcRenderer.on(IPC.feedbackOpen, listener)
 		return () => ipcRenderer.removeListener(IPC.feedbackOpen, listener)
 	},
+	onSidebarToggle: (handler) => {
+		const listener = (): void => handler()
+		ipcRenderer.on(IPC.sidebarToggle, listener)
+		return () => ipcRenderer.removeListener(IPC.sidebarToggle, listener)
+	},
 	installUpdate: () => ipcRenderer.invoke(IPC.installUpdate),
 	onUpdateProgress: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, fraction: number): void => handler(fraction)

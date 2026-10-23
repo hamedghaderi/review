@@ -838,9 +838,10 @@ function present(n: Notification, target: InboxOpen | null): Promise<void> {
 }
 
 /** Brings the window forward (re-creating it if it was closed) and then runs `then` once its page is loaded. */
-/** Electron's standard menus, with "Send Feedback…" under Help in place of Electron's own links. */
+/** Electron's standard menus, with "Send Feedback…" under Help in place of Electron's own links, and the sidebar under View. */
 function setMenu(): void {
 	const feedback = (): void => focusWindow((w) => w.webContents.send(IPC.feedbackOpen))
+	const sidebar = (): void => focusWindow((w) => w.webContents.send(IPC.sidebarToggle))
 	Menu.setApplicationMenu(
 		Menu.buildFromTemplate([
 			...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
@@ -852,6 +853,8 @@ function setMenu(): void {
 					{ role: 'reload' },
 					{ role: 'forceReload' },
 					{ role: 'toggleDevTools' },
+					{ type: 'separator' },
+					{ label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: sidebar },
 					{ type: 'separator' },
 					// Zoom is the interface size in Settings · Appearance, so it is remembered and both show the same.
 					{ label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => void zoom(0) },
