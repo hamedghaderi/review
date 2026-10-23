@@ -2,6 +2,7 @@ import type { HeadChecks } from './ci.ts'
 import type { HomeInbox, WatchedPr } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
 import type { ThemeSettings } from './theme.ts'
+import type { KeymapOverrides } from './keymap.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -1689,6 +1690,10 @@ export const IPC = {
 	theme: 'app:theme',
 	setTheme: 'app:set-theme',
 	themeChanged: 'app:theme-changed',
+	keymap: 'app:keymap',
+	setKeymap: 'app:set-keymap',
+	keymapChanged: 'app:keymap-changed',
+	keymapRecording: 'app:keymap-recording',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
@@ -1879,13 +1884,19 @@ export interface ReviewApi {
 	systemInfo(): Promise<Result<string>>
 	/** Help › Send Feedback… was chosen in the menu. */
 	onFeedbackOpen(handler: () => void): () => void
-	/** View › Toggle Sidebar was chosen in the menu (or ⌘B / Ctrl+B pressed). */
+	/** View › Toggle Sidebar was chosen in the menu, or its shortcut pressed. */
 	onSidebarToggle(handler: () => void): () => void
 	/** Light or dark and the colour theme, as last chosen (the defaults until then). */
 	theme(): Promise<Result<ThemeSettings>>
 	setTheme(next: ThemeSettings): Promise<Result<ThemeSettings>>
 	/** The theme changed, from the View menu or another part of the app. */
 	onThemeChanged(handler: (next: ThemeSettings) => void): () => void
+	/** The shortcuts you changed (the others keep their defaults). */
+	keymap(): Promise<Result<KeymapOverrides>>
+	setKeymap(next: KeymapOverrides): Promise<Result<KeymapOverrides>>
+	onKeymapChanged(handler: (next: KeymapOverrides) => void): () => void
+	/** While a new shortcut is being recorded, the menu's shortcuts are off so the press reaches the page. */
+	keymapRecording(on: boolean): Promise<Result<boolean>>
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
 	installUpdate(): Promise<Result<boolean>>
 	/** Download progress of `installUpdate`, from 0 to 1. */

@@ -6,6 +6,7 @@ import { suggestTeam, TeamEditor } from './TeamEditor.tsx'
 import { McpImport, McpServerEditor } from './McpSettings.tsx'
 import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
+import { KeymapSettings } from './KeymapSettings.tsx'
 
 /**
  * A page in the settings window. Fixed pages have plain names; pages for one item carry its id after a colon:
@@ -108,6 +109,7 @@ export function Settings(props: {
 	const tree: Array<Node> = useMemo(
 		() => [
 			{ id: 'appearance', label: 'Appearance', keywords: 'theme light dark colour color' },
+			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
 			{
 				id: 'github-group',
 				label: 'GitHub',
@@ -275,6 +277,7 @@ export function Settings(props: {
 
 	function body(): ReactNode {
 		if (page === 'appearance') return <AppearanceSettings />
+		if (page === 'keymap') return <KeymapSettings />
 		if (page === 'github') return <GitHubAccount status={github} act={act} />
 		if (page === 'notifications') return <GitHubNotifications status={github} act={act} />
 		if (page === 'auto-review')
