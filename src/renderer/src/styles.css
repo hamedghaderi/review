@@ -4925,6 +4925,34 @@ button.stack-row:hover {
 .home-filter {
 	max-width: 320px;
 }
+.outcomes {
+	max-width: 1080px;
+}
+/* The period choices get equal columns, each as wide as the longest label. */
+.outcomes .seg {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+}
+.outcomes .home-tools select {
+	max-width: 260px;
+}
+.outcomes .usage-total {
+	flex-wrap: wrap;
+	margin-bottom: 8px;
+}
+.outcomes-table th:first-child,
+.outcomes-table td:first-child {
+	width: 22%;
+}
+/* Room for "at least $0.41"; whatever still doesn't fit is cut off with its full text in the tooltip. */
+.outcomes-table .cost {
+	width: 13%;
+}
+.outcomes-table td {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
 .home-check {
 	display: inline-flex;
 	align-items: center;

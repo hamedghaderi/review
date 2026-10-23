@@ -7,6 +7,8 @@ import type {
 	FileCoverage,
 	Finding,
 	IncrementalOffer,
+	OutcomeFilter,
+	OutcomeSummary,
 	BranchPr,
 	CodeQuestion,
 	PastDecision,
@@ -84,6 +86,7 @@ import { findSymbol } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
+import { summarizeOutcomes } from './ai/outcomes.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
@@ -1011,6 +1014,11 @@ export class ReviewService {
 	 * Every pull request waiting for you, in every repository, from the background check's last look. Reads only the
 	 * store, so it is free to call often.
 	 */
+	/** What became of AI findings in every repository's reviews: read from the store, nothing is fetched. */
+	outcomes(filter: OutcomeFilter): OutcomeSummary {
+		return summarizeOutcomes(Object.values(this.store.read().repos), filter)
+	}
+
 	homeInbox(): HomeInbox {
 		const d = this.store.read()
 		const gh = this.github
