@@ -427,7 +427,7 @@ export function AiRunControl({
 									have no price, so your budgets don’t limit them.
 								</>
 							)}{' '}
-							Set a price in Settings → AI providers to include {shown.unbudgeted.length === 1 ? 'it' : 'them'}.
+							Set a price in Settings → AI review → Providers to include {shown.unbudgeted.length === 1 ? 'it' : 'them'}.
 						</p>
 					)}
 					{shown && shown.over.length > 0 && (

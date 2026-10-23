@@ -31,7 +31,9 @@ export function formatCost(c: AiCost): string {
 /** Why a cost is uncertain, for a tooltip; null when it is not. */
 export function costCaveat(c: AiCost): string | null {
 	const parts = [
-		...(c.estimated ? ['Estimated from catalog prices, which may be out of date. Set your own price in Settings → AI providers.'] : []),
+		...(c.estimated
+			? ['Estimated from catalog prices, which may be out of date. Set your own price in Settings → AI review → Providers.']
+			: []),
 		...(c.unpriced ? ['Some requests used a model without a price, or the provider reported no usage, so they are not counted.'] : []),
 	]
 	return parts.length ? parts.join(' ') : null

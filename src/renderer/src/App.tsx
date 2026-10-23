@@ -39,7 +39,6 @@ import type {
 import { commitsLabel, targetKey } from '../../shared/types.ts'
 import { AiRunControl } from './AiRunControl.tsx'
 import { Browser, type BrowserHandle } from './Browser.tsx'
-import { GitHubSettings } from './GitHubSettings.tsx'
 import { BranchPrHint, isAuthProblem, lookupProblem, useBranchPr } from './BranchPrHint.tsx'
 import { PublishDialog, type PendingReview } from './PublishDialog.tsx'
 import { QuickOpen } from './QuickOpen.tsx'
@@ -57,7 +56,7 @@ import { discussedAt, hasReply, ownThread } from './discussed.ts'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
 import { AskModel, ModelPicker } from './ModelPicker.tsx'
-import { ProviderSettings } from './ProviderSettings.tsx'
+import { Settings, type SettingsPage } from './Settings.tsx'
 import { DiffView, type RevealRequest } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
 import { FileView, type OutsideFile } from './FileView.tsx'
@@ -151,7 +150,6 @@ export function App() {
 	const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null)
 	const [updateProgress, setUpdateProgress] = useState<number | null>(null) // while downloading
 	const [updateError, setUpdateError] = useState<string | null>(null)
-	const [githubOpen, setGithubOpen] = useState<boolean | 'clones'>(false) // 'clones': opened at the app's clones
 	// The start page: every pull request waiting for you, in every repository. Shown at launch when nothing is restored.
 	// Home and Outcomes are pages across all repositories, shown instead of the repository on screen.
 	const [page, setPage] = useState<'home' | 'outcomes' | null>(null)
@@ -171,7 +169,9 @@ export function App() {
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
 	const browserRef = useRef<BrowserHandle>(null)
 	const [aiSettings, setAiSettings] = useState<AiSettingsView | null>(null)
-	const [settingsOpen, setSettingsOpen] = useState<false | { team: 'new' | string | null }>(false)
+	// The settings window: false when closed, else the page to open at (null: the last one shown).
+	const [settingsOpen, setSettingsOpen] = useState<false | { page: SettingsPage | null }>(false)
+	const openSettings = useCallback((page: SettingsPage | null = null) => setSettingsOpen({ page }), [])
 	const [aiRuns, setAiRuns] = useState<Array<AiRun>>([])
 	const [aiError, setAiError] = useState<string | null>(null)
 	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'description' | 'github' | 'context'>('comments')
@@ -742,7 +742,7 @@ export function App() {
 			// Settings opens from anywhere, even before a repository is open (the usual ⌘, on macOS, Ctrl+, elsewhere).
 			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ',') {
 				e.preventDefault()
-				setSettingsOpen({ team: null })
+				openSettings()
 				return
 			}
 			if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === '0') {
@@ -862,7 +862,7 @@ export function App() {
 	const aiSelection: ModelSelection | null = aiSettings?.selection ?? null
 	const aiProblem =
 		aiSettings && !aiSettings.connections.some((c) => c.status === 'connected')
-			? 'No AI provider is connected. Open Settings → AI providers to connect one; manual review works without it.'
+			? 'No AI provider is connected. Open Settings → AI review → Providers to connect one; manual review works without it.'
 			: (aiSettings?.selectionIssue ?? null)
 
 	const selectModel = async (sel: ModelSelection): Promise<void> => {
@@ -968,7 +968,7 @@ export function App() {
 			? 'Choose a model for questions first.'
 			: null
 	// One model for every Ask AI box (code and findings); picking it in any box changes them all.
-	const askModelPicker = <AskModel settings={aiSettings} onManage={() => setSettingsOpen({ team: null })} />
+	const askModelPicker = <AskModel settings={aiSettings} onManage={() => openSettings()} />
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const id = questionId ?? `new:${Date.now()}`
@@ -1240,8 +1240,8 @@ export function App() {
 				}}
 				onClose={(id) => void closeTab(id)}
 				onOpen={() => void openRepo()}
-				onGitHub={() => setGithubOpen(true)}
-				onSettings={() => setSettingsOpen({ team: null })}
+				onGitHub={() => openSettings('github')}
+				onSettings={() => openSettings()}
 				onFeedback={() => setFeedbackOpen(true)}
 				onDismissError={() => setTabError(null)}
 			/>
@@ -1350,7 +1350,7 @@ export function App() {
 											disabled={activeRun !== null}
 											onSelect={(sel) => void selectModel(sel)}
 											onSelectTeam={(id) => void selectTeam(id)}
-											onManage={(team) => setSettingsOpen({ team: team ?? null })}
+											onManage={(team) => openSettings(team === 'new' ? 'team-new' : team ? `team:${team}` : 'teams')}
 										/>
 										{reviewer && (
 											<AiRunControl
@@ -1490,7 +1490,7 @@ export function App() {
 										: lookupProblem(branchPr.error)}
 								</span>
 								{isAuthProblem(branchPr.error) && (
-									<button className="btn small primary" onClick={() => setGithubOpen(true)}>
+									<button className="btn small primary" onClick={() => openSettings('github')}>
 										Connect GitHub
 									</button>
 								)}
@@ -1599,10 +1599,10 @@ export function App() {
 							onOpen={(pr) => void openFromHome(pr)}
 							onMute={(repo, muted) => void muteRepo(repo, muted)}
 							onRefresh={refreshHome}
-							onConnect={() => setGithubOpen(true)}
+							onConnect={() => openSettings('github')}
 							onOpenRepo={() => void openRepo()}
 							onDeleteClone={(repoId) => void deleteAppClone(repoId)}
-							onManageClones={() => setGithubOpen('clones')}
+							onManageClones={() => openSettings('clones')}
 						/>
 					</main>
 				) : (
@@ -1621,7 +1621,7 @@ export function App() {
 									onState={updateBrowser}
 									onOpen={(t) => void openReview(session.repo.id, { kind: 'target', target: t })}
 									onOpenSnapshot={(id) => void chooseSnapshot(id)}
-									onConnectGitHub={() => setGithubOpen(true)}
+									onConnectGitHub={() => openSettings('github')}
 									onRefreshRepo={() => void refreshSession(session.repo.id)}
 								/>
 								{opening && (
@@ -1831,7 +1831,7 @@ export function App() {
 												onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
 											/>
 										) : rightTab === 'description' && isPrReview && session && comparison ? (
-											<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => setGithubOpen(true)} />
+											<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => openSettings('github')} />
 										) : rightTab === 'github' && isPrReview ? (
 											<DiscussionPanel
 												discussion={current?.value ?? null}
@@ -1839,7 +1839,7 @@ export function App() {
 												files={files}
 												onRefresh={() => session && comparison && loadDiscussion(session.repo.id, comparison.id)}
 												onOpen={openThread}
-												onConnect={() => setGithubOpen(true)}
+												onConnect={() => openSettings('github')}
 											/>
 										) : rightTab === 'comments' || rightTab === 'github' || rightTab === 'description' ? (
 											<CommentsPanel
@@ -1913,21 +1913,6 @@ export function App() {
 					</main>
 				)}
 			</div>
-			{githubOpen && github && (
-				<GitHubSettings
-					status={github}
-					mapping={session?.github ?? null}
-					onClose={() => setGithubOpen(false)}
-					onStatus={setGithub}
-					onChooseRepo={async (repo) => {
-						if (!session) return
-						const r = await window.review.githubSetRepo(session.repo.id, repo)
-						if (r.ok) setSession({ ...session, github: r.value })
-					}}
-					onDeleteClone={deleteAppClone}
-					focus={githubOpen === 'clones' ? 'clones' : null}
-				/>
-			)}
 			{publishOpen && session && comparison?.pr && github && (
 				<PublishDialog
 					repoId={session.repo.id}
@@ -1939,7 +1924,7 @@ export function App() {
 					}}
 					onOpenGitHubSettings={() => {
 						setPublishOpen(false)
-						setGithubOpen(true)
+						openSettings('github')
 					}}
 					beforePublish={persist}
 					blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
@@ -1954,7 +1939,7 @@ export function App() {
 					signedIn={github?.state === 'connected'}
 					viewer={github?.login ?? null}
 					reviews={session.reviews}
-					onConnect={() => setGithubOpen(true)}
+					onConnect={() => openSettings('github')}
 					onClose={() => setPaletteOpen(false)}
 					onPickPr={(pr) => browserRef.current?.reveal({ kind: 'pr', pr })}
 					onPickBranch={(b) => browserRef.current?.reveal({ kind: 'branch', branch: b })}
@@ -1967,14 +1952,22 @@ export function App() {
 				/>
 			)}
 			{feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
-			{settingsOpen && aiSettings && (
-				<ProviderSettings
-					settings={aiSettings}
-					initialConnectionId={aiSelection?.connectionId ?? null}
-					initialTeam={settingsOpen ? settingsOpen.team : null}
+			{settingsOpen && aiSettings && github && (
+				<Settings
+					page={settingsOpen.page}
+					ai={aiSettings}
+					github={github}
+					mapping={session?.github ?? null}
 					repoId={session?.repo.id ?? null}
 					onClose={() => setSettingsOpen(false)}
-					onChange={setAiSettings}
+					onAi={setAiSettings}
+					onGitHub={setGithub}
+					onChooseRepo={async (repo) => {
+						if (!session) return
+						const r = await window.review.githubSetRepo(session.repo.id, repo)
+						if (r.ok) setSession({ ...session, github: r.value })
+					}}
+					onDeleteClone={deleteAppClone}
 				/>
 			)}
 		</div>

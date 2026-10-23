@@ -72,7 +72,7 @@ export class GiphyService {
 		const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(TIMEOUT_MS)])
 		const read = await this.store.read(KEY_ID, KEY_SCOPE)
 		if (read.state !== 'saved' && read.state !== 'session')
-			throw new AppFail('invalid-input', 'Add a GIPHY API key in Settings → GitHub to search GIFs.')
+			throw new AppFail('invalid-input', 'Add a GIPHY API key in Settings → GitHub → GIFs to search GIFs.')
 		const q = query.trim().slice(0, 50)
 		const page = `limit=${RESULTS}&offset=${offset}&rating=g`
 		const path = q ? `/search?q=${encodeURIComponent(q)}&${page}&lang=en` : `/trending?${page}`

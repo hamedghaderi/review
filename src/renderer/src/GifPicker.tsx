@@ -81,10 +81,10 @@ function GifResults({ search, query, selected, onPick, onOpenSettings, hint }: R
 				<p>GIF search uses GIPHY and needs a free API key.</p>
 				{onOpenSettings ? (
 					<button type="button" className="btn small primary" onMouseDown={(e) => e.preventDefault()} onClick={onOpenSettings}>
-						Add a key in Settings → GitHub
+						Add a key in Settings → GitHub → GIFs
 					</button>
 				) : (
-					<p className="muted">Add one in Settings → GitHub.</p>
+					<p className="muted">Add one in Settings → GitHub → GIFs.</p>
 				)}
 			</div>
 		)
