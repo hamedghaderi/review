@@ -4928,6 +4928,12 @@ button.stack-row:hover {
 .outcomes {
 	max-width: 1080px;
 }
+/* The period choices get equal columns, each as wide as the longest label. */
+.outcomes .seg {
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: 1fr;
+}
 .outcomes .home-tools select {
 	max-width: 260px;
 }
