@@ -63,3 +63,12 @@ test('badge: GitHub decision first, then the reviews; older-commit approvals, pa
 	const other = reviewSummary(st(null, [r('b', 'APPROVED', '1')]), 'a')!
 	assert.deepEqual([other.short, other.mine], ['Approved', null])
 })
+
+test('behind: a comment review on the new head counts as seen, while the standing approval stays on the older commit', () => {
+	const me = (rows: Array<ReturnType<typeof r>>) => summarizeReviews(rows, HEAD, 'author', null).reviewers.find((x) => x.login === 'me')!
+	const after = me([r('me', 'APPROVED', '2026-01-01', OLD), r('me', 'COMMENTED', '2026-01-02')])
+	assert.deepEqual([after.verdict, after.stale, after.behind], ['approved', true, false])
+	assert.equal(me([r('me', 'APPROVED', '2026-01-01', OLD)]).behind, true, 'only the older commit reviewed')
+	assert.equal(me([r('me', 'COMMENTED', '2026-01-01'), r('me', 'COMMENTED', '2026-01-02', OLD)]).behind, true, 'the latest review wins')
+	assert.equal(me([r('me', 'COMMENTED', '2026-01-01', OLD), r('me', 'PENDING', '2026-01-02')]).behind, true, 'a pending review is no look')
+})

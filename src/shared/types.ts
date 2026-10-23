@@ -176,6 +176,7 @@ export interface PrReviewer {
 	verdict: ReviewVerdict
 	at: string | null
 	stale: boolean // given on an older commit than the PR's head
+	behind: boolean // their latest review of any kind, a comment included, is on an older commit than the head
 }
 
 export interface PrReviewState {
