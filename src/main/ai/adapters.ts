@@ -23,7 +23,7 @@ export interface AdapterFactory {
 }
 
 function requireKey(c: ResolvedConnection): string {
-	if (!c.apiKey) throw new ProviderError('auth', `${c.label} needs an API key. Add one in Settings → AI providers.`)
+	if (!c.apiKey) throw new ProviderError('auth', `${c.label} needs an API key. Add one in Settings → AI review → Providers.`)
 	return c.apiKey
 }
 

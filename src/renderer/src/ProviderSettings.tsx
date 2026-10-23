@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type {
 	AiSettingsView,
 	AuthMethod,
 	ConnectionStatus,
 	ConnectionView,
-	McpSettingsView,
 	ModelPrice,
 	ModelView,
 	ProviderDescriptor,
@@ -13,332 +12,18 @@ import type {
 	Result,
 } from '../../shared/types.ts'
 import { sourceLabel, sourceTitle } from './ModelPicker.tsx'
-import { suggestTeam, TeamEditor } from './TeamEditor.tsx'
-import { McpImport, McpServerEditor } from './McpSettings.tsx'
-import { UsageSettings } from './UsageSettings.tsx'
-import { AppearanceSettings } from './AppearanceSettings.tsx'
-import { FINDING_LEVELS, type FindingLevel, type FindingLevelSettings, type ReviewTeam } from '../../shared/types.ts'
+import { FINDING_LEVELS, type FindingLevel, type FindingLevelSettings } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
 import { formatPrice } from '../../shared/cost.ts'
 
-interface Props {
-	settings: AiSettingsView
-	initialConnectionId: string | null
-	initialTeam?: 'new' | string | null
-	repoId?: string | null // the open repository, for MCP servers started in its folder and its Claude Code settings
-	onClose(): void
-	onChange(view: AiSettingsView): void
-}
-
-const STATUS_TEXT: Record<ConnectionStatus, string> = {
+export const STATUS_TEXT: Record<ConnectionStatus, string> = {
 	'not-connected': 'Not connected',
 	connected: 'Connected',
 	testing: 'Testing…',
 	failed: 'Connection failed',
 }
 
-/** Settings → AI providers. Everything shown is derived from provider descriptors sent by the main process. */
-export function ProviderSettings({ settings, initialConnectionId, initialTeam = null, repoId = null, onClose, onChange }: Props) {
-	const [selectedId, setSelectedId] = useState<string | null>(initialConnectionId ?? settings.connections[0]?.id ?? null)
-	const [adding, setAdding] = useState<{ kind: ProviderKind; preset: string | null } | null>(null)
-	const [editingTeam, setEditingTeam] = useState<{ team: ReviewTeam; isNew: boolean } | null>(() =>
-		initialTeam === 'new'
-			? { team: suggestTeam(settings), isNew: true }
-			: initialTeam
-				? ((t) => (t ? { team: t, isNew: false } : null))(settings.teams.find((x) => x.id === initialTeam))
-				: null,
-	)
-	const [error, setError] = useState<string | null>(null)
-	const [mcp, setMcp] = useState<McpSettingsView | null>(null)
-	const [mcpPane, setMcpPaneOnly] = useState<{ kind: 'server'; id: string } | { kind: 'new' } | { kind: 'import' } | null>(null)
-	const [side, setSide] = useState<'usage' | 'appearance' | null>(null) // a pane that isn't about one connection
-	// Every other pane is opened through this, so it also closes Usage and Appearance.
-	const setMcpPane = (pane: typeof mcpPane): void => {
-		setSide(null)
-		setMcpPaneOnly(pane)
-	}
-	const dialog = useRef<HTMLDivElement>(null)
-
-	useEffect(() => {
-		void window.review.mcpSettings().then((r) => r.ok && setMcp(r.value))
-		return window.review.onMcpSettingsChanged(setMcp)
-	}, [])
-
-	async function mcpRun(p: Promise<Result<McpSettingsView>>): Promise<boolean> {
-		setError(null)
-		const r = await p
-		if (!r.ok) {
-			setError(r.error.message)
-			return false
-		}
-		setMcp(r.value)
-		return true
-	}
-	const showMcp = (pane: typeof mcpPane): void => {
-		setAdding(null)
-		setEditingTeam(null)
-		setMcpPane(pane)
-	}
-	const mcpServer = mcpPane?.kind === 'server' ? (mcp?.servers.find((x) => x.id === mcpPane.id) ?? null) : null
-
-	useEffect(() => {
-		dialog.current?.focus()
-		function onKey(e: KeyboardEvent): void {
-			if (e.key === 'Escape') onClose()
-		}
-		window.addEventListener('keydown', onKey)
-		return () => window.removeEventListener('keydown', onKey)
-	}, [onClose])
-
-	const selected = settings.connections.find((c) => c.id === selectedId) ?? null
-
-	async function run<T extends AiSettingsView>(p: Promise<Result<T>>): Promise<boolean> {
-		setError(null)
-		const r = await p
-		if (!r.ok) {
-			setError(r.error.message)
-			return false
-		}
-		onChange(r.value)
-		return true
-	}
-
-	return (
-		<div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-			<div className="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialog}>
-				<div className="modal-head">
-					<h2 id="settings-title">Settings · AI providers</h2>
-					<span className="spacer" />
-					<button className="btn small ghost" onClick={onClose} aria-label="Close settings">
-						✕
-					</button>
-				</div>
-				{!settings.storage.secure && settings.storage.message && <div className="notice">{settings.storage.message}</div>}
-				{error && (
-					<button className="notice error-notice" onClick={() => setError(null)} title="Dismiss">
-						{error} ✕
-					</button>
-				)}
-				<div className="settings-body">
-					<nav className="settings-nav" aria-label="Connections">
-						<div className="section-title">Connections</div>
-						{settings.connections.length === 0 && (
-							<div className="muted small">No providers connected. Manual review works without one.</div>
-						)}
-						{settings.connections.map((c) => (
-							<button
-								key={c.id}
-								className={`conn-item ${c.id === selectedId && !adding && !editingTeam && !mcpPane && !side ? 'on' : ''}`}
-								onClick={() => {
-									setAdding(null)
-									setEditingTeam(null)
-									setMcpPane(null)
-									setSelectedId(c.id)
-								}}
-							>
-								<span className={`dot ${c.status}`} aria-hidden />
-								<span className="ellipsis">{c.label}</span>
-								<span className="muted small nowrap">{STATUS_TEXT[c.status]}</span>
-							</button>
-						))}
-						<button
-							className={`conn-item ${side === 'usage' ? 'on' : ''}`}
-							onClick={() => {
-								setAdding(null)
-								setEditingTeam(null)
-								setMcpPane(null)
-								setSide('usage')
-							}}
-							title="Tokens and cost of every AI request"
-						>
-							<span className="ellipsis">Usage</span>
-						</button>
-						<div className="section-title add-title">Add provider</div>
-						{settings.providers.flatMap((p) => {
-							const exists = !p.multiple && settings.connections.some((c) => c.kind === p.kind)
-							// Providers with presets (e.g. local servers) get one entry per preset, so each is findable by name.
-							const entries = p.presets.length
-								? p.presets.map((x) => ({ preset: x.id as string | null, label: x.label, title: x.note ?? p.description }))
-								: [{ preset: null, label: p.label, title: p.description }]
-							return entries.map((e) => (
-								<button
-									key={`${p.kind}:${e.preset ?? ''}`}
-									className={`conn-item ${adding?.kind === p.kind && adding.preset === e.preset ? 'on' : ''}`}
-									disabled={exists}
-									onClick={() => {
-										setEditingTeam(null)
-										setMcpPane(null)
-										setAdding({ kind: p.kind, preset: e.preset })
-									}}
-									title={exists ? 'Already connected' : e.title}
-								>
-									<span className="ellipsis">+ {e.label}</span>
-									{p.development && <span className="pill warn">Dev</span>}
-								</button>
-							))
-						})}
-						<div className="section-title add-title">Review teams</div>
-						{settings.teams.map((t) => (
-							<button
-								key={t.id}
-								className={`conn-item ${editingTeam?.team.id === t.id ? 'on' : ''}`}
-								onClick={() => {
-									setAdding(null)
-									setMcpPane(null)
-									setEditingTeam({ team: t, isNew: false })
-								}}
-								title={t.issues.map((i) => i.message).join('\n') || undefined}
-							>
-								<span className={`dot ${t.issues.length ? 'failed' : 'connected'}`} aria-hidden />
-								<span className="ellipsis">{t.name}</span>
-								<span className="muted small nowrap">
-									{t.members.length} reviewer{t.members.length === 1 ? '' : 's'}
-								</span>
-							</button>
-						))}
-						<button
-							className={`conn-item ${editingTeam?.isNew ? 'on' : ''}`}
-							disabled={!settings.connections.some((c) => c.status === 'connected' || c.kind === 'fixture')}
-							title="Split the review rules between several models"
-							onClick={() => {
-								setAdding(null)
-								setMcpPane(null)
-								setEditingTeam({ team: suggestTeam(settings), isNew: true })
-							}}
-						>
-							<span className="ellipsis">+ New review team</span>
-						</button>
-						<button
-							className="conn-item"
-							disabled={!settings.connections.some((c) => c.status === 'connected' || c.kind === 'fixture')}
-							title="A team of personas (Clean Code, Test-driven, Pragmatic, Performance, Security, API steward), each checking the rules it cares about most"
-							onClick={() => {
-								setAdding(null)
-								setMcpPane(null)
-								setEditingTeam({ team: suggestTeam(settings, true), isNew: true })
-							}}
-						>
-							<span className="ellipsis">+ New persona team</span>
-						</button>
-						<div className="section-title add-title">MCP servers</div>
-						{mcp?.servers.map((x) => (
-							<button
-								key={x.id}
-								className={`conn-item ${mcpPane?.kind === 'server' && mcpPane.id === x.id ? 'on' : ''}`}
-								onClick={() => showMcp({ kind: 'server', id: x.id })}
-								title={x.lastTest?.message}
-							>
-								<span className={`dot ${!x.enabled ? '' : x.lastTest ? (x.lastTest.ok ? 'connected' : 'failed') : ''}`} aria-hidden />
-								<span className="ellipsis">{x.name}</span>
-								<span className="muted small nowrap">
-									{!x.enabled ? 'Off' : x.tools ? `${x.tools.filter((t) => t.allowed).length} tools` : 'Not tested'}
-								</span>
-							</button>
-						))}
-						<button
-							className={`conn-item ${mcpPane?.kind === 'new' ? 'on' : ''}`}
-							onClick={() => showMcp({ kind: 'new' })}
-							title="Give reviewers tools from an MCP server"
-						>
-							<span className="ellipsis">+ Add MCP server</span>
-						</button>
-						<button className={`conn-item ${mcpPane?.kind === 'import' ? 'on' : ''}`} onClick={() => showMcp({ kind: 'import' })}>
-							<span className="ellipsis">+ Import from Claude Code</span>
-						</button>
-						<div className="section-title add-title">App</div>
-						<button
-							className={`conn-item ${side === 'appearance' ? 'on' : ''}`}
-							onClick={() => {
-								setAdding(null)
-								setEditingTeam(null)
-								setMcpPane(null)
-								setSide('appearance')
-							}}
-							title="Light or dark, and the colour theme"
-						>
-							<span className="ellipsis">Appearance</span>
-						</button>
-						<div className="app-version muted small selectable">Review {__APP_VERSION__}</div>
-					</nav>
-					<section className="settings-main">
-						{side === 'usage' ? (
-							<UsageSettings connections={settings.connections} />
-						) : side === 'appearance' ? (
-							<AppearanceSettings />
-						) : mcpPane?.kind === 'import' ? (
-							<McpImport repoId={repoId} run={mcpRun} onDone={() => setMcpPane(null)} />
-						) : mcpPane && (mcpPane.kind === 'new' || mcpServer) ? (
-							<McpServerEditor
-								key={mcpServer?.id ?? 'new'}
-								server={mcpServer}
-								repoId={repoId}
-								lookups={settings.limits.lookups !== false}
-								secure={mcp?.secureStorage ?? false}
-								run={mcpRun}
-								onSaved={(id) => setMcpPane({ kind: 'server', id })}
-								onRemoved={() => setMcpPane(null)}
-								onCancel={() => setMcpPane(null)}
-							/>
-						) : editingTeam ? (
-							<TeamEditor
-								key={editingTeam.team.id}
-								settings={settings}
-								team={editingTeam.team}
-								isNew={editingTeam.isNew}
-								onCancel={() => setEditingTeam(null)}
-								onSave={async (t) => {
-									const ok = await run(window.review.saveTeam(t))
-									if (ok) {
-										if (editingTeam.isNew) await run(window.review.selectTeam(t.id))
-										setEditingTeam({ team: t, isNew: false })
-									}
-									return ok
-								}}
-								onRemove={async () => {
-									if (!window.confirm(`Delete ${editingTeam.team.name}?`)) return
-									if (await run(window.review.removeTeam(editingTeam.team.id))) setEditingTeam(null)
-								}}
-							/>
-						) : adding ? (
-							<AddConnection
-								key={`${adding.kind}:${adding.preset ?? ''}`}
-								provider={settings.providers.find((p) => p.kind === adding.kind)!}
-								initialPreset={adding.preset}
-								onCancel={() => setAdding(null)}
-								onCreate={async (input) => {
-									const r = await window.review.createConnection(input)
-									if (!r.ok) {
-										setError(r.error.message)
-										return
-									}
-									onChange(r.value)
-									const created = r.value.connections.find((c) => !settings.connections.some((o) => o.id === c.id))
-									setAdding(null)
-									setSelectedId(created?.id ?? null)
-								}}
-							/>
-						) : selected ? (
-							<ConnectionDetail
-								key={selected.id}
-								connection={selected}
-								provider={settings.providers.find((p) => p.kind === selected.kind)}
-								settings={settings}
-								run={run}
-								onRemoved={() => setSelectedId(null)}
-							/>
-						) : (
-							<div className="muted pad">Choose a provider on the left to connect it.</div>
-						)}
-					</section>
-				</div>
-				<FindingLevels settings={settings} run={run} />
-				<Limits settings={settings} run={run} />
-			</div>
-		</div>
-	)
-}
-
-function AddConnection({
+export function AddConnection({
 	provider,
 	initialPreset,
 	onCancel,
@@ -605,7 +290,7 @@ function PriceEditor({
 	)
 }
 
-function ConnectionDetail({
+export function ConnectionDetail({
 	connection: c,
 	provider,
 	settings,
@@ -887,14 +572,13 @@ function ConnectionDetail({
 	)
 }
 
-function FindingLevels({ settings, run }: { settings: AiSettingsView; run(p: Promise<Result<AiSettingsView>>): Promise<boolean> }) {
+export function FindingLevels({ settings, run }: { settings: AiSettingsView; run(p: Promise<Result<AiSettingsView>>): Promise<boolean> }) {
 	const { enabled, autoAdd } = settings.levels
 	const save = (next: FindingLevelSettings): void => void run(window.review.setFindingLevels(next))
 	const toggle = (list: Array<FindingLevel>, l: FindingLevel, on: boolean): Array<FindingLevel> =>
 		FINDING_LEVELS.filter((x) => (x === l ? on : list.includes(x)))
 	return (
-		<details className="limits">
-			<summary>Finding levels</summary>
+		<div className="limits">
 			<table className="level-table">
 				<thead>
 					<tr>
@@ -947,11 +631,11 @@ function FindingLevels({ settings, run }: { settings: AiSettingsView; run(p: Pro
 				to the code become your comments: nothing is posted until you publish, and you can edit or delete them first. Changes apply to the
 				next run.
 			</div>
-		</details>
+		</div>
 	)
 }
 
-function Limits({ settings, run }: { settings: AiSettingsView; run(p: Promise<Result<AiSettingsView>>): Promise<boolean> }) {
+export function Limits({ settings, run }: { settings: AiSettingsView; run(p: Promise<Result<AiSettingsView>>): Promise<boolean> }) {
 	const [v, setV] = useState(settings.limits)
 	const changed =
 		v.contextLines !== settings.limits.contextLines ||
@@ -962,8 +646,7 @@ function Limits({ settings, run }: { settings: AiSettingsView; run(p: Promise<Re
 		v.verify !== settings.limits.verify ||
 		v.groupDuplicates !== settings.limits.groupDuplicates
 	return (
-		<details className="limits">
-			<summary>Review input limits</summary>
+		<div className="limits">
 			<div className="limits-row">
 				<label className="field">
 					<span>Context lines</span>
@@ -1038,6 +721,6 @@ function Limits({ settings, run }: { settings: AiSettingsView; run(p: Promise<Re
 			<div className="muted small limits-note">
 				Requests shrink automatically to fit the model. Anything over a limit is listed as skipped.
 			</div>
-		</details>
+		</div>
 	)
 }

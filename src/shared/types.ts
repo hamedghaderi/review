@@ -1196,7 +1196,7 @@ export interface UsageTotals {
 
 export type UsagePeriod = 'day' | 'month'
 
-/** Settings → AI providers → Usage: the last 30 days by day, or the last 12 months by month, in local time. */
+/** Settings → AI review → Usage: the last 30 days by day, or the last 12 months by month, in local time. */
 export interface UsageSummary {
 	by: UsagePeriod
 	periods: Array<{ key: string; totals: UsageTotals }> // every period in the window, newest first, empty ones included
@@ -1226,7 +1226,7 @@ export interface SpendTotals {
 	outputTokens: number
 }
 
-/** Settings → AI providers → Usage → Budgets. */
+/** Settings → AI review → Usage → Budgets. */
 export interface BudgetView {
 	budgets: BudgetSettings
 	today: SpendTotals & { connections: Record<string, SpendTotals> }

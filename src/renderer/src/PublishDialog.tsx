@@ -234,7 +234,7 @@ export function PublishDialog({
 										Create a token with “Pull requests: Read and write” ↗
 									</a>
 									<button className="link" onClick={onOpenGitHubSettings}>
-										Enter it under GitHub settings
+										Enter it in Settings → GitHub
 									</button>
 								</div>
 							)}
