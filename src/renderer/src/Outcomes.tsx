@@ -51,7 +51,6 @@ function CostCell({ cost, accepted }: { cost: AiCost | null; accepted: number })
 	return (
 		<span title={[`${formatCost(cost)} in all.`, costCaveat(cost)].filter(Boolean).join(' ')}>
 			{each ? formatCost(each) : <span className="muted">none accepted</span>}
-			{each && cost.estimated ? ' est.' : ''}
 		</span>
 	)
 }
@@ -89,7 +88,7 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 							Likely wrong
 						</th>
 						{withCost && (
-							<th className="num" title="What its runs cost, divided by the problems you accepted">
+							<th className="num cost" title="What its runs cost, divided by the problems you accepted">
 								Per accepted
 							</th>
 						)}
@@ -134,7 +133,7 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 									{c.checked ? c.likelyWrong : <span className="muted">—</span>}
 								</td>
 								{withCost && (
-									<td className="num">
+									<td className="num cost">
 										<CostCell cost={r.cost} accepted={c.accepted} />
 									</td>
 								)}

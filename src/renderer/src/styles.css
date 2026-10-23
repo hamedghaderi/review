@@ -4943,7 +4943,15 @@ button.stack-row:hover {
 }
 .outcomes-table th:first-child,
 .outcomes-table td:first-child {
-	width: 24%;
+	width: 22%;
+}
+/* Room for "at least $0.41"; whatever still doesn't fit is cut off with its full text in the tooltip. */
+.outcomes-table .cost {
+	width: 13%;
+}
+.outcomes-table td {
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 .home-check {
 	display: inline-flex;
