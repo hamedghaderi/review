@@ -29,7 +29,7 @@
 		"@modelcontextprotocol/sdk": "1.32.0",
 		"openai": "7.25.0",
 		"semver": "7.8.5",
-		"zod": "4.6.5"
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@types/node": "22.20.4",
@@ -38,8 +38,8 @@
 		"@types/semver": "7.8.0",
 		"@vitejs/plugin-react": "5.2.0",
 		"@yogesharc/thinking-orbs": "0.1.1",
-		"dompurify": "3.4.16",
-		"electron": "44.5.0",
+		"dompurify": "3.4.17",
+		"electron": "44.9.1",
 		"electron-builder": "26.15.3",
 		"electron-vite": "5.0.0",
 		"prettier": "3.9.9",
