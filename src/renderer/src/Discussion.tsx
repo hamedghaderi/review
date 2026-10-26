@@ -257,8 +257,8 @@ export type DraftFn = (threadId: string) => Promise<{ text: string } | { error: 
 
 /**
  * Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state.
- * `onDraft` asks the AI for a draft, which only fills the box: you edit it and press Reply yourself. `asked`: the thread
- * waits for your answer, so drafting is offered first.
+ * `onDraft` asks the AI for a draft, which only fills the box: you edit it and press Reply yourself. It is offered up
+ * front only when the thread waits for your answer (`asked`); elsewhere only once you open the box to reply.
  */
 export function ThreadReplyBox({
 	t,
@@ -295,7 +295,7 @@ export function ThreadReplyBox({
 	}
 	const draftButton = onDraft && (
 		<button
-			className={`btn small ${asked && !open ? '' : 'ghost'}`}
+			className={`btn small ${open ? 'ghost' : ''}`}
 			onClick={() => void draft()}
 			disabled={drafting || busy}
 			title="Your model for questions drafts a reply from the thread and the code. Nothing is sent until you press Reply."
@@ -304,6 +304,8 @@ export function ThreadReplyBox({
 				<>
 					<AiOrb activity="reasoning" size={12} /> Drafting…
 				</>
+			) : open ? (
+				'Draft with AI'
 			) : (
 				'Draft reply'
 			)}
@@ -326,7 +328,7 @@ export function ThreadReplyBox({
 				<button className="btn small ghost" onClick={() => setOpen(true)}>
 					Reply
 				</button>
-				{draftButton}
+				{asked && draftButton}
 				{t.resolved === false && (
 					<button className="btn small ghost" onClick={() => void send(true)} disabled={busy}>
 						{busy ? 'Resolving…' : 'Resolve'}
