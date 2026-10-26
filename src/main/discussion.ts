@@ -1,5 +1,5 @@
 import type { ChangedFile, Comparison, Discussion, DiscussionThread } from '../shared/types.ts'
-import type { Activity } from './activity.ts'
+import type { Activity, RawThread } from './activity.ts'
 import { resolveCommit } from './git.ts'
 import { Mapper } from './linemap.ts'
 
@@ -13,6 +13,7 @@ export async function placeThreads(root: string, c: Comparison, a: Activity): Pr
 	const current = a.headSha === c.headSha && !!c.pr && a.baseSha === c.pr.baseSha
 	const headLocal = a.headSha === c.headSha || (await resolveCommit(root, a.headSha)) === a.headSha
 	const toSnapshot = new Mapper(root, a.headSha, c.headSha)
+	const changedSinceMine = await sinceMine(root, a, headLocal)
 	const short = a.headSha.slice(0, 7)
 	const out: Array<DiscussionThread> = []
 	for (const t of a.threads) {
@@ -49,12 +50,52 @@ export async function placeThreads(root: string, c: Comparison, a: Activity): Pr
 			fileKey: file?.key ?? null,
 			originalLine: t.originalLine,
 			diffHunk: t.diffHunk,
+			changedSinceMine: await changedSinceMine(t),
 			comments: t.comments,
 			commentsOmitted: t.commentsOmitted,
 			url: t.url,
 		})
 	}
 	return out
+}
+
+/**
+ * Whether a thread's code changed between the commit of the viewer's last review and the PR head, so a fix pushed
+ * without a reply still shows. GitHub's `outdated` can't say this: it counts from when the thread was written, which
+ * may be several rounds back. A thread already outdated when you reviewed is not changed since. Null when there is
+ * no review to compare with, either commit isn't local, the thread is on the old side, or it was started after it.
+ */
+async function sinceMine(root: string, a: Activity, headLocal: boolean): Promise<(t: RawThread) => Promise<boolean | null>> {
+	const at = a.mine?.at
+	const commit = a.mine?.commit
+	if (!at || !commit) return async () => null
+	if (commit === a.headSha) return async () => false
+	if (!headLocal || (await resolveCommit(root, commit)) !== commit) return async () => null
+	const back = new Mapper(root, a.headSha, commit)
+	const toMine = new Map<string, Mapper | null>() // by the commit a thread was written on
+	return async (t) => {
+		if (t.side === 'old' || (t.comments[0]?.createdAt ?? '') > at) return null
+		if (t.subject === 'file') {
+			const m = await back.move(t.path)
+			return m.path === null || m.oldBlob !== m.newBlob
+		}
+		if (!t.outdated && t.line !== null) {
+			const m = await back.move(t.path)
+			return m.path === null || (await back.range(m, t.startLine ?? t.line, t.line)) === null
+		}
+		// Outdated now: changed since your review only if it still applied then.
+		if (t.originalCommit === null || t.originalLine === null) return null
+		if (t.originalCommit === commit) return true
+		if (!toMine.has(t.originalCommit))
+			toMine.set(
+				t.originalCommit,
+				(await resolveCommit(root, t.originalCommit)) === t.originalCommit ? new Mapper(root, t.originalCommit, commit) : null,
+			)
+		const fwd = toMine.get(t.originalCommit)
+		if (!fwd) return null
+		const m = await fwd.move(t.path)
+		return m.path !== null && (await fwd.range(m, t.originalStartLine ?? t.originalLine, t.originalLine)) !== null
+	}
 }
 
 /** GitHub names both sides of a file by its new path (a deleted file by its old one). */
@@ -80,5 +121,6 @@ export function discussionOf(c: Comparison, a: Activity, threads: Array<Discussi
 		reviews: a.reviews,
 		conversation: a.conversation,
 		omitted: a.omitted,
+		mine: a.mine ?? null,
 	}
 }

@@ -1,4 +1,4 @@
-import type { Anchor, DiscussionThread } from '../../shared/types.ts'
+import type { Anchor, DiscussionThread, MyLastReview } from '../../shared/types.ts'
 
 /**
  * Threads on GitHub that already cover `a`: line threads placed on overlapping lines of the same side, or file
@@ -19,13 +19,38 @@ export function hasReply(t: DiscussionThread): boolean {
 	return t.commentsOmitted > 0 || t.comments.slice(1).some((c) => c.author !== author)
 }
 
-export type ThreadFilter = 'all' | 'open' | 'resolved'
+export type ThreadFilter = 'all' | 'since' | 'open' | 'resolved'
 
 /** The GitHub panel filter. `author`: anyone who wrote in the thread, not only who started it. */
-export function matchesThread(t: DiscussionThread, state: ThreadFilter, author: string | null): boolean {
+export function matchesThread(t: DiscussionThread, state: ThreadFilter, author: string | null, mine: MyLastReview | null = null): boolean {
+	if (state === 'since' && (!mine || !sinceMine(t, mine))) return false
 	if (state === 'open' && t.resolved !== false) return false
 	if (state === 'resolved' && t.resolved !== true) return false
 	return !author || t.comments.some((c) => c.author === author)
+}
+
+/**
+ * What happened to a thread since your last review: someone else started it (`new`) or answered in it (`replied`),
+ * the code under one you wrote in changed without an answer (`changed`), or one you wrote in is open with nothing
+ * since (`waiting`). Null: nothing for you to look at. Replies GitHub left out (past the first 30) aren't checked.
+ */
+export type SinceMine = 'new' | 'replied' | 'changed' | 'waiting'
+
+export const SINCE_ORDER: Record<SinceMine, number> = { new: 0, replied: 1, changed: 2, waiting: 3 }
+
+export function sinceMine(t: DiscussionThread, mine: MyLastReview): SinceMine | null {
+	const first = t.comments[0]
+	if (first && isNewSince(first, mine)) return first.author === mine.viewer ? null : 'new'
+	if (t.comments.some((c) => isNewSince(c, mine) && c.author !== mine.viewer)) return 'replied'
+	if (!t.comments.some((c) => c.author === mine.viewer)) return null
+	if (t.changedSinceMine) return 'changed' // a fix is often resolved in the same push, so this counts when resolved too
+	return t.resolved === true ? null : 'waiting'
+}
+
+/** Written after your last review (your own unsubmitted comments aren't). */
+export function isNewSince(c: { createdAt?: string | null; submittedAt?: string | null; pending?: boolean }, mine: MyLastReview): boolean {
+	const at = c.createdAt ?? c.submittedAt ?? null
+	return !c.pending && at !== null && at > mine.at
 }
 
 export function discussedAt(threads: Array<DiscussionThread>, a: Anchor, own: ReadonlySet<string> = new Set()): Array<DiscussionThread> {

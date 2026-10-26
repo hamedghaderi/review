@@ -9,8 +9,8 @@ import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '.
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
-import { discussedAt, hasReply, matchesThread, ownThread } from '../src/renderer/src/discussed.ts'
-import type { Anchor, Comparison, CredentialStorageInfo, DiscussionThread } from '../src/shared/types.ts'
+import { discussedAt, hasReply, isNewSince, matchesThread, ownThread, sinceMine } from '../src/renderer/src/discussed.ts'
+import type { Anchor, Comparison, CredentialStorageInfo, DiscussionComment, DiscussionThread, MyLastReview } from '../src/shared/types.ts'
 
 function tmp(): string {
 	return mkdtempSync(join(tmpdir(), 'review-disc-'))
@@ -472,4 +472,136 @@ test('thread filters: open/resolved, anyone who wrote in it, and whether someone
 	assert.equal(hasReply(open), true)
 	assert.equal(hasReply(t(false, ['me', 'me'])), false, 'only my own follow-ups')
 	assert.equal(hasReply(t(false, ['me'], 2)), true, 'replies GitHub left out')
+})
+
+test('your last review: the newest one you submitted, even with only inline comments; none without knowing who you are', () => {
+	const page = (reviews: Array<{ login: string; state: string; at: string; commit: string }>) => ({
+		headRefOid: 'h',
+		baseRefOid: 'b',
+		reviewThreads: { totalCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+		reviews: {
+			totalCount: reviews.length,
+			nodes: reviews.map((r, i) => ({
+				id: `R${i}`,
+				author: { login: r.login },
+				state: r.state,
+				body: '',
+				submittedAt: r.at,
+				url: `https://github.com/r/${i}`,
+				commit: { oid: r.commit },
+			})),
+		},
+		comments: { totalCount: 0, nodes: [] },
+	})
+	const p = page([
+		{ login: 'me', state: 'CHANGES_REQUESTED', at: '2026-10-01T10:00:00Z', commit: 'c1' },
+		{ login: 'me', state: 'COMMENTED', at: '2026-10-03T10:00:00Z', commit: 'c2' }, // inline comments only
+		{ login: 'ann', state: 'APPROVED', at: '2026-10-04T10:00:00Z', commit: 'c3' },
+		{ login: 'me', state: 'PENDING', at: '2026-10-05T10:00:00Z', commit: 'c3' },
+	])
+	const g = fromGraphql([p], 'me')
+	assert.deepEqual(g.mine, { viewer: 'me', state: 'COMMENTED', at: '2026-10-03T10:00:00Z', commit: 'c2', url: 'https://github.com/r/1' })
+	assert.deepEqual(
+		g.reviews.map((r) => r.id),
+		['R0', 'R2'],
+		'the list still leaves out empty and pending reviews',
+	)
+	assert.equal(fromGraphql([p]).mine, null)
+	const r = fromRest(
+		{ headSha: 'h', baseSha: 'b' },
+		[],
+		false,
+		[
+			{
+				node_id: 'N',
+				user: { login: 'me' },
+				state: 'APPROVED',
+				body: null,
+				submitted_at: '2026-10-02T00:00:00Z',
+				html_url: null,
+				commit_id: 'c9',
+			},
+		],
+		[],
+		'me',
+	)
+	assert.equal(r.mine?.commit, 'c9')
+})
+
+test('a thread’s code changed since your review: compared with the commit you reviewed, not when it was written', async () => {
+	const w = world()
+	const snap = await snapshot(w.dir, w.base, w.v2)
+	const mine = { viewer: 'me', state: 'CHANGES_REQUESTED', at: '2026-10-10T00:00:00Z', commit: w.v1, url: null }
+	const later = (o: Partial<RawThread>) =>
+		thread({ ...o, comments: [{ ...thread({}).comments[0], id: `${o.id}-c`, createdAt: '2026-10-11T00:00:00Z' }] })
+	const a: Activity = {
+		...activity(w.v2, w.base, [
+			thread({ id: 'same', line: 7, startLine: 7 }), // v2 line 7 = v1 line 5, unchanged
+			thread({ id: 'fixed', line: 17 }), // v2 line 17 = "B15", was "A15" when you reviewed
+			thread({ id: 'out-after', outdated: true, line: null, originalLine: 15, originalCommit: w.v1 }),
+			thread({ id: 'out-before', outdated: true, line: null, originalLine: 15, originalCommit: w.base }), // already outdated at v1
+			thread({ id: 'file', subject: 'file', side: null }),
+			thread({ id: 'old-side', side: 'old', line: 5 }),
+			later({ id: 'started-after', line: 7 }),
+		]),
+		mine,
+	}
+	const by = async (x: Activity) => new Map((await placeThreads(w.dir, snap, x)).map((t) => [t.id, t.changedSinceMine]))
+	const got = await by(a)
+	assert.deepEqual(Object.fromEntries(got), {
+		same: false,
+		fixed: true,
+		'out-after': true,
+		'out-before': false,
+		file: true,
+		'old-side': null,
+		'started-after': null,
+	})
+	assert.ok(
+		[...(await by({ ...a, mine: { ...mine, commit: w.v2 } })).values()].every((v) => v === false),
+		'reviewed the head',
+	)
+	assert.ok(
+		[...(await by({ ...a, mine: null })).values()].every((v) => v === null),
+		'no review to compare with',
+	)
+	assert.ok(
+		[...(await by({ ...a, mine: { ...mine, commit: 'e'.repeat(40) } })).values()].every((v) => v === null),
+		'the commit you reviewed is not here',
+	)
+	assert.deepEqual(discussionOf(snap, a, []).mine, mine)
+})
+
+test('since your review: new threads, replies, silent fixes and threads still waiting, in that order of interest', () => {
+	const mine: MyLastReview = { viewer: 'me', state: 'CHANGES_REQUESTED', at: '2026-10-10T00:00:00Z', commit: 'c', url: null }
+	const c = (author: string, at: string, pending = false): DiscussionComment => ({
+		id: `${author}${at}`,
+		author,
+		association: null,
+		body: '',
+		bodyTruncated: false,
+		createdAt: at,
+		url: null,
+		pending,
+	})
+	const before = '2026-10-09T00:00:00Z'
+	const after = '2026-10-11T00:00:00Z'
+	const t = (comments: Array<DiscussionComment>, o: Partial<DiscussionThread> = {}) =>
+		({ resolved: false, changedSinceMine: false, comments, commentsOmitted: 0, ...o }) as DiscussionThread
+	assert.equal(sinceMine(t([c('ann', after)]), mine), 'new')
+	assert.equal(sinceMine(t([c('me', after)]), mine), null, 'your own new thread')
+	assert.equal(sinceMine(t([c('me', before), c('ann', after)]), mine), 'replied')
+	assert.equal(sinceMine(t([c('bob', before), c('ann', after)]), mine), 'replied', 'answers in others’ threads count too')
+	assert.equal(sinceMine(t([c('me', before), c('me', after)]), mine), 'waiting', 'only your own follow-up')
+	assert.equal(sinceMine(t([c('me', before)], { changedSinceMine: true }), mine), 'changed')
+	assert.equal(sinceMine(t([c('me', before)], { changedSinceMine: true, resolved: true }), mine), 'changed', 'fixed and resolved')
+	assert.equal(sinceMine(t([c('me', before)], { resolved: true }), mine), null)
+	assert.equal(sinceMine(t([c('bob', before)], { changedSinceMine: true }), mine), null, 'not one you took part in')
+	assert.equal(sinceMine(t([c('me', before), c('ann', after, true)]), mine), 'waiting', 'unsubmitted replies are not new')
+	assert.equal(isNewSince({ submittedAt: after }, mine), true)
+	assert.equal(isNewSince({ createdAt: null }, mine), false)
+	const quiet = t([c('bob', before)])
+	assert.equal(matchesThread(quiet, 'since', null, mine), false)
+	assert.equal(matchesThread(t([c('me', before)]), 'since', null, mine), true)
+	assert.equal(matchesThread(quiet, 'since', null, null), false, 'no review to count from')
 })
