@@ -9,7 +9,7 @@ import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '.
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
-import { discussedAt, hasReply, isNewSince, matchesThread, ownThread, sinceMine } from '../src/renderer/src/discussed.ts'
+import { asksYou, discussedAt, hasReply, isNewSince, matchesThread, ownThread, sinceMine } from '../src/renderer/src/discussed.ts'
 import type { Anchor, Comparison, CredentialStorageInfo, DiscussionComment, DiscussionThread, MyLastReview } from '../src/shared/types.ts'
 
 function tmp(): string {
@@ -604,4 +604,39 @@ test('since your review: new threads, replies, silent fixes and threads still wa
 	assert.equal(matchesThread(quiet, 'since', null, mine), false)
 	assert.equal(matchesThread(t([c('me', before)]), 'since', null, mine), true)
 	assert.equal(matchesThread(quiet, 'since', null, null), false, 'no review to count from')
+})
+
+test('asks you: the last word is someone else’s question in your thread, or names you; answering clears it', () => {
+	const c = (author: string, body: string, pending = false): DiscussionComment => ({
+		id: `${author}:${body}`,
+		author,
+		association: null,
+		body,
+		bodyTruncated: false,
+		createdAt: '2026-10-01T00:00:00Z',
+		url: null,
+		pending,
+	})
+	const t = (comments: Array<DiscussionComment>, o: Partial<DiscussionThread> = {}) =>
+		({ resolved: false, comments, commentsOmitted: 0, ...o }) as DiscussionThread
+	const mine = (q: string) => t([c('me', 'This can be null.'), c('ann', q)])
+	assert.equal(asksYou(mine('Do you agree?'), 'me'), true)
+	assert.equal(asksYou(mine('What would you suggest instead? I tried a guard.'), 'me'), true, 'a question mid-text')
+	assert.equal(asksYou(mine('wdyt'), 'me'), true)
+	assert.equal(asksYou(mine('Fixed in abc123.'), 'me'), false)
+	assert.equal(asksYou(mine('Changed `a?.b` to a guard'), 'me'), false, 'a "?" in code')
+	assert.equal(asksYou(mine('```ts\nconst x = a ? b : c\n```\nDone'), 'me'), false, 'a "?" in a code block')
+	assert.equal(asksYou(mine('> can this be null?\nNo, it is checked above.'), 'me'), false, 'a quoted question')
+	assert.equal(asksYou(mine('See https://example.com/?q=1'), 'me'), false, 'a "?" in a link')
+	assert.equal(asksYou(t([c('me', 'Null?'), c('ann', 'Yes?'), c('me', 'Then guard it.')]), 'me'), false, 'you answered')
+	assert.equal(asksYou({ ...mine('Do you agree?'), resolved: true }, 'me'), false)
+	assert.equal(asksYou({ ...mine('Do you agree?'), commentsOmitted: 3 }, 'me'), false, 'the last reply may not be shown')
+	assert.equal(asksYou(t([c('bob', 'Hmm.'), c('ann', 'Any idea?')]), 'me'), false, 'not your thread, not named')
+	assert.equal(asksYou(t([c('bob', 'Hmm.'), c('ann', '@me can you check this.')]), 'me'), true, 'named, even without "?"')
+	assert.equal(asksYou(t([c('bob', 'Hmm.'), c('ann', 'cc @meow')]), 'me'), false, 'a longer login')
+	assert.equal(asksYou(t([c('bob', 'Hmm.'), c('ann', 'mail me@example.com')]), 'me'), false)
+	assert.equal(asksYou(t([c('me', 'Null?'), c('ann', 'Do you agree?'), c('me', 'draft', true)]), 'me'), true, 'an unsent reply')
+	assert.equal(asksYou(mine('Do you agree?'), null), false, 'without knowing who you are')
+	const review: MyLastReview = { viewer: 'me', state: 'COMMENTED', at: '2026-10-10T00:00:00Z', commit: null, url: null }
+	assert.equal(sinceMine(mine('Do you agree?'), review), 'asked', 'still waiting, though asked before your last review')
 })

@@ -3,6 +3,7 @@ import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, MyLastReview
 import { AiOrb } from './AiOrb.tsx'
 import {
 	AlreadyDiscussed,
+	AsksYou,
 	firstNew,
 	InlineReply,
 	MoreOnGitHub,
@@ -13,6 +14,7 @@ import {
 } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
 import { useMentionCommand } from './Mention.tsx'
+import { asksYou } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
 
@@ -226,6 +228,7 @@ export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, o
 				<b className="ic-who you">You</b>
 				{posted && <SentState posted={posted} />}
 				{thread && <ThreadState t={thread} />}
+				{thread && asksYou(thread, mine?.viewer ?? null) && <AsksYou />}
 				{comment.carried?.outdated && !thread?.outdated && (
 					<span className="ic-state warn" title={comment.carried.outdated.reason}>
 						Outdated

@@ -595,6 +595,7 @@ export interface Discussion {
 	omitted: { threads: number; comments: number; reviews: number; conversation: number }
 	/** Your last submitted review on the PR, which "since your review" counts from; null without one or without a token. */
 	mine?: MyLastReview | null // absent on discussions read before it was
+	viewer?: string | null // your GitHub login, to tell which questions are for you; null without a token
 }
 
 export interface MyLastReview {

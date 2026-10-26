@@ -3539,6 +3539,11 @@ input.member-role {
 	border-bottom: 1px solid var(--border);
 	background: var(--accent-soft);
 }
+.gh-pill.since-asked {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: var(--accent-text);
+}
 .gh-pill.since-new,
 .gh-pill.since-replied {
 	border-color: var(--accent);
