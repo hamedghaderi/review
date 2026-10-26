@@ -3,6 +3,7 @@ import type { HomeInbox, WatchedPr } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
 import type { ThemeSettings } from './theme.ts'
 import type { KeymapOverrides } from './keymap.ts'
+import type { NotesRange } from './releases.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -251,6 +252,14 @@ export interface AppUpdate {
 	current: string // the version running now
 	url: string // the release page to download from
 	canInstall: boolean // the release has this system's installer, so the app can download and open it
+}
+
+/** One published release of Review: its notes, as GitHub rendered them; sanitised again where they are shown. */
+export interface ReleaseNote {
+	version: string
+	html: string
+	url: string // its page on GitHub
+	date: string | null
 }
 
 /** A pull request's description as GitHub has it now: the Markdown, and GitHub's own rendering of it. */
@@ -1724,6 +1733,10 @@ export const IPC = {
 	skipUpdate: 'update:skip',
 	systemInfo: 'app:system-info',
 	feedbackOpen: 'feedback:open',
+	whatsNewOpen: 'whats-new:open',
+	whatsNewStatus: 'whats-new:status',
+	whatsNewSeen: 'whats-new:seen',
+	releaseNotes: 'whats-new:notes',
 	sidebarToggle: 'sidebar:toggle',
 	theme: 'app:theme',
 	setTheme: 'app:set-theme',
@@ -1926,6 +1939,14 @@ export interface ReviewApi {
 	systemInfo(): Promise<Result<string>>
 	/** Help › Send Feedback… was chosen in the menu. */
 	onFeedbackOpen(handler: () => void): () => void
+	/** Help › What's New. */
+	onWhatsNewOpen(handler: () => void): () => void
+	/** The release notes to show now that the app has started, or null when there is nothing new since you last looked. */
+	whatsNewStatus(): Promise<Result<NotesRange | null>>
+	/** Marks this version's notes as seen, so they aren't shown on the next start. */
+	whatsNewSeen(): Promise<Result<void>>
+	/** Recent releases' notes, newest first, read from GitHub. */
+	releaseNotes(): Promise<Result<Array<ReleaseNote>>>
 	/** View › Toggle Sidebar was chosen in the menu, or its shortcut pressed. */
 	onSidebarToggle(handler: () => void): () => void
 	/** Light or dark and the colour theme, as last chosen (the defaults until then). */

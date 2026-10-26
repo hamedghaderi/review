@@ -1,6 +1,6 @@
-import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppError, PrDescription } from '../../shared/types.ts'
+import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 
 interface Props {
@@ -201,50 +201,4 @@ export function DescriptionPanel({ repoId, reviewId, onConnect, explain }: Props
 			) : null}
 		</div>
 	)
-}
-
-/**
- * HTML that GitHub rendered from Markdown, sanitised again here: no scripts, styles, forms or event handlers. Links
- * open in your browser and show where they go; images become links, since the window loads no remote images.
- */
-function GitHubHtml({ html, empty }: { html: string; empty: string }) {
-	const box = useRef<HTMLDivElement>(null)
-	useEffect(() => {
-		const el = box.current
-		if (!el) return
-		const frag = DOMPurify.sanitize(html, {
-			USE_PROFILES: { html: true },
-			FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'video', 'audio', 'source'],
-			RETURN_DOM_FRAGMENT: true,
-		})
-		for (const a of frag.querySelectorAll('a')) {
-			const href = a.getAttribute('href') ?? ''
-			if (/^https?:\/\//i.test(href)) {
-				a.setAttribute('target', '_blank')
-				a.setAttribute('rel', 'noreferrer noopener')
-				a.setAttribute('title', href)
-			} else a.removeAttribute('href') // in-page anchors and other schemes: text only
-		}
-		for (const img of frag.querySelectorAll('img')) {
-			const src = img.getAttribute('src') ?? ''
-			const label = `🖼 ${img.getAttribute('alt')?.trim() || 'image'}`
-			const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
-			link.textContent = label
-			link.className = 'desc-image'
-			if (link instanceof HTMLAnchorElement) {
-				link.href = src
-				link.target = '_blank'
-				link.rel = 'noreferrer noopener'
-				link.title = 'Images aren’t loaded in the app. Opens in your browser.'
-			}
-			// GitHub wraps images in a link to the full-size file; keep a single link.
-			const parent = img.parentElement
-			if (parent instanceof HTMLAnchorElement && parent.childNodes.length === 1) parent.replaceWith(link)
-			else img.replaceWith(link)
-		}
-		for (const input of frag.querySelectorAll('input')) input.setAttribute('disabled', '')
-		el.replaceChildren(frag)
-	}, [html])
-	if (!html.trim()) return <p className="small muted desc-note">{empty}</p>
-	return <div ref={box} className="md-body selectable" />
 }

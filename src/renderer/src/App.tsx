@@ -75,6 +75,8 @@ import { Outcomes } from './Outcomes.tsx'
 import { Sidebar } from './Sidebar.tsx'
 import { MentionProvider, type Mentions } from './Mention.tsx'
 import { ExplainChange } from './ExplainChange.tsx'
+import { WhatsNew } from './WhatsNew.tsx'
+import type { NotesRange } from '../../shared/releases.ts'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
@@ -457,6 +459,18 @@ export function App() {
 	}, [openSession])
 	useEffect(() => window.review.onLinkOpen(() => void takeLinkRef.current()), [])
 	useEffect(() => window.review.onFeedbackOpen(() => setFeedbackOpen(true)), [])
+	// What's new: once after an update (marked seen when closed), from the update banner, and from Help › What's New.
+	const [whatsNew, setWhatsNew] = useState<{ range: NotesRange; afterUpdate: boolean } | null>(null)
+	useEffect(() => {
+		void window.review.whatsNewStatus().then((r) => r.ok && r.value && setWhatsNew({ range: r.value, afterUpdate: true }))
+		return window.review.onWhatsNewOpen(() => setWhatsNew({ range: { kind: 'all' }, afterUpdate: false }))
+	}, [])
+	const closeWhatsNew = useCallback(() => {
+		setWhatsNew((w) => {
+			if (w?.afterUpdate) void window.review.whatsNewSeen()
+			return null
+		})
+	}, [])
 	// View › Toggle Sidebar, ⌘B / Ctrl+B: the menu owns the shortcut, so it works wherever focus is.
 	useEffect(
 		() => window.review.onSidebarToggle(() => setSidebarRef.current(sidebarRef.current === 'collapsed' ? 'expanded' : 'collapsed')),
@@ -1618,6 +1632,14 @@ export function App() {
 								<>
 									<button
 										className="btn small ghost"
+										onClick={() =>
+											setWhatsNew({ range: { kind: 'since', from: appUpdate.current, to: appUpdate.version }, afterUpdate: false })
+										}
+									>
+										What’s new
+									</button>
+									<button
+										className="btn small ghost"
 										onClick={() => {
 											void window.review.skipUpdate(appUpdate.version)
 											setAppUpdate(null)
@@ -2024,6 +2046,7 @@ export function App() {
 					/>
 				)}
 				{feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
+				{whatsNew && <WhatsNew range={whatsNew.range} onClose={closeWhatsNew} />}
 				{settingsOpen && aiSettings && github && (
 					<Settings
 						page={settingsOpen.page}
