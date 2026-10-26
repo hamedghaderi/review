@@ -1480,6 +1480,12 @@ export interface GifResult {
 	url: string // https://media.giphy.com/media/<id>/giphy-downsized.gif
 }
 
+/** Someone who can be @mentioned in a comment. */
+export interface MentionUser {
+	login: string
+	name: string | null
+}
+
 export interface GifPage {
 	results: Array<GifResult>
 	next: number | null // offset of the next page, null at the end (or the per-search page limit)
@@ -1641,6 +1647,7 @@ export const IPC = {
 	prDescriptionPreview: 'gh:description-preview',
 	prDescriptionUpdate: 'gh:description-update',
 	replyToThread: 'gh:thread-reply',
+	mentionable: 'gh:mentionable',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
 	loadFileAt: 'diff:file-at',
@@ -1808,6 +1815,8 @@ export interface ReviewApi {
 	prDescriptionUpdate(repoId: string, reviewId: string, expected: string, body: string): Promise<Result<PrDescription>>
 	/** Posts a reply to a GitHub review thread (if `body` isn't blank) and/or resolves it. Only on explicit user action. */
 	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<Result<void>>
+	/** People GitHub lets you @mention in the PR's repository whose login or name matches `query`; empty without a token. */
+	mentionable(repoId: string, reviewId: string, query: string): Promise<Result<Array<MentionUser>>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
 	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */

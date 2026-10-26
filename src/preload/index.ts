@@ -87,6 +87,7 @@ const api: ReviewApi = {
 	prDescriptionUpdate: (repoId, reviewId, expected, body) => ipcRenderer.invoke(IPC.prDescriptionUpdate, repoId, reviewId, expected, body),
 	replyToThread: (repoId, reviewId, threadId, body, resolve) =>
 		ipcRenderer.invoke(IPC.replyToThread, repoId, reviewId, threadId, body, resolve),
+	mentionable: (repoId, reviewId, query) => ipcRenderer.invoke(IPC.mentionable, repoId, reviewId, query),
 	loadPatch: (comparisonId, fileKey, force) => ipcRenderer.invoke(IPC.loadPatch, comparisonId, fileKey, force),
 	loadFileLines: (comparisonId, fileKey) => ipcRenderer.invoke(IPC.loadFileLines, comparisonId, fileKey),
 	loadFileAt: (comparisonId, path, side) => ipcRenderer.invoke(IPC.loadFileAt, comparisonId, path, side),

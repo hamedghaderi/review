@@ -6,6 +6,7 @@ import type {
 	CredentialState,
 	CredentialStorageInfo,
 	GitHubStatus,
+	MentionUser,
 	NotificationPrefs,
 	PrDescription,
 	PrDetail,
@@ -1056,6 +1057,22 @@ fragment LinkedIssue on Issue {
 	}
 
 	/**
+	 * Who GitHub lets you @mention in `repo` (collaborators, org members and people who took part), matching `query` on
+	 * login or name: the same list github.com suggests from. Read-only; empty without a token, which GitHub requires.
+	 */
+	async mentionable(repo: string, query: string, signal?: AbortSignal): Promise<Array<MentionUser>> {
+		checkRepo(repo)
+		if (!(await this.token())) return []
+		const [owner, name] = repo.split('/')
+		const d = await this.graphql<{
+			repository: { mentionableUsers: { nodes: Array<{ login: string; name: string | null } | null> } } | null
+		}>(MENTIONABLE_QUERY, { owner, name, q: query.trim() || null }, signal)
+		return (d.repository?.mentionableUsers.nodes ?? []).flatMap((u) =>
+			u && LOGIN_RE.test(u.login) ? [{ login: u.login, name: u.name?.trim().slice(0, 100) || null }] : [],
+		)
+	}
+
+	/**
 	 * The PR's existing review threads, reviews and conversation. Read-only. With a token this is GraphQL, the only
 	 * API that reports resolved and outdated threads; without one it falls back to REST and says resolved state is
 	 * unknown.
@@ -1467,6 +1484,14 @@ interface GqlGraph {
 }
 
 // The pull request's review decision and each person's latest reviews, for one PR (the preview and an open review).
+const MENTIONABLE_QUERY = `query($owner: String!, $name: String!, $q: String) {
+  rateLimit { remaining limit resetAt }
+  repository(owner: $owner, name: $name) { mentionableUsers(first: 8, query: $q) { nodes { login name } } }
+}`
+
+/** A GitHub login as GitHub allows it, so nothing else ends up in a comment as a mention. */
+const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+
 const PR_REVIEWS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   rateLimit { remaining limit resetAt }
   repository(owner: $owner, name: $name) { pullRequest(number: $number) { author { login } ${REVIEW_FIELDS} } }

@@ -142,7 +142,7 @@ function GifResults({ search, query, selected, onPick, onOpenSettings, hint }: R
  * A panel drawn over the whole window, next to `anchor`: above or below it, whichever has more room, never taller than
  * that room (its content scrolls instead). Drawn outside any dialog, so a dialog edge cannot cut it off.
  */
-function Floating({
+export function Floating({
 	anchor,
 	prefer,
 	panelRef,

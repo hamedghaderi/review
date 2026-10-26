@@ -4039,6 +4039,20 @@ button.stack-row:hover {
 .slash-item:hover {
 	background: var(--hover);
 }
+/* "@" suggestions in a comment box */
+.mention-menu [role='listbox'] {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow-y: auto;
+}
+.mention-login {
+	font-weight: 600;
+	flex-shrink: 0;
+}
+.mention-foot {
+	padding: 2px 8px 4px;
+}
 .slash-item kbd {
 	font-size: 10px;
 	color: var(--text-2);

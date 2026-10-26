@@ -22,6 +22,7 @@ import type {
 	FindingLevel,
 	GitHubMapping,
 	LoadedComparison,
+	MentionUser,
 	ModelSelection,
 	PatchResult,
 	PrDescription,
@@ -208,6 +209,14 @@ export class ReviewService {
 		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
 		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
 		return this.requireGitHub().replyToThread(pr.repo, pr.number, threadId, body, resolve)
+	}
+
+	/** People who can be @mentioned in the open PR review's repository; empty without a token (GitHub needs one). */
+	async mentionable(repoId: string, reviewId: string, query: string): Promise<Array<MentionUser>> {
+		this.repo(repoId)
+		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
+		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
+		return this.requireGitHub().mentionable(pr.repo, query)
 	}
 
 	/**
