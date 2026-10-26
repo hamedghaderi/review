@@ -18,6 +18,7 @@ const KIND_LABEL: Record<UsageKind, string> = {
 	explain: 'Questions about code',
 	verify: 'Verify',
 	test: 'Write test',
+	reply: 'Drafted replies',
 }
 
 function Cost({ totals }: { totals: UsageTotals }) {

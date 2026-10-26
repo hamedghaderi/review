@@ -1178,8 +1178,8 @@ export interface AiCost {
 }
 
 // review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
-// verify and test: Verify and Write test on a finding.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test'
+// verify and test: Verify and Write test on a finding; reply: a drafted reply in a GitHub thread.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'reply'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1677,6 +1677,7 @@ export const IPC = {
 	aiCheckFixed: 'ai:check-fixed',
 	aiWriteTest: 'ai:write-test',
 	aiAskCode: 'ai:ask-code',
+	aiDraftReply: 'ai:draft-reply',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -1890,6 +1891,8 @@ export interface ReviewApi {
 	 * same lines. Returns the review's updated list of questions.
 	 */
 	askCode(reviewId: string, anchor: Anchor, question: string, questionId: string | null): Promise<Result<Array<CodeQuestion>>>
+	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
+	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
 	/** Forgets one conversation about selected code. */
 	deleteCodeQuestion(reviewId: string, questionId: string): Promise<Result<Array<CodeQuestion>>>
 	gifStatus(): Promise<Result<GifStatus>>
