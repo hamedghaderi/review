@@ -12,6 +12,7 @@ import {
 	type ReplyFn,
 } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
+import { useMentionCommand } from './Mention.tsx'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
 
@@ -86,6 +87,7 @@ export function Composer({
 		ref.current?.focus({ preventScroll: true })
 	}, [draft.id])
 	const gif = useGifCommand(draft.body, ref, (next) => onChange(next))
+	const mention = useMentionCommand(draft.body, ref, (next) => onChange(next))
 	const a = draft.anchor
 	const editing = draft.commentId !== null
 	return (
@@ -123,7 +125,7 @@ export function Composer({
 					rows={3}
 					onChange={(e) => onChange(e.target.value)}
 					onKeyDown={(e) => {
-						if (gif.onKeyDown(e)) return
+						if (gif.onKeyDown(e) || mention.onKeyDown(e)) return
 						if (e.key === 'Enter' && e.altKey && onAskCode) {
 							e.preventDefault()
 							if (draft.body.trim() && !askCodeDisabled) onAskCode()
@@ -137,6 +139,7 @@ export function Composer({
 					}}
 				/>
 				{gif.panel}
+				{mention.panel}
 			</div>
 			<div className="composer-actions">
 				<span className="muted small">⌘↵ to {editing ? 'update' : 'add'} · Esc to close</span>

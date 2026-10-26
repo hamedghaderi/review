@@ -7,6 +7,7 @@ const oldCount = (ci: HeadChecks): number => ci.failed.filter((f) => f.atBase ==
 import { ago } from './branches.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
+import { useMentionCommand } from './Mention.tsx'
 import { insertGif } from '../../shared/gif.ts'
 import { plainPreview } from './reviewOps.ts'
 
@@ -101,6 +102,7 @@ export function PublishDialog({
 		placeCursor(r.cursor)
 	}
 	const gifCommand = useGifCommand(summary, summaryRef, (next) => setSummary(next), onOpenGitHubSettings, 'above')
+	const mention = useMentionCommand(summary, summaryRef, (next) => setSummary(next), 'above')
 
 	const load = useCallback(
 		async (keepSelection: boolean) => {
@@ -469,11 +471,12 @@ export function PublishDialog({
 										placeholder={`Summary${event === 'APPROVE' ? ' (optional)' : ''} · type /gif and a word for a GIF`}
 										value={summary}
 										onChange={(e) => setSummary(e.target.value)}
-										onKeyDown={(e) => void gifCommand.onKeyDown(e)}
+										onKeyDown={(e) => void (gifCommand.onKeyDown(e) || mention.onKeyDown(e))}
 										rows={4}
 										disabled={!!running}
 									/>
 									{gifCommand.panel}
+									{mention.panel}
 									<div className="summary-tools">
 										<EmojiPicker disabled={!!running} onPick={insertText} />
 										<GifPicker disabled={!!running} onPick={pickGif} onOpenSettings={onOpenGitHubSettings} />

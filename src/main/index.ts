@@ -343,6 +343,9 @@ function registerIpc(): void {
 	handle(IPC.submitReview, (repoId: unknown, reviewId: unknown, event: unknown, body: unknown) =>
 		service.submitReview(str(repoId, 'repository'), comparisonId(reviewId), reviewEvent(event), reviewBody(body)),
 	)
+	handle(IPC.mentionable, (repoId: unknown, reviewId: unknown, query: unknown) =>
+		service.mentionable(str(repoId, 'repository'), comparisonId(reviewId), typeof query === 'string' ? query.slice(0, 39) : ''),
+	)
 	handle(IPC.replyToThread, (repoId: unknown, reviewId: unknown, threadId: unknown, body: unknown, resolve: unknown) =>
 		service.replyToThread(
 			str(repoId, 'repository'),

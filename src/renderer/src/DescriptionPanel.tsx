@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppError, PrDescription } from '../../shared/types.ts'
+import { useMentionCommand } from './Mention.tsx'
 
 interface Props {
 	repoId: string
@@ -39,6 +40,8 @@ export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
 		},
 		[key],
 	)
+	const inputRef = useRef<HTMLTextAreaElement>(null)
+	const mention = useMentionCommand(draft?.text ?? '', inputRef, (next) => draft && setDraft({ ...draft, text: next }))
 
 	const load = useCallback(async () => {
 		setLoading(true)
@@ -142,6 +145,7 @@ export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
 			{d && !d.canEdit && d.editIssue && !draft && <p className="small muted desc-note">{d.editIssue}</p>}
 			{draft ? (
 				<div className="desc-editor">
+					{draft.tab === 'write' && mention.panel}
 					<div className="seg" role="tablist" aria-label="Editor">
 						{(['write', 'preview'] as const).map((t) => (
 							<button
@@ -157,6 +161,7 @@ export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
 					</div>
 					{draft.tab === 'write' ? (
 						<textarea
+							ref={inputRef}
 							className="desc-input mono"
 							value={draft.text}
 							spellCheck
@@ -165,6 +170,7 @@ export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
 							aria-label="Pull request description (Markdown)"
 							onChange={(e) => setDraft({ ...draft, text: e.target.value })}
 							onKeyDown={(e) => {
+								if (mention.onKeyDown(e)) return
 								if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && draft.text !== draft.base) {
 									e.preventDefault()
 									void save()

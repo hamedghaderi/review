@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
 	ChangedFile,
 	Discussion,
@@ -11,6 +11,7 @@ import type {
 import { ago } from './branches.ts'
 import { isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
+import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
 const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'since', 'open', 'resolved']
@@ -242,6 +243,8 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 	const [text, setText] = useState('')
 	const [busy, setBusy] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	const ref = useRef<HTMLTextAreaElement>(null)
+	const mention = useMentionCommand(text, ref, (next) => setText(next))
 	if (t.resolved === null) return null
 	const send = async (resolve: boolean): Promise<void> => {
 		if (busy || (!text.trim() && !resolve)) return
@@ -270,12 +273,14 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 	return (
 		<div className="ask-box reply-box">
 			<textarea
+				ref={ref}
 				autoFocus
 				value={text}
 				rows={2}
 				placeholder="Reply on GitHub (⌘↵ to send)"
 				onChange={(e) => setText(e.target.value)}
 				onKeyDown={(e) => {
+					if (mention.onKeyDown(e)) return
 					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 						e.preventDefault()
 						void send(false)
@@ -285,6 +290,7 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 					}
 				}}
 			/>
+			{mention.panel}
 			{error && <p className="small error-text">{error}</p>}
 			<div className="ask-actions">
 				<span className="muted small">Posted to GitHub right away (or added to your pending review, if you have one).</span>
