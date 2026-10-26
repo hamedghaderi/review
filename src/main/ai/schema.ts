@@ -150,6 +150,26 @@ export const explainSchema = z.object({
 export const EXPLAIN_SCHEMA_NAME = 'code_answer'
 export const EXPLAIN_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(explainSchema, { target: 'draft-7' }))
 
+export const overviewSchema = z.object({
+	purpose: z
+		.string()
+		.describe('What problem the change solves and how, in two to four plain sentences. Say who or what it is for when that is known.'),
+	source: z
+		.enum(['stated', 'inferred', 'unclear'])
+		.describe(
+			'"stated": the description, an issue or the commits say it. "inferred": worked out from the code. "unclear": neither settles it.',
+		),
+	changes: z
+		.array(z.object({ what: z.string().describe('One behavior that is different after the change.'), files: z.array(z.string()) }))
+		.describe('Two to seven changes in behavior, most important first, each with the changed files (paths as listed) that do it.'),
+	readingOrder: z
+		.array(z.object({ path: z.string(), why: z.string().describe('Why read it at this point, in one short sentence.') }))
+		.describe('Up to six changed files in the order a reviewer should read them, starting where the change begins.'),
+	questions: z.array(z.string()).describe('Up to four things only the author can answer, such as intent or a trade-off. Empty when none.'),
+})
+export const OVERVIEW_SCHEMA_NAME = 'change_overview'
+export const OVERVIEW_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(overviewSchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

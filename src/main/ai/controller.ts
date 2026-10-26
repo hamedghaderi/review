@@ -4,6 +4,7 @@ import {
 	BUGS_ONLY_RULES,
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
+	type ChangeExplanation,
 	type AiScope,
 	type Anchor,
 	type CarriedRun,
@@ -51,6 +52,8 @@ import { capacityChars } from './context.ts'
 import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
 import { outputBudget, type ModelLimits } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
+import { buildOverviewRequest, MAX_OVERVIEW_CHARS, OVERVIEW_INSTRUCTIONS, OVERVIEW_LOOKUPS, parseOverview } from './overview.ts'
+import { buildBackground } from './background.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
@@ -79,6 +82,8 @@ export interface ComparisonAccess {
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
 	/** Linked issues and the PR conversation; absent for branch reviews. */
 	loadBackground?: RunInput['loadBackground']
+	/** The change's commit messages, oldest first. */
+	commits?(): Promise<Array<{ sha: string; subject: string; body: string }>>
 	/** The notes and files you gave the reviewer for this review, as saved when the run starts. */
 	reviewContext?(): ReviewContext | null
 	/** The images in that context, read from disk when the run starts. */
@@ -807,6 +812,67 @@ export class AiController {
 			}
 		}
 		return this.addCodeMessage(repoId, reviewId, id, at, reply)
+	}
+
+	/**
+	 * Asks `selection`'s model what the change is for, what behaves differently and where to start reading, from the
+	 * description, your notes, linked issues, the conversation, the commits and as much of the diff as fits; lookups
+	 * reach the rest. Saved on the review (replacing an earlier one), so reopening it costs nothing.
+	 */
+	async explainChange(access: ComparisonAccess, reviewId: string, selection: ModelSelection): Promise<ChangeExplanation> {
+		const { comparison } = access
+		const repoId = comparison.repoId
+		const busy = `overview:${reviewId}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'This change is already being explained.')
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'overview', repoId)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		let explanation: ChangeExplanation
+		try {
+			// Linked issues and the conversation help when GitHub answers; without them the description and code remain.
+			const extra = await access.loadBackground?.(AbortSignal.timeout(60_000)).catch(() => null)
+			const background = buildBackground({
+				description: comparison.pr?.body ?? null,
+				context: access.reviewContext?.() ?? null,
+				issues: extra?.issues ?? [],
+				discussion: extra?.discussion ?? null,
+			})
+			const commits = (await access.commits?.().catch(() => [])) ?? []
+			const patches = new Map<string, PatchResult | null>()
+			for (const f of comparison.files) if (!f.binary && !f.submodule) patches.set(f.key, await access.loadPatch(f.key).catch(() => null))
+			const tools = config.limits.lookups !== false && access.tools ? access.tools(OVERVIEW_LOOKUPS) : undefined
+			const l = config.provider.limits
+			const room =
+				capacityChars(
+					l.contextWindow,
+					outputBudget(l),
+					OVERVIEW_INSTRUCTIONS.length + (tools ? JSON.stringify(TOOL_DEFINITIONS).length : 0),
+				) - (tools ? OVERVIEW_LOOKUPS.maxChars : 0)
+			const { request, omitted } = buildOverviewRequest({
+				files: comparison.files,
+				patches,
+				background: background.sections,
+				commits,
+				maxChars: Math.min(MAX_OVERVIEW_CHARS, room),
+				tools,
+			})
+			const response = await config.provider.review(request, AbortSignal.timeout(300_000))
+			explanation = parseOverview(response.output, comparison.files, omitted, selection.modelId)
+		} catch (e) {
+			if (e instanceof AppFail) throw e
+			throw new AppFail('ai-unavailable', `No explanation: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.reviews[reviewId]
+			if (r) r.explanation = explanation
+		})
+		return structuredClone(explanation)
 	}
 
 	questionsFor(repoId: string, reviewId: string): Array<CodeQuestion> {

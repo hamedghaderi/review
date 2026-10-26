@@ -10,6 +10,7 @@ import type {
 	OutcomeFilter,
 	OutcomeSummary,
 	BranchPr,
+	ChangeExplanation,
 	CodeQuestion,
 	PastDecision,
 	EarlierLimitations,
@@ -57,6 +58,7 @@ import {
 	compareBranches,
 	compareCommits,
 	changesBetween,
+	commitMessages,
 	compareSnapshot,
 	ensureCommits,
 	filesAt,
@@ -1410,6 +1412,12 @@ export class ReviewService {
 		return ai.askCode(access, reviewId, anchor(anchorInput, stored), question, questionId, selection)
 	}
 
+	/** What the change is for and where to start reading, from the AI; see AiController.explainChange. */
+	async explainChange(reviewId: string, selection: ModelSelection): Promise<ChangeExplanation> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.explainChange(access, reviewId, selection)
+	}
+
 	async deleteCodeQuestion(reviewId: string, questionId: string): Promise<Array<CodeQuestion>> {
 		const { ai, access } = this.aiAccess(reviewId)
 		return ai.deleteCodeQuestion(access.comparison.repoId, reviewId, questionId)
@@ -1436,6 +1444,7 @@ export class ReviewService {
 					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
+				commits: () => commitMessages(data.root, data.comparison.baseSha, data.comparison.headSha),
 				reviewContext: () => this.store.read().repos[repoId]?.reviews[reviewId]?.context ?? null,
 				contextImages: async () => {
 					const list = this.store.read().repos[repoId]?.reviews[reviewId]?.context?.images ?? []

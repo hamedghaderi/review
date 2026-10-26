@@ -92,7 +92,7 @@ function near(hunks: Array<Hunk>, a: Anchor): Array<Hunk> {
 	})
 }
 
-function hunkText(h: Hunk): string {
+export function hunkText(h: Hunk): string {
 	const mark = { add: '+', del: '-', ctx: ' ' } as const
 	return [
 		`@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@ ${h.section}`,

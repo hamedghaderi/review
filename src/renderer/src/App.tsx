@@ -19,6 +19,7 @@ import type {
 	GoneFinding,
 	Finding,
 	FindingLevel,
+	ChangeExplanation,
 	GitHubStatus,
 	MentionUser,
 	PrReviewState,
@@ -73,6 +74,7 @@ import { FeedbackDialog } from './FeedbackDialog.tsx'
 import { Outcomes } from './Outcomes.tsx'
 import { Sidebar } from './Sidebar.tsx'
 import { MentionProvider, type Mentions } from './Mention.tsx'
+import { ExplainChange } from './ExplainChange.tsx'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
 import { homeCount, type HomePr } from '../../shared/inbox.ts'
 
@@ -992,6 +994,42 @@ export function App() {
 			: null
 	// One model for every Ask AI box (code and findings); picking it in any box changes them all.
 	const askModelPicker = <AskModel settings={aiSettings} onManage={() => openSettings()} />
+
+	// What the change is for, from the AI. Like questions, it lives on the review but only the main process writes it.
+	const [explanation, setExplanation] = useState<ChangeExplanation | null>(null)
+	const [explaining, setExplaining] = useState<string | null>(null) // the review being explained
+	const [explainError, setExplainError] = useState<string | null>(null)
+	useEffect(() => {
+		setExplanation(loaded?.review.explanation ?? null)
+		setExplainError(null)
+	}, [loaded])
+	const explainChange = async (): Promise<void> => {
+		if (!comparison || explaining) return
+		const reviewId = comparison.id
+		setExplaining(reviewId)
+		setExplainError(null)
+		const r = await window.review.explainChange(reviewId)
+		setExplaining(null)
+		if (comparisonIdRef.current !== reviewId) return
+		if (r.ok) setExplanation(r.value)
+		else setExplainError(r.error.message)
+	}
+	const openPath = (path: string): void => {
+		const f = comparison?.files.find((x) => (x.newPath ?? x.oldPath) === path)
+		if (f) selectFile(f.key)
+	}
+	const explainPanel = (
+		<ExplainChange
+			explanation={explanation}
+			busy={!!comparison && explaining === comparison.id}
+			error={explainError}
+			disabled={askDisabled}
+			modelPicker={askModelPicker}
+			described={!!comparison?.pr?.body?.trim()}
+			onExplain={() => void explainChange()}
+			onOpenPath={openPath}
+		/>
+	)
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const id = questionId ?? `new:${Date.now()}`
@@ -1801,17 +1839,19 @@ export function App() {
 												Findings <span className="count">{aiRuns[aiRuns.length - 1]?.findings.length ?? 0}</span>
 												{activeRun && <AiOrb activity="reasoning" size={14} label="AI review running" />}
 											</button>
-											{isPrReview && (
-												<button
-													role="tab"
-													aria-selected={rightTab === 'description'}
-													className={rightTab === 'description' ? 'on' : ''}
-													onClick={() => setRightTab('description')}
-													title="The pull request description, as GitHub shows it; edit it here"
-												>
-													Description
-												</button>
-											)}
+											<button
+												role="tab"
+												aria-selected={rightTab === 'description'}
+												className={rightTab === 'description' ? 'on' : ''}
+												onClick={() => setRightTab('description')}
+												title={
+													isPrReview
+														? 'The pull request description, as GitHub shows it; edit it here. The AI can explain the change.'
+														: 'What this change is for, explained by the AI'
+												}
+											>
+												{isPrReview ? 'Description' : 'About'}
+											</button>
 											{isPrReview && (
 												<button
 													role="tab"
@@ -1856,7 +1896,14 @@ export function App() {
 													onRemoveImage={(id) => change((r) => ops.removeContextImage(r, id))}
 												/>
 											) : rightTab === 'description' && isPrReview && session && comparison ? (
-												<DescriptionPanel repoId={session.repo.id} reviewId={comparison.id} onConnect={() => openSettings('github')} />
+												<DescriptionPanel
+													repoId={session.repo.id}
+													reviewId={comparison.id}
+													onConnect={() => openSettings('github')}
+													explain={explainPanel}
+												/>
+											) : rightTab === 'description' ? (
+												<div className="comments description">{explainPanel}</div>
 											) : rightTab === 'github' && isPrReview ? (
 												<DiscussionPanel
 													discussion={current?.value ?? null}
@@ -1866,7 +1913,7 @@ export function App() {
 													onOpen={openThread}
 													onConnect={() => openSettings('github')}
 												/>
-											) : rightTab === 'comments' || rightTab === 'github' || rightTab === 'description' ? (
+											) : rightTab === 'comments' || rightTab === 'github' ? (
 												<CommentsPanel
 													comments={review.comments}
 													drafts={review.drafts}

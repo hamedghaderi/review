@@ -1154,6 +1154,61 @@ test('ask about code: the selected lines, the change and the file around them go
 	await assert.rejects(controller.askCode(access, s.comp.id, anchor, 'Hi', 'gone', SEL), /no longer exists/)
 })
 
+test('explain this change: the description, notes, commits and diffs go to the chosen model; the answer is saved on the review', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: { ...emptyReview(), context: { notes: 'Part of the billing rewrite.', files: [] } } },
+			aiRuns: {},
+		}
+	})
+	const asked: Array<{ input: string; schema: string | undefined }> = []
+	let reply: unknown = {
+		purpose: 'Makes run() add the numbers instead of subtracting them.',
+		source: 'inferred',
+		changes: [{ what: 'run() returns the sum.', files: ['src/app.ts'] }],
+		readingOrder: [{ path: 'src/app.ts', why: 'The whole change is here.' }],
+		questions: ['Was subtracting ever right?'],
+	}
+	const provider = createFakeProvider({
+		script: (req) => {
+			asked.push({ input: req.input, schema: req.schema?.name })
+			return reply as ReviewOutput
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = {
+		comparison: { ...s.comp, pr: { ...(s.comp.pr ?? {}), title: 'Fix run', body: 'Fixes the total.' } as Comparison['pr'] },
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText ?? { kind: 'text' as const, lines: [] },
+		reviewContext: () => store.read().repos['/repo'].reviews[s.comp.id].context ?? null,
+		commits: async () => [{ sha: 'c'.repeat(40), subject: 'Add instead of subtract', body: '' }],
+	}
+	const e = await controller.explainChange(access, s.comp.id, SEL)
+	assert.equal(asked[0].schema, 'change_overview')
+	const input = asked[0].input
+	assert.match(input, /<<<DESCRIPTION\nFixes the total\.\nDESCRIPTION>>>/)
+	assert.match(input, /Part of the billing rewrite\./, 'your notes')
+	assert.match(input, /- ccccccc Add instead of subtract/)
+	assert.match(input, /## src\/app\.ts\n@@/)
+	assert.match(input, /-  return a - b/)
+	assert.equal(e.purpose, 'Makes run() add the numbers instead of subtracting them.')
+	assert.equal(e.model, SEL.modelId)
+	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].explanation, e, 'saved, so reopening costs nothing')
+
+	reply = { nope: true }
+	await assert.rejects(controller.explainChange(access, s.comp.id, SEL), /No explanation: The explanation did not match/)
+	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].explanation, e, 'a failed answer keeps the earlier one')
+})
+
 test('questions about code go to one model: with a team, its callers member, else its first offered member; otherwise the chosen model', async () => {
 	const { questionModel } = await import('../src/main/ai/connections.ts')
 	const conn = (id: string, models: Array<string>) => ({ id, kind: 'openai' as const, models: models.map((m) => ({ id: m })) })
