@@ -346,7 +346,10 @@ export function ThreadReplyBox({
 				rows={drafted ? 5 : 2}
 				readOnly={drafting}
 				placeholder={drafting ? 'Drafting a reply…' : 'Reply on GitHub (⌘↵ to send)'}
-				onChange={(e) => setText(e.target.value)}
+				onChange={(e) => {
+					setText(e.target.value)
+					if (!e.target.value.trim()) setDrafted(false) // emptied: what you type next is yours
+				}}
 				onKeyDown={(e) => {
 					if (mention.onKeyDown(e)) return
 					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
