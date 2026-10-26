@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { isSupporting, overviewInput, parseOverview } from '../src/main/ai/overview.ts'
+import { isSupporting, OVERVIEW_INSTRUCTIONS, overviewInput, parseOverview } from '../src/main/ai/overview.ts'
 import { commitMessages } from '../src/main/git.ts'
 import type { ChangedFile, PatchResult } from '../src/shared/types.ts'
 
@@ -70,6 +70,7 @@ test('the input: background, commits and every file, then diffs that fit, the ch
 	assert.deepEqual(omitted, ['src/big.ts'], 'what did not fit; a binary file has no diff to leave out')
 	assert.match(input, /# Diffs left out for size \(look them up if they matter\)\n- src\/big\.ts/)
 	assert.ok(input.endsWith('# Explain this change'))
+	assert.match(OVERVIEW_INSTRUCTIONS, /never by its label/, 'thread labels are for the model; the developer never sees them')
 	assert.ok(isSupporting('package-lock.json') && isSupporting('src/__snapshots__/a.snap') && !isSupporting('src/testing.ts'))
 })
 

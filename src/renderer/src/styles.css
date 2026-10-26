@@ -3595,9 +3595,13 @@ input.member-role {
 }
 .explain-head {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 6px;
 	min-width: 0;
+}
+.explain-head b {
+	white-space: nowrap; /* a narrow panel wraps the model and time onto the next line, not the title word by word */
 }
 .explain-purpose {
 	margin: 0;
