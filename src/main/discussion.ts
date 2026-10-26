@@ -122,5 +122,6 @@ export function discussionOf(c: Comparison, a: Activity, threads: Array<Discussi
 		conversation: a.conversation,
 		omitted: a.omitted,
 		mine: a.mine ?? null,
+		viewer: a.viewer ?? null,
 	}
 }

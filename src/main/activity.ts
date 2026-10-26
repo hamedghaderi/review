@@ -13,6 +13,7 @@ export interface Activity {
 	omitted: { threads: number; comments: number; reviews: number; conversation: number }
 	partial: string | null // why the read is incomplete, e.g. no token so resolved state is unknown
 	mine?: MyLastReview | null // the viewer's last submitted review, kept even when it holds only inline comments
+	viewer?: string | null // your GitHub login; null without a token
 }
 
 export interface RawThread {
@@ -222,6 +223,7 @@ export function fromGraphql(
 			conversation: Math.max(0, (first.comments?.totalCount ?? 0) - conv.length),
 		},
 		partial: null,
+		viewer,
 		mine: lastReviewBy(
 			viewer,
 			reviews.map((r) => ({
@@ -345,6 +347,7 @@ export function fromRest(
 		})),
 		conversation: issueComments.map(restComment),
 		omitted: { threads: 0, comments: 0, reviews: 0, conversation: 0 },
+		viewer,
 		mine: lastReviewBy(
 			viewer,
 			reviews.map((r) => ({

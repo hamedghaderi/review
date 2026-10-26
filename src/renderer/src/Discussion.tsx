@@ -9,15 +9,22 @@ import type {
 	RaisedOutcome,
 } from '../../shared/types.ts'
 import { ago } from './branches.ts'
-import { isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
+import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
 const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'since', 'open', 'resolved']
 
-const SINCE_LABEL: Record<SinceMine, string> = { new: 'New thread', replied: 'Replied', changed: 'Code changed', waiting: 'No response' }
+const SINCE_LABEL: Record<SinceMine, string> = {
+	asked: 'Asks you',
+	new: 'New thread',
+	replied: 'Replied',
+	changed: 'Code changed',
+	waiting: 'No response',
+}
 const SINCE_TITLE: Record<SinceMine, string> = {
+	asked: 'The last comment asks you something, and you haven’t answered yet',
 	new: 'Started after your last review',
 	replied: 'Someone answered after your last review',
 	changed: 'Nobody answered, but its lines changed since the commit you reviewed',
@@ -27,6 +34,15 @@ const SINCE_TITLE: Record<SinceMine, string> = {
 /** The first comment someone else wrote after your last review; -1 when there is none. */
 export function firstNew(comments: Array<DiscussionComment>, mine: MyLastReview | null | undefined): number {
 	return mine ? comments.findIndex((c) => isNewSince(c, mine) && c.author !== mine.viewer) : -1
+}
+
+/** On a thread whose last comment asks you something you haven't answered. */
+export function AsksYou() {
+	return (
+		<span className="ic-state accent" title={SINCE_TITLE.asked}>
+			Asks you
+		</span>
+	)
 }
 
 /** Marks where the comments you haven't seen start, inside a thread. */
@@ -323,6 +339,7 @@ export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
  */
 export function ThreadCard({ thread: t, onReply, mine }: { thread: DiscussionThread; onReply?: ReplyFn; mine?: MyLastReview | null }) {
 	const from = firstNew(t.comments, mine)
+	const asked = asksYou(t, mine?.viewer ?? null)
 	const [open, setOpen] = useState(t.resolved !== true || from >= 0)
 	const [root, ...replies] = t.comments
 	return (
@@ -333,6 +350,7 @@ export function ThreadCard({ thread: t, onReply, mine }: { thread: DiscussionThr
 				</button>
 				<b className="ic-who gh">{root?.author ?? 'unknown user'}</b>
 				<ThreadState t={t} />
+				{asked && <AsksYou />}
 				{from === 0 && <span className="ic-state accent">New since your review</span>}
 				{!open && root && <span className="ellipsis muted">{root.body.split('\n')[0]}</span>}
 				{open && root?.createdAt && (
@@ -390,6 +408,7 @@ function placeLabel(t: DiscussionThread): string {
 function SinceLine({ mine, since, comments }: { mine: MyLastReview; since: Array<SinceMine>; comments: number }) {
 	const n = (k: SinceMine): number => since.filter((x) => x === k).length
 	const parts = [
+		n('asked') && `${n('asked')} ask${n('asked') === 1 ? 's' : ''} you`,
 		n('replied') && `${n('replied')} replied`,
 		n('changed') && `${n('changed')} code changed`,
 		n('waiting') && `${n('waiting')} no response`,
@@ -442,9 +461,10 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 	const openCount = threads.filter((t) => t.resolved === false).length
 	const known = threads.some((t) => t.resolved !== null) // without a token GitHub doesn't say what's resolved
 	const mine = d?.mine ?? null
+	// Without a review to count from, only questions waiting for you are marked.
 	const since = new Map(
 		threads.flatMap((t) => {
-			const s = mine && sinceMine(t, mine)
+			const s = mine ? sinceMine(t, mine) : asksYou(t, d?.viewer ?? null) ? 'asked' : null
 			return s ? [[t.id, s] as const] : []
 		}),
 	)

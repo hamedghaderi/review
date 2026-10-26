@@ -30,21 +30,52 @@ export function matchesThread(t: DiscussionThread, state: ThreadFilter, author: 
 }
 
 /**
- * What happened to a thread since your last review: someone else started it (`new`) or answered in it (`replied`),
+ * What happened to a thread since your last review: someone is waiting for your answer to a question (`asked`, however
+ * long ago it was asked), someone else started it (`new`) or answered in it (`replied`),
  * the code under one you wrote in changed without an answer (`changed`), or one you wrote in is open with nothing
  * since (`waiting`). Null: nothing for you to look at. Replies GitHub left out (past the first 30) aren't checked.
  */
-export type SinceMine = 'new' | 'replied' | 'changed' | 'waiting'
+export type SinceMine = 'asked' | 'new' | 'replied' | 'changed' | 'waiting'
 
-export const SINCE_ORDER: Record<SinceMine, number> = { new: 0, replied: 1, changed: 2, waiting: 3 }
+export const SINCE_ORDER: Record<SinceMine, number> = { asked: 0, new: 1, replied: 2, changed: 3, waiting: 4 }
 
 export function sinceMine(t: DiscussionThread, mine: MyLastReview): SinceMine | null {
+	if (asksYou(t, mine.viewer)) return 'asked'
 	const first = t.comments[0]
 	if (first && isNewSince(first, mine)) return first.author === mine.viewer ? null : 'new'
 	if (t.comments.some((c) => isNewSince(c, mine) && c.author !== mine.viewer)) return 'replied'
 	if (!t.comments.some((c) => c.author === mine.viewer)) return null
 	if (t.changedSinceMine) return 'changed' // a fix is often resolved in the same push, so this counts when resolved too
 	return t.resolved === true ? null : 'waiting'
+}
+
+/**
+ * Someone is waiting for your answer: the thread is open and its last comment, by someone else, @mentions you, or asks
+ * a question in a thread you wrote in. Answering (or resolving) clears it. Unknown when GitHub left replies out, since
+ * the last one shown may not be the last.
+ */
+export function asksYou(t: DiscussionThread, viewer: string | null): boolean {
+	if (!viewer || t.resolved === true || t.commentsOmitted > 0) return false
+	const said = t.comments.filter((c) => !c.pending)
+	const last = said[said.length - 1]
+	if (!last?.author || last.author === viewer) return false
+	const text = prose(last.body)
+	const named = new RegExp(`(^|[^\\w/-])@${viewer}(?![\\w-])`, 'i').test(text) // logins are letters, digits and "-"
+	return named || (said.some((c) => c.author === viewer) && isQuestion(text))
+}
+
+/** A question mark ending a sentence, or "wdyt". `text` is prose, without code or quotes (see `prose`). */
+function isQuestion(text: string): boolean {
+	return /\?(?=\s|$|[)"'\]*_])/.test(text) || /\bwdyt\b/i.test(text)
+}
+
+/** A comment without its code, quoted lines and links, where a "?" or "@name" isn't asking anyone anything. */
+function prose(body: string): string {
+	return body
+		.replace(/^(```|~~~)[^\n]*\n[\s\S]*?(^\1[^\n]*$|(?![\s\S]))/gm, '')
+		.replace(/`[^`\n]*`/g, '')
+		.replace(/^\s*>.*$/gm, '')
+		.replace(/\bhttps?:\/\/\S+/g, '')
 }
 
 /** Written after your last review (your own unsubmitted comments aren't). */
