@@ -1,4 +1,4 @@
-import type { DiscussionComment, DiscussionReview, Side } from '../shared/types.ts'
+import type { DiscussionComment, DiscussionReview, MyLastReview, Side } from '../shared/types.ts'
 
 /**
  * A pull request's existing review activity as GitHub reports it, before it is placed on a snapshot. Everything in
@@ -12,6 +12,7 @@ export interface Activity {
 	conversation: Array<DiscussionComment>
 	omitted: { threads: number; comments: number; reviews: number; conversation: number }
 	partial: string | null // why the read is incomplete, e.g. no token so resolved state is unknown
+	mine?: MyLastReview | null // the viewer's last submitted review, kept even when it holds only inline comments
 }
 
 export interface RawThread {
@@ -60,6 +61,7 @@ function keepReview(state: string, text: string): boolean {
 
 export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String, $first: Boolean!) {
   rateLimit { remaining limit resetAt }
+  viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       headRefOid baseRefOid
@@ -75,9 +77,9 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
           }
         }
       }
-      reviews(first: ${LIST_LIMIT}) @include(if: $first) {
+      reviews(last: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login } authorAssociation state body submittedAt url }
+        nodes { id author { login } authorAssociation state body submittedAt url commit { oid } }
       }
       comments(first: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
@@ -100,6 +102,7 @@ interface GqlComment {
 }
 
 export interface GqlActivity {
+	viewer?: { login: string } | null
 	repository: {
 		pullRequest: {
 			headRefOid: string
@@ -132,6 +135,7 @@ export interface GqlActivity {
 					body: string
 					submittedAt: string | null
 					url: string
+					commit?: { oid: string } | null
 				}>
 			}
 			comments?: { totalCount: number; nodes: Array<GqlComment> }
@@ -151,7 +155,22 @@ function gqlComment(c: GqlComment): DiscussionComment {
 	}
 }
 
-export function fromGraphql(pages: Array<NonNullable<NonNullable<GqlActivity['repository']>['pullRequest']>>): Activity {
+/** The viewer's newest submitted review, from all of them: one holding only inline comments counts too. */
+function lastReviewBy(
+	viewer: string | null,
+	reviews: Array<{ login: string | null; state: string; at: string | null; commit: string | null; url: string | null }>,
+): MyLastReview | null {
+	let out: MyLastReview | null = null
+	for (const r of reviews)
+		if (viewer && r.login === viewer && r.state !== 'PENDING' && r.at && (!out || r.at > out.at))
+			out = { viewer, state: r.state, at: r.at, commit: r.commit, url: safeUrl(r.url) }
+	return out
+}
+
+export function fromGraphql(
+	pages: Array<NonNullable<NonNullable<GqlActivity['repository']>['pullRequest']>>,
+	viewer: string | null = null,
+): Activity {
 	const [first] = pages
 	const threads: Array<RawThread> = []
 	let comments = 0
@@ -203,6 +222,16 @@ export function fromGraphql(pages: Array<NonNullable<NonNullable<GqlActivity['re
 			conversation: Math.max(0, (first.comments?.totalCount ?? 0) - conv.length),
 		},
 		partial: null,
+		mine: lastReviewBy(
+			viewer,
+			reviews.map((r) => ({
+				login: r.author?.login ?? null,
+				state: r.state,
+				at: r.submittedAt,
+				commit: r.commit?.oid ?? null,
+				url: r.url,
+			})),
+		),
 	}
 }
 
@@ -236,6 +265,7 @@ export interface RestReview {
 	body: string | null
 	submitted_at: string | null
 	html_url: string | null
+	commit_id?: string | null
 }
 
 export interface RestIssueComment {
@@ -253,6 +283,7 @@ export function fromRest(
 	commentsCapped: boolean,
 	reviews: Array<RestReview>,
 	issueComments: Array<RestIssueComment>,
+	viewer: string | null = null,
 ): Activity {
 	const roots = new Map<number, RestReviewComment>()
 	const replies = new Map<number, Array<RestReviewComment>>()
@@ -314,6 +345,16 @@ export function fromRest(
 		})),
 		conversation: issueComments.map(restComment),
 		omitted: { threads: 0, comments: 0, reviews: 0, conversation: 0 },
+		mine: lastReviewBy(
+			viewer,
+			reviews.map((r) => ({
+				login: r.user?.login ?? null,
+				state: r.state,
+				at: r.submitted_at,
+				commit: r.commit_id ?? null,
+				url: r.html_url,
+			})),
+		),
 		partial: `Read without a GitHub token, so GitHub doesn't say which threads are resolved.${commentsCapped ? ' Only the first comments were read.' : ''} Connect GitHub to see resolved state.`,
 	}
 }

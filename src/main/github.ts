@@ -1075,21 +1075,23 @@ fragment LinkedIssue on Issue {
 				this.get<Array<RestReview>>(`/repos/${repo}/pulls/${number}/reviews?per_page=100`, signal),
 				this.get<Array<RestIssueComment>>(`/repos/${repo}/issues/${number}/comments?per_page=100`, signal),
 			])
-			return fromRest(pr, comments, page > 5, reviews, issue)
+			return fromRest(pr, comments, page > 5, reviews, issue, this.login)
 		}
 		const [owner, name] = repo.split('/')
 		type Pr = NonNullable<NonNullable<GqlActivity['repository']>['pullRequest']>
 		const pages: Array<Pr> = []
+		let viewer = this.login
 		let after: string | null = null
 		for (let i = 0; i < THREAD_PAGES; i++) {
 			const d: GqlActivity = await this.graphql<GqlActivity>(ACTIVITY_QUERY, { owner, name, number, after, first: i === 0 }, signal)
 			const pr: Pr | null | undefined = d.repository?.pullRequest
 			if (!pr) throw new AppFail('github-not-found', `${repo} has no pull request #${number}, or the token has no access to it.`)
+			viewer = d.viewer?.login ?? viewer
 			pages.push(pr)
 			if (!pr.reviewThreads.pageInfo.hasNextPage) break
 			after = pr.reviewThreads.pageInfo.endCursor
 		}
-		return fromGraphql(pages)
+		return fromGraphql(pages, viewer)
 	}
 
 	/**

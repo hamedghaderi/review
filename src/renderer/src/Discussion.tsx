@@ -1,11 +1,41 @@
 import { useState } from 'react'
-import type { ChangedFile, Discussion, DiscussionComment, DiscussionThread, RaisedBefore, RaisedOutcome } from '../../shared/types.ts'
+import type {
+	ChangedFile,
+	Discussion,
+	DiscussionComment,
+	DiscussionThread,
+	MyLastReview,
+	RaisedBefore,
+	RaisedOutcome,
+} from '../../shared/types.ts'
 import { ago } from './branches.ts'
-import { matchesThread, type ThreadFilter } from './discussed.ts'
+import { isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
 import { useStored } from './useStored.ts'
 
-const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'open', 'resolved']
+const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'since', 'open', 'resolved']
+
+const SINCE_LABEL: Record<SinceMine, string> = { new: 'New thread', replied: 'Replied', changed: 'Code changed', waiting: 'No response' }
+const SINCE_TITLE: Record<SinceMine, string> = {
+	new: 'Started after your last review',
+	replied: 'Someone answered after your last review',
+	changed: 'Nobody answered, but its lines changed since the commit you reviewed',
+	waiting: 'You wrote in it, and nothing happened since your last review',
+}
+
+/** The first comment someone else wrote after your last review; -1 when there is none. */
+export function firstNew(comments: Array<DiscussionComment>, mine: MyLastReview | null | undefined): number {
+	return mine ? comments.findIndex((c) => isNewSince(c, mine) && c.author !== mine.viewer) : -1
+}
+
+/** Marks where the comments you haven't seen start, inside a thread. */
+export function NewSinceDivider() {
+	return <div className="since-divider small">New since your review</div>
+}
+
+function reviewState(state: string): string {
+	return state === 'APPROVED' ? 'approved' : state === 'CHANGES_REQUESTED' ? 'changes requested' : state.toLowerCase().replace(/_/g, ' ')
+}
 
 function count(n: number, one: string, many = `${one}s`): string {
 	return `${n} ${n === 1 ? one : many}`
@@ -285,8 +315,9 @@ export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
  * Someone else's thread on GitHub, read-only, in the code: who started it, its state, and the replies. Resolved threads
  * start as one line. Threads started by your own published comments are shown on your comment card instead.
  */
-export function ThreadCard({ thread: t, onReply }: { thread: DiscussionThread; onReply?: ReplyFn }) {
-	const [open, setOpen] = useState(t.resolved !== true)
+export function ThreadCard({ thread: t, onReply, mine }: { thread: DiscussionThread; onReply?: ReplyFn; mine?: MyLastReview | null }) {
+	const from = firstNew(t.comments, mine)
+	const [open, setOpen] = useState(t.resolved !== true || from >= 0)
 	const [root, ...replies] = t.comments
 	return (
 		<div className={`ic ic-gh ${t.resolved ? 'is-resolved' : ''}`} data-item={t.id} onMouseUp={(e) => e.stopPropagation()}>
@@ -296,6 +327,7 @@ export function ThreadCard({ thread: t, onReply }: { thread: DiscussionThread; o
 				</button>
 				<b className="ic-who gh">{root?.author ?? 'unknown user'}</b>
 				<ThreadState t={t} />
+				{from === 0 && <span className="ic-state accent">New since your review</span>}
 				{!open && root && <span className="ellipsis muted">{root.body.split('\n')[0]}</span>}
 				{open && root?.createdAt && (
 					<span className="muted small" title={new Date(root.createdAt).toLocaleString()}>
@@ -327,8 +359,11 @@ export function ThreadCard({ thread: t, onReply }: { thread: DiscussionThread; o
 							{root.bodyTruncated && <span className="muted"> …(truncated)</span>}
 						</div>
 					)}
-					{replies.map((c) => (
-						<InlineReply key={c.id} c={c} />
+					{replies.map((c, i) => (
+						<div key={c.id}>
+							{i + 1 === from && <NewSinceDivider />}
+							<InlineReply c={c} />
+						</div>
 					))}
 					<MoreOnGitHub t={t} />
 					{onReply && <ThreadReplyBox t={t} onReply={onReply} />}
@@ -343,6 +378,39 @@ function placeLabel(t: DiscussionThread): string {
 	if (!p) return t.originalLine !== null ? `was line ${t.originalLine}` : 'not shown at a line'
 	if (p.startLine === null || p.endLine === null) return 'Whole file'
 	return `${t.side === 'old' ? 'old ' : ''}${rangeLabel({ start: p.startLine, end: p.endLine })}`
+}
+
+/** "Since your review on 24 Oct (changes requested): 2 replied · 1 code changed · 3 no response", leaving out what is zero. */
+function SinceLine({ mine, since, comments }: { mine: MyLastReview; since: Array<SinceMine>; comments: number }) {
+	const n = (k: SinceMine): number => since.filter((x) => x === k).length
+	const parts = [
+		n('replied') && `${n('replied')} replied`,
+		n('changed') && `${n('changed')} code changed`,
+		n('waiting') && `${n('waiting')} no response`,
+		n('new') && count(n('new'), 'new thread'),
+		comments && count(comments, 'new review or comment', 'new reviews and comments'),
+	].filter(Boolean)
+	const when = new Date(mine.at).toLocaleDateString([], { day: 'numeric', month: 'short' })
+	return (
+		<div className="since-line small">
+			<b>
+				Since your{' '}
+				{mine.url ? (
+					<a href={mine.url} target="_blank" rel="noreferrer" title="Open your review on GitHub">
+						review
+					</a>
+				) : (
+					'review'
+				)}{' '}
+				on {when}
+			</b>{' '}
+			<span className="muted">
+				({reviewState(mine.state)}
+				{mine.commit ? ` on ${mine.commit.slice(0, 7)}` : ''}, {ago(mine.at)})
+			</span>
+			: {parts.length ? parts.join(' · ') : 'nothing new'}
+		</div>
+	)
 }
 
 interface PanelProps {
@@ -367,8 +435,16 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 	)
 	const openCount = threads.filter((t) => t.resolved === false).length
 	const known = threads.some((t) => t.resolved !== null) // without a token GitHub doesn't say what's resolved
-	const [stored, setState] = useStored<ThreadFilter>('review.threadFilter', 'all', THREAD_FILTERS)
-	const state = known ? stored : 'all'
+	const mine = d?.mine ?? null
+	const since = new Map(
+		threads.flatMap((t) => {
+			const s = mine && sinceMine(t, mine)
+			return s ? [[t.id, s] as const] : []
+		}),
+	)
+	// Since your last review comes first when you have one, so a second round opens on what happened since.
+	const [stored, setState] = useStored<ThreadFilter>('review.threadFilter', 'since', THREAD_FILTERS)
+	const state = stored === 'since' ? (mine ? 'since' : 'all') : known ? stored : 'all'
 	const [author, setAuthor] = useState<string | null>(null)
 	const authors = [
 		...new Set(
@@ -378,10 +454,18 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 		),
 	].sort((a, b) => a.localeCompare(b))
 	const who = author && authors.includes(author) ? author : null
-	const shown = threads.filter((t) => matchesThread(t, state, who))
-	// Reviews and the conversation have no open/resolved state, so they show only under "All".
-	const showReviews = state !== 'all' ? [] : (d?.reviews ?? []).filter((r) => !who || r.author === who)
-	const showConversation = state !== 'all' ? [] : (d?.conversation ?? []).filter((c) => !who || c.author === who)
+	const shown = threads.filter((t) => matchesThread(t, state, who, mine))
+	if (state === 'since') shown.sort((a, b) => SINCE_ORDER[since.get(a.id)!] - SINCE_ORDER[since.get(b.id)!])
+	// Reviews and the conversation have no open/resolved state, so they show under "All", and under "Since your review"
+	// when someone else wrote them after it.
+	const newer = <T extends { author: string | null; createdAt?: string | null; submittedAt?: string | null }>(xs: Array<T>): Array<T> =>
+		mine ? xs.filter((x) => isNewSince(x, mine) && x.author !== mine.viewer) : []
+	const newReviews = newer(d?.reviews ?? [])
+	const newConversation = newer(d?.conversation ?? [])
+	const showReviews = (state === 'all' ? (d?.reviews ?? []) : state === 'since' ? newReviews : []).filter((r) => !who || r.author === who)
+	const showConversation = (state === 'all' ? (d?.conversation ?? []) : state === 'since' ? newConversation : []).filter(
+		(c) => !who || c.author === who,
+	)
 	const narrowed = state !== 'all' || !!who
 	return (
 		<div className="comments">
@@ -411,15 +495,21 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 					)}
 				</div>
 			)}
-			{(threads.length > 0 || authors.length > 1) && (
+			{mine && <SinceLine mine={mine} since={[...since.values()]} comments={newReviews.length + newConversation.length} />}
+			{(threads.length > 0 || authors.length > 1 || mine) && (
 				<div className="list-tools">
-					{known && (
+					{(known || mine) && (
 						<div className="seg" role="tablist" aria-label="Thread state">
 							{(
 								[
+									...(mine ? ([['since', 'Since your review', since.size]] as const) : []),
 									['all', 'All', threads.length],
-									['open', 'Open', openCount],
-									['resolved', 'Resolved', threads.filter((t) => t.resolved === true).length],
+									...(known
+										? ([
+												['open', 'Open', openCount],
+												['resolved', 'Resolved', threads.filter((t) => t.resolved === true).length],
+											] as const)
+										: []),
 								] as const
 							).map(([k, label, n]) => (
 								<button key={k} role="tab" aria-selected={state === k} className={state === k ? 'on' : ''} onClick={() => setState(k)}>
@@ -446,7 +536,7 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 				)}
 				{narrowed && !shown.length && !showReviews.length && !showConversation.length && (
 					<div className="muted pad small">
-						Nothing matches.{' '}
+						{state === 'since' && !who ? 'Nothing new since your review.' : 'Nothing matches.'}{' '}
 						<button
 							className="link"
 							onClick={() => {
@@ -464,24 +554,43 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 							Threads · {shown.length}
 							{!narrowed && openCount ? ` · ${openCount} open` : ''}
 						</div>
-						{shown.map((t) => (
-							<button key={t.id} className="comment-item" disabled={!t.fileKey} onClick={() => onOpen(t)}>
-								<div className="ci-loc">
-									<span className="mono ellipsis">{t.path}</span>
-									<span className="muted small nowrap">{placeLabel(t)}</span>
-								</div>
-								<div className="gh-pills">
-									<StatusPills t={t} />
-									{!t.placed && t.fileKey && <span className="gh-pill">Listed with the file</span>}
-								</div>
-								<div className="ci-body">
-									<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0]?.body}
-								</div>
-								{t.comments.length + t.commentsOmitted > 1 && (
-									<div className="muted small">{count(t.comments.length - 1 + t.commentsOmitted, 'reply', 'replies')}</div>
-								)}
-							</button>
-						))}
+						{shown.map((t) => {
+							const st = since.get(t.id)
+							const from = firstNew(t.comments, mine)
+							const fresh = from > 0 ? t.comments.slice(from).filter((c) => c.author !== mine?.viewer) : []
+							const last = fresh[fresh.length - 1]
+							return (
+								<button key={t.id} className="comment-item" disabled={!t.fileKey} onClick={() => onOpen(t)}>
+									<div className="ci-loc">
+										<span className="mono ellipsis">{t.path}</span>
+										<span className="muted small nowrap">{placeLabel(t)}</span>
+									</div>
+									<div className="gh-pills">
+										{st && (
+											<span className={`gh-pill since-${st}`} title={SINCE_TITLE[st]}>
+												{SINCE_LABEL[st]}
+											</span>
+										)}
+										<StatusPills t={t} />
+										{!t.placed && t.fileKey && <span className="gh-pill">Listed with the file</span>}
+									</div>
+									<div className="ci-body">
+										<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0]?.body}
+									</div>
+									{last && (
+										<div className="ci-body ci-new">
+											<b>{last.author ?? 'unknown user'}:</b> {last.body}
+										</div>
+									)}
+									{t.comments.length + t.commentsOmitted > 1 && (
+										<div className="muted small">
+											{count(t.comments.length - 1 + t.commentsOmitted, 'reply', 'replies')}
+											{fresh.length ? `, ${fresh.length} new` : ''}
+										</div>
+									)}
+								</button>
+							)
+						})}
 					</section>
 				)}
 				{showReviews.length > 0 && (

@@ -7,6 +7,7 @@ import type {
 	Comparison,
 	DiscussionThread,
 	FileLinesResult,
+	MyLastReview,
 	PatchResult,
 	ReviewComment,
 	Side,
@@ -56,6 +57,7 @@ interface Props {
 	onDeleteComment(id: string): void
 	onShowFinding?(findingId: string): void // opens the finding a comment was made from, to ask about it
 	onReply?: ReplyFn // reply to / resolve a GitHub thread (PR reviews)
+	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
 	onLookup(r: SymbolRequest): void // ⌘/Ctrl-click on a name
 	placeRef: React.RefObject<(() => number) | null> // reads the scroll position, for back and forward
 }
@@ -305,7 +307,7 @@ export function DiffView(p: Props) {
 	}
 
 	const renderItem = (it: Item): React.ReactNode => {
-		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} />
+		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} mine={p.mine} />
 		if (it.kind === 'question') {
 			const q = it.q
 			return (
@@ -334,6 +336,7 @@ export function DiffView(p: Props) {
 					onDelete={() => p.onDeleteComment(it.c.id)}
 					onAskAi={it.c.findingId && p.onShowFinding ? () => p.onShowFinding!(it.c.findingId!) : undefined}
 					onReply={p.onReply}
+					mine={p.mine}
 				/>
 			)
 		}

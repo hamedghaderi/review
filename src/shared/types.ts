@@ -593,6 +593,16 @@ export interface Discussion {
 	reviews: Array<DiscussionReview>
 	conversation: Array<DiscussionComment> // PR comments outside the diff
 	omitted: { threads: number; comments: number; reviews: number; conversation: number }
+	/** Your last submitted review on the PR, which "since your review" counts from; null without one or without a token. */
+	mine?: MyLastReview | null // absent on discussions read before it was
+}
+
+export interface MyLastReview {
+	viewer: string // your GitHub login
+	state: string // passed through as GitHub reports it
+	at: string // submittedAt
+	commit: string | null // the PR head it was submitted on
+	url: string | null
 }
 
 export interface DiscussionThread {
@@ -609,6 +619,8 @@ export interface DiscussionThread {
 	fileKey: string | null // the file in this snapshot, when there is one
 	originalLine: number | null // where it pointed when written; display only, never used to place it
 	diffHunk: string | null // the diff GitHub showed when it was written
+	// Its lines differ between the commit of your last review and the PR head; null: unknown, or no review to compare with.
+	changedSinceMine?: boolean | null
 	comments: Array<DiscussionComment>
 	commentsOmitted: number
 	url: string | null

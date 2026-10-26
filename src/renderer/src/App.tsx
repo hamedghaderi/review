@@ -1689,6 +1689,7 @@ export function App() {
 											reveal={reveal}
 											highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
 											threads={fileThreads}
+											mine={current?.value?.mine ?? null}
 											published={published}
 											questions={fileQuestions}
 											asking={asking}

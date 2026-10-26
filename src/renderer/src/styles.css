@@ -3533,6 +3533,38 @@ input.member-role {
 .gh-reason {
 	padding: 6px 8px;
 }
+/* What happened since your last review: the panel's summary, each thread's state, and where the new replies start */
+.since-line {
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--accent-soft);
+}
+.gh-pill.since-new,
+.gh-pill.since-replied {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+.gh-pill.since-changed {
+	border-color: var(--warn-fg);
+	color: var(--warn-fg);
+}
+.ci-body.ci-new {
+	padding-left: 8px;
+	border-left: 2px solid var(--accent);
+	-webkit-line-clamp: 2;
+}
+.since-divider {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 6px;
+	color: var(--accent);
+}
+.since-divider::after {
+	content: '';
+	flex: 1;
+	border-top: 1px solid var(--accent-line);
+}
 .discussed-note {
 	padding: 4px 6px;
 	border-radius: 4px;

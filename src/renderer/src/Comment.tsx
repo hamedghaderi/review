@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, ReviewComment } from '../../shared/types.ts'
+import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, MyLastReview, ReviewComment } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
-import { AlreadyDiscussed, InlineReply, MoreOnGitHub, ThreadReplyBox, ThreadState, type ReplyFn } from './Discussion.tsx'
+import {
+	AlreadyDiscussed,
+	firstNew,
+	InlineReply,
+	MoreOnGitHub,
+	NewSinceDivider,
+	ThreadReplyBox,
+	ThreadState,
+	type ReplyFn,
+} from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
@@ -176,6 +185,7 @@ interface CardProps {
 	onDelete(): void
 	onAskAi?(): void // comments made from an AI finding: ask the model about it
 	onReply?: ReplyFn // reply to / resolve the GitHub thread it started
+	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
 }
 
 /** Where your comment stands: only here, on GitHub, or on GitHub with a newer edit not sent yet. */
@@ -203,9 +213,10 @@ function AskAiButton({ onClick }: { onClick(): void }) {
 	)
 }
 
-export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply }: CardProps) {
+export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply, mine }: CardProps) {
 	const thread = posted?.thread ?? null
 	const replies = thread ? thread.comments.slice(1) : []
+	const from = thread ? firstNew(thread.comments, mine) : -1
 	return (
 		<div className="ic ic-you" data-item={comment.id} onMouseUp={(e) => e.stopPropagation()}>
 			<div className="ic-head">
@@ -231,8 +242,11 @@ export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, o
 			<OutdatedCode comment={comment} />
 			<AlreadyDiscussed threads={discussed} />
 			<RichText className="ic-body" text={comment.body} />
-			{replies.map((c) => (
-				<InlineReply key={c.id} c={c} />
+			{replies.map((c, i) => (
+				<div key={c.id}>
+					{i + 1 === from && <NewSinceDivider />}
+					<InlineReply c={c} />
+				</div>
 			))}
 			{thread && <MoreOnGitHub t={thread} />}
 			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} />}
