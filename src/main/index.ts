@@ -414,6 +414,11 @@ function registerIpc(): void {
 			selection,
 		)
 	})
+	handle(IPC.aiExplainChange, async (reviewId: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return service.explainChange(comparisonId(reviewId), selection)
+	})
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)

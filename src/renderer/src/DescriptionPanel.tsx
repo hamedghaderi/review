@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppError, PrDescription } from '../../shared/types.ts'
 import { useMentionCommand } from './Mention.tsx'
 
@@ -7,6 +7,7 @@ interface Props {
 	repoId: string
 	reviewId: string
 	onConnect(): void
+	explain?: ReactNode // "Explain this change", shown above the description
 }
 
 interface Draft {
@@ -22,7 +23,7 @@ const drafts = new Map<string, Draft>()
  * The open PR review's description: GitHub's rendering of it, and an editor that saves it back to GitHub. Read from
  * GitHub when the tab opens; it doesn't update by itself.
  */
-export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
+export function DescriptionPanel({ repoId, reviewId, onConnect, explain }: Props) {
 	const key = `${repoId}\u0000${reviewId}`
 	const [d, setD] = useState<PrDescription | null>(null)
 	const [loading, setLoading] = useState(false)
@@ -142,6 +143,7 @@ export function DescriptionPanel({ repoId, reviewId, onConnect }: Props) {
 					)}
 				</div>
 			)}
+			{!draft && explain}
 			{d && !d.canEdit && d.editIssue && !draft && <p className="small muted desc-note">{d.editIssue}</p>}
 			{draft ? (
 				<div className="desc-editor">

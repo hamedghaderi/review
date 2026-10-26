@@ -183,6 +183,28 @@ export function isSha(s: unknown): s is string {
 	return typeof s === 'string' && SHA_RE.test(s)
 }
 
+/** Commit messages from `base` (left out) to `head`, oldest first, without merges; the newest `max` when there are more. */
+export async function commitMessages(
+	cwd: string,
+	base: string,
+	head: string,
+	max = 100,
+): Promise<Array<{ sha: string; subject: string; body: string }>> {
+	if (!isSha(base) || !isSha(head)) return []
+	const r = await git(
+		cwd,
+		['log', '--no-merges', '--reverse', `--max-count=${max}`, '--format=%H%x1f%s%x1f%b%x1e', `${base}..${head}`],
+		1024 * 1024,
+	)
+	if (r.code !== 0) return []
+	return r.stdout
+		.toString('utf8')
+		.split('\x1e')
+		.map((x) => x.replace(/^\n/, '').split('\x1f'))
+		.filter((x) => x.length === 3 && isSha(x[0]))
+		.map(([sha, subject, body]) => ({ sha, subject, body: body.trim() }))
+}
+
 export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
 	const r = await git(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${rev}^{commit}`])
 	const sha = r.stdout.toString('utf8').trim()

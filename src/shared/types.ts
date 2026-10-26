@@ -481,6 +481,7 @@ export interface Review {
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
 	questions?: Array<CodeQuestion> // questions you asked the AI about selected code; written by the main process only
+	explanation?: ChangeExplanation // what the AI says this change is for; written by the main process only
 }
 
 /**
@@ -491,6 +492,21 @@ export interface ReviewContext {
 	notes: string
 	files: Array<ContextFile>
 	images?: Array<ContextImage> // absent on context saved before images were supported
+}
+
+/**
+ * What the change is for and where to start reading, from the AI, for when the description doesn't tell you. Read from
+ * the description, issues, commits and the diff; `source` says whether the purpose was stated or worked out from code.
+ */
+export interface ChangeExplanation {
+	purpose: string // what problem it solves and how, in a few sentences
+	source: 'stated' | 'inferred' | 'unclear' // stated by the author, worked out from the code, or not clear from either
+	changes: Array<{ what: string; files: Array<string> }> // what behaves differently, with the files that do it
+	readingOrder: Array<{ path: string; why: string }> // where to start reading, in order
+	questions: Array<string> // what only the author can answer
+	omitted: Array<string> // files whose diff was too big to send
+	model: string
+	at: string
 }
 
 /** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */
@@ -1178,8 +1194,8 @@ export interface AiCost {
 }
 
 // review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
-// verify and test: Verify and Write test on a finding.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test'
+// verify and test: Verify and Write test on a finding; overview: Explain this change.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1677,6 +1693,7 @@ export const IPC = {
 	aiCheckFixed: 'ai:check-fixed',
 	aiWriteTest: 'ai:write-test',
 	aiAskCode: 'ai:ask-code',
+	aiExplainChange: 'ai:explain-change',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -1890,6 +1907,8 @@ export interface ReviewApi {
 	 * same lines. Returns the review's updated list of questions.
 	 */
 	askCode(reviewId: string, anchor: Anchor, question: string, questionId: string | null): Promise<Result<Array<CodeQuestion>>>
+	/** Asks the model for questions what the change is for and where to start reading; saved on the review. */
+	explainChange(reviewId: string): Promise<Result<ChangeExplanation>>
 	/** Forgets one conversation about selected code. */
 	deleteCodeQuestion(reviewId: string, questionId: string): Promise<Result<Array<CodeQuestion>>>
 	gifStatus(): Promise<Result<GifStatus>>

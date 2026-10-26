@@ -3533,6 +3533,48 @@ input.member-role {
 .gh-reason {
 	padding: 6px 8px;
 }
+/* "Explain this change": what the change is for, from the AI */
+.explain-change {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px;
+	border-bottom: 1px solid var(--border);
+}
+.explain-change.empty {
+	background: var(--panel);
+}
+.explain-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+.explain-purpose {
+	margin: 0;
+	line-height: 1.5;
+	white-space: pre-wrap;
+}
+.explain-list {
+	margin: 0;
+	padding-left: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.explain-files .link + .link::before {
+	content: ', ';
+	color: var(--text-2);
+}
+.gh-pill.source-stated {
+	border-color: var(--ok);
+	color: var(--ok);
+}
+.gh-pill.source-inferred,
+.gh-pill.source-unclear {
+	border-color: var(--warn-fg);
+	color: var(--warn-fg);
+}
 /* What happened since your last review: the panel's summary, each thread's state, and where the new replies start */
 .since-line {
 	padding: 6px 8px;
