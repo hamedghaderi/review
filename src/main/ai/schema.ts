@@ -170,6 +170,12 @@ export const overviewSchema = z.object({
 export const OVERVIEW_SCHEMA_NAME = 'change_overview'
 export const OVERVIEW_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(overviewSchema, { target: 'draft-7' }))
 
+export const replySchema = z.object({
+	reply: z.string().describe('Your next comment in the thread, in Markdown, written as the reviewer to the person who asked.'),
+})
+export const REPLY_SCHEMA_NAME = 'thread_reply'
+export const REPLY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(replySchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z
