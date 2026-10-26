@@ -174,6 +174,14 @@ const api: ReviewApi = {
 		ipcRenderer.on(IPC.feedbackOpen, listener)
 		return () => ipcRenderer.removeListener(IPC.feedbackOpen, listener)
 	},
+	onWhatsNewOpen: (handler) => {
+		const listener = (): void => handler()
+		ipcRenderer.on(IPC.whatsNewOpen, listener)
+		return () => ipcRenderer.removeListener(IPC.whatsNewOpen, listener)
+	},
+	whatsNewStatus: () => ipcRenderer.invoke(IPC.whatsNewStatus),
+	whatsNewSeen: () => ipcRenderer.invoke(IPC.whatsNewSeen),
+	releaseNotes: () => ipcRenderer.invoke(IPC.releaseNotes),
 	keymap: () => ipcRenderer.invoke(IPC.keymap),
 	setKeymap: (next) => ipcRenderer.invoke(IPC.setKeymap, next),
 	onKeymapChanged: (handler) => {

@@ -19,6 +19,7 @@ export interface StoreData {
 	appClones?: Record<string, { repo: string; at: string }> // folders the app cloned itself, by real path: deletable here
 	cloneParent?: string // the folder last chosen for a clone, where the folder picker starts next time
 	skippedVersion?: string // a release you chose not to be told about again
+	seenVersion?: string // the newest version whose "What's new" you have seen
 	theme?: ThemeSettings // light or dark and the colour theme; absent until you choose one
 	keymap?: KeymapOverrides // the shortcuts you changed; the others keep their defaults
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
@@ -139,6 +140,7 @@ export function migrate(raw: unknown): StoreData {
 		...(d.openRepoIds ? { openRepoIds: d.openRepoIds } : {}),
 		...(d.inboxWatch ? { inboxWatch: d.inboxWatch } : {}),
 		...(typeof d.skippedVersion === 'string' ? { skippedVersion: d.skippedVersion } : {}),
+		...(typeof d.seenVersion === 'string' ? { seenVersion: d.seenVersion } : {}),
 		...(d.autoReviews ? { autoReviews: d.autoReviews } : {}),
 		...(Array.isArray(d.mutedRepos) ? { mutedRepos: d.mutedRepos } : {}),
 		...(d.appClones && typeof d.appClones === 'object' ? { appClones: d.appClones } : {}),

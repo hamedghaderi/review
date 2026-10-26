@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { open, rename, rm } from 'node:fs/promises'
 import semver from 'semver'
+import type { ReleaseNote } from '../shared/types.ts'
 
 export const RELEASES_URL = 'https://github.com/hamedghaderi/review/releases/latest'
 const LATEST_API = 'https://api.github.com/repos/hamedghaderi/review/releases/latest'
@@ -16,6 +17,33 @@ export interface ReleaseAsset {
 export interface Release {
 	version: string
 	asset: ReleaseAsset | null // the installer for this system, if the release has it
+}
+
+const RELEASES_API = 'https://api.github.com/repos/hamedghaderi/review/releases?per_page=30'
+const RELEASE_PREFIX = 'https://github.com/hamedghaderi/review/releases/'
+
+/**
+ * The notes of recent published releases, newest first, rendered by GitHub. Drafts and pre-releases are left out.
+ * Throws when GitHub can't be reached, so the window can say so and link to the releases page.
+ */
+export async function releaseNotes(fetcher: typeof fetch = fetch): Promise<Array<ReleaseNote>> {
+	const res = await fetcher(RELEASES_API, { headers: { Accept: 'application/vnd.github.html+json' }, signal: AbortSignal.timeout(10_000) })
+	if (!res.ok) throw new Error(`GitHub answered ${res.status}.`)
+	const list = (await res.json()) as unknown
+	if (!Array.isArray(list)) throw new Error('GitHub sent something unexpected.')
+	const out: Array<ReleaseNote> = []
+	for (const r of list as Array<Record<string, unknown>>) {
+		const version = semver.clean(String(r?.tag_name ?? ''))
+		if (!version || r.draft === true || r.prerelease === true || semver.prerelease(version)) continue
+		const url = typeof r.html_url === 'string' && r.html_url.startsWith(RELEASE_PREFIX) ? r.html_url : RELEASES_URL
+		out.push({
+			version,
+			html: typeof r.body_html === 'string' ? r.body_html : '',
+			url,
+			date: typeof r.published_at === 'string' ? r.published_at : null,
+		})
+	}
+	return out.sort((a, b) => semver.rcompare(a.version, b.version))
 }
 
 /** The installer built for a system, as named by electron-builder.yml's artifactName. */

@@ -8,8 +8,10 @@ import {
 	ipcMain,
 	Menu,
 	nativeTheme,
+	net,
 	Notification,
 	powerMonitor,
+	protocol,
 	safeStorage,
 	shell,
 	type IpcMainInvokeEvent,
@@ -33,7 +35,9 @@ import { ReviewStore } from './store.ts'
 import { parseKeymap, resolveKeymap, toAccelerator, type KeymapOverrides } from '../shared/keymap.ts'
 import { APPEARANCES, DEFAULT_THEME, nextScale, parseTheme, THEMES, themeBackground, type ThemeSettings } from '../shared/theme.ts'
 import { LINK_SCHEME, linkInArgs, parsePrLink, type PrLink } from '../shared/link.ts'
-import { download, newerRelease, RELEASES_URL, type Release } from './update.ts'
+import { download, newerRelease, releaseNotes, RELEASES_URL, type Release } from './update.ts'
+import { whatsNewOnStart, type NotesRange } from '../shared/releases.ts'
+import { MEDIA_SCHEME, ReleaseMedia } from './releaseMedia.ts'
 import {
 	apiKey,
 	bool,
@@ -98,6 +102,10 @@ const devIcon = app.isPackaged ? undefined : join(__dirname, '../../build/icons/
 
 const rendererUrl = process.env.ELECTRON_RENDERER_URL
 const rendererFile = join(__dirname, '../renderer/index.html')
+
+// Images and videos in Review's release notes reach the window through this scheme only (see ReleaseMedia).
+const releaseMedia = new ReleaseMedia()
+protocol.registerSchemesAsPrivileged([{ scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true } }])
 
 // Pull request links from a browser (review-code://open/owner/repo/pull/n). One instance handles them all: a second
 // launch (Windows and Linux pass the link on its command line) hands its link over and quits.
@@ -232,6 +240,21 @@ function registerIpc(): void {
 	handle(IPC.installUpdate, async () => {
 		await installUpdate()
 		return true
+	})
+	handle(IPC.whatsNewStatus, async () => whatsNew)
+	handle(IPC.whatsNewSeen, async () => {
+		whatsNew = null
+		if (runningVersion) await store.update((d) => void (d.seenVersion = runningVersion!))
+	})
+	// Read once per run; a failed read is tried again next time.
+	handle(IPC.releaseNotes, async () => {
+		notes ??= releaseNotes()
+			.then((list) => list.map((n) => ({ ...n, html: releaseMedia.rewrite(n.html) })))
+			.catch((e: unknown) => {
+				notes = null
+				throw e
+			})
+		return notes
 	})
 	handle(IPC.skipUpdate, async (version: unknown) => {
 		const v = str(version, 'version', 64)
@@ -548,6 +571,14 @@ app.whenReady().then(async () => {
 	const dir = app.getPath('userData')
 	store = ReviewStore.in(dir)
 	await store.load()
+	protocol.handle(MEDIA_SCHEME, (request) => releaseMedia.respond(request, net.fetch as typeof fetch))
+	if (runningVersion) {
+		// Nothing opened yet means a fresh install: no notes to catch up on, and this version counts as seen.
+		const d = store.read()
+		const fresh = d.lastRepoId === null && !Object.keys(d.repos).length
+		whatsNew = whatsNewOnStart(d.seenVersion ?? null, runningVersion, fresh)
+		if (fresh && !d.seenVersion) await store.update((x) => void (x.seenVersion = runningVersion!))
+	}
 	nativeTheme.themeSource = currentTheme().appearance
 	credentials = new CredentialService(dir, safeStorage)
 	await credentials.load()
@@ -697,6 +728,8 @@ app.whenReady().then(async () => {
 // Development runs skip the update check; `REVIEW_UPDATE_FROM=0.1.0 npm run dev` pretends to be that version to try it.
 const runningVersion = app.isPackaged ? app.getVersion() : (process.env.REVIEW_UPDATE_FROM ?? null)
 let newest: Release | null = null
+let whatsNew: NotesRange | null = null // the notes to show once this run, until you've seen them
+let notes: Promise<Awaited<ReturnType<typeof releaseNotes>>> | null = null
 let announcedVersion: string | null = null
 let installing: Promise<void> | null = null
 
@@ -895,7 +928,13 @@ function setMenu(): void {
 				],
 			},
 			{ role: 'windowMenu' },
-			{ role: 'help', submenu: [{ label: 'Send Feedback…', click: feedback }] },
+			{
+				role: 'help',
+				submenu: [
+					{ label: 'What’s New…', click: () => focusWindow((w) => w.webContents.send(IPC.whatsNewOpen)) },
+					{ label: 'Send Feedback…', click: feedback },
+				],
+			},
 		]),
 	)
 }
