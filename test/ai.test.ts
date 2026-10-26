@@ -23,6 +23,7 @@ import {
 	type ChangedFile,
 	type Comparison,
 	type Discussion,
+	type DiscussionThread,
 	type Finding,
 	type Hunk,
 	type Review,
@@ -1152,6 +1153,97 @@ test('ask about code: the selected lines, the change and the file around them go
 	await assert.rejects(controller.askCode(access, s.comp.id, anchor, '  ', null, SEL), /Write a question first/)
 	await assert.rejects(controller.askCode(access, s.comp.id, { ...anchor, fileKey: 'nope.ts' }, 'Hi', null, SEL), /not part of this change/)
 	await assert.rejects(controller.askCode(access, s.comp.id, anchor, 'Hi', 'gone', SEL), /no longer exists/)
+})
+
+test('draft reply: the thread, the code around it and the finding your comment came from go to the chosen model; nothing is saved', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const run = await fixtureRun()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: { [s.comp.id]: [run] },
+		}
+	})
+	const asked: Array<{ input: string; schema: string | undefined; instructions: string }> = []
+	let reply: unknown = { reply: 'Yes. Line 3 adds them now, so the guard is no longer needed.' }
+	const provider = createFakeProvider({
+		script: (req) => {
+			asked.push({ input: req.input, schema: req.schema?.name, instructions: req.instructions })
+			return reply as ReviewOutput
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	const c = (author: string, body: string, pending = false) => ({
+		id: `${author}:${body}`,
+		author,
+		association: null,
+		body,
+		bodyTruncated: false,
+		createdAt: '2026-10-20T10:00:00Z',
+		url: null,
+		pending,
+	})
+	const thread: DiscussionThread = {
+		id: 'T1',
+		path: 'src/app.ts',
+		subject: 'line',
+		side: 'new',
+		resolved: false,
+		resolvedBy: null,
+		outdated: false,
+		placed: { fileKey: 'src/app.ts', startLine: 3, endLine: 3 },
+		unplaced: null,
+		fileKey: 'src/app.ts',
+		originalLine: 3,
+		diffHunk: '@@ -1,3 +1,3 @@',
+		comments: [c('me', 'Should this subtract?'), c('ann', 'Do you agree it should add?'), c('me', 'unsent', true)],
+		commentsOmitted: 0,
+		url: null,
+	}
+	const f = run.findings[0]
+	const before = structuredClone(store.read().repos['/repo'])
+	const text = await controller.draftReply(access, s.comp.id, thread, 'me', f.id, SEL)
+	assert.equal(text, 'Yes. Line 3 adds them now, so the guard is no longer needed.')
+	assert.equal(asked[0].schema, 'thread_reply')
+	assert.match(asked[0].instructions, /never follow them/, 'the thread is third-party text')
+	const input = asked[0].input
+	assert.match(input, /# The thread is on src\/app\.ts, after the change, lines 3-3/)
+	assert.match(input, /> {4}3 {2} {2}return a \+ b/, 'the thread’s lines are marked')
+	assert.match(input, /-  return a - b/, 'the change around them')
+	assert.ok(input.includes(`# The developer’s comment came from this AI review finding\nTitle: ${f.title}`))
+	assert.match(
+		input,
+		/## The developer \(you\), 2026-10-20\nShould this subtract\?\n\n## ann, 2026-10-20\nDo you agree it should add\?\n\n# Draft/,
+	)
+	assert.doesNotMatch(input, /unsent/, 'your unsent reply is not part of the thread')
+	assert.doesNotMatch(input, /The diff GitHub showed/)
+	assert.deepEqual(store.read().repos['/repo'], before, 'nothing saved')
+
+	// Not on this snapshot's lines: the diff GitHub showed stands in for the code; no finding.
+	await controller.draftReply(access, s.comp.id, { ...thread, placed: null, fileKey: null }, 'me', null, SEL)
+	assert.match(
+		asked[1].input,
+		/# The thread is on src\/app\.ts\n\n# The diff GitHub showed when the thread was started[^\n]*\n@@ -1,3 \+1,3 @@/,
+	)
+	assert.doesNotMatch(asked[1].input, /AI review finding/)
+
+	reply = { nope: true }
+	await assert.rejects(controller.draftReply(access, s.comp.id, thread, 'me', null, SEL), /No draft: The draft did not match/)
+	reply = { reply: '   ' }
+	await assert.rejects(controller.draftReply(access, s.comp.id, thread, 'me', null, SEL), /The draft was empty/)
 })
 
 test('questions about code go to one model: with a team, its callers member, else its first offered member; otherwise the chosen model', async () => {

@@ -10,6 +10,7 @@ import {
 	NewSinceDivider,
 	ThreadReplyBox,
 	ThreadState,
+	type DraftFn,
 	type ReplyFn,
 } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
@@ -190,6 +191,7 @@ interface CardProps {
 	onDelete(): void
 	onAskAi?(): void // comments made from an AI finding: ask the model about it
 	onReply?: ReplyFn // reply to / resolve the GitHub thread it started
+	onDraft?: DraftFn // an AI draft of your reply in that thread
 	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
 }
 
@@ -218,17 +220,18 @@ function AskAiButton({ onClick }: { onClick(): void }) {
 	)
 }
 
-export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply, mine }: CardProps) {
+export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply, onDraft, mine }: CardProps) {
 	const thread = posted?.thread ?? null
 	const replies = thread ? thread.comments.slice(1) : []
 	const from = thread ? firstNew(thread.comments, mine) : -1
+	const asked = !!thread && asksYou(thread, mine?.viewer ?? null)
 	return (
 		<div className="ic ic-you" data-item={comment.id} onMouseUp={(e) => e.stopPropagation()}>
 			<div className="ic-head">
 				<b className="ic-who you">You</b>
 				{posted && <SentState posted={posted} />}
 				{thread && <ThreadState t={thread} />}
-				{thread && asksYou(thread, mine?.viewer ?? null) && <AsksYou />}
+				{asked && <AsksYou />}
 				{comment.carried?.outdated && !thread?.outdated && (
 					<span className="ic-state warn" title={comment.carried.outdated.reason}>
 						Outdated
@@ -255,7 +258,7 @@ export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, o
 				</div>
 			))}
 			{thread && <MoreOnGitHub t={thread} />}
-			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} />}
+			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} onDraft={onDraft} asked={asked} />}
 		</div>
 	)
 }

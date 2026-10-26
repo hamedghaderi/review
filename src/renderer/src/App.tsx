@@ -1764,6 +1764,14 @@ export function App() {
 													change((r) => ops.deleteComment(r, cid))
 												}}
 												onShowFinding={showFinding}
+												onDraftReply={
+													comparison.pr
+														? async (threadId) => {
+																const r = await window.review.draftReply(session.repo.id, comparison.id, threadId)
+																return r.ok ? { text: r.value } : { error: r.error.message }
+															}
+														: undefined
+												}
 												onReply={
 													comparison.pr
 														? async (threadId, body, resolve) => {

@@ -80,7 +80,7 @@ export function explainInput({ anchor: a, question, history, patch, fileLines, p
 	return out.join('\n')
 }
 
-function near(hunks: Array<Hunk>, a: Anchor): Array<Hunk> {
+export function near(hunks: Array<Hunk>, a: Pick<Anchor, 'side' | 'startLine' | 'endLine'>): Array<Hunk> {
 	const { side, startLine, endLine } = a
 	if (startLine === null || side === null) return hunks.slice(0, 6)
 	const lo = startLine - AROUND
@@ -92,7 +92,7 @@ function near(hunks: Array<Hunk>, a: Anchor): Array<Hunk> {
 	})
 }
 
-function hunkText(h: Hunk): string {
+export function hunkText(h: Hunk): string {
 	const mark = { add: '+', del: '-', ctx: ' ' } as const
 	return [
 		`@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@ ${h.section}`,

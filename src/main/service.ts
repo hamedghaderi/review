@@ -1410,6 +1410,28 @@ export class ReviewService {
 		return ai.askCode(access, reviewId, anchor(anchorInput, stored), question, questionId, selection)
 	}
 
+	/**
+	 * Drafts your reply in one of the PR's GitHub threads (see AiController.draftReply). The thread is read from GitHub
+	 * again, so the draft answers its newest comment.
+	 */
+	async draftReply(repoId: string, reviewId: string, threadId: string, selection: ModelSelection): Promise<string> {
+		const { ai, access } = this.aiAccess(reviewId)
+		const d = await this.prDiscussion(repoId, reviewId)
+		if (d.status === 'unavailable') throw new AppFail('github-failed', d.reason ?? 'The thread could not be read from GitHub.')
+		const thread = d.threads.find((t) => t.id === threadId)
+		if (!thread) throw new AppFail('not-found', 'That thread is no longer on this pull request.')
+		// Your comment that started it, to give the model the finding it came from.
+		const first = thread.comments[0]
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		const own = first
+			? stored?.comments.find((c) => {
+					const pub = stored.publication?.comments[c.id]
+					return (pub && (pub.githubId === first.id || pub.url === first.url)) || (!!first.url && c.carried?.published?.url === first.url)
+				})
+			: undefined
+		return ai.draftReply(access, reviewId, thread, d.viewer ?? null, own?.findingId ?? null, selection)
+	}
+
 	async deleteCodeQuestion(reviewId: string, questionId: string): Promise<Array<CodeQuestion>> {
 		const { ai, access } = this.aiAccess(reviewId)
 		return ai.deleteCodeQuestion(access.comparison.repoId, reviewId, questionId)
