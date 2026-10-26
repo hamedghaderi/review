@@ -12,6 +12,7 @@ import {
 	type CodeQuestion,
 	type Comparison,
 	type FileLinesResult,
+	type DiscussionThread,
 	type FindingMessage,
 	type FindingVerification,
 	type FindingReproducer,
@@ -54,6 +55,7 @@ import { outputBudget, type ModelLimits } from './provider.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import { buildOverviewRequest, MAX_OVERVIEW_CHARS, OVERVIEW_INSTRUCTIONS, OVERVIEW_LOOKUPS, parseOverview } from './overview.ts'
 import { buildBackground } from './background.ts'
+import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
@@ -873,6 +875,53 @@ export class AiController {
 			if (r) r.explanation = explanation
 		})
 		return structuredClone(explanation)
+	}
+
+	/**
+	 * Drafts your next reply in a GitHub thread, by `selection`'s model, from the thread, the code around it, the PR's
+	 * text and, when your comment came from an AI finding, that finding. Nothing is posted or saved: the draft is only
+	 * put in the reply box, for you to edit and send. `viewer` is your login, so the model knows which comments are yours.
+	 */
+	async draftReply(
+		access: ComparisonAccess,
+		reviewId: string,
+		thread: DiscussionThread,
+		viewer: string | null,
+		findingId: string | null,
+		selection: ModelSelection,
+	): Promise<string> {
+		const repoId = access.comparison.repoId
+		const busy = `reply:${thread.id}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'A reply to this thread is already being drafted.')
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'reply', repoId)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		try {
+			const finding = findingId
+				? (this.runsFor(repoId, reviewId)
+						.flatMap((r) => r.findings)
+						.find((f) => f.id === findingId) ?? null)
+				: null
+			const fileKey = thread.placed?.fileKey ?? null
+			const patch = fileKey ? await access.loadPatch(fileKey).catch(() => null) : null
+			const lines = fileKey && thread.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
+			const tools = config.limits.lookups !== false && access.tools ? access.tools(REPLY_LOOKUPS) : undefined
+			const pr = access.comparison.pr ? { title: access.comparison.pr.title, body: access.comparison.pr.body } : null
+			const response = await config.provider.review(
+				buildReplyRequest({ thread, viewer, finding, patch, fileLines: lines?.kind === 'text' ? lines.lines : null, pr, tools }),
+				AbortSignal.timeout(180_000),
+			)
+			return parseReply(response.output)
+		} catch (e) {
+			if (e instanceof AppFail) throw e
+			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
 	}
 
 	questionsFor(repoId: string, reviewId: string): Array<CodeQuestion> {

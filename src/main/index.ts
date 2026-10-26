@@ -442,6 +442,11 @@ function registerIpc(): void {
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
 		return service.explainChange(comparisonId(reviewId), selection)
 	})
+	handle(IPC.aiDraftReply, async (repoId: unknown, reviewId: unknown, threadId: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return service.draftReply(str(repoId, 'repository'), comparisonId(reviewId), str(threadId, 'thread id', 128), selection)
+	})
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)

@@ -8,6 +8,7 @@ import type {
 	RaisedBefore,
 	RaisedOutcome,
 } from '../../shared/types.ts'
+import { AiOrb } from './AiOrb.tsx'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
@@ -252,16 +253,64 @@ function hunkTail(h: string): string {
 }
 
 export type ReplyFn = (threadId: string, body: string, resolve: boolean) => Promise<string | null> // returns why it failed, or null
+export type DraftFn = (threadId: string) => Promise<{ text: string } | { error: string }> // an AI draft of your reply
 
-/** Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state. */
-export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: ReplyFn }) {
+/**
+ * Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state.
+ * `onDraft` asks the AI for a draft, which only fills the box: you edit it and press Reply yourself. It is offered up
+ * front only when the thread waits for your answer (`asked`); elsewhere only once you open the box to reply.
+ */
+export function ThreadReplyBox({
+	t,
+	onReply,
+	onDraft,
+	asked = false,
+}: {
+	t: DiscussionThread
+	onReply: ReplyFn
+	onDraft?: DraftFn
+	asked?: boolean
+}) {
 	const [open, setOpen] = useState(false)
 	const [text, setText] = useState('')
 	const [busy, setBusy] = useState(false)
+	const [drafting, setDrafting] = useState(false)
+	const [drafted, setDrafted] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const ref = useRef<HTMLTextAreaElement>(null)
 	const mention = useMentionCommand(text, ref, (next) => setText(next))
 	if (t.resolved === null) return null
+	// What you already typed stays; the draft goes after it.
+	const draft = async (): Promise<void> => {
+		if (!onDraft || drafting) return
+		setOpen(true)
+		setDrafting(true)
+		setError(null)
+		const r = await onDraft(t.id)
+		setDrafting(false)
+		if ('error' in r) return setError(r.error)
+		setText((x) => (x.trim() ? `${x.trimEnd()}\n\n${r.text}` : r.text))
+		setDrafted(true)
+		requestAnimationFrame(() => ref.current?.focus())
+	}
+	const draftButton = onDraft && (
+		<button
+			className={`btn small ${open ? 'ghost' : ''}`}
+			onClick={() => void draft()}
+			disabled={drafting || busy}
+			title="Your model for questions drafts a reply from the thread and the code. Nothing is sent until you press Reply."
+		>
+			{drafting ? (
+				<>
+					<AiOrb activity="reasoning" size={12} /> Drafting…
+				</>
+			) : open ? (
+				'Draft with AI'
+			) : (
+				'Draft reply'
+			)}
+		</button>
+	)
 	const send = async (resolve: boolean): Promise<void> => {
 		if (busy || (!text.trim() && !resolve)) return
 		setBusy(true)
@@ -270,6 +319,7 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 		setBusy(false)
 		if (problem) return setError(problem)
 		setText('')
+		setDrafted(false)
 		setOpen(false)
 	}
 	if (!open)
@@ -278,6 +328,7 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 				<button className="btn small ghost" onClick={() => setOpen(true)}>
 					Reply
 				</button>
+				{asked && draftButton}
 				{t.resolved === false && (
 					<button className="btn small ghost" onClick={() => void send(true)} disabled={busy}>
 						{busy ? 'Resolving…' : 'Resolve'}
@@ -292,8 +343,9 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 				ref={ref}
 				autoFocus
 				value={text}
-				rows={2}
-				placeholder="Reply on GitHub (⌘↵ to send)"
+				rows={drafted ? 5 : 2}
+				readOnly={drafting}
+				placeholder={drafting ? 'Drafting a reply…' : 'Reply on GitHub (⌘↵ to send)'}
 				onChange={(e) => setText(e.target.value)}
 				onKeyDown={(e) => {
 					if (mention.onKeyDown(e)) return
@@ -309,8 +361,12 @@ export function ThreadReplyBox({ t, onReply }: { t: DiscussionThread; onReply: R
 			{mention.panel}
 			{error && <p className="small error-text">{error}</p>}
 			<div className="ask-actions">
-				<span className="muted small">Posted to GitHub right away (or added to your pending review, if you have one).</span>
+				<span className="muted small">
+					{drafted && text.trim() ? 'Drafted by AI: check it before you send. ' : ''}Posted to GitHub right away (or added to your pending
+					review, if you have one).
+				</span>
 				<span className="spacer" />
+				{draftButton}
 				<button className="btn small ghost" onClick={() => setOpen(false)} disabled={busy}>
 					Cancel
 				</button>
@@ -337,7 +393,17 @@ export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
  * Someone else's thread on GitHub, read-only, in the code: who started it, its state, and the replies. Resolved threads
  * start as one line. Threads started by your own published comments are shown on your comment card instead.
  */
-export function ThreadCard({ thread: t, onReply, mine }: { thread: DiscussionThread; onReply?: ReplyFn; mine?: MyLastReview | null }) {
+export function ThreadCard({
+	thread: t,
+	onReply,
+	onDraft,
+	mine,
+}: {
+	thread: DiscussionThread
+	onReply?: ReplyFn
+	onDraft?: DraftFn
+	mine?: MyLastReview | null
+}) {
 	const from = firstNew(t.comments, mine)
 	const asked = asksYou(t, mine?.viewer ?? null)
 	const [open, setOpen] = useState(t.resolved !== true || from >= 0)
@@ -390,7 +456,7 @@ export function ThreadCard({ thread: t, onReply, mine }: { thread: DiscussionThr
 						</div>
 					))}
 					<MoreOnGitHub t={t} />
-					{onReply && <ThreadReplyBox t={t} onReply={onReply} />}
+					{onReply && <ThreadReplyBox t={t} onReply={onReply} onDraft={onDraft} asked={asked} />}
 				</>
 			)}
 		</div>
