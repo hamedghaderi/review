@@ -1032,11 +1032,11 @@ test('ask: the question goes to the model that raised the finding, with the code
 			aiRuns: {},
 		}
 	})
-	const asked: Array<{ input: string; schema: string; instructions: string }> = []
+	const asked: Array<{ input: string; schema: string; instructions: string; tools: boolean }> = []
 	const provider = createFakeProvider({
 		script: (req) => {
 			if (req.schema) {
-				asked.push({ input: req.input, schema: req.schema.name, instructions: req.instructions })
+				asked.push({ input: req.input, schema: req.schema.name, instructions: req.instructions, tools: !!req.tools })
 				return { answer: 'You are right: it is never unmounted, so nothing leaks.', verdict: 'wrong', level: 'should_fix' }
 			}
 			return out([finding()])
@@ -1075,6 +1075,24 @@ test('ask: the question goes to the model that raised the finding, with the code
 	assert.equal(withPick.findings.find((x) => x.id === f.id)!.thread!.at(-1)?.model, 'other-model')
 	assert.match(asked[0].instructions, /^You reviewed a code change/)
 	assert.match(asked.at(-1)!.instructions, /^Another AI reviewer looked at a code change/)
+	assert.equal(asked[0].tools, false)
+	assert.match(asked[0].instructions, /You have no tools/)
+
+	// With lookups available, the answer can open files the excerpt does not show (a definition, a migration); never MCP.
+	const toolCalls: Array<unknown> = []
+	const withTools = {
+		...access,
+		tools: (_budget: unknown, external?: unknown) => {
+			toolCalls.push(external)
+			const log = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [] }
+			return { definitions: [], exhausted: () => true, call: async () => ({ text: '', error: true }), log } as never
+		},
+	}
+	await controller.ask(withTools, s.comp.id, f.id, 'Where is the cleanup defined?')
+	assert.equal(asked.at(-1)!.tools, true)
+	assert.match(asked.at(-1)!.instructions, /open it with the lookups/)
+	assert.doesNotMatch(asked.at(-1)!.instructions, /You have no tools/)
+	assert.deepEqual(toolCalls, [null], 'MCP tools are never offered on a question')
 })
 
 test('ask about code: the selected lines, the change and the file around them go to the chosen model; the answer is saved privately', async () => {
