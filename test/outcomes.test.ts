@@ -243,3 +243,51 @@ test('outcomes: filters by period, prompt version, group and model; a group filt
 	assert.deepEqual(claude.promptVersions, ['v2', 'v1'])
 	assert.equal(summarizeOutcomes(repos, { ...ALL, repoId: 'elsewhere' }, NOW).total.raised, 0)
 })
+
+test('outcomes: after merge, a problem takes its strongest result across re-runs, and only reverts and changes are listed', () => {
+	const runs = [
+		run('run1', [finding('f1'), finding('f2'), finding('f3'), finding('f4')]),
+		run('run2', [finding('f1b', { repeatOf: 'f1' })], { startedAt: '2026-10-21T10:00:00Z' }),
+	]
+	const commit = (sha: string, at: string) => ({ sha, subject: `commit ${sha}`, at })
+	const s = summarizeOutcomes(
+		[
+			{
+				...repo([review('rev1')], { rev1: runs }),
+				followedAt: '2026-10-22T00:00:00Z',
+				merged: {
+					'7': {
+						repo: 'owner/shop',
+						title: 'Pull request',
+						mergeCommit: 'm',
+						mergedAt: '2026-10-01T00:00:00Z',
+						baseRef: 'main',
+						until: '2026-10-22T00:00:00Z',
+						done: false,
+						findings: {
+							f1: { state: 'untouched', commit: null, reason: null },
+							f1b: { state: 'changed', commit: commit('aaa', '2026-10-04T12:00:00Z'), reason: null },
+							f2: { state: 'reverted', commit: commit('bbb', '2026-10-10T00:00:00Z'), reason: null },
+							f3: { state: 'unknown', commit: null, reason: 'rewritten' },
+						},
+					},
+					'8': null,
+				},
+			},
+		],
+		ALL,
+		NOW,
+	)
+	assert.equal(s.total.raised, 4)
+	assert.equal(s.total.followed, 2, 'unknown and never followed are left out')
+	assert.equal(s.total.changedAfterMerge, 1, 'f1 counts once, as changed')
+	assert.equal(s.total.reverted, 1)
+	assert.deepEqual(
+		s.afterMerge.map((i) => [i.state, i.commit.sha, i.days, i.number]),
+		[
+			['reverted', 'bbb', 9, 7],
+			['changed', 'aaa', 3, 7],
+		],
+	)
+	assert.equal(s.followedAt, '2026-10-22T00:00:00Z')
+})

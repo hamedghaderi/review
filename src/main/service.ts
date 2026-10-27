@@ -90,6 +90,7 @@ import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
 import { summarizeOutcomes } from './ai/outcomes.ts'
+import { AFTER_MERGE_DAYS, followAfterMerge, type FollowTarget } from './afterMerge.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
@@ -1028,6 +1029,79 @@ export class ReviewService {
 	/** What became of AI findings in every repository's reviews: read from the store, nothing is fetched. */
 	outcomes(filter: OutcomeFilter): OutcomeSummary {
 		return summarizeOutcomes(Object.values(this.store.read().repos), filter)
+	}
+
+	/**
+	 * Follows the findings of every reviewed pull request that merged past the merge, for Outcomes (see afterMerge.ts):
+	 * one GitHub read per pull request not settled yet, its merge commit and the base branch's commit at the window's end
+	 * fetched by id, and the lines followed in Git. Nothing is checked out or run, and no model is asked. One pull
+	 * request that can't be read doesn't stop the others; it is named in `problems`.
+	 */
+	async followMerged(repoId: string | null, now = new Date()): Promise<{ followed: number; problems: Array<string> }> {
+		const gh = this.requireGitHub()
+		const problems: Array<string> = []
+		let followed = 0
+		for (const s of Object.values(this.store.read().repos)) {
+			if (repoId !== null && s.repoId !== repoId) continue
+			const byPr = new Map<string, Array<Review>>() // "owner/name#N" → its reviewed snapshots that have findings
+			for (const r of Object.values(s.reviews)) {
+				if (!r.pr || !s.aiRuns[r.id]?.some((x) => !x.fixture && x.findings.length)) continue
+				const key = `${r.pr.repo}#${r.pr.number}`
+				byPr.set(key, [...(byPr.get(key) ?? []), r])
+			}
+			for (const reviews of byPr.values()) {
+				const { repo, number } = reviews[0].pr!
+				const known = s.merged?.[String(number)]
+				if (known === null || known?.done) continue
+				try {
+					const d = await gh.detail(repo, number)
+					if (d.state === 'closed') {
+						await this.store.update((x) => void ((x.repos[s.repoId].merged ??= {})[String(number)] = null))
+						continue
+					}
+					if (!d.mergedAt || !d.mergeCommit) continue // still open
+					if (!d.baseRef) throw new AppFail('github-failed', 'GitHub no longer reports the branch it merged into.')
+					const ends = Date.parse(d.mergedAt) + AFTER_MERGE_DAYS * 86_400_000
+					const until = new Date(Math.min(now.getTime(), ends)).toISOString()
+					const tip = await gh.branchTipAt(repo, d.baseRef, until)
+					if (!tip) throw new AppFail('github-failed', `GitHub lists no commit on ${d.baseRef} by ${until}.`)
+					// The snapshot that merged, else the newest one reviewed.
+					const review =
+						reviews.find((r) => r.headSha === d.headSha) ?? [...reviews].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+					const info = this.repos.get(s.repoId) ?? (await readRepo(s.root))
+					await ensureCommits(s.root, fetchRemote(info, [repo]), [review.headSha, d.mergeCommit, tip])
+					// Reverted, changed and unknown are settled; untouched lines are followed again.
+					const settled = Object.fromEntries(Object.entries(known?.findings ?? {}).filter(([, r]) => r.state !== 'untouched'))
+					const targets: Array<FollowTarget> = []
+					for (const run of s.aiRuns[review.id] ?? []) {
+						if (run.fixture) continue
+						for (const f of run.findings) {
+							const a = f.anchor
+							if (settled[f.id] || a.side !== 'new' || !a.newPath || a.startLine === null) continue
+							targets.push({ id: f.id, path: a.newPath, start: a.startLine, end: a.endLine ?? a.startLine })
+						}
+					}
+					const pr = { repo, number, title: d.title, mergeCommit: d.mergeCommit }
+					const results = await followAfterMerge(s.root, review.headSha, pr, tip, targets)
+					const merged = {
+						repo,
+						title: d.title,
+						mergeCommit: d.mergeCommit,
+						mergedAt: d.mergedAt,
+						baseRef: d.baseRef,
+						until,
+						done: now.getTime() >= ends,
+						findings: { ...settled, ...Object.fromEntries(results) },
+					}
+					await this.store.update((x) => void ((x.repos[s.repoId].merged ??= {})[String(number)] = merged))
+					followed += results.size
+				} catch (e) {
+					problems.push(`${repo}#${number}: ${errorOf(e).message}`)
+				}
+			}
+			await this.store.update((x) => void (x.repos[s.repoId].followedAt = now.toISOString()))
+		}
+		return { followed, problems }
 	}
 
 	homeInbox(): HomeInbox {
