@@ -308,7 +308,10 @@ export function DiffView(p: Props) {
 	}
 
 	const renderItem = (it: Item): React.ReactNode => {
-		if (it.kind === 'thread') return <ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} onDraft={p.onDraftReply} mine={p.mine} />
+		if (it.kind === 'thread')
+			return (
+				<ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} onDraft={p.onDraftReply} modelPicker={p.askModelPicker} mine={p.mine} />
+			)
 		if (it.kind === 'question') {
 			const q = it.q
 			return (
@@ -338,6 +341,7 @@ export function DiffView(p: Props) {
 					onAskAi={it.c.findingId && p.onShowFinding ? () => p.onShowFinding!(it.c.findingId!) : undefined}
 					onReply={p.onReply}
 					onDraft={p.onDraftReply}
+					modelPicker={p.askModelPicker}
 					mine={p.mine}
 				/>
 			)

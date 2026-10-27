@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import type {
 	ChangedFile,
 	Discussion,
@@ -259,16 +259,19 @@ export type DraftFn = (threadId: string) => Promise<{ text: string } | { error: 
  * Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state.
  * `onDraft` asks the AI for a draft, which only fills the box: you edit it and press Reply yourself. It is offered up
  * front only when the thread waits for your answer (`asked`); elsewhere only once you open the box to reply.
+ * `modelPicker` picks the model for questions, which writes the draft.
  */
 export function ThreadReplyBox({
 	t,
 	onReply,
 	onDraft,
+	modelPicker,
 	asked = false,
 }: {
 	t: DiscussionThread
 	onReply: ReplyFn
 	onDraft?: DraftFn
+	modelPicker?: ReactNode
 	asked?: boolean
 }) {
 	const [open, setOpen] = useState(false)
@@ -369,6 +372,7 @@ export function ThreadReplyBox({
 					review, if you have one).
 				</span>
 				<span className="spacer" />
+				{onDraft && modelPicker}
 				{draftButton}
 				<button className="btn small ghost" onClick={() => setOpen(false)} disabled={busy}>
 					Cancel
@@ -400,11 +404,13 @@ export function ThreadCard({
 	thread: t,
 	onReply,
 	onDraft,
+	modelPicker,
 	mine,
 }: {
 	thread: DiscussionThread
 	onReply?: ReplyFn
 	onDraft?: DraftFn
+	modelPicker?: ReactNode
 	mine?: MyLastReview | null
 }) {
 	const from = firstNew(t.comments, mine)
@@ -459,7 +465,7 @@ export function ThreadCard({
 						</div>
 					))}
 					<MoreOnGitHub t={t} />
-					{onReply && <ThreadReplyBox t={t} onReply={onReply} onDraft={onDraft} asked={asked} />}
+					{onReply && <ThreadReplyBox t={t} onReply={onReply} onDraft={onDraft} modelPicker={modelPicker} asked={asked} />}
 				</>
 			)}
 		</div>

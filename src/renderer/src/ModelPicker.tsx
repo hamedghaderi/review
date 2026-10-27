@@ -40,6 +40,18 @@ export function AskModel({ settings, onManage }: { settings: AiSettingsView | nu
 	)
 }
 
+const COLLAPSED_KEY = 'review.pickerCollapsed'
+
+/** Providers folded in the picker, by connection id, kept across openings and restarts; none when storage is unavailable. */
+function readCollapsed(): Set<string> {
+	try {
+		const v: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
+		return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+	} catch {
+		return new Set()
+	}
+}
+
 /** Only connections that can run a review appear in the picker. */
 function usable(c: ConnectionView): boolean {
 	return c.status === 'connected' || c.status === 'testing'
@@ -54,12 +66,11 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 	const [query, setQuery] = useState('')
 	const [cursor, setCursor] = useState(0)
 	const [anchor, setAnchor] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
+	const [collapsed, setCollapsed] = useState(readCollapsed)
 	const ref = useRef<HTMLDivElement>(null)
 	const input = useRef<HTMLInputElement>(null)
 
-	// CLI connections review only: each request starts a process, too slow for questions.
-	const cli = new Set(settings?.providers.filter((p) => p.cli).map((p) => p.kind))
-	const connections = settings?.connections.filter((c) => usable(c) && (onSelectTeam || !cli.has(c.kind))) ?? []
+	const connections = settings?.connections.filter(usable) ?? []
 	const activeTeam =
 		onSelectTeam && settings?.reviewer?.kind === 'team'
 			? settings.teams.find((t) => t.id === (settings.reviewer as { teamId: string }).teamId)
@@ -72,20 +83,36 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 
 	const groups = useMemo(() => {
 		const q = query.trim().toLowerCase()
-		return connections
-			.map((c) => ({
-				connection: c,
-				models: c.models.filter(
-					(m) =>
-						listed(m) && (!q || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q) || c.label.toLowerCase().includes(q)),
-				),
-			}))
-			.filter((g) => g.models.length > 0)
-	}, [connections, query])
+		return (
+			connections
+				.map((c) => ({
+					connection: c,
+					models: c.models.filter(
+						(m) =>
+							listed(m) && (!q || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q) || c.label.toLowerCase().includes(q)),
+					),
+				}))
+				.filter((g) => g.models.length > 0)
+				// A search opens every provider, so a match is never hidden in a folded one.
+				.map((g) => ({ ...g, open: !!q || !collapsed.has(g.connection.id) }))
+		)
+	}, [connections, query, collapsed])
 	const flat: Array<{ connectionId: string; modelId: string } | { teamId: string }> = [
 		...teams.map((t) => ({ teamId: t.id })),
-		...groups.flatMap((g) => g.models.map((m) => ({ connectionId: g.connection.id, modelId: m.id }))),
+		...groups.flatMap((g) => (g.open ? g.models.map((m) => ({ connectionId: g.connection.id, modelId: m.id })) : [])),
 	]
+
+	function fold(connectionId: string): void {
+		const next = new Set(collapsed)
+		if (!next.delete(connectionId)) next.add(connectionId)
+		setCollapsed(next)
+		setCursor(0)
+		try {
+			localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+		} catch {
+			// Not remembered; the provider stays folded until the app restarts.
+		}
+	}
 
 	useEffect(() => {
 		if (!open) return
@@ -249,36 +276,49 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 						{groups.length === 0 && <div className="muted small pad">No models match.</div>}
 						{groups.map((g) => (
 							<div key={g.connection.id} role="group" aria-label={g.connection.label}>
-								<div className="section-title picker-group">
-									{g.connection.label}
-									{g.connection.label !== g.connection.providerLabel && <span className="muted"> · {g.connection.providerLabel}</span>}
-								</div>
-								{g.models.map((m) => {
-									index++
-									const i = index
-									const selected = !activeTeam && selection?.connectionId === g.connection.id && selection?.modelId === m.id
-									return (
-										<div
-											key={m.id}
-											role="option"
-											aria-selected={selected}
-											className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
-											onMouseEnter={() => setCursor(i)}
-											onClick={() => choose(i)}
-											title={sourceTitle(m)}
-										>
-											<span className="picker-check" aria-hidden>
-												{selected ? '✓' : ''}
-											</span>
-											<span className="ellipsis">{m.label}</span>
-											{m.label !== m.id && <span className="muted mono small ellipsis">{m.id}</span>}
-											<span className="spacer" />
-											<span className={`src-tag ${m.probe ? (m.probe.ok ? 'ok' : 'bad') : m.source}`}>
-												{m.probe && !m.probe.ok ? 'Failed test' : sourceLabel(m)}
-											</span>
-										</div>
-									)
-								})}
+								<button
+									className="section-title section-toggle picker-group"
+									aria-expanded={g.open}
+									disabled={!!query.trim()}
+									onClick={() => fold(g.connection.id)}
+								>
+									<span className={`chev ${g.open ? 'open' : ''}`} aria-hidden>
+										▸
+									</span>
+									<span className="ellipsis">
+										{g.connection.label}
+										{g.connection.label !== g.connection.providerLabel && <span className="muted"> · {g.connection.providerLabel}</span>}
+									</span>
+									<span className="spacer" />
+									<span className="muted">{g.models.length}</span>
+								</button>
+								{g.open &&
+									g.models.map((m) => {
+										index++
+										const i = index
+										const selected = !activeTeam && selection?.connectionId === g.connection.id && selection?.modelId === m.id
+										return (
+											<div
+												key={m.id}
+												role="option"
+												aria-selected={selected}
+												className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
+												onMouseEnter={() => setCursor(i)}
+												onClick={() => choose(i)}
+												title={sourceTitle(m)}
+											>
+												<span className="picker-check" aria-hidden>
+													{selected ? '✓' : ''}
+												</span>
+												<span className="ellipsis">{m.label}</span>
+												{m.label !== m.id && <span className="muted mono small ellipsis">{m.id}</span>}
+												<span className="spacer" />
+												<span className={`src-tag ${m.probe ? (m.probe.ok ? 'ok' : 'bad') : m.source}`}>
+													{m.probe && !m.probe.ok ? 'Failed test' : sourceLabel(m)}
+												</span>
+											</div>
+										)
+									})}
 							</div>
 						))}
 					</div>
