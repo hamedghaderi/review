@@ -3,6 +3,7 @@ import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { CATEGORY_LABEL } from '../../shared/findings.ts'
 import { decidedCount, OUTCOME_GROUP_LABEL } from '../../shared/outcomes.ts'
 import type {
+	AfterMergeItem,
 	AiCost,
 	DismissReason,
 	FindingCategory,
@@ -13,6 +14,7 @@ import type {
 	OutcomeRow,
 	OutcomeSummary,
 } from '../../shared/types.ts'
+import { ago } from './branches.ts'
 import { useStored } from './useStored.ts'
 
 const PERIODS: Array<[OutcomePeriod, string]> = [
@@ -55,6 +57,57 @@ function CostCell({ cost, accepted }: { cost: AiCost | null; accepted: number })
 	)
 }
 
+/** "2 · 1 reverted" of the problems followed past their merge; a dash when none were. */
+function AfterMergeCell({ c }: { c: OutcomeCounts }) {
+	if (!c.followed) return <span className="muted">—</span>
+	const changed = c.reverted + c.changedAfterMerge
+	return (
+		<span
+			title={`${c.followed} followed past the merge: ${c.reverted} reverted, ${c.changedAfterMerge} changed by a later commit. A later change is a candidate fix, not proof of one.`}
+		>
+			{changed}
+			{c.reverted > 0 && <span className="muted"> · {c.reverted} reverted</span>}
+		</span>
+	)
+}
+
+/** Findings whose lines changed after their pull request merged, with the commit that changed them. */
+function AfterMergeList({ items }: { items: Array<AfterMergeItem> }) {
+	if (!items.length) return null
+	return (
+		<>
+			<div className="section-title">Changed after merge</div>
+			<p className="muted small">
+				The first commit on the base branch that changed a finding’s lines after its pull request merged. A revert undid the pull request;
+				any other change may be a fix or may be unrelated.
+			</p>
+			<ul className="after-merge-list">
+				{items.map((i) => (
+					<li key={`${i.repo}#${i.number}:${i.commit.sha}:${i.title}`}>
+						<span className={`ic-state ${i.state === 'reverted' ? 'warn' : ''}`}>{i.state === 'reverted' ? 'Reverted' : 'Changed'}</span>
+						<span className="ellipsis" title={i.title}>
+							{i.title}
+						</span>
+						<span className="spacer" />
+						<span className="muted small nowrap">
+							#{i.number} · {i.days === 0 ? 'same day' : `${i.days} day${i.days === 1 ? '' : 's'} after merge`}
+						</span>
+						<a
+							className="mono small nowrap"
+							href={`https://github.com/${i.repo}/commit/${i.commit.sha}`}
+							target="_blank"
+							rel="noreferrer"
+							title={i.commit.subject}
+						>
+							{i.commit.sha.slice(0, 7)} ↗
+						</a>
+					</li>
+				))}
+			</ul>
+		</>
+	)
+}
+
 function Table({ title, label, rows, min }: { title: string; label: string; rows: Array<OutcomeRow>; min: number }) {
 	if (!rows.length) return null
 	const withCost = rows.some((r) => r.cost)
@@ -83,6 +136,12 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 							title="Its lines changed in a later snapshot and the next run didn't raise it again. The model may have missed it."
 						>
 							Probably fixed
+						</th>
+						<th
+							className="num"
+							title="Merged, and a later commit on the base branch changed its lines (or reverted the pull request). Follow merged pull requests to fill this in."
+						>
+							After merge
 						</th>
 						<th className="num" title="Double-checked findings the newest check called likely wrong">
 							Likely wrong
@@ -129,6 +188,9 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 								</td>
 								<td className="num">{c.undecided + c.auto}</td>
 								<td className="num">{c.fixed}</td>
+								<td className="num">
+									<AfterMergeCell c={c} />
+								</td>
 								<td className="num" title={c.checked ? `${c.likelyWrong} of ${c.checked} double-checked` : 'None double-checked'}>
 									{c.checked ? c.likelyWrong : <span className="muted">—</span>}
 								</td>
@@ -155,6 +217,9 @@ export function Outcomes() {
 	const [rest, setRest] = useState<Omit<OutcomeFilter, 'period'>>({ repoId: null, promptVersion: null, group: null, model: null })
 	const [summary, setSummary] = useState<OutcomeSummary | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [following, setFollowing] = useState(false)
+	const [followNote, setFollowNote] = useState<string | null>(null)
+	const [loads, setLoads] = useState(0) // bumped to read the summary again
 
 	useEffect(() => {
 		let live = true
@@ -168,7 +233,17 @@ export function Outcomes() {
 		return () => {
 			live = false
 		}
-	}, [period, rest])
+	}, [period, rest, loads])
+
+	async function follow(): Promise<void> {
+		setFollowing(true)
+		setFollowNote(null)
+		const r = await window.review.aiFollowMerged(rest.repoId)
+		setFollowing(false)
+		if (!r.ok) setFollowNote(r.error.message)
+		else if (r.value.problems.length) setFollowNote(`Some pull requests couldn’t be followed:\n${r.value.problems.join('\n')}`)
+		setLoads((n) => n + 1)
+	}
 
 	const s = summary
 	const min = s?.minDecided ?? 10
@@ -243,8 +318,19 @@ export function Outcomes() {
 							</option>
 						))}
 					</select>
+					<span className="spacer" />
+					<span className="muted small">{s.followedAt ? `Merged pull requests followed ${ago(s.followedAt)}` : ''}</span>
+					<button
+						className="btn small"
+						onClick={() => void follow()}
+						disabled={following}
+						title={`For reviewed pull requests that merged: whether a later commit on the base branch changed each finding's lines, up to 90 days after the merge. Reads GitHub and Git only; no model is asked.`}
+					>
+						{following ? 'Following…' : 'Follow merged pull requests'}
+					</button>
 				</div>
 			)}
+			{followNote && <div className="error-text small follow-note">{followNote}</div>}
 			{error && <div className="error-text small">{error}</div>}
 			{!s ? (
 				!error && <p className="muted home-note">Loading…</p>
@@ -257,6 +343,7 @@ export function Outcomes() {
 						<span className="muted">
 							{s.total.accepted} accepted · {dismissedOf(s.total)} dismissed ({s.total.dismissed.wrong} wrong) ·{' '}
 							{s.total.undecided + s.total.auto} undecided · {s.total.fixed} probably fixed
+							{s.total.followed ? ` · ${s.total.reverted + s.total.changedAfterMerge} changed after merge` : ''}
 							{s.cost ? ` · ${formatCost(s.cost)}` : ''}
 						</span>
 					</div>
@@ -264,6 +351,7 @@ export function Outcomes() {
 					<Table title="By setup" label="Single model or team" rows={s.setups} min={min} />
 					<Table title="Defects and design" label="Kind" rows={groupRows(s.groups)} min={min} />
 					<Table title="By rule" label="Rule" rows={ruleRows(s.rules)} min={min} />
+					<AfterMergeList items={s.afterMerge} />
 					{s.cost === null && <p className="muted small">Cost can’t be split by kind of finding, so it isn’t shown with that filter.</p>}
 				</>
 			)}

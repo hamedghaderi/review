@@ -732,6 +732,14 @@ export class GitHubService {
 	 * A pull request's description: the Markdown, GitHub's rendering of it, and whether you may edit it. One GraphQL
 	 * query with a token; without one, the REST pull request in its HTML form (public repositories only).
 	 */
+	/** The newest commit on `branch` committed by `until` (an ISO time), or null when there is none. Read-only. */
+	async branchTipAt(repo: string, branch: string, until: string, signal?: AbortSignal): Promise<string | null> {
+		checkRepo(repo)
+		const qs = new URLSearchParams({ sha: branch, until, per_page: '1' })
+		const list = await this.get<Array<{ sha: string }>>(`/repos/${repo}/commits?${qs}`, signal)
+		return list[0]?.sha ?? null
+	}
+
 	async description(repo: string, number: number, signal?: AbortSignal): Promise<PrDescription> {
 		checkRepo(repo)
 		const fetchedAt = new Date().toISOString()
@@ -1669,6 +1677,7 @@ interface RestPull {
 	state: 'open' | 'closed'
 	draft?: boolean
 	merged_at: string | null
+	merge_commit_sha?: string | null
 	closed_at: string | null
 	created_at: string
 	updated_at: string
@@ -1714,6 +1723,7 @@ export function fromRestPull(p: RestPull, viewer: string | null): PrDetail {
 		headRepo,
 		createdAt: p.created_at,
 		mergedAt: p.merged_at,
+		mergeCommit: p.merged_at ? (p.merge_commit_sha ?? null) : null,
 		closedAt: p.closed_at,
 	}
 }

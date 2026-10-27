@@ -1,6 +1,8 @@
 import { basename } from 'node:path'
 import { findingRoots, findingState } from '../../shared/findings.ts'
 import type {
+	AfterMergeItem,
+	AfterMergeResult,
 	AiCost,
 	AiRun,
 	Finding,
@@ -40,7 +42,18 @@ interface Occurrence {
 interface Problem {
 	occurrences: Array<Occurrence>
 	fixed: boolean
+	after: Followed | null // what happened to its lines after its pull request merged
 }
+
+interface Followed {
+	result: AfterMergeResult
+	finding: Finding
+	repo: string
+	number: number
+	mergedAt: string
+}
+
+const AFTER_RANK: Record<AfterMergeResult['state'], number> = { reverted: 3, changed: 2, untouched: 1, unknown: 0 }
 
 type Decided = 'accepted' | 'auto' | 'undecided' | { dismissed: keyof OutcomeCounts['dismissed'] }
 
@@ -111,11 +124,17 @@ function problemsOf(s: RepoState): Array<Problem> {
 			}
 		}
 	}
+	const followed = new Map<string, Omit<Followed, 'finding'>>()
+	for (const [number, m] of Object.entries(s.merged ?? {}))
+		for (const [id, result] of Object.entries(m?.findings ?? {}))
+			followed.set(id, { result, repo: m!.repo, number: Number(number), mergedAt: m!.mergedAt })
 	const byRoot = new Map<string, Problem>()
 	for (const o of occurrences) {
 		const root = find(o.finding.id)
-		const p = byRoot.get(root) ?? { occurrences: [], fixed: false }
+		const p = byRoot.get(root) ?? { occurrences: [], fixed: false, after: null }
 		p.occurrences.push(o)
+		const f = followed.get(o.finding.id)
+		if (f && (!p.after || AFTER_RANK[f.result.state] > AFTER_RANK[p.after.result.state])) p.after = { ...f, finding: o.finding }
 		byRoot.set(root, p)
 	}
 	for (const g of gone) {
@@ -152,6 +171,9 @@ function emptyCounts(): OutcomeCounts {
 		checked: 0,
 		likelyWrong: 0,
 		reproduced: 0,
+		followed: 0,
+		reverted: 0,
+		changedAfterMerge: 0,
 	}
 }
 
@@ -186,6 +208,8 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 	const allModels = new Map<string, { key: string; label: string; detail: string | null }>()
 	const versions = new Map<string, string>() // version → newest run with it
 	const repoList: OutcomeSummary['repos'] = []
+	const afterMerge: Array<AfterMergeItem> = []
+	let followedAt: string | null = null
 	let cost: AiCost | null = null
 
 	for (const s of repos) {
@@ -194,6 +218,8 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 			.filter((r) => !r.fixture)
 		if (!runs.length) continue
 		repoList.push({ id: s.repoId, label: repoLabel(s) })
+		if (s.followedAt && (filter.repoId === null || s.repoId === filter.repoId) && s.followedAt > (followedAt ?? ''))
+			followedAt = s.followedAt
 		for (const run of runs) {
 			if (run.startedAt > (versions.get(run.promptVersion) ?? '')) versions.set(run.promptVersion, run.startedAt)
 			for (const m of run.team?.members ?? [null]) {
@@ -249,6 +275,10 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 				if (verified) c.checked++
 				if (verified?.verdict === 'wrong') c.likelyWrong++
 				if (p.occurrences.some((o) => o.finding.reproducer?.code && !o.finding.reproducer.error)) c.reproduced++
+				const after = p.after?.result.state
+				if (after && after !== 'unknown') c.followed++
+				if (after === 'reverted') c.reverted++
+				if (after === 'changed') c.changedAfterMerge++
 			}
 			add(total)
 			for (const key of new Set(raised.map((r) => r.model.key)))
@@ -258,6 +288,17 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 			const category = lead.finding.category
 			add(row(rows.rules, { key: category ?? 'uncategorised', label: category ?? 'uncategorised', detail: null, group }).counts)
 			add(row(rows.groups, { key: group, label: group, detail: null, group }).counts)
+			const a = p.after
+			if (a?.result.commit && (a.result.state === 'reverted' || a.result.state === 'changed'))
+				afterMerge.push({
+					repo: a.repo,
+					number: a.number,
+					title: a.finding.title,
+					category: lead.finding.category ?? null,
+					state: a.result.state,
+					commit: a.result.commit,
+					days: Math.max(0, Math.floor((Date.parse(a.result.commit.at) - Date.parse(a.mergedAt)) / 86_400_000)),
+				})
 		}
 	}
 
@@ -275,5 +316,7 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 		promptVersions: [...versions.entries()].sort((a, b) => b[1].localeCompare(a[1])).map(([v]) => v),
 		allModels: [...allModels.values()].sort((a, b) => a.label.localeCompare(b.label)),
 		minDecided: MIN_DECIDED,
+		afterMerge: afterMerge.sort((a, b) => b.commit.at.localeCompare(a.commit.at)),
+		followedAt,
 	}
 }

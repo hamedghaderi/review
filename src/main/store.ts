@@ -1,6 +1,6 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AiRun, AutoReviewRecord, BrowserState, Review } from '../shared/types.ts'
+import type { AiRun, AutoReviewRecord, BrowserState, MergedPr, Review } from '../shared/types.ts'
 import type { WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 import { parseKeymap, type KeymapOverrides } from '../shared/keymap.ts'
@@ -38,6 +38,8 @@ export interface RepoState {
 	githubRepo?: string | null // "owner/name" chosen explicitly for pull requests
 	githubResolved?: string | null // the GitHub repository in use when last opened (explicit or from the remotes)
 	seenPrs?: Record<string, string> // PR number → when you last looked at it in the app (the Inbox's "new")
+	merged?: Record<string, MergedPr | null> // PR number → how it merged and its findings since; null: closed without merging
+	followedAt?: string // when merged pull requests were last followed
 }
 
 /**

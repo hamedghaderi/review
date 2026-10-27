@@ -213,6 +213,7 @@ export interface PrDetail extends PrSummary {
 	headRepo: string | null // null when the fork was deleted
 	createdAt: string
 	mergedAt: string | null
+	mergeCommit: string | null // what landed on the base branch (the merge, squash or last rebased commit); null until merged
 	closedAt: string | null
 }
 
@@ -1311,6 +1312,42 @@ export interface OutcomeCounts {
 	checked: number // double-checked (after the run, or with Verify)
 	likelyWrong: number // the newest double-check said likely wrong
 	reproduced: number // a failing test was written for it
+	followed: number // its pull request merged and its lines were followed past the merge (not "unknown")
+	reverted: number // the pull request was reverted on those lines
+	changedAfterMerge: number // a later commit changed its lines: a candidate fix, not proof of one
+}
+
+/** What happened to a finding's lines after its pull request merged (see src/main/afterMerge.ts). */
+export interface AfterMergeResult {
+	state: 'reverted' | 'changed' | 'untouched' | 'unknown'
+	commit: { sha: string; subject: string; at: string } | null // the first commit that changed them; reverted and changed only
+	reason: string | null // unknown: why the lines couldn't be followed
+}
+
+/**
+ * A reviewed pull request as it merged, and what happened to its findings' lines since; kept per repository. Findings
+ * that came back reverted, changed or unknown are settled; untouched ones are followed again until the window ends.
+ */
+export interface MergedPr {
+	repo: string // "owner/name"
+	title: string
+	mergeCommit: string
+	mergedAt: string
+	baseRef: string
+	until: string // the end of the window followed so far: the check's time, or the end of the window once it has passed
+	done: boolean // the window has passed: nothing left to follow
+	findings: Record<string, AfterMergeResult> // by finding id, on the snapshot that was followed
+}
+
+/** A finding whose lines changed after its pull request merged, for the list under the Outcomes tables. */
+export interface AfterMergeItem {
+	repo: string
+	number: number
+	title: string // the finding's
+	category: FindingCategory | null
+	state: 'reverted' | 'changed'
+	commit: { sha: string; subject: string; at: string }
+	days: number // after the merge
 }
 
 export interface OutcomeRow {
@@ -1334,6 +1371,8 @@ export interface OutcomeSummary {
 	promptVersions: Array<string> // newest first
 	allModels: Array<{ key: string; label: string; detail: string | null }> // for the filter, whatever else is filtered
 	minDecided: number // below this many accepted or dismissed, rows show counts only
+	afterMerge: Array<AfterMergeItem> // newest first
+	followedAt: string | null // when merged pull requests were last followed; null: never
 }
 
 export interface AiRun {
@@ -1716,6 +1755,7 @@ export const IPC = {
 	aiStart: 'ai:start',
 	aiBudget: 'ai:budget',
 	aiOutcomes: 'ai:outcomes',
+	aiFollowMerged: 'ai:follow-merged',
 	aiSetBudgets: 'ai:budget-set',
 	aiIncremental: 'ai:incremental',
 	aiEstimate: 'ai:estimate',
@@ -1879,6 +1919,8 @@ export interface ReviewApi {
 	aiBudget(): Promise<Result<BudgetView>>
 	/** What became of AI findings, from every repository's reviews and runs (the Outcomes page). */
 	aiOutcomes(filter: OutcomeFilter): Promise<Result<OutcomeSummary>>
+	/** Follows reviewed pull requests' findings past their merge (git and GitHub reads only); resolves with what it couldn't follow. */
+	aiFollowMerged(repoId: string | null): Promise<Result<{ followed: number; problems: Array<string> }>>
 	setBudgets(budgets: BudgetSettings): Promise<Result<BudgetView>>
 	selectModel(selection: ModelSelection): Promise<Result<AiSettingsView>>
 	/** The model for questions (Ask AI about code and findings); review runs are unchanged. */
