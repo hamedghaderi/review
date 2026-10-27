@@ -192,6 +192,7 @@ interface CardProps {
 	onAskAi?(): void // comments made from an AI finding: ask the model about it
 	onReply?: ReplyFn // reply to / resolve the GitHub thread it started
 	onDraft?: DraftFn // an AI draft of your reply in that thread
+	modelPicker?: React.ReactNode // the model for questions, which writes the draft
 	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
 }
 
@@ -220,7 +221,19 @@ function AskAiButton({ onClick }: { onClick(): void }) {
 	)
 }
 
-export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, onDelete, onAskAi, onReply, onDraft, mine }: CardProps) {
+export function CommentCard({
+	comment,
+	posted,
+	pendingEdit,
+	discussed,
+	onEdit,
+	onDelete,
+	onAskAi,
+	onReply,
+	onDraft,
+	modelPicker,
+	mine,
+}: CardProps) {
 	const thread = posted?.thread ?? null
 	const replies = thread ? thread.comments.slice(1) : []
 	const from = thread ? firstNew(thread.comments, mine) : -1
@@ -258,7 +271,7 @@ export function CommentCard({ comment, posted, pendingEdit, discussed, onEdit, o
 				</div>
 			))}
 			{thread && <MoreOnGitHub t={thread} />}
-			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} onDraft={onDraft} asked={asked} />}
+			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} onDraft={onDraft} modelPicker={modelPicker} asked={asked} />}
 		</div>
 	)
 }
