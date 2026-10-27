@@ -1701,6 +1701,13 @@ a.ic-state:hover {
 .picker-group {
 	padding: 8px 6px 2px;
 }
+.picker-group.section-toggle {
+	width: 100%;
+	padding: 8px 6px 2px;
+}
+.picker-group.section-toggle:disabled {
+	cursor: default;
+}
 .picker-item {
 	display: flex;
 	align-items: center;

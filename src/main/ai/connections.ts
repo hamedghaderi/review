@@ -175,7 +175,6 @@ export class ConnectionService {
 		const conn = this.get(selection.connectionId)
 		if (!this.connectionView(conn).models.some((m) => m.id === selection.modelId))
 			throw new AppFail('invalid-input', 'That model is not offered by this connection.')
-		if (descriptor(conn.kind).cli) throw new AppFail('invalid-input', `${conn.label} runs reviews only, not questions.`)
 		await this.file.update((f) => {
 			f.askModel = selection
 		})
@@ -759,9 +758,8 @@ export class ConnectionService {
  * model is offered; without a team, the chosen model.
  */
 export function questionModel(v: Omit<AiSettingsView, 'questionModel'>, picked: ModelSelection | null = null): ModelSelection | null {
-	// CLI connections start a process per request, too slow for questions, so they never answer them.
 	const offered = (connectionId: string, modelId: string): boolean =>
-		v.connections.some((c) => c.id === connectionId && !descriptor(c.kind).cli && c.models.some((m) => m.id === modelId))
+		v.connections.some((c) => c.id === connectionId && c.models.some((m) => m.id === modelId))
 	if (picked && offered(picked.connectionId, picked.modelId)) return picked
 	const r = v.reviewer
 	if (r?.kind === 'team') {

@@ -1418,7 +1418,7 @@ export interface ProviderDescriptor {
 	endpointEditable: boolean
 	defaultBaseUrl: string | null
 	// Runs the user's own signed-in CLI: the endpoint is the program to run, requests count against the CLI's subscription
-	// instead of being billed per token, and it reviews only (each request starts a process, too slow for questions).
+	// instead of being billed per token. Each request starts a process.
 	cli: boolean
 	// The effort levels a CLI takes as a suffix on a model's name ("gpt-6-sol-high"); empty for the others.
 	efforts: Array<string>

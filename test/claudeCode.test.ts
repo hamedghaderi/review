@@ -230,11 +230,13 @@ test('a Claude Code connection: a program not a URL, priced as the plan, never a
 	const opus = view.models.find((m) => m.id === 'claude-opus-5-5')!
 	assert.equal(opus.price?.source, 'subscription')
 
-	// Chosen for reviews, it is not the default for questions, and can't be picked for them.
+	// Chosen for reviews, it answers questions too, and can be picked for them.
 	await connections.select({ connectionId: cc.id, modelId: opus.id })
 	assert.deepEqual(connections.view().selection, { connectionId: cc.id, modelId: opus.id })
-	assert.equal(connections.view().questionModel, null)
-	await assert.rejects(connections.selectAskModel({ connectionId: cc.id, modelId: opus.id }), /reviews only/)
+	assert.deepEqual(connections.view().questionModel, { connectionId: cc.id, modelId: opus.id })
+	const sonnet = view.models.find((m) => m.id === 'claude-sonnet-5-5')!
+	await connections.selectAskModel({ connectionId: cc.id, modelId: sonnet.id })
+	assert.deepEqual(connections.view().questionModel, { connectionId: cc.id, modelId: sonnet.id })
 
 	// Every model is offered at each effort Claude Code takes, chosen beside it rather than listed.
 	const offered = connections.view().connections[0]
