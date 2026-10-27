@@ -45,7 +45,7 @@ import { DEFAULT_LEVELS, instructionsFor, PROMPT_VERSION } from './prompt.ts'
 import { estimateRun, type EstimateReviewer } from './estimate.ts'
 import type { ReviewerPrint } from './incremental.ts'
 import type { Baseline } from './history.ts'
-import { buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer, seenAround } from './ask.ts'
+import { askInput, buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer, seenAround } from './ask.ts'
 import { Seen, unreadRefs, verificationTexts, withUnread } from './citations.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
 import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
@@ -529,15 +529,23 @@ export class AiController {
 		const inChange = comparison.files.some((x) => x.key === fileKey)
 		const patch = inChange ? await access.loadPatch(fileKey).catch(() => null) : null
 		const lines = inChange && finding.anchor.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
+		const context = { finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null }
+		const raisedByAnother = modelId !== (member?.model ?? run.model)
+		// Lookups as the double-check gets them: what the window has left after the question, at most a high-risk request's.
+		const l = config.provider.limits
+		const room =
+			capacityChars(
+				l.contextWindow,
+				outputBudget(l),
+				buildAskRequest(context, raisedByAnother).instructions.length + JSON.stringify(TOOL_DEFINITIONS).length,
+			) - askInput(context).length
+		const tools =
+			config.limits.lookups !== false && access.tools && room >= 2000
+				? access.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) }, null)
+				: undefined
 		let reply: FindingMessage
 		try {
-			const response = await config.provider.review(
-				buildAskRequest(
-					{ finding, question: text, history, patch, fileLines: lines?.kind === 'text' ? lines.lines : null },
-					modelId !== (member?.model ?? run.model),
-				),
-				AbortSignal.timeout(180_000),
-			)
+			const response = await config.provider.review(buildAskRequest(context, raisedByAnother, tools), AbortSignal.timeout(300_000))
 			const a = parseAnswer(response.output)
 			reply = {
 				id: randomUUID(),
