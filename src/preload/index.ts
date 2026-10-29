@@ -10,6 +10,7 @@ import {
 	type Review,
 	type ReviewApi,
 } from '../shared/types.ts'
+import type { SoundId } from '../shared/sounds.ts'
 import type { ThemeSettings } from '../shared/theme.ts'
 import type { KeymapOverrides } from '../shared/keymap.ts'
 
@@ -55,6 +56,11 @@ const api: ReviewApi = {
 		const listener = (): void => handler()
 		ipcRenderer.on(IPC.linkOpen, listener)
 		return () => ipcRenderer.removeListener(IPC.linkOpen, listener)
+	},
+	onPlaySound: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, sound: SoundId): void => handler(sound)
+		ipcRenderer.on(IPC.playSound, listener)
+		return () => ipcRenderer.removeListener(IPC.playSound, listener)
 	},
 	onInboxOpen: (handler) => {
 		const listener = (_e: Electron.IpcRendererEvent, target: InboxOpen): void => handler(target)
@@ -185,6 +191,8 @@ const api: ReviewApi = {
 	whatsNewStatus: () => ipcRenderer.invoke(IPC.whatsNewStatus),
 	whatsNewSeen: () => ipcRenderer.invoke(IPC.whatsNewSeen),
 	releaseNotes: () => ipcRenderer.invoke(IPC.releaseNotes),
+	sounds: () => ipcRenderer.invoke(IPC.sounds),
+	setSounds: (next) => ipcRenderer.invoke(IPC.setSounds, next),
 	keymap: () => ipcRenderer.invoke(IPC.keymap),
 	setKeymap: (next) => ipcRenderer.invoke(IPC.setKeymap, next),
 	onKeymapChanged: (handler) => {

@@ -3970,6 +3970,25 @@ button.stack-row:hover {
 .notify-box.on {
 	border-color: var(--warn-fg);
 }
+.sound-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.sound-table td {
+	padding: 5px 0;
+	vertical-align: middle;
+	border-bottom: 1px solid var(--border);
+}
+.sound-table tr:last-child td {
+	border-bottom: none;
+}
+.sound-table td:nth-child(2) {
+	width: 1%;
+	padding: 0 6px 0 12px;
+}
+.sound-table td:last-child {
+	width: 1%;
+}
 .auto-review-warn {
 	background: var(--warn-bg);
 	color: var(--warn-fg);

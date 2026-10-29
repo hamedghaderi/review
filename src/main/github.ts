@@ -85,7 +85,7 @@ export class GitHubService {
 	private scopes: Array<string> | null = null
 	private prefs: JsonStore<GitHubPrefs> | null
 	private useCliMemory = false
-	private notifyMemory: NotificationPrefs = { enabled: true, sound: true }
+	private notifyMemory: NotificationPrefs = { enabled: true }
 	private autoReviewMemory = false
 	private autoReviewCommitsMemory = false
 	private notifyProblem: string | null = null
@@ -98,7 +98,8 @@ export class GitHubService {
 		const empty = (): GitHubPrefs => ({
 			version: 1,
 			useCli: false,
-			notifications: { enabled: true, sound: true },
+			notifications: { enabled: true },
+			soundOff: false,
 			autoReview: false,
 			autoReviewCommits: false,
 		})
@@ -107,13 +108,15 @@ export class GitHubService {
 					const r = raw as {
 						useCli?: unknown
 						notifications?: { enabled?: unknown; sound?: unknown }
+						soundOff?: unknown
 						autoReview?: unknown
 						autoReviewCommits?: unknown
 					} | null
 					return {
 						...empty(),
 						useCli: r?.useCli === true,
-						notifications: { enabled: r?.notifications?.enabled !== false, sound: r?.notifications?.sound !== false },
+						notifications: { enabled: r?.notifications?.enabled !== false },
+						soundOff: r?.soundOff === true || r?.notifications?.sound === false,
 						autoReview: r?.autoReview === true,
 						autoReviewCommits: r?.autoReviewCommits === true,
 					}
@@ -160,6 +163,11 @@ export class GitHubService {
 
 	get notifications(): NotificationPrefs {
 		return this.prefs ? this.prefs.read().notifications : this.notifyMemory
+	}
+
+	/** "Play a sound" was turned off here, before sounds became an app setting: the app starts them all off. */
+	get soundsWereOff(): boolean {
+		return this.prefs?.read().soundOff ?? false
 	}
 
 	/** Recorded by the main process after each notification: null once one was shown, else why it was not. */
@@ -1461,6 +1469,7 @@ interface GitHubPrefs {
 	version: 1
 	useCli: boolean
 	notifications: NotificationPrefs
+	soundOff: boolean // "Play a sound" was off, from before sounds became an app setting; read once, by soundsWereOff
 	autoReview: boolean
 	autoReviewCommits: boolean
 }

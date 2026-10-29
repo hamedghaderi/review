@@ -260,7 +260,7 @@ test('the watcher notifies for every repository unless muted, and remembers what
 	assert.equal(badges.at(-1), 5, '#1, #3, #5, #6 and #9 in octo/app')
 
 	// Notifications off: still checked for the start page (and automatic review, which decides for itself), no badge.
-	await gh.setNotifications({ enabled: false, sound: true })
+	await gh.setNotifications({ enabled: false })
 	open = [...open, node(7, 'octo/app')]
 	const off = make(reopened)
 	await off.check().finally(() => off.stop())
