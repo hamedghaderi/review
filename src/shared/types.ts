@@ -491,6 +491,7 @@ export interface Review {
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
 	questions?: Array<CodeQuestion> // questions you asked the AI about selected code; written by the main process only
 	explanation?: ChangeExplanation // what the AI says this change is for; written by the main process only
+	conclusion?: ChangeConclusion // the AI's conclusion on the whole change, and your conversation about it; main process only
 }
 
 /**
@@ -516,6 +517,16 @@ export interface ChangeExplanation {
 	omitted: Array<string> // files whose diff was too big to send
 	model: string
 	at: string
+}
+
+/**
+ * The AI's conclusion on the whole change once a review run has finished: what it does, whether the approach was a good
+ * one, what the findings add up to and what to follow up. You can keep asking about it. Private to you; never posted.
+ */
+export interface ChangeConclusion {
+	runId: string // the finished run whose findings it read
+	messages: Array<CodeMessage> // the conclusion first (Markdown), then your questions and the answers
+	omitted: Array<string> // files whose diff was too big to send with the conclusion; the AI could look them up
 }
 
 /** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */
@@ -1203,9 +1214,9 @@ export interface AiCost {
 }
 
 // review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
-// verify and test: Verify and Write test on a finding; overview: Explain this change; reply: a drafted reply in a
-// GitHub thread.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'reply'
+// verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
+// change and questions about it; reply: a drafted reply in a GitHub thread.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1704,6 +1715,7 @@ export const IPC = {
 	aiWriteTest: 'ai:write-test',
 	aiAskCode: 'ai:ask-code',
 	aiExplainChange: 'ai:explain-change',
+	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
@@ -1924,6 +1936,8 @@ export interface ReviewApi {
 	askCode(reviewId: string, anchor: Anchor, question: string, questionId: string | null): Promise<Result<Array<CodeQuestion>>>
 	/** Asks the model for questions what the change is for and where to start reading; saved on the review. */
 	explainChange(reviewId: string): Promise<Result<ChangeExplanation>>
+	// `question` null writes the conclusion (again, replacing the conversation); otherwise asks about it.
+	conclude(reviewId: string, question: string | null): Promise<Result<ChangeConclusion>>
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
 	/** Forgets one conversation about selected code. */

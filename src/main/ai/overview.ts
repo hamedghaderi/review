@@ -36,6 +36,7 @@ export interface OverviewContext {
 	commits: Array<{ sha: string; subject: string; body: string }> // oldest first
 	maxChars: number // what the request's input may hold
 	tools?: ReviewTools
+	closing?: string // what follows the change and says what to do with it; not counted in maxChars
 }
 
 export function buildOverviewRequest(c: OverviewContext): { request: ProviderRequest; omitted: Array<string> } {
@@ -66,7 +67,7 @@ export function isSupporting(path: string): boolean {
  * The background, the commits, every changed file with its size, then as many diffs as fit: the change's own code
  * first, smaller diffs before larger ones, tests and generated files last. Returns the paths whose diff was left out.
  */
-export function overviewInput({ files, patches, background, commits, maxChars }: OverviewContext): {
+export function overviewInput({ files, patches, background, commits, maxChars, closing = '# Explain this change' }: OverviewContext): {
 	input: string
 	omitted: Array<string>
 } {
@@ -113,7 +114,7 @@ export function overviewInput({ files, patches, background, commits, maxChars }:
 	const out = [...head]
 	if (diffs.length) out.push('# Diffs (unified; old and new line numbers on the left)', '', ...diffs)
 	if (omitted.length) out.push('# Diffs left out for size (look them up if they matter)', ...omitted.map((p) => `- ${p}`), '')
-	out.push('# Explain this change')
+	out.push(closing)
 	return { input: out.join('\n'), omitted }
 }
 

@@ -124,6 +124,7 @@ const api: ReviewApi = {
 	writeFindingTest: (reviewId, findingId) => ipcRenderer.invoke(IPC.aiWriteTest, reviewId, findingId),
 	askCode: (reviewId, anchor, question, questionId) => ipcRenderer.invoke(IPC.aiAskCode, reviewId, anchor, question, questionId),
 	explainChange: (reviewId) => ipcRenderer.invoke(IPC.aiExplainChange, reviewId),
+	conclude: (reviewId, question) => ipcRenderer.invoke(IPC.aiConclude, reviewId, question),
 	draftReply: (repoId, reviewId, threadId) => ipcRenderer.invoke(IPC.aiDraftReply, repoId, reviewId, threadId),
 	deleteCodeQuestion: (reviewId, questionId) => ipcRenderer.invoke(IPC.aiDeleteCodeQuestion, reviewId, questionId),
 	gifStatus: () => ipcRenderer.invoke(IPC.gifStatus),

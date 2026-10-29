@@ -4,6 +4,7 @@ import {
 	BUGS_ONLY_RULES,
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
+	type ChangeConclusion,
 	type ChangeExplanation,
 	type AiScope,
 	type Anchor,
@@ -52,9 +53,18 @@ import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
 import { capacityChars } from './context.ts'
 import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
 import { outputBudget, type ModelLimits } from './provider.ts'
+import {
+	buildConclusionRequest,
+	CONCLUSION_LOOKUPS,
+	conclusionInstructions,
+	MAX_CONCLUSION_CHARS,
+	MAX_CONCLUSION_QUESTION_CHARS,
+	MAX_CONCLUSION_MESSAGES,
+	parseConclusion,
+} from './conclusion.ts'
 import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUESTION_CHARS, parseExplain } from './explain.ts'
 import { buildOverviewRequest, MAX_OVERVIEW_CHARS, OVERVIEW_INSTRUCTIONS, OVERVIEW_LOOKUPS, parseOverview } from './overview.ts'
-import { buildBackground } from './background.ts'
+import { type Background, buildBackground } from './background.ts'
 import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
@@ -843,17 +853,7 @@ export class AiController {
 		this.onDemandBusy.add(busy)
 		let explanation: ChangeExplanation
 		try {
-			// Linked issues and the conversation help when GitHub answers; without them the description and code remain.
-			const extra = await access.loadBackground?.(AbortSignal.timeout(60_000)).catch(() => null)
-			const background = buildBackground({
-				description: comparison.pr?.body ?? null,
-				context: access.reviewContext?.() ?? null,
-				issues: extra?.issues ?? [],
-				discussion: extra?.discussion ?? null,
-			})
-			const commits = (await access.commits?.().catch(() => [])) ?? []
-			const patches = new Map<string, PatchResult | null>()
-			for (const f of comparison.files) if (!f.binary && !f.submodule) patches.set(f.key, await access.loadPatch(f.key).catch(() => null))
+			const { background, commits, patches } = await this.wholeChange(access)
 			const tools = config.limits.lookups !== false && access.tools ? access.tools(OVERVIEW_LOOKUPS) : undefined
 			const l = config.provider.limits
 			const room =
@@ -865,7 +865,7 @@ export class AiController {
 			const { request, omitted } = buildOverviewRequest({
 				files: comparison.files,
 				patches,
-				background: background.sections,
+				background,
 				commits,
 				maxChars: Math.min(MAX_OVERVIEW_CHARS, room),
 				tools,
@@ -883,6 +883,149 @@ export class AiController {
 			if (r) r.explanation = explanation
 		})
 		return structuredClone(explanation)
+	}
+
+	/**
+	 * Asks `selection`'s model for its conclusion on the whole change, after the newest finished run: what the change does,
+	 * whether the approach was a good one, what the findings add up to and what to follow up. With `question`, asks about
+	 * the conclusion instead; each request sends the change again, with lookups, so the model can read any file. One
+	 * request per review at a time. The question is saved first; a failed answer is saved as an error message.
+	 */
+	async conclude(
+		access: ComparisonAccess,
+		reviewId: string,
+		question: string | null,
+		selection: ModelSelection,
+	): Promise<ChangeConclusion> {
+		const { comparison } = access
+		const repoId = comparison.repoId
+		const text = question?.trim() ?? null
+		if (text === '') throw new AppFail('invalid-input', 'Write a question first.')
+		if (text && text.length > MAX_CONCLUSION_QUESTION_CHARS)
+			throw new AppFail('invalid-input', `Questions are limited to ${MAX_CONCLUSION_QUESTION_CHARS} characters.`)
+		const busy = `conclusion:${reviewId}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'The AI is already working on this conclusion.')
+		const earlier = this.store.read().repos[repoId]?.reviews[reviewId]?.conclusion ?? null
+		const run =
+			text === null
+				? this.runsFor(repoId, reviewId).findLast((r) => r.status === 'completed' || r.status === 'partial')
+				: this.runsFor(repoId, reviewId).find((r) => r.id === earlier?.runId)
+		if (text !== null && !earlier) throw new AppFail('not-found', 'Write the conclusion first.')
+		if (!run)
+			throw new AppFail(
+				'invalid-input',
+				text === null
+					? 'Run the AI review first. The conclusion builds on its findings.'
+					: 'The review run this conclusion read no longer exists. Write the conclusion again.',
+			)
+		if (earlier && text !== null && earlier.messages.length >= MAX_CONCLUSION_MESSAGES)
+			throw new AppFail('invalid-input', 'This conversation is full. Write the conclusion again to start over.')
+		// Marked busy before the first await, so a second click that arrives meanwhile is turned away.
+		this.onDemandBusy.add(busy)
+		try {
+			let config: RunConfig
+			try {
+				config = await this.configFor(selection, 'conclusion', repoId)
+			} catch (e) {
+				throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+			}
+			const history = text === null ? [] : earlier!.messages
+			if (text !== null)
+				await this.addConclusionMessage(repoId, reviewId, { id: randomUUID(), role: 'you', text, at: new Date().toISOString() })
+			let answer: CodeMessage
+			let omitted = earlier?.omitted ?? []
+			try {
+				const { background, commits, patches } = await this.wholeChange(access)
+				const tools = config.limits.lookups !== false && access.tools ? access.tools(CONCLUSION_LOOKUPS) : undefined
+				const l = config.provider.limits
+				const instructions = conclusionInstructions(!!tools)
+				const room =
+					capacityChars(l.contextWindow, outputBudget(l), instructions.length + (tools ? JSON.stringify(TOOL_DEFINITIONS).length : 0)) -
+					(tools ? CONCLUSION_LOOKUPS.maxChars : 0)
+				const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+				const built = buildConclusionRequest({
+					files: comparison.files,
+					patches,
+					background,
+					commits,
+					maxChars: Math.min(MAX_CONCLUSION_CHARS, room),
+					tools,
+					run,
+					decisions: stored?.findingDecisions ?? {},
+					explanation: stored?.explanation ?? null,
+					history,
+					question: text,
+				})
+				if (text === null) omitted = built.omitted
+				const response = await config.provider.review(built.request, AbortSignal.timeout(300_000))
+				answer = {
+					id: randomUUID(),
+					role: 'ai',
+					text: parseConclusion(response.output),
+					at: new Date().toISOString(),
+					model: selection.modelId,
+				}
+			} catch (e) {
+				// A new conclusion that failed saves nothing, so the one before it stays; a failed answer is kept in the conversation.
+				if (text === null) throw new AppFail('ai-unavailable', `No conclusion: ${e instanceof Error ? e.message : String(e)}`)
+				const why = e instanceof Error ? e.message : String(e)
+				answer = {
+					id: randomUUID(),
+					role: 'ai',
+					text: `No answer: ${why}`,
+					at: new Date().toISOString(),
+					model: selection.modelId,
+					error: true,
+				}
+			}
+			if (text === null) {
+				const conclusion: ChangeConclusion = { runId: run.id, messages: [answer], omitted }
+				await this.store.update((d) => {
+					const r = d.repos[repoId]?.reviews[reviewId]
+					if (r) r.conclusion = conclusion
+				})
+				return structuredClone(conclusion)
+			}
+			return this.addConclusionMessage(repoId, reviewId, answer)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/** Appends to the conversation about the stored conclusion, then returns it. */
+	private async addConclusionMessage(repoId: string, reviewId: string, m: CodeMessage): Promise<ChangeConclusion> {
+		let saved: ChangeConclusion | null = null
+		await this.store.update((d) => {
+			const c = d.repos[repoId]?.reviews[reviewId]?.conclusion
+			if (!c) return
+			c.messages.push(m)
+			saved = c
+		})
+		if (!saved) throw new AppFail('not-found', 'That conclusion no longer exists.')
+		return structuredClone(saved as ChangeConclusion)
+	}
+
+	/**
+	 * What an explanation or a conclusion reads besides the diff: the description, your notes, linked issues and the
+	 * conversation (when GitHub answers), the commits, and every text file's patch.
+	 */
+	private async wholeChange(access: ComparisonAccess): Promise<{
+		background: Background['sections']
+		commits: Array<{ sha: string; subject: string; body: string }>
+		patches: Map<string, PatchResult | null>
+	}> {
+		const { comparison } = access
+		const extra = await access.loadBackground?.(AbortSignal.timeout(60_000)).catch(() => null)
+		const background = buildBackground({
+			description: comparison.pr?.body ?? null,
+			context: access.reviewContext?.() ?? null,
+			issues: extra?.issues ?? [],
+			discussion: extra?.discussion ?? null,
+		})
+		const commits = (await access.commits?.().catch(() => [])) ?? []
+		const patches = new Map<string, PatchResult | null>()
+		for (const f of comparison.files) if (!f.binary && !f.submodule) patches.set(f.key, await access.loadPatch(f.key).catch(() => null))
+		return { background: background.sections, commits, patches }
 	}
 
 	/**

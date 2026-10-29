@@ -10,6 +10,7 @@ import type {
 	OutcomeFilter,
 	OutcomeSummary,
 	BranchPr,
+	ChangeConclusion,
 	ChangeExplanation,
 	CodeQuestion,
 	PastDecision,
@@ -1416,6 +1417,12 @@ export class ReviewService {
 	async explainChange(reviewId: string, selection: ModelSelection): Promise<ChangeExplanation> {
 		const { ai, access } = this.aiAccess(reviewId)
 		return ai.explainChange(access, reviewId, selection)
+	}
+
+	/** The AI's conclusion on the whole change, or an answer about it; see AiController.conclude. */
+	async conclude(reviewId: string, question: string | null, selection: ModelSelection): Promise<ChangeConclusion> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.conclude(access, reviewId, question, selection)
 	}
 
 	/**
