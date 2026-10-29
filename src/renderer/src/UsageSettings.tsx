@@ -19,6 +19,7 @@ const KIND_LABEL: Record<UsageKind, string> = {
 	verify: 'Verify',
 	test: 'Write test',
 	overview: 'Change explanations',
+	conclusion: 'Conclusions',
 	reply: 'Drafted replies',
 }
 

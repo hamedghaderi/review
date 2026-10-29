@@ -19,6 +19,7 @@ import type {
 	GoneFinding,
 	Finding,
 	FindingLevel,
+	ChangeConclusion,
 	ChangeExplanation,
 	GitHubStatus,
 	MentionUser,
@@ -74,6 +75,7 @@ import { FeedbackDialog } from './FeedbackDialog.tsx'
 import { Outcomes } from './Outcomes.tsx'
 import { Sidebar } from './Sidebar.tsx'
 import { MentionProvider, type Mentions } from './Mention.tsx'
+import { Conclusion } from './Conclusion.tsx'
 import { ExplainChange } from './ExplainChange.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
 import type { NotesRange } from '../../shared/releases.ts'
@@ -803,6 +805,7 @@ export function App() {
 
 	const selectFile = (key: string): void => {
 		setOutside(null)
+		setConclusionOpen(false)
 		if (key === selected) return
 		if (activeDraftId) {
 			const d = review?.drafts.find((x) => x.id === activeDraftId)
@@ -1044,6 +1047,48 @@ export function App() {
 			onOpenPath={openPath}
 		/>
 	)
+	// The AI's conclusion on the whole change, shown in place of the code. Like questions, only the main process writes it.
+	// One request per review at a time: the ref turns away a second click before the busy state has rendered.
+	const [conclusion, setConclusion] = useState<ChangeConclusion | null>(null)
+	const [concluding, setConcluding] = useState<{ reviewId: string; kind: 'writing' | 'asking'; asked: string | null } | null>(null)
+	const concludingRef = useRef<string | null>(null)
+	const [conclusionError, setConclusionError] = useState<string | null>(null)
+	const [conclusionOpen, setConclusionOpen] = useState(false)
+	useEffect(() => {
+		setConclusion(loaded?.review.conclusion ?? null)
+		setConclusionError(null)
+	}, [loaded])
+	useEffect(() => setConclusionOpen(false), [loaded?.review.id])
+	const lastFinished = [...aiRuns].reverse().find((r) => r.status === 'completed' || r.status === 'partial') ?? null
+	const concludeDisabled =
+		askDisabled ??
+		(activeRun
+			? 'Wait for the AI review to finish. The conclusion builds on its findings.'
+			: !lastFinished
+				? 'Run the AI review first. The conclusion builds on its findings.'
+				: null)
+	const concludingHere = comparison && concluding?.reviewId === comparison.id ? concluding : null
+	const conclude = async (question: string | null): Promise<boolean> => {
+		if (!comparison || concludingRef.current === comparison.id) return false
+		const reviewId = comparison.id
+		concludingRef.current = reviewId
+		setConcluding({ reviewId, kind: question === null ? 'writing' : 'asking', asked: question })
+		setConclusionError(null)
+		const r = await window.review.conclude(reviewId, question)
+		if (concludingRef.current === reviewId) concludingRef.current = null
+		setConcluding((c) => (c?.reviewId === reviewId ? null : c))
+		if (comparisonIdRef.current !== reviewId) return true
+		if (r.ok) setConclusion(r.value)
+		else setConclusionError(r.error.message)
+		return r.ok
+	}
+	const toggleConclusion = (): void => {
+		if (conclusionOpen) return setConclusionOpen(false)
+		setConclusionOpen(true)
+		if (!conclusion && !concludingHere && !concludeDisabled) void conclude(null)
+	}
+	const changedPaths = useMemo(() => new Set((comparison?.files ?? []).map((f) => (f.newPath ?? f.oldPath) as string)), [comparison?.files])
+
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const id = questionId ?? `new:${Date.now()}`
@@ -1533,6 +1578,24 @@ export function App() {
 											</select>
 										</label>
 									)}
+									{comparison.files.length > 0 && (
+										<button
+											className={`btn small conclusion-toggle${conclusionOpen ? ' on' : ''}`}
+											aria-pressed={conclusionOpen}
+											onClick={toggleConclusion}
+											disabled={!conclusionOpen && !conclusion && !concludingHere && !!concludeDisabled}
+											title={
+												conclusionOpen
+													? 'Hide the conclusion and go back to the code'
+													: conclusion || concludingHere
+														? 'Show the AI’s conclusion on the whole change'
+														: (concludeDisabled ??
+															'The AI steps back and says what the change does, whether the approach was a good one, and what to follow up')
+											}
+										>
+											{concludingHere && <AiOrb activity="reasoning" size={12} />} Conclusion
+										</button>
+									)}
 									{repo.uncommitted > 0 && (
 										<span
 											className="pill warn"
@@ -1769,6 +1832,22 @@ export function App() {
 													to pick a different base branch or target.
 												</p>
 											</div>
+										) : conclusionOpen ? (
+											<Conclusion
+												conclusion={conclusion}
+												busy={concludingHere?.kind ?? null}
+												asked={concludingHere?.asked ?? null}
+												error={conclusionError}
+												disabled={concludeDisabled}
+												askDisabled={askDisabled}
+												stale={!!conclusion && !!lastFinished && conclusion.runId !== lastFinished.id}
+												modelPicker={askModelPicker}
+												paths={changedPaths}
+												onOpenPath={openPath}
+												onWrite={() => void conclude(null)}
+												onAsk={conclude}
+												onHide={() => setConclusionOpen(false)}
+											/>
 										) : outside ? (
 											<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
 										) : file ? (

@@ -2844,3 +2844,114 @@ test('a failing test on demand: written in the style of the tests that import th
 	const none = (await controller.writeTest(access, s.comp.id, f.id)).findings.find((x) => x.id === f.id)!.reproducer!
 	assert.deepEqual([none.path, none.code, none.asserts, none.error], [null, null, 'It needs a real payment gateway.', undefined])
 })
+
+test('conclusion: needs a finished run, reads the change and its findings, keeps dismissed ones apart, and continues as a conversation', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: {},
+		}
+	})
+	const asked: Array<{ input: string; schema: string | undefined; instructions: string }> = []
+	let reply: unknown = { markdown: '## What it does\nAdds instead of subtracting in `src/app.ts:3`.' }
+	const provider = createFakeProvider({
+		script: (req) => {
+			asked.push({ input: req.input, schema: req.schema?.name, instructions: req.instructions })
+			return reply as ReviewOutput
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = {
+		comparison: s.comp,
+		loadPatch: async (k: string) => source(k).patch,
+		loadFileLines: async (k: string) => source(k).fullText ?? { kind: 'text' as const, lines: [] },
+	}
+	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /Run the AI review first/)
+	await assert.rejects(controller.conclude(access, s.comp.id, 'Why?', SEL), /Write the conclusion first/)
+	assert.equal(asked.length, 0)
+
+	const run = await fixtureRun()
+	run.findings.push({ ...run.findings[0], id: 'gone', title: 'An old worry' })
+	await store.update((d) => {
+		d.repos['/repo'].aiRuns![s.comp.id] = [run]
+		d.repos['/repo'].reviews[s.comp.id].findingDecisions = {
+			gone: { status: 'dismissed', decidedAt: '2026-10-29T10:00:00Z', reason: 'intended', note: 'On purpose' },
+		}
+	})
+	const c = await controller.conclude(access, s.comp.id, null, SEL)
+	assert.equal(asked[0].schema, 'change_conclusion')
+	assert.match(asked[0].instructions, /Lookups are switched off/, 'without lookups it says so, instead of claiming no access')
+	const [open, gone] = asked[0].input.split('# Findings the developer dismissed')
+	assert.match(open, /## src\/app\.ts\n@@/, 'the diff')
+	assert.ok(open.includes(run.findings[0].title), 'the open finding')
+	assert.ok(!open.includes('An old worry'))
+	assert.match(gone, /An old worry[^\n]*\(dismissed: intended: On purpose\)/)
+	assert.match(asked[0].input, /# Write your conclusion$/)
+	assert.equal(c.runId, run.id)
+	assert.deepEqual(
+		c.messages.map((m) => m.text),
+		['## What it does\nAdds instead of subtracting in `src/app.ts:3`.'],
+	)
+	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].conclusion, c, 'saved on the review')
+
+	reply = { markdown: 'Yes. A guard there would hide the bug.' }
+	const next = await controller.conclude(access, s.comp.id, '  Should it guard?  ', SEL)
+	assert.match(asked[1].input, /You: ## What it does[\s\S]*# The developer asks\nShould it guard\?$/)
+	assert.deepEqual(
+		next.messages.map((m) => [m.role, m.text]),
+		[
+			['ai', c.messages[0].text],
+			['you', 'Should it guard?'],
+			['ai', 'Yes. A guard there would hide the bug.'],
+		],
+	)
+
+	reply = { nope: true }
+	const failed = await controller.conclude(access, s.comp.id, 'And then?', SEL)
+	assert.equal(failed.messages.length, 5, 'the question stays, with why it got no answer')
+	assert.equal(failed.messages[4].error, true)
+	assert.match(failed.messages[4].text, /^No answer: /)
+	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /No conclusion: /)
+	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.messages.length, 5, 'a failed rewrite keeps the conversation')
+})
+
+test('conclusion: a second request for the same review is turned away while the first runs', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-ai-'))
+	const s = sources()
+	const run = await fixtureRun()
+	const store = ReviewStore.in(dir)
+	await store.load()
+	await store.update((d) => {
+		d.repos['/repo'] = {
+			repoId: '/repo',
+			root: '/repo',
+			selectedBase: null,
+			activeReviewId: s.comp.id,
+			reviews: { [s.comp.id]: emptyReview() },
+			aiRuns: { [s.comp.id]: [run] },
+		}
+	})
+	let calls = 0
+	const provider = createFakeProvider({
+		script: () => {
+			calls++
+			return { markdown: 'Fine.' } as unknown as ReviewOutput
+		},
+	})
+	const controller = new AiController(store, fixedConfig(provider), () => {})
+	const source = (k: string) => s.srcs.find((x) => x.file.key === k)!
+	const access = { comparison: s.comp, loadPatch: async (k: string) => source(k).patch, loadFileLines: async () => null }
+	const first = controller.conclude(access, s.comp.id, null, SEL)
+	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /already working on this conclusion/)
+	await first
+	assert.equal(calls, 1)
+})

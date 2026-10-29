@@ -150,6 +150,13 @@ export const explainSchema = z.object({
 export const EXPLAIN_SCHEMA_NAME = 'code_answer'
 export const EXPLAIN_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(explainSchema, { target: 'draft-7' }))
 
+/** The conclusion on a whole change, or an answer in the conversation about it. */
+export const conclusionSchema = z.object({
+	markdown: z.string().describe('The conclusion, or the answer to the follow-up question, in Markdown.'),
+})
+export const CONCLUSION_SCHEMA_NAME = 'change_conclusion'
+export const CONCLUSION_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(conclusionSchema, { target: 'draft-7' }))
+
 export const overviewSchema = z.object({
 	purpose: z
 		.string()

@@ -3635,6 +3635,99 @@ input.member-role {
 	border-color: var(--warn-fg);
 	color: var(--warn-fg);
 }
+/* The AI's conclusion on the whole change, shown where the code is, and the conversation about it */
+.conclusion {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.conclusion-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border-bottom: 1px solid var(--border);
+	background: var(--panel);
+}
+.conclusion-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+}
+.conclusion-body {
+	max-width: 760px;
+	margin: 0 auto;
+	padding: 16px 20px 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+.conclusion-body .md-body {
+	padding: 0;
+	font-size: 14px;
+	line-height: 1.6;
+}
+.conclusion-body .md-body > :last-child {
+	margin-bottom: 0;
+}
+.conclusion-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 24px 0;
+}
+.conclusion-empty p {
+	margin: 0;
+	line-height: 1.5;
+}
+.conclusion-wait {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+}
+.conclusion-note {
+	margin: 0;
+	padding: 6px 10px;
+	border-radius: 6px;
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+}
+.conclusion-q {
+	align-self: flex-end;
+	max-width: 85%;
+	padding: 8px 12px;
+	border-radius: 10px;
+	background: var(--hover);
+	white-space: pre-wrap;
+	line-height: 1.5;
+}
+.conclusion-a {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.ask-box.conclusion-ask {
+	margin: 0;
+	padding: 8px 12px;
+	border-top: 1px solid var(--border);
+	background: var(--panel);
+}
+.md-path {
+	font: inherit;
+}
+.conclusion-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+.conclusion-toggle.on {
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-color: var(--accent);
+}
 /* What happened since your last review: the panel's summary, each thread's state, and where the new replies start */
 .since-line {
 	padding: 6px 8px;
