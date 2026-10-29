@@ -16,7 +16,8 @@ import {
 	shell,
 	type IpcMainInvokeEvent,
 } from 'electron'
-import { IPC, type AppUpdate, type BudgetView, type InboxOpen, type Result } from '../shared/types.ts'
+import { storedSounds, type SoundEvent, type SoundPrefs } from '../shared/sounds.ts'
+import { IPC, type AiRun, type AppUpdate, type BudgetView, type InboxOpen, type Result } from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { UsageLog } from './ai/usage.ts'
@@ -46,6 +47,7 @@ import {
 	compareTarget,
 	githubRepo,
 	notificationPrefs,
+	soundPrefs,
 	githubToken,
 	prNumber,
 	prDescriptionText,
@@ -77,6 +79,7 @@ import {
 } from './validate.ts'
 
 let win: BrowserWindow | null = null
+const runStatus = new Map<string, AiRun['status']>() // runs seen running, so their end can play a sound
 let service: ReviewService
 let store: ReviewStore
 let ai: AiController
@@ -220,7 +223,7 @@ function registerIpc(): void {
 			new Notification({
 				title: 'Review requested: example#123',
 				body: 'This is what a review-request notification looks like\nby the Review app',
-				silent: !github.notifications.sound,
+				silent: playSound('request'),
 			}),
 			null,
 		)
@@ -230,6 +233,12 @@ function registerIpc(): void {
 	handle(IPC.systemInfo, async () => systemInfo())
 	handle(IPC.theme, async () => currentTheme())
 	handle(IPC.setTheme, async (raw: unknown) => setTheme(parseTheme(raw)))
+	handle(IPC.sounds, async () => currentSounds())
+	handle(IPC.setSounds, async (raw: unknown) => {
+		const next = soundPrefs(raw)
+		await store.update((d) => void (d.sounds = next))
+		return next
+	})
 	handle(IPC.keymap, async () => store.read().keymap ?? {})
 	handle(IPC.setKeymap, async (raw: unknown) => setKeymap(parseKeymap(raw, IS_MAC)))
 	handle(IPC.keymapRecording, async (on: unknown) => {
@@ -410,11 +419,14 @@ function registerIpc(): void {
 	)
 	// Questions go to the model picked for them; a finding without one goes to the model that raised it.
 	handle(IPC.aiAsk, (reviewId: unknown, findingId: unknown, question: unknown) =>
-		service.askFinding(
-			comparisonId(reviewId),
-			str(findingId, 'finding id', 64),
-			str(question, 'question', 4000),
-			connections.pickedAskModel(),
+		answered(
+			service.askFinding(
+				comparisonId(reviewId),
+				str(findingId, 'finding id', 64),
+				str(question, 'question', 4000),
+				connections.pickedAskModel(),
+			),
+			'The answer about a finding',
 		),
 	)
 	handle(IPC.aiVerify, (reviewId: unknown, findingId: unknown) =>
@@ -429,28 +441,38 @@ function registerIpc(): void {
 	handle(IPC.aiAskCode, async (reviewId: unknown, anchor: unknown, question: unknown, questionId: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first.')
-		return service.askCode(
-			comparisonId(reviewId),
-			anchor,
-			str(question, 'question', 4000),
-			questionId === null ? null : str(questionId, 'question id', 64),
-			selection,
+		return answered(
+			service.askCode(
+				comparisonId(reviewId),
+				anchor,
+				str(question, 'question', 4000),
+				questionId === null ? null : str(questionId, 'question id', 64),
+				selection,
+			),
+			'The answer about the code you selected',
 		)
 	})
 	handle(IPC.aiExplainChange, async (reviewId: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
-		return service.explainChange(comparisonId(reviewId), selection)
+		return answered(service.explainChange(comparisonId(reviewId), selection), 'What this change is for')
 	})
 	handle(IPC.aiConclude, async (reviewId: unknown, question: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
-		return service.conclude(comparisonId(reviewId), question === null ? null : str(question, 'question', 4000), selection)
+		const q = question === null ? null : str(question, 'question', 4000)
+		return answered(
+			service.conclude(comparisonId(reviewId), q, selection),
+			q === null ? 'The conclusion on this change' : 'The answer about the conclusion',
+		)
 	})
 	handle(IPC.aiDraftReply, async (repoId: unknown, reviewId: unknown, threadId: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
-		return service.draftReply(str(repoId, 'repository'), comparisonId(reviewId), str(threadId, 'thread id', 128), selection)
+		return answered(
+			service.draftReply(str(repoId, 'repository'), comparisonId(reviewId), str(threadId, 'thread id', 128), selection),
+			'Your drafted reply',
+		)
 	})
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
@@ -636,6 +658,11 @@ app.whenReady().then(async () => {
 		(selection) => connections.runConfig(selection),
 		(run) => {
 			if (win && !win.isDestroyed()) win.webContents.send(IPC.aiRunUpdate, run)
+			const before = runStatus.get(run.id)
+			if (run.status === 'running') runStatus.set(run.id, run.status)
+			else runStatus.delete(run.id)
+			// Automatic reviews say so when they are submitted; a run you cancelled needs no sound.
+			if (before === 'running' && run.status !== 'running' && run.status !== 'cancelled' && !run.auto) runFinished(run)
 		},
 	)
 	connections.onRemoved((id) => ai.cancelForConnection(id))
@@ -714,7 +741,7 @@ app.whenReady().then(async () => {
 				new Notification({
 					title: `Automatic review: ${e.pr.repo.split('/')[1]}#${e.pr.number}`,
 					body: record.message,
-					silent: !github.notifications.sound,
+					silent: playSound('autoReview'),
 				}),
 				{ repoId: e.repoId, repo: e.pr.repo, number: e.pr.number },
 			)
@@ -836,7 +863,8 @@ function budgetView(): BudgetView {
 }
 
 function showNotifications(events: Array<WatchEvent>): void {
-	const silent = !github.notifications.sound
+	// One sound for the lot: a review request outranks new commits.
+	const silent = playSound(events.every((e) => e.kind === 'updated') ? 'commits' : 'request')
 	// A burst (e.g. after the app was closed for a while) becomes one summary instead of a stack of banners.
 	const batches =
 		events.length > 3
@@ -860,6 +888,46 @@ function showNotifications(events: Array<WatchEvent>): void {
 					target: { repoId: e.repoId, repo: e.pr.repo, number: e.pr.number } satisfies InboxOpen,
 				}))
 	for (const b of batches) void present(new Notification({ title: b.title, body: b.body, silent }), b.target)
+}
+
+/**
+ * Plays `event`'s sound in the window and returns whether its notification should be silent. With no window open to
+ * play it, the system's notification sound stands in, unless the event's sound is off.
+ */
+function playSound(event: SoundEvent): boolean {
+	const choice = currentSounds()[event]
+	if (choice === 'off') return true
+	if (!win || win.isDestroyed()) return false
+	win.webContents.send(IPC.playSound, choice)
+	return true
+}
+
+/** Each event's sound; until you pick one, the defaults (or all off, if "Play a sound" was off in the old setting). */
+function currentSounds(): SoundPrefs {
+	return store.read().sounds ?? storedSounds(undefined, !github.soundsWereOff)
+}
+
+/** The AI finished something you started: its sound, and a notification when you are looking at another app. */
+function aiDone(event: 'runFinished' | 'answer', title: string, body: string): void {
+	const silent = playSound(event)
+	if (win && !win.isDestroyed() && win.isFocused()) return
+	void present(new Notification({ title, body, silent }), null)
+}
+
+/** Resolves with `p`; once it does, says the answer is ready. A request that fails says nothing. */
+function answered<T>(p: Promise<T>, what: string): Promise<T> {
+	return p.then((v) => {
+		aiDone('answer', 'AI answer ready', what)
+		return v
+	})
+}
+
+function runFinished(run: AiRun): void {
+	const r = store.read().repos[run.repoId]?.reviews[run.reviewId]
+	const name = r?.pr ? `${r.pr.repo.split('/')[1]}#${r.pr.number}` : (r?.headRef ?? 'your branch')
+	if (run.status === 'failed') return aiDone('runFinished', `AI review failed: ${name}`, run.errors[0] ?? 'The run stopped with an error.')
+	const n = run.findings.filter((f) => !f.mergedInto && !f.heldBack).length
+	aiDone('runFinished', `AI review finished: ${name}`, n ? `${n} finding${n === 1 ? '' : 's'}` : 'No findings')
 }
 
 /**

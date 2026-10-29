@@ -7,6 +7,7 @@ import { McpImport, McpServerEditor } from './McpSettings.tsx'
 import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { KeymapSettings } from './KeymapSettings.tsx'
+import { SoundSettings } from './SoundSettings.tsx'
 
 /**
  * A page in the settings window. Fixed pages have plain names; pages for one item carry its id after a colon:
@@ -110,6 +111,7 @@ export function Settings(props: {
 		() => [
 			{ id: 'appearance', label: 'Appearance', keywords: 'theme light dark colour color' },
 			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
+			{ id: 'sounds', label: 'Sounds', keywords: 'sound audio chime alert notification ai answer review finished' },
 			{
 				id: 'github-group',
 				label: 'GitHub',
@@ -117,7 +119,7 @@ export function Settings(props: {
 				dot: github.state === 'connected' ? 'connected' : github.state === 'failed' ? 'failed' : undefined,
 				children: [
 					{ id: 'github', label: 'Account', keywords: 'token login gh cli personal access api rate limit sign in' },
-					{ id: 'notifications', label: 'Notifications', keywords: 'review requests sound dock' },
+					{ id: 'notifications', label: 'Notifications', keywords: 'review requests dock' },
 					{ id: 'auto-review', label: 'Automatic review', keywords: 'approve submit commits ai' },
 					...(props.mapping && props.mapping.candidates.length > 0
 						? [{ id: 'repo', label: 'This repository', keywords: 'remotes fork upstream pull requests' }]
@@ -278,6 +280,7 @@ export function Settings(props: {
 	function body(): ReactNode {
 		if (page === 'appearance') return <AppearanceSettings />
 		if (page === 'keymap') return <KeymapSettings />
+		if (page === 'sounds') return <SoundSettings githubNotifications={github.notifications.enabled} />
 		if (page === 'github') return <GitHubAccount status={github} act={act} />
 		if (page === 'notifications') return <GitHubNotifications status={github} act={act} />
 		if (page === 'auto-review')

@@ -1,6 +1,7 @@
 import type { HeadChecks } from './ci.ts'
 import type { HomeInbox, WatchedPr } from './inbox.ts'
 import type { PersonaId } from './personas.ts'
+import type { SoundId, SoundPrefs } from './sounds.ts'
 import type { ThemeSettings } from './theme.ts'
 import type { KeymapOverrides } from './keymap.ts'
 import type { NotesRange } from './releases.ts'
@@ -241,10 +242,9 @@ export interface GitHubStatus {
 	autoReviewCommits: boolean // with autoReview: also review new commits on pull requests it reviewed, incrementally; off by default
 }
 
-/** Desktop notifications for review requests in repositories opened in the app. */
+/** Desktop notifications for review requests in repositories opened in the app. Their sounds are in SoundPrefs. */
 export interface NotificationPrefs {
 	enabled: boolean
-	sound: boolean
 }
 
 export interface AppUpdate {
@@ -1657,6 +1657,7 @@ export const IPC = {
 	contextImage: 'context:image',
 	repoTabs: 'repo:tabs',
 	inboxOpen: 'inbox:open',
+	playSound: 'sound:play',
 	takeLink: 'link:take',
 	linkOpen: 'link:open',
 	inboxChanged: 'inbox:changed',
@@ -1755,6 +1756,8 @@ export const IPC = {
 	theme: 'app:theme',
 	setTheme: 'app:set-theme',
 	themeChanged: 'app:theme-changed',
+	sounds: 'app:sounds',
+	setSounds: 'app:set-sounds',
 	keymap: 'app:keymap',
 	setKeymap: 'app:set-keymap',
 	keymapChanged: 'app:keymap-changed',
@@ -1825,6 +1828,7 @@ export interface ReviewApi {
 	/** The repository tabs, re-read when review requests change. */
 	repoTabs(): Promise<Result<Array<RepoTab>>>
 	onInboxOpen(handler: (target: InboxOpen) => void): () => void
+	onPlaySound(handler: (sound: SoundId) => void): () => void
 	/** The pull request link the app was last opened with, once: later calls return null until another link arrives. */
 	takeLink(): Promise<Result<LinkOpen | null>>
 	/** A link arrived while the window was open; call `takeLink` to read it. */
@@ -1973,6 +1977,8 @@ export interface ReviewApi {
 	/** The theme changed, from the View menu or another part of the app. */
 	onThemeChanged(handler: (next: ThemeSettings) => void): () => void
 	/** The shortcuts you changed (the others keep their defaults). */
+	sounds(): Promise<Result<SoundPrefs>>
+	setSounds(next: SoundPrefs): Promise<Result<SoundPrefs>>
 	keymap(): Promise<Result<KeymapOverrides>>
 	setKeymap(next: KeymapOverrides): Promise<Result<KeymapOverrides>>
 	onKeymapChanged(handler: (next: KeymapOverrides) => void): () => void

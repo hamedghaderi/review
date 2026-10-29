@@ -69,6 +69,7 @@ import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { playSound } from './sounds.ts'
 import { Home, useHomeInbox } from './Home.tsx'
 import { useStored } from './useStored.ts'
 import { FeedbackDialog } from './FeedbackDialog.tsx'
@@ -516,6 +517,7 @@ export function App() {
 	)
 
 	// A clicked review-request notification opens that PR's review, switching to its repository first if needed.
+	useEffect(() => window.review.onPlaySound(playSound), [])
 	useEffect(() => window.review.onInboxOpen((t) => void openPr({ repoId: t.repoId, repo: t.repo, number: t.number })), [openPr])
 
 	/** Closes a repository tab. Closing the one on screen moves to its neighbour, or to the empty state if it was the last. */

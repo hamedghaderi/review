@@ -4,6 +4,7 @@ import type { AiRun, AutoReviewRecord, BrowserState, Review } from '../shared/ty
 import type { WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 import { parseKeymap, type KeymapOverrides } from '../shared/keymap.ts'
+import { storedSounds, type SoundPrefs } from '../shared/sounds.ts'
 
 export const STORE_VERSION = 2
 
@@ -22,6 +23,7 @@ export interface StoreData {
 	seenVersion?: string // the newest version whose "What's new" you have seen
 	theme?: ThemeSettings // light or dark and the colour theme; absent until you choose one
 	keymap?: KeymapOverrides // the shortcuts you changed; the others keep their defaults
+	sounds?: SoundPrefs // the sound each event plays; absent until you change one
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
 }
@@ -147,6 +149,7 @@ export function migrate(raw: unknown): StoreData {
 		...(typeof d.cloneParent === 'string' ? { cloneParent: d.cloneParent } : {}),
 		...(d.theme ? { theme: parseTheme(d.theme) } : {}),
 		...(d.keymap ? { keymap: parseKeymap(d.keymap, process.platform === 'darwin') } : {}),
+		...(d.sounds ? { sounds: storedSounds(d.sounds) } : {}),
 	}
 }
 

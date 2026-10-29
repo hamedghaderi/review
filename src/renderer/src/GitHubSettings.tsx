@@ -164,15 +164,6 @@ export function GitHubNotifications({ status, act }: { status: GitHubStatus; act
 						</span>
 					</span>
 				</label>
-				<label className="check">
-					<input
-						type="checkbox"
-						checked={status.notifications.sound}
-						disabled={!status.notifications.enabled}
-						onChange={(e) => void act(window.review.githubSetNotifications({ ...status.notifications, sound: e.target.checked }))}
-					/>
-					<span>Play a sound</span>
-				</label>
 				<div>
 					<button className="btn small" onClick={() => void act(window.review.githubTestNotification())}>
 						Send a test notification
@@ -184,7 +175,6 @@ export function GitHubNotifications({ status, act }: { status: GitHubStatus; act
 	)
 }
 
-/** Settings → GitHub → Repository: whose pull requests to browse when the clone's remotes point at several. */
 export function GitHubRepoChoice({ mapping, onChoose }: { mapping: GitHubMapping; onChoose(repo: string): void }) {
 	return (
 		<div className="settings-main form">

@@ -27,6 +27,7 @@ import type {
 	OutcomeGroup,
 } from '../shared/types.ts'
 import { PERSONA_IDS } from '../shared/personas.ts'
+import { SOUND_EVENTS, SOUNDS, storedSounds, type SoundId, type SoundPrefs } from '../shared/sounds.ts'
 import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
@@ -83,7 +84,13 @@ function arr(v: unknown, what: string): Array<unknown> {
 
 export function notificationPrefs(v: unknown): NotificationPrefs {
 	const o = obj(v, 'notification settings')
-	return { enabled: bool(o.enabled, 'notifications'), sound: bool(o.sound, 'sound') }
+	return { enabled: bool(o.enabled, 'notifications') }
+}
+
+export function soundPrefs(v: unknown): SoundPrefs {
+	const o = obj(v, 'sounds')
+	for (const e of SOUND_EVENTS) if (o[e] !== 'off' && !SOUNDS.includes(o[e] as SoundId)) bad('sound')
+	return storedSounds(o)
 }
 
 export function bool(v: unknown, what: string): boolean {
