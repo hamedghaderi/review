@@ -457,6 +457,22 @@ input[type='checkbox'] {
 	margin: 0 0 8px;
 	max-width: 520px;
 }
+/* Hairline's palette, drawn from the theme so every theme (not only dark) gets matching lines. The plate must match
+   the background behind the figure, or its faces show as boxes. */
+.empty-figure {
+	width: 200px;
+	max-width: 100%;
+	margin-bottom: 4px;
+	--hairline-plate: var(--bg);
+	--hairline-hi: var(--text);
+	--hairline-edge: color-mix(in srgb, var(--text-2) 65%, var(--bg));
+	--hairline-mid: color-mix(in srgb, var(--text-2) 45%, var(--bg));
+	--hairline-lo: var(--border);
+}
+.side .empty-figure {
+	width: 160px;
+	--hairline-plate: var(--panel);
+}
 .row-actions {
 	display: flex;
 	gap: 8px;

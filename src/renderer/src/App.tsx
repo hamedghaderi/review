@@ -78,6 +78,7 @@ import { Sidebar } from './Sidebar.tsx'
 import { MentionProvider, type Mentions } from './Mention.tsx'
 import { Conclusion } from './Conclusion.tsx'
 import { ExplainChange } from './ExplainChange.tsx'
+import { EmptyFigure } from './EmptyFigure.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
 import type { NotesRange } from '../../shared/releases.ts'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
@@ -1819,6 +1820,7 @@ export function App() {
 									<section className="center">
 										{comparison.files.length === 0 ? (
 											<div className="empty">
+												<EmptyFigure figure="branches" />
 												<h2>No committed changes</h2>
 												<p className="muted">{emptyReason(comparison)}</p>
 												{repo && repo.uncommitted > 0 && (
