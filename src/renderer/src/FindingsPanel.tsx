@@ -43,6 +43,7 @@ import { screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { EmptyFigure } from './EmptyFigure.tsx'
 import { useStored } from './useStored.ts'
 import { personaOf } from '../../shared/personas.ts'
 import { isKey, keyLabel } from './keymap.ts'
@@ -428,6 +429,11 @@ export function FindingsPanel({
 										Clear filters
 									</button>
 								</>
+							) : filter === 'open' && run.status === 'completed' && items.length === 0 ? (
+								<div className="empty">
+									<EmptyFigure figure="loupe" />
+									{emptyText(run, filter, items.length)}
+								</div>
 							) : (
 								emptyText(run, filter, items.length)
 							)}
