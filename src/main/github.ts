@@ -43,11 +43,12 @@ const PAGE_SIZE = 50
 const INBOX_SIZE = 50 // per part of the Inbox (requested, reviewed)
 const SEARCH_CAP = 1000 // GitHub search never returns more than 1,000 results per query
 const TIMEOUT_MS = 20_000
-// Fine-grained tokens (metadata:read is implied). Browsing needs read; publishing reviews needs write.
+// Fine-grained tokens (metadata:read is implied). Browsing needs read; publishing reviews needs write. Actions read
+// lets the AI review read why a CI job failed.
 export const TOKEN_URL =
-	'https://github.com/settings/personal-access-tokens/new?name=Review+app&description=Read+pull+requests+in+the+Review+desktop+app&pull_requests=read'
+	'https://github.com/settings/personal-access-tokens/new?name=Review+app&description=Read+pull+requests+in+the+Review+desktop+app&pull_requests=read&actions=read'
 export const WRITE_TOKEN_URL =
-	'https://github.com/settings/personal-access-tokens/new?name=Review+app+(publish)&description=Read+pull+requests+and+publish+reviews+from+the+Review+desktop+app&pull_requests=write'
+	'https://github.com/settings/personal-access-tokens/new?name=Review+app+(publish)&description=Read+pull+requests+and+publish+reviews+from+the+Review+desktop+app&pull_requests=write&actions=read'
 
 /** The subset of CredentialService used here, so the token shares the app's encrypted credential store. */
 export interface TokenStore {
@@ -681,6 +682,17 @@ export class GitHubService {
 			title: a.title || null,
 			message: a.message ?? '',
 		}))
+	}
+
+	/**
+	 * The plain-text log of one GitHub Actions job (a check run's id is its job's id). GitHub answers with a redirect to
+	 * short-lived storage; the token is not sent there. Needs a token with Actions read access, even on public repos.
+	 */
+	async jobLog(repo: string, jobId: number, signal?: AbortSignal): Promise<string> {
+		checkRepo(repo)
+		if (!Number.isSafeInteger(jobId) || jobId <= 0) throw new AppFail('invalid-input', 'Invalid job.')
+		const res = await this.request(`${this.base}/repos/${repo}/actions/jobs/${jobId}/logs`, { method: 'GET' }, signal)
+		return await res.text()
 	}
 
 	// ─── Stacks ───────────────────────────────────────────────────────────────
