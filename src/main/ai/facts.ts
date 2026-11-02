@@ -5,6 +5,7 @@ import { markPreExisting, type BaseChecks } from '../baseCi.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { dependencyFacts } from './deps.ts'
 import { annotationFacts } from './evidence.ts'
+import { failureExcerpt } from '../ciLog.ts'
 import { wantedNames } from './related.ts'
 import type { CiAnnotation } from '../../shared/types.ts'
 
@@ -16,6 +17,8 @@ export interface FactsResult {
 }
 
 const MAX_ANNOTATED_RUNS = 10
+const MAX_LOGS = 5 // failed GitHub Actions jobs whose log is read
+const LOG_CHARS = 5000 // per job: the end of the failed step, near the failures
 
 /** Maintainer-written notes about the codebase (where input is sanitized, which layer checks permissions…). */
 export const PROJECT_CONTEXT_PATH = '.review/context.md'
@@ -37,6 +40,7 @@ export async function loadFacts(o: {
 	sources: Array<FileSource>
 	checks: (() => Promise<CommitChecks>) | null // null: no GitHub repository for this review
 	annotations?: ((runId: number) => Promise<Array<Omit<CiAnnotation, 'check'>>>) | null
+	jobLog?: ((runId: number) => Promise<string>) | null // a GitHub Actions job's raw log, to show why it failed
 	baseChecks?: (() => Promise<BaseChecks | null>) | null // the merge base's CI (see readBaseChecks)
 	signal?: AbortSignal
 }): Promise<FactsResult> {
@@ -89,6 +93,7 @@ export async function loadFacts(o: {
 			const f = ciFact(c, base)
 			out.facts.push(f.fact)
 			out.summary.push({ kind: 'ci', text: f.summary })
+			if (o.jobLog) await readLogs(c, base, o.jobLog, out, o.signal)
 			if (o.annotations)
 				await readAnnotations(c, o.annotations, o.sources, out, o.signal, base && { root: o.root, headSha: o.headSha, base })
 		} catch (e) {
@@ -106,6 +111,37 @@ export async function loadFacts(o: {
 		}
 	}
 	return out
+}
+
+/**
+ * What the failed GitHub Actions jobs printed when they failed: the failing test, the assertion, the error and where it
+ * was thrown. Check names alone only say that something broke. A job that also fails at the base control is skipped,
+ * since its output is not about this change; one that passes there comes first.
+ */
+async function readLogs(
+	c: CommitChecks,
+	base: BaseChecks | null,
+	fetch: (runId: number) => Promise<string>,
+	out: FactsResult,
+	signal?: AbortSignal,
+): Promise<void> {
+	const at = compareChecks(base?.checks ?? null)
+	const failed = c.runs.filter((r) => CI_FAILED.has(r.result) && r.app === 'GitHub Actions' && at.run(r) !== 'fails')
+	failed.sort((a, b) => Number(at.run(b) === 'passes') - Number(at.run(a) === 'passes'))
+	let read = 0
+	for (const r of failed.slice(0, MAX_LOGS)) {
+		try {
+			const text = failureExcerpt(await fetch(r.id), LOG_CHARS)
+			if (!text) continue
+			out.facts.push({ kind: 'ci', title: `CI log of "${r.name}"`, text, fileKeys: null })
+			read++
+		} catch (e) {
+			if (signal?.aborted) throw e
+			out.notes.push(`The log of "${r.name}" could not be read: ${e instanceof Error ? e.message : String(e)}`)
+		}
+	}
+	if (failed.length > MAX_LOGS) out.notes.push(`Only the logs of the first ${MAX_LOGS} of ${failed.length} failed CI jobs were read.`)
+	if (read) out.summary.push({ kind: 'ci', text: `Failure output read from ${read} failed CI job log${read === 1 ? '' : 's'}.` })
 }
 
 /** The line messages CI tools attached to the changed files, from the check runs that report any. */

@@ -1571,6 +1571,7 @@ export class ReviewService {
 						sources,
 						checks: gh && repo ? () => gh.checks(repo, c.headSha, signal) : null,
 						annotations: gh && repo ? (id) => gh.annotations(repo, id, signal) : null,
+						jobLog: gh && repo ? (id) => gh.jobLog(repo, id, signal) : null,
 						baseChecks: gh && repo ? () => this.baseChecks(data.root, repo, c.baseSha, signal) : null,
 						signal,
 					})
