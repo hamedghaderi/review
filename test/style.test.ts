@@ -25,8 +25,8 @@ import { ReviewService } from '../src/main/service.ts'
 import { migrate, ReviewStore, STORE_VERSION } from '../src/main/store.ts'
 import { reviewStyleEdit, stylePrList } from '../src/main/validate.ts'
 import { parsePrRef } from '../src/shared/prQuery.ts'
-import { findingCommentBody } from '../src/shared/findings.ts'
-import type { AiRun, Anchor, Finding, Review, ReviewComment } from '../src/shared/types.ts'
+import { CATEGORY_LABEL, findingCommentBody, LEVEL_META, RESIDUE_LABEL, TEST_PATTERN_LABEL } from '../src/shared/findings.ts'
+import type { AiRun, Anchor, Finding, FindingCategory, Review, ReviewComment, Severity, TestPattern } from '../src/shared/types.ts'
 
 const anchor = { fileKey: 'k', side: 'new', startLine: 1, endLine: 1, excerpt: '' } as unknown as Anchor
 
@@ -394,4 +394,25 @@ test('GitHub: listing reviewed pull requests counts your comments; a pasted link
 		one.map((p) => `${p.repo}#${p.number}`),
 		['octo/app#7'],
 	)
+})
+
+// The app tells comments it posted from findings by their label line, so a change to that line must fail here, or
+// unchanged findings on GitHub would quietly count as your own words.
+test('fromFinding recognises the label line at every level and topic findingCommentBody writes', () => {
+	const levels = Object.keys(LEVEL_META) as Array<Severity>
+	const topics: Array<Partial<Finding>> = [
+		{},
+		...(Object.keys(CATEGORY_LABEL) as Array<FindingCategory>).map((category) => ({ category })),
+		...RESIDUE_LABEL.map((_, i) => ({ category: 'residue' as FindingCategory, signature: i })),
+		...(Object.keys(TEST_PATTERN_LABEL) as Array<TestPattern>).map((testPattern) => ({
+			category: 'test-value' as FindingCategory,
+			testPattern,
+		})),
+	]
+	for (const severity of levels)
+		for (const t of topics) {
+			const body = findingCommentBody(finding('f', { severity, ...t }))
+			assert.ok(fromFinding(body), `not recognised: ${body.split('\n')[0]}`)
+			assert.equal(withoutAdded(body), finding('f').body, `label not stripped: ${body.split('\n')[0]}`)
+		}
 })
