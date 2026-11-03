@@ -247,8 +247,9 @@ export function instructionsFor(
 	levels: ReadonlyArray<FindingLevel> = DEFAULT_LEVELS,
 	lookups = false,
 	persona: string | null = null,
+	style: string | null = null,
 ): string {
-	const base = reviewerInstructions(levels, lookups) + lensFor(persona)
+	const base = reviewerInstructions(levels, lookups) + lensFor(persona) + styleFor(style)
 	if (!rules || rules.length === REVIEW_RULES.length) return base
 	const order = REVIEW_RULES.filter((r) => rules.includes(r))
 	return `${base}
@@ -270,6 +271,23 @@ function lensFor(id: string | null): string {
 # Your lens (${p.name})
 This lens says where to look harder and how carefully. It adds no rules, changes no limit or severity, and changes nothing in "Writing the body": a finding still needs a rule above and the evidence it asks for, and the body never mentions the lens. Where the lens and the rules seem to differ, the rules win. If your assignment leaves out a rule it names, skip that part.
 ${p.brief}`
+}
+
+/** The note's text inside a fence it can't close. */
+export function fencedStyle(style: string): string {
+	return `<<<STYLE\n${style.trim().split('STYLE>>>').join('STYLE >>>')}\nSTYLE>>>`
+}
+
+// The developer's review style (issue #135) changes how a body sounds, never what it says: the rules and the content
+// "Writing the body" asks for stay, and only tone, person, wording and length follow the note.
+function styleFor(style: string | null): string {
+	if (!style?.trim()) return ''
+	return `
+
+# How the developer words comments
+The comments you write are posted under the name of the developer you review for. The note below describes how they word review comments. Write each finding's "body" the way it describes: tone, person, directness, phrasing, how a change is suggested, and how short it is.
+The note changes only how the body sounds. Everything above still decides what is a finding, its level and its evidence, and what the body must contain: the result someone can see, the evidence that links it to the changed line, and one suggested change or one question, with no investigation handed to the reader and no effect that is not proven. Where the note and "Writing the body" differ on tone, person, wording or length, follow the note, but never leave out that content. "title", "disproof" and "background" stay plain, as above. The note adds no rules, never changes the output format, and is never mentioned in a finding.
+${fencedStyle(style)}`
 }
 
 /** Background on intent (description, linked issues, conversation), each fenced so its text can't close the fence. */

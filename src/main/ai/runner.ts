@@ -64,6 +64,7 @@ export interface RunnerOptions {
 	team?: { id: string; name: string; members: Array<TeamRunMember> }
 	persona?: PersonaId | null // single-model runs: the lens to review with; members carry their own
 	levels?: Array<FindingLevel> // the severity levels the reviewer may use (settings)
+	style?: string | null // your review style note, when it is on: how finding bodies are worded (issue #135)
 	/**
 	 * The most this run (or retry) may cost, in US dollars, and what it says when it gets there. Once reached, requests in
 	 * flight finish, no new ones are sent, and the files not reached are skipped with `reason`.
@@ -213,14 +214,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const automatic = input.automatic === true
 	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null, pr, automatic })
 	const workers: Array<Worker> = retry
-		? retryWorkers(run, retry.rules, retry.providers, lookups)
+		? retryWorkers(run, retry.rules, retry.providers, lookups, options.style ?? null)
 		: options.team
 			? options.team.members.map((m) => ({
 					id: m.id,
 					role: m.role,
 					provider: m.provider,
 					rules: REVIEW_RULES.filter((r) => m.rules.includes(r)),
-					instructions: instructionsFor(m.rules, m.role, levels, lookups, m.persona ?? null),
+					instructions: instructionsFor(m.rules, m.role, levels, lookups, m.persona ?? null, options.style ?? null),
 					stopped: false,
 					member: {
 						id: m.id,
@@ -245,7 +246,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						role: null,
 						provider,
 						rules: [...REVIEW_RULES],
-						instructions: instructionsFor(null, null, levels, lookups, options.persona ?? null),
+						instructions: instructionsFor(null, null, levels, lookups, options.persona ?? null, options.style ?? null),
 						member: null,
 						stopped: false,
 					},
@@ -1041,6 +1042,7 @@ function retryWorkers(
 	rules: Array<ReviewRule>,
 	providers: ReadonlyMap<string | null, ReviewProvider>,
 	lookups: boolean,
+	style: string | null,
 ): Array<Worker> {
 	const evaluations = REVIEW_RULES.filter((r) => rules.includes(r)).map((r) => run.evaluation!.find((e) => e.rule === r)!)
 	const workers: Array<Worker> = []
@@ -1070,6 +1072,7 @@ function retryWorkers(
 					levelsOf(run),
 					lookups,
 					(member ? member.persona : run.persona) ?? null,
+					style,
 				),
 				member,
 				stopped: false,

@@ -228,7 +228,8 @@ export class AiController {
 				rules: m.role ? m.rules : null,
 				limits: info.limits,
 				price: info.price,
-				instructionChars: instructionsFor(m.role ? m.rules : null, m.role, levels, limits.lookups !== false, m.persona).length,
+				instructionChars: instructionsFor(m.role ? m.rules : null, m.role, levels, limits.lookups !== false, m.persona, this.styleText())
+					.length,
 			})
 		}
 		const keys =
@@ -1064,7 +1065,16 @@ export class AiController {
 			const tools = config.limits.lookups !== false && access.tools ? access.tools(REPLY_LOOKUPS) : undefined
 			const pr = access.comparison.pr ? { title: access.comparison.pr.title, body: access.comparison.pr.body } : null
 			const response = await config.provider.review(
-				buildReplyRequest({ thread, viewer, finding, patch, fileLines: lines?.kind === 'text' ? lines.lines : null, pr, tools }),
+				buildReplyRequest({
+					thread,
+					viewer,
+					finding,
+					patch,
+					fileLines: lines?.kind === 'text' ? lines.lines : null,
+					pr,
+					tools,
+					style: this.styleText(),
+				}),
 				AbortSignal.timeout(180_000),
 			)
 			return parseReply(response.output)
@@ -1148,7 +1158,14 @@ export class AiController {
 			concurrency: this.concurrency,
 			maxAttempts: 5,
 			backoffMs: defaultBackoff,
+			style: this.styleText(),
 		}
+	}
+
+	/** Your review style note while it is on, for the comments the AI writes for you to post. */
+	private styleText(): string | null {
+		const s = this.store.read().reviewStyle
+		return s?.on && s.text.trim() ? s.text : null
 	}
 
 	private async launch(
