@@ -81,7 +81,11 @@ export function StyleSettings({ hasQuestionModel }: { hasQuestionModel: boolean 
 						/>
 						Write in my style
 					</label>
-					<p className="muted small">Findings and drafted replies don't use it yet.</p>
+					<p className="muted small">
+						{style.on
+							? 'New AI reviews word their findings this way, and so do drafted replies. Automatic reviews too: they still say they were written by AI. Findings from earlier runs keep their wording.'
+							: 'Off: findings and drafted replies are worded as before.'}
+					</p>
 
 					{draft === null ? (
 						<div className={`style-note${style.on ? '' : ' off'}`}>

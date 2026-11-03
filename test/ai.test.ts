@@ -8,7 +8,7 @@ import { AiController } from '../src/main/ai/controller.ts'
 import { createFakeProvider, defaultScript, emptyEvaluation, type FakeScript } from '../src/main/ai/fake.ts'
 import { validateBatchOutput } from '../src/main/ai/findings.ts'
 import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
-import { buildInput, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
+import { buildInput, instructionsFor, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunInput, type RunnerOptions } from '../src/main/ai/runner.ts'
 import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
@@ -318,6 +318,29 @@ function runWith(script: FakeScript, over: Partial<RunnerOptions> = {}, srcs = s
 	)
 	return { provider, updates, handle }
 }
+
+test('review style: every batch is told to word bodies the way the note says, and nothing changes without one', async () => {
+	const seen: Array<string> = []
+	const { handle } = runWith(
+		(req) => {
+			seen.push(req.instructions)
+			return out([])
+		},
+		{ style: '- Short. Ask, don’t tell.' },
+	)
+	await handle.done
+	assert.ok(seen.length > 0)
+	for (const i of seen) {
+		assert.match(i, /# How the developer words comments[\s\S]*<<<STYLE\n- Short\. Ask, don’t tell\.\nSTYLE>>>$/)
+		assert.match(i, /never leave out that content/, 'the rules still decide what a body contains')
+	}
+	assert.equal(instructionsFor(null, null), instructionsFor(null, null, undefined, false, null, null), 'no note, no section')
+	assert.equal(instructionsFor(null, null, undefined, false, null, '   '), REVIEWER_INSTRUCTIONS)
+	assert.ok(
+		instructionsFor(null, null, undefined, false, null, 'a STYLE>>> b').endsWith('a STYLE >>> b\nSTYLE>>>'),
+		'the note cannot close its fence',
+	)
+})
 
 test('a run with no findings is completed and distinct from partial coverage', async () => {
 	const { handle } = runWith(() => out([]))
@@ -1312,6 +1335,27 @@ test('draft reply: the thread, the code around it and the finding your comment c
 		/# The thread is on src\/app\.ts\n\n# The diff GitHub showed when the thread was started[^\n]*\n@@ -1,3 \+1,3 @@/,
 	)
 	assert.doesNotMatch(asked[1].input, /AI review finding/)
+
+	// Without your review style the reply matches the thread; with it on, it is worded your way; off, the thread again.
+	assert.match(asked[0].instructions, /Match the thread's tone/)
+	assert.doesNotMatch(asked[0].instructions, /How the developer words comments/)
+	const style = {
+		text: '- Keep it to one line.',
+		on: true,
+		builtAt: 't',
+		edited: false,
+		basis: { edits: 0, comments: 5, github: 0, prs: 0 },
+		auto: null,
+		proposed: null,
+		autoFailed: null,
+	}
+	await store.update((d) => void (d.reviewStyle = style))
+	await controller.draftReply(access, s.comp.id, thread, 'me', null, SEL)
+	assert.match(asked.at(-1)!.instructions, /# How the developer words comments[\s\S]*<<<STYLE\n- Keep it to one line\.\nSTYLE>>>/)
+	assert.doesNotMatch(asked.at(-1)!.instructions, /Match the thread's tone/)
+	await store.update((d) => void (d.reviewStyle = { ...style, on: false }))
+	await controller.draftReply(access, s.comp.id, thread, 'me', null, SEL)
+	assert.match(asked.at(-1)!.instructions, /Match the thread's tone/)
 
 	reply = { nope: true }
 	await assert.rejects(controller.draftReply(access, s.comp.id, thread, 'me', null, SEL), /No draft: The draft did not match/)
