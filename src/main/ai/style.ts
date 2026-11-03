@@ -42,7 +42,12 @@ export interface StyleExamples {
 	github: Array<string> // your review comments on GitHub, without the ones the app posted from findings
 }
 
-export const styleBasis = (x: StyleExamples): StyleBasis => ({ edits: x.edits.length, comments: x.own.length, github: x.github.length })
+export const styleBasis = (x: StyleExamples, prs = 0): StyleBasis => ({
+	edits: x.edits.length,
+	comments: x.own.length,
+	github: x.github.length,
+	prs,
+})
 export const exampleCount = (x: StyleExamples): number => x.edits.length + x.own.length + x.github.length
 
 const clip = (s: string): string => (s.length > MAX_EXAMPLE_CHARS ? `${s.slice(0, MAX_EXAMPLE_CHARS)}…` : s)

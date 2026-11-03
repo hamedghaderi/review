@@ -44,6 +44,8 @@ import type {
 	RunEstimate,
 	ReviewRule,
 	ReviewStyle,
+	ReviewedPr,
+	StylePr,
 	ReviewTarget,
 	SearchSlot,
 	Side,
@@ -1535,7 +1537,8 @@ export class ReviewService {
 	async buildReviewStyle(selection: ModelSelection, auto: number | null = null): Promise<ReviewStyle> {
 		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
 		// GitHub adds examples when it can; without a token or when it fails, the app's own comments still count.
-		const github = this.github ? await this.github.myReviewComments(AbortSignal.timeout(30_000)).catch(() => null) : null
+		const picked = this.store.read().stylePrs ?? []
+		const github = this.github ? await this.github.myReviewComments(picked, AbortSignal.timeout(30_000)).catch(() => null) : null
 		const examples = styleExamples(Object.values(this.store.read().repos), github ?? [])
 		const count = exampleCount(examples)
 		if (count < MIN_EXAMPLES)
@@ -1544,7 +1547,7 @@ export class ReviewService {
 				`Only ${count} of your comments ${count === 1 ? 'was' : 'were'} found, and at least ${MIN_EXAMPLES} are needed. ${github === null ? 'Connect GitHub, or write' : 'Write'} a few more review comments, or edit some findings before posting them, then try again.`,
 			)
 		const text = await this.ai.buildReviewStyle(examples, selection)
-		const built = { text, builtAt: new Date().toISOString(), basis: styleBasis(examples), auto }
+		const built = { text, builtAt: new Date().toISOString(), basis: styleBasis(examples, github ? picked.length : 0), auto }
 		let next: ReviewStyle | null = null
 		await this.store.update((d) => {
 			const cur = d.reviewStyle
@@ -1576,6 +1579,21 @@ export class ReviewService {
 				if (d.reviewStyle) d.reviewStyle = { ...d.reviewStyle, autoFailed: { at: new Date().toISOString(), message } }
 			})
 		}
+	}
+
+	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
+	stylePrs(): Array<StylePr> {
+		return this.store.read().stylePrs ?? []
+	}
+
+	async setStylePrs(next: Array<StylePr>): Promise<Array<StylePr>> {
+		await this.store.update((d) => void (d.stylePrs = next))
+		return next
+	}
+
+	async reviewedPrs(query: string): Promise<Array<ReviewedPr>> {
+		if (!this.github) throw new AppFail('github-failed', 'GitHub is not available.')
+		return this.github.reviewedPrs(query, AbortSignal.timeout(30_000))
 	}
 
 	/** Saves the note as you edited it, and whether it is used. */

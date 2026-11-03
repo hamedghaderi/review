@@ -273,6 +273,24 @@ export interface StyleBasis {
 	edits: number // findings you edited before posting
 	comments: number // comments you wrote in the app
 	github: number // your review comments on GitHub
+	prs: number // the pull requests you picked that they came from; 0 when it read the ones you reviewed most recently
+}
+
+/** The most pull requests you can pick for your review style. */
+export const MAX_STYLE_PRS = 10
+
+/** A pull request you picked to learn your review style from. */
+export interface StylePr {
+	repo: string // "owner/name"
+	number: number
+	title: string
+}
+
+/** A pull request you reviewed, as listed to pick from. */
+export interface ReviewedPr extends StylePr {
+	url: string
+	updatedAt: string | null
+	comments: number // your review comments and review summaries on it
 }
 
 export interface AppUpdate {
@@ -1785,6 +1803,9 @@ export const IPC = {
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
 	reviewStyle: 'ai:review-style',
+	stylePrs: 'ai:style-prs',
+	setStylePrs: 'ai:set-style-prs',
+	reviewedPrs: 'github:reviewed-prs',
 	buildReviewStyle: 'ai:build-review-style',
 	setReviewStyle: 'ai:set-review-style',
 	settleReviewStyle: 'ai:settle-review-style',
@@ -2024,6 +2045,11 @@ export interface ReviewApi {
 	setReviewStyle(next: { text: string; on: boolean }): Promise<Result<ReviewStyle>>
 	/** Takes or drops the rebuilt note waiting in `proposed`. */
 	settleReviewStyle(accept: boolean): Promise<Result<ReviewStyle>>
+	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
+	stylePrs(): Promise<Result<Array<StylePr>>>
+	setStylePrs(next: Array<StylePr>): Promise<Result<Array<StylePr>>>
+	/** Pull requests you reviewed to pick from, narrowed by search words; a pull request link finds that one. */
+	reviewedPrs(query: string): Promise<Result<Array<ReviewedPr>>>
 	/** Forgets one conversation about selected code. */
 	deleteCodeQuestion(reviewId: string, questionId: string): Promise<Result<Array<CodeQuestion>>>
 	gifStatus(): Promise<Result<GifStatus>>

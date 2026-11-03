@@ -49,6 +49,8 @@ import {
 	notificationPrefs,
 	soundPrefs,
 	reviewStyleEdit,
+	stylePrList,
+	reviewedPrQuery,
 	githubToken,
 	prNumber,
 	prDescriptionText,
@@ -483,6 +485,9 @@ function registerIpc(): void {
 	})
 	handle(IPC.setReviewStyle, async (raw: unknown) => service.setReviewStyle(reviewStyleEdit(raw)))
 	handle(IPC.settleReviewStyle, async (accept: unknown) => service.settleReviewStyle(bool(accept, 'accept')))
+	handle(IPC.stylePrs, async () => service.stylePrs())
+	handle(IPC.setStylePrs, async (raw: unknown) => service.setStylePrs(stylePrList(raw)))
+	handle(IPC.reviewedPrs, async (query: unknown) => service.reviewedPrs(reviewedPrQuery(query)))
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)

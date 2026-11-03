@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AiRun, AutoReviewRecord, BrowserState, MergedPr, Review, ReviewStyle, StyleBasis } from '../shared/types.ts'
+import type { AiRun, AutoReviewRecord, BrowserState, MergedPr, Review, ReviewStyle, StyleBasis, StylePr } from '../shared/types.ts'
+import { MAX_STYLE_PRS } from '../shared/types.ts'
 import type { WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 import { parseKeymap, type KeymapOverrides } from '../shared/keymap.ts'
@@ -25,6 +26,7 @@ export interface StoreData {
 	keymap?: KeymapOverrides // the shortcuts you changed; the others keep their defaults
 	sounds?: SoundPrefs // the sound each event plays; absent until you change one
 	reviewStyle?: ReviewStyle // how you word review comments; absent until you build it
+	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
 }
@@ -154,7 +156,19 @@ export function migrate(raw: unknown): StoreData {
 		...(d.keymap ? { keymap: parseKeymap(d.keymap, process.platform === 'darwin') } : {}),
 		...(d.sounds ? { sounds: storedSounds(d.sounds) } : {}),
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
+		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
 	}
+}
+
+/** The picked pull requests that are still readable, at most MAX_STYLE_PRS. */
+function storedStylePrs(raw: Array<unknown>): Array<StylePr> {
+	return raw
+		.filter((p): p is StylePr => {
+			const o = p as Partial<StylePr> | null
+			return !!o && typeof o.repo === 'string' && Number.isSafeInteger(o.number) && typeof o.title === 'string'
+		})
+		.map(({ repo, number, title }) => ({ repo, number, title }))
+		.slice(0, MAX_STYLE_PRS)
 }
 
 /** The saved review style note, or null when it is missing or unreadable. */
@@ -164,7 +178,7 @@ export function storedStyle(raw: unknown): ReviewStyle | null {
 	const basis = (b: unknown): StyleBasis => {
 		const o = (b ?? {}) as Partial<StyleBasis>
 		const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0)
-		return { edits: n(o.edits), comments: n(o.comments), github: n(o.github) }
+		return { edits: n(o.edits), comments: n(o.comments), github: n(o.github), prs: n(o.prs) }
 	}
 	const p = r.proposed
 	const auto = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : null)

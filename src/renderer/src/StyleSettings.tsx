@@ -1,12 +1,20 @@
-import { useEffect, useState } from 'react'
-import { MAX_STYLE_CHARS, STYLE_REFRESH_EVERY, type ReviewStyle, type StyleBasis } from '../../shared/types.ts'
+import { useEffect, useRef, useState } from 'react'
+import {
+	MAX_STYLE_CHARS,
+	MAX_STYLE_PRS,
+	STYLE_REFRESH_EVERY,
+	type ReviewedPr,
+	type ReviewStyle,
+	type StyleBasis,
+	type StylePr,
+} from '../../shared/types.ts'
 import { Markdown } from './Markdown.tsx'
 
 function basisText(b: StyleBasis): string {
 	const parts = [
 		b.edits && `${b.edits} finding${b.edits === 1 ? '' : 's'} you edited`,
 		b.comments && `${b.comments} comment${b.comments === 1 ? '' : 's'} you wrote here`,
-		b.github && `${b.github} of your comments on GitHub`,
+		b.github && `${b.github} of your comments on ${b.prs ? `${b.prs} pull request${b.prs === 1 ? '' : 's'} you picked` : 'GitHub'}`,
 	].filter(Boolean)
 	return parts.length ? `From ${parts.join(', ')}` : 'From no examples'
 }
@@ -59,7 +67,10 @@ export function StyleSettings({ hasQuestionModel }: { hasQuestionModel: boolean 
 			{!hasQuestionModel && <p className="small">Choose a model for questions first, in AI review › Providers.</p>}
 
 			{style === null ? (
-				<div className="form-actions start">{buildButton('Learn my style')}</div>
+				<>
+					<StylePrPicker built={false} />
+					<div className="form-actions start">{buildButton('Learn my style')}</div>
+				</>
 			) : (
 				<>
 					<label className="check">
@@ -144,7 +155,144 @@ export function StyleSettings({ hasQuestionModel }: { hasQuestionModel: boolean 
 							</div>
 						</div>
 					)}
+					<StylePrPicker built />
 				</>
+			)}
+			{error && <p className="small error-text">{error}</p>}
+		</div>
+	)
+}
+
+const key = (p: { repo: string; number: number }): string => `${p.repo.toLowerCase()}#${p.number}`
+
+/**
+ * The GitHub pull requests your review style is learned from: up to MAX_STYLE_PRS you pick from the ones you reviewed
+ * (or by pasting a link). With none picked, the note reads the ones you reviewed most recently.
+ */
+function StylePrPicker({ built }: { built: boolean }) {
+	const [picked, setPicked] = useState<Array<StylePr> | null>(null)
+	const [open, setOpen] = useState(false)
+	const [query, setQuery] = useState('')
+	const [found, setFound] = useState<Array<ReviewedPr> | null>(null)
+	const [searching, setSearching] = useState(false)
+	const [changed, setChanged] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+	const asked = useRef(0)
+	useEffect(() => {
+		void window.review.stylePrs().then((r) => (r.ok ? setPicked(r.value) : setError(r.error.message)))
+	}, [])
+	// Searching waits for you to stop typing; only the newest answer is shown.
+	useEffect(() => {
+		if (!open) return
+		const n = ++asked.current
+		setSearching(true)
+		const t = setTimeout(async () => {
+			const r = await window.review.reviewedPrs(query)
+			if (n !== asked.current) return
+			setSearching(false)
+			if (r.ok) {
+				setFound(r.value)
+				setError(null)
+			} else setError(r.error.message)
+		}, 300)
+		return () => clearTimeout(t)
+	}, [open, query])
+	if (!picked) return error ? <p className="small error-text">{error}</p> : null
+
+	const save = async (next: Array<StylePr>): Promise<void> => {
+		setPicked(next)
+		const r = await window.review.setStylePrs(next)
+		if (r.ok) {
+			setPicked(r.value)
+			setChanged(true)
+			setError(null)
+		} else setError(r.error.message)
+	}
+	const chosen = new Set(picked.map(key))
+	const toggle = (p: ReviewedPr): Promise<void> =>
+		save(chosen.has(key(p)) ? picked.filter((x) => key(x) !== key(p)) : [...picked, { repo: p.repo, number: p.number, title: p.title }])
+	return (
+		<div className="style-prs">
+			<h4>Pull requests to learn from</h4>
+			<p className="muted small">
+				{picked.length
+					? `Your review comments on these ${picked.length === 1 ? 'pull request are' : `${picked.length} pull requests are`} used instead of your recent ones. Your edits and comments in Review still count.`
+					: `None picked, so it reads the 30 pull requests you reviewed most recently. Pick up to ${MAX_STYLE_PRS} that show how you review.`}
+			</p>
+			{!!picked.length && (
+				<ul className="style-pr-list small">
+					{picked.map((p) => (
+						<li key={key(p)}>
+							<span className="ellipsis" title={p.title}>
+								{p.title}
+							</span>
+							<span className="muted nowrap">
+								{p.repo}#{p.number}
+							</span>
+							<button
+								className="btn small ghost"
+								aria-label={`Stop learning from ${p.repo}#${p.number}`}
+								onClick={() => void save(picked.filter((x) => key(x) !== key(p)))}
+							>
+								✕
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
+			{changed && built && <p className="small">Rebuild the note to learn from these.</p>}
+			{!open ? (
+				<div className="form-actions start">
+					<button className="btn" onClick={() => setOpen(true)}>
+						{picked.length ? 'Change pull requests…' : 'Choose pull requests…'}
+					</button>
+				</div>
+			) : (
+				<div className="style-pr-picker">
+					<input
+						type="search"
+						className="settings-search"
+						placeholder="Search the pull requests you reviewed, or paste a link"
+						aria-label="Search the pull requests you reviewed, or paste a link"
+						value={query}
+						autoFocus
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+					<div className="style-pr-results small" aria-busy={searching}>
+						{found === null ? (
+							<div className="muted pad">Loading…</div>
+						) : !found.length ? (
+							<div className="muted pad">{searching ? 'Searching…' : 'No pull requests you reviewed match.'}</div>
+						) : (
+							found.map((p) => {
+								const on = chosen.has(key(p))
+								const full = !on && picked.length >= MAX_STYLE_PRS
+								return (
+									<label
+										key={key(p)}
+										className={`check style-pr-row${full ? ' muted' : ''}`}
+										title={full ? `You can pick up to ${MAX_STYLE_PRS}.` : p.title}
+									>
+										<input type="checkbox" checked={on} disabled={full} onChange={() => void toggle(p)} />
+										<span className="ellipsis">{p.title}</span>
+										<span className="muted nowrap">
+											{p.repo}#{p.number} · {p.comments ? `${p.comments} by you` : 'no comments by you'}
+										</span>
+									</label>
+								)
+							})
+						)}
+					</div>
+					<div className="form-actions start">
+						<span className="muted small">
+							{picked.length} of {MAX_STYLE_PRS} picked
+						</span>
+						<span className="spacer" />
+						<button className="btn" onClick={() => setOpen(false)}>
+							Done
+						</button>
+					</div>
+				</div>
 			)}
 			{error && <p className="small error-text">{error}</p>}
 		</div>

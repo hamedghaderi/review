@@ -20,9 +20,11 @@ import {
 	STYLE_REFRESH_EVERY,
 	withoutAdded,
 } from '../src/main/ai/style.ts'
+import { GitHubService, type TokenStore } from '../src/main/github.ts'
 import { ReviewService } from '../src/main/service.ts'
 import { migrate, ReviewStore, STORE_VERSION } from '../src/main/store.ts'
-import { reviewStyleEdit } from '../src/main/validate.ts'
+import { reviewStyleEdit, stylePrList } from '../src/main/validate.ts'
+import { parsePrRef } from '../src/shared/prQuery.ts'
 import { findingCommentBody } from '../src/shared/findings.ts'
 import type { AiRun, Anchor, Finding, Review, ReviewComment } from '../src/shared/types.ts'
 
@@ -72,7 +74,7 @@ test('examples: an edited finding is a pair, an unchanged one is the AI’s word
 	)
 	assert.deepEqual(x.edits, [{ ai: edited.body, yours: 'nit: clear the cache here too?' }], 'the level label is not part of your words')
 	assert.deepEqual(x.own, ['Could we name this `retryAfterMs`? It holds milliseconds.'])
-	assert.deepEqual(styleBasis(x), { edits: 1, comments: 1, github: 0 })
+	assert.deepEqual(styleBasis(x), { edits: 1, comments: 1, github: 0, prs: 0 })
 })
 
 test('examples: a finding whose only change was dropping the parts the app adds is not an edit', () => {
@@ -150,9 +152,9 @@ test('store: the note survives a restart, and a broken one is dropped', () => {
 		on: false,
 		builtAt: '2026-11-03T09:00:00Z',
 		edited: true,
-		basis: { edits: 2, comments: 3, github: 10 },
+		basis: { edits: 2, comments: 3, github: 10, prs: 0 },
 		auto: null,
-		proposed: { text: '- Be briefer.', builtAt: '2026-11-03T10:00:00Z', basis: { edits: 2, comments: 3, github: 12 }, auto: 10 },
+		proposed: { text: '- Be briefer.', builtAt: '2026-11-03T10:00:00Z', basis: { edits: 2, comments: 3, github: 12, prs: 4 }, auto: 10 },
 		autoFailed: { at: '2026-11-03T11:00:00Z', message: 'No style note: model down' },
 	}
 	const base = { version: STORE_VERSION, lastRepoId: null, repos: {} }
@@ -278,4 +280,118 @@ test('refresh: a failed update is shown and waits for more comments instead of r
 	await write(STYLE_REFRESH_EVERY)
 	await svc.refreshReviewStyle(SEL)
 	assert.equal(store.read().reviewStyle?.autoFailed, null)
+})
+
+test('parsePrRef: a GitHub pull request link or owner/name#123, nothing else', () => {
+	assert.deepEqual(parsePrRef(' https://github.com/octo/app/pull/7/files '), { repo: 'octo/app', number: 7 })
+	assert.deepEqual(parsePrRef('octo/app#12'), { repo: 'octo/app', number: 12 })
+	for (const no of ['flaky tests', '#12', 'octo/app', 'https://github.com/octo/app/issues/7', 'octo/..#3', 'octo/app#0'])
+		assert.equal(parsePrRef(no), null, no)
+})
+
+test('validate: picked pull requests are at most 10, well formed and not repeated', () => {
+	const pr = (n: number) => ({ repo: 'octo/app', number: n, title: `PR ${n}` })
+	assert.deepEqual(stylePrList([pr(1), pr(2)]), [pr(1), pr(2)])
+	assert.deepEqual(stylePrList([]), [])
+	assert.throws(() => stylePrList(Array.from({ length: 11 }, (_, i) => pr(i + 1))))
+	assert.throws(() => stylePrList([pr(1), { ...pr(1), repo: 'Octo/App' }]), /picked twice/)
+	assert.throws(() => stylePrList([{ ...pr(1), repo: 'not a repo' }]))
+	assert.throws(() => stylePrList([{ ...pr(1), number: 1.5 }]))
+})
+
+test('store: picked pull requests survive a restart; broken entries are dropped', () => {
+	const base = { version: STORE_VERSION, lastRepoId: null, repos: {} }
+	const ok = { repo: 'octo/app', number: 7, title: 'Fix cache' }
+	assert.deepEqual(migrate({ ...base, stylePrs: [ok, { repo: 'x' }, null] }).stylePrs, [ok])
+	assert.equal(migrate(base).stylePrs, undefined)
+})
+
+function signedIn(): TokenStore {
+	return {
+		async save() {},
+		async read() {
+			return { state: 'saved', secret: 'ghp_test' }
+		},
+		peek: () => 'saved',
+		async remove() {},
+		storageInfo: () => ({ secure: true, backend: 'test', message: null }),
+	} as TokenStore
+}
+
+/** A fake GitHub answering the style queries; records each GraphQL request. */
+function styleGitHub() {
+	const calls: Array<{ query: string; variables: Record<string, unknown> }> = []
+	const pr = (repo: string, number: number, comments: Array<string>) => ({
+		number,
+		title: `PR ${number}`,
+		url: `https://github.com/${repo}/pull/${number}`,
+		updatedAt: '2026-11-01T00:00:00Z',
+		repository: { nameWithOwner: repo },
+		reviews: {
+			nodes: [
+				{
+					body: 'Summary',
+					submittedAt: '2026-11-01T00:00:00Z',
+					comments: { nodes: comments.map((body) => ({ body, createdAt: '2026-11-01T00:00:00Z' })) },
+				},
+			],
+		},
+	})
+	const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } })
+	const fetch = async (_url: string, init: RequestInit): Promise<Response> => {
+		const body = JSON.parse(String(init.body))
+		calls.push(body)
+		const q = String(body.query)
+		if (q.includes('viewer { login }')) return json({ data: { viewer: { login: 'me' } } })
+		if (q.includes('search(')) return json({ data: { search: { nodes: [pr('octo/app', 1, ['a', 'b']), {}] } } })
+		// Picked ones: r0, r1… The second is out of reach and comes back as an error on its own path.
+		return json({
+			data: { r0: { pullRequest: pr('octo/app', 7, ['picked comment']) }, r1: null },
+			errors: [{ type: 'NOT_FOUND', message: 'Could not resolve', path: ['r1'] }],
+		})
+	}
+	return { svc: new GitHubService(signedIn(), { fetch, base: 'https://api.test' }), calls }
+}
+
+test('GitHub: with nothing picked it reads recent reviews; with picks only those, skipping unreadable ones', async () => {
+	const { svc, calls } = styleGitHub()
+	const recent = await svc.myReviewComments([])
+	assert.deepEqual(
+		recent?.map((c) => c.body),
+		['Summary', 'a', 'b'],
+	)
+	assert.match(String(calls.at(-1)?.variables.q), /reviewed-by:@me -author:@me/)
+
+	const picked = await svc.myReviewComments([
+		{ repo: 'octo/app', number: 7 },
+		{ repo: 'octo/gone', number: 3 },
+	])
+	assert.deepEqual(
+		picked?.map((c) => c.body),
+		['Summary', 'picked comment'],
+	)
+	const last = calls.at(-1)!
+	assert.deepEqual([last.variables.o0, last.variables.n0, last.variables.p0, last.variables.n1], ['octo', 'app', 7, 'gone'])
+	assert.doesNotMatch(last.query, /octo/, 'names go in as variables, never into the query text')
+})
+
+test('GitHub: listing reviewed pull requests counts your comments; a pasted link looks up that one', async () => {
+	const { svc, calls } = styleGitHub()
+	const list = await svc.reviewedPrs('cache')
+	assert.deepEqual(list, [
+		{
+			repo: 'octo/app',
+			number: 1,
+			title: 'PR 1',
+			url: 'https://github.com/octo/app/pull/1',
+			updatedAt: '2026-11-01T00:00:00Z',
+			comments: 3,
+		},
+	])
+	assert.match(String(calls.at(-1)?.variables.q), /reviewed-by:@me .*cache sort:updated-desc/)
+	const one = await svc.reviewedPrs('https://github.com/octo/app/pull/7')
+	assert.deepEqual(
+		one.map((p) => `${p.repo}#${p.number}`),
+		['octo/app#7'],
+	)
 })

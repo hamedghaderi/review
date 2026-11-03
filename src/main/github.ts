@@ -1,4 +1,4 @@
-import { buildSearch, FILTER_NEEDS_LOGIN, parsePrQuery } from '../shared/prQuery.ts'
+import { buildSearch, FILTER_NEEDS_LOGIN, parsePrQuery, parsePrRef } from '../shared/prQuery.ts'
 import { watchKey, type WatchedPr } from '../shared/inbox.ts'
 import type {
 	AppError,
@@ -20,7 +20,9 @@ import type {
 	PrSummary,
 	ReviewEvent,
 	ReviewVerdict,
+	ReviewedPr,
 } from '../shared/types.ts'
+import { MAX_STYLE_PRS } from '../shared/types.ts'
 import {
 	ACTIVITY_QUERY,
 	fromGraphql,
@@ -696,25 +698,76 @@ export class GitHubService {
 	}
 
 	/**
-	 * Review comments and review summaries you wrote on other people's pull requests, newest pull requests first, for
-	 * your review style note. Pending (unsubmitted) reviews are left out. Null without a token.
+	 * Review comments and review summaries you wrote: on the pull requests you picked for your review style, or else on
+	 * the 30 most recently updated pull requests you reviewed. Pending (unsubmitted) reviews are left out. Null without
+	 * a token.
 	 */
-	async myReviewComments(signal?: AbortSignal): Promise<Array<{ body: string; createdAt: string | null }> | null> {
+	async myReviewComments(
+		picked: ReadonlyArray<{ repo: string; number: number }>,
+		signal?: AbortSignal,
+	): Promise<Array<{ body: string; createdAt: string | null }> | null> {
 		if (!(await this.token())) return null
-		const login = this.login ?? (await this.graphql<{ viewer: { login: string } }>('query { viewer { login } }', {}, signal)).viewer.login
-		const data = await this.graphql<GqlMyReviews>(
-			MY_REVIEWS_QUERY,
-			{ q: 'is:pr reviewed-by:@me -author:@me archived:false sort:updated-desc', login },
+		const login = await this.viewerLogin(signal)
+		const prs = picked.length ? await this.picked(picked, login, signal) : await this.searchReviewed('', login, signal)
+		return prs.flatMap(myComments)
+	}
+
+	/**
+	 * Pull requests you reviewed (not your own), most recently updated first, to pick the ones your review style is
+	 * learned from. `query` narrows them with GitHub search words; a pull request link or "owner/name#123" looks up that
+	 * one pull request, reviewed by you or not, so older ones can be picked too.
+	 */
+	async reviewedPrs(query: string, signal?: AbortSignal): Promise<Array<ReviewedPr>> {
+		if (!(await this.token())) throw new AppFail('github-failed', 'Connect GitHub first, in Settings › GitHub.')
+		const login = await this.viewerLogin(signal)
+		const ref = parsePrRef(query)
+		const prs = ref ? await this.picked([ref], login, signal) : await this.searchReviewed(query, login, signal)
+		return prs.map((p) => ({
+			repo: p.repository.nameWithOwner,
+			number: p.number,
+			title: p.title,
+			url: p.url,
+			updatedAt: p.updatedAt,
+			comments: myComments(p).length,
+		}))
+	}
+
+	private async viewerLogin(signal?: AbortSignal): Promise<string> {
+		return this.login ?? (await this.graphql<{ viewer: { login: string } }>('query { viewer { login } }', {}, signal)).viewer.login
+	}
+
+	private async searchReviewed(words: string, login: string, signal?: AbortSignal): Promise<Array<GqlStylePr>> {
+		const q = `is:pr reviewed-by:@me -author:@me archived:false ${words.replace(/\s+/g, ' ').trim().slice(0, 200)} sort:updated-desc`
+		const data = await this.graphql<{ search: { nodes: Array<GqlStylePr | Record<string, never> | null> } }>(
+			REVIEWED_PRS_QUERY,
+			{ q, login },
 			signal,
 		)
-		const out: Array<{ body: string; createdAt: string | null }> = []
-		for (const pr of data.search.nodes)
-			for (const r of pr?.reviews?.nodes ?? []) {
-				if (!r) continue
-				if (r.body?.trim()) out.push({ body: r.body, createdAt: r.submittedAt })
-				for (const c of r.comments.nodes) if (c?.body?.trim()) out.push({ body: c.body, createdAt: c.createdAt })
-			}
-		return out
+		return data.search.nodes.filter((n): n is GqlStylePr => !!n && 'number' in n)
+	}
+
+	/** The pull requests in `prs`, in one request; ones that are gone or out of the token's reach are left out. */
+	private async picked(
+		prs: ReadonlyArray<{ repo: string; number: number }>,
+		login: string,
+		signal?: AbortSignal,
+	): Promise<Array<GqlStylePr>> {
+		const vars: Record<string, unknown> = { login }
+		const decl: Array<string> = ['$login: String!']
+		const parts = prs.slice(0, MAX_STYLE_PRS).map((p, i) => {
+			checkRepo(p.repo)
+			const [owner, name] = p.repo.split('/')
+			Object.assign(vars, { [`o${i}`]: owner, [`n${i}`]: name, [`p${i}`]: p.number })
+			decl.push(`$o${i}: String!`, `$n${i}: String!`, `$p${i}: Int!`)
+			return `r${i}: repository(owner: $o${i}, name: $n${i}) { pullRequest(number: $p${i}) { ...StylePr } }`
+		})
+		const query = `query(${decl.join(', ')}) {\n  rateLimit { remaining limit resetAt }\n  ${parts.join('\n  ')}\n}\n${STYLE_PR_FRAGMENT}`
+		// A pull request that can't be read comes back as an error on its own path; the others still count.
+		const data = await this.graphql<Record<string, { pullRequest: GqlStylePr | null } | null>>(query, vars, signal, { ignore: () => true })
+		return prs
+			.slice(0, MAX_STYLE_PRS)
+			.map((_, i) => data[`r${i}`]?.pullRequest ?? null)
+			.filter((p): p is GqlStylePr => !!p)
 	}
 
 	// ─── Stacks ───────────────────────────────────────────────────────────────
@@ -1346,33 +1399,45 @@ const REVIEW_STATE_QUERY = `query($owner: String!, $name: String!, $number: Int!
   nodes(ids: $ids) { ... on PullRequestReview { id state url submittedAt } }
 }`
 
-interface GqlMyReviews {
-	search: {
+interface GqlStylePr {
+	number: number
+	title: string
+	url: string
+	updatedAt: string | null
+	repository: { nameWithOwner: string }
+	reviews: {
 		nodes: Array<{
-			reviews?: {
-				nodes: Array<{
-					body: string | null
-					submittedAt: string | null
-					comments: { nodes: Array<{ body: string | null; createdAt: string | null } | null> }
-				} | null>
-			} | null
+			body: string | null
+			submittedAt: string | null
+			comments: { nodes: Array<{ body: string | null; createdAt: string | null } | null> }
 		} | null>
-	}
+	} | null
 }
 
-// The newest 30 pull requests you reviewed, 10 reviews and 30 comments each, is plenty for a style note.
-const MY_REVIEWS_QUERY = `query($q: String!, $login: String!) {
-  rateLimit { remaining limit resetAt }
-  search(query: $q, type: ISSUE, first: 30) {
-    nodes {
-      ... on PullRequest {
-        reviews(author: $login, states: [COMMENTED, APPROVED, CHANGES_REQUESTED, DISMISSED], last: 10) {
-          nodes { body submittedAt comments(first: 30) { nodes { body createdAt } } }
-        }
-      }
-    }
+/** Your review summaries and review comments on one pull request, without empty ones. */
+function myComments(pr: GqlStylePr): Array<{ body: string; createdAt: string | null }> {
+	const out: Array<{ body: string; createdAt: string | null }> = []
+	for (const r of pr.reviews?.nodes ?? []) {
+		if (!r) continue
+		if (r.body?.trim()) out.push({ body: r.body, createdAt: r.submittedAt })
+		for (const c of r.comments.nodes) if (c?.body?.trim()) out.push({ body: c.body, createdAt: c.createdAt })
+	}
+	return out
+}
+
+// Your last 10 reviews on a pull request with 30 comments each is plenty for a style note.
+const STYLE_PR_FRAGMENT = `fragment StylePr on PullRequest {
+  number title url updatedAt repository { nameWithOwner }
+  reviews(author: $login, states: [COMMENTED, APPROVED, CHANGES_REQUESTED, DISMISSED], last: 10) {
+    nodes { body submittedAt comments(first: 30) { nodes { body createdAt } } }
   }
 }`
+
+const REVIEWED_PRS_QUERY = `query($q: String!, $login: String!) {
+  rateLimit { remaining limit resetAt }
+  search(query: $q, type: ISSUE, first: 30) { nodes { ...StylePr } }
+}
+${STYLE_PR_FRAGMENT}`
 
 const ADD_REVIEW_MUTATION = `mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) { pullRequestReview { id url } }
