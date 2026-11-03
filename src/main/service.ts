@@ -53,7 +53,7 @@ import type {
 	TargetProbe,
 } from '../shared/types.ts'
 import { targetKey } from '../shared/types.ts'
-import { exampleCount, MIN_EXAMPLES, styleBasis, styleExamples } from './ai/style.ts'
+import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
 import {
 	aheadBehind,
 	AppFail,
@@ -1532,7 +1532,7 @@ export class ReviewService {
 	 * Builds your review style note from your comments in the app and your review comments on GitHub. A note you edited
 	 * by hand is kept: the new one waits in `proposed` until you take or drop it.
 	 */
-	async buildReviewStyle(selection: ModelSelection): Promise<ReviewStyle> {
+	async buildReviewStyle(selection: ModelSelection, auto: number | null = null): Promise<ReviewStyle> {
 		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
 		// GitHub adds examples when it can; without a token or when it fails, the app's own comments still count.
 		const github = this.github ? await this.github.myReviewComments(AbortSignal.timeout(30_000)).catch(() => null) : null
@@ -1544,14 +1544,38 @@ export class ReviewService {
 				`Only ${count} of your comments ${count === 1 ? 'was' : 'were'} found, and at least ${MIN_EXAMPLES} are needed. ${github === null ? 'Connect GitHub, or write' : 'Write'} a few more review comments, or edit some findings before posting them, then try again.`,
 			)
 		const text = await this.ai.buildReviewStyle(examples, selection)
-		const built = { text, builtAt: new Date().toISOString(), basis: styleBasis(examples) }
+		const built = { text, builtAt: new Date().toISOString(), basis: styleBasis(examples), auto }
 		let next: ReviewStyle | null = null
 		await this.store.update((d) => {
 			const cur = d.reviewStyle
-			next = cur?.edited ? { ...cur, proposed: built } : { ...built, on: cur?.on ?? true, edited: false, proposed: null }
+			next = cur?.edited
+				? { ...cur, proposed: built, autoFailed: null }
+				: { ...built, on: cur?.on ?? true, edited: false, proposed: null, autoFailed: null }
 			d.reviewStyle = next
 		})
 		return next!
+	}
+
+	/**
+	 * Updates the note on its own once you have added STYLE_REFRESH_EVERY new examples since it (or the rebuild waiting
+	 * for you) was built, or since the last update on its own failed. Called after a review run; does nothing while the
+	 * note is off or not built, so it never costs anything unless you use it.
+	 */
+	async refreshReviewStyle(selection: ModelSelection | null): Promise<void> {
+		const cur = this.store.read().reviewStyle
+		if (!cur?.on || !selection || !this.ai) return
+		const since = [cur.proposed?.builtAt ?? cur.builtAt, cur.autoFailed?.at ?? ''].reduce((a, b) => (a > b ? a : b))
+		const added = newExamplesSince(Object.values(this.store.read().repos), since)
+		if (added < STYLE_REFRESH_EVERY) return
+		try {
+			await this.buildReviewStyle(selection, added)
+		} catch (e) {
+			if (e instanceof AppFail && e.code === 'ai-busy') return // you are building it yourself
+			const message = e instanceof Error ? e.message : String(e)
+			await this.store.update((d) => {
+				if (d.reviewStyle) d.reviewStyle = { ...d.reviewStyle, autoFailed: { at: new Date().toISOString(), message } }
+			})
+		}
 	}
 
 	/** Saves the note as you edited it, and whether it is used. */

@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { ReviewStyle, StyleBasis } from '../../shared/types.ts'
+import { MAX_STYLE_CHARS, STYLE_REFRESH_EVERY, type ReviewStyle, type StyleBasis } from '../../shared/types.ts'
 import { Markdown } from './Markdown.tsx'
-
-const MAX_CHARS = 2000 // as MAX_STYLE_CHARS in the main process
 
 function basisText(b: StyleBasis): string {
 	const parts = [
@@ -83,15 +81,26 @@ export function StyleSettings({ hasQuestionModel }: { hasQuestionModel: boolean 
 							className="style-edit"
 							rows={12}
 							value={draft}
-							maxLength={MAX_CHARS}
+							maxLength={MAX_STYLE_CHARS}
 							onChange={(e) => setDraft(e.target.value)}
 							aria-label="Your review style"
 						/>
 					)}
 					<span className="muted small field-note">
-						{basisText(style.basis)} · built {when(style.builtAt)}
+						{basisText(style.basis)} · {style.auto ? `updated on its own from ${style.auto} new comments` : 'built'} {when(style.builtAt)}
 						{style.edited ? ' · edited by you' : ''}
 					</span>
+					<p className="muted small">
+						{style.on
+							? `It updates on its own after a review run, once you have edited ${STYLE_REFRESH_EVERY} more findings or written ${STYLE_REFRESH_EVERY} more comments. Each update is one request to the model for questions.`
+							: 'While it is off, it does not update on its own.'}
+					</p>
+					{style.autoFailed && (
+						<p className="small error-text">
+							The last update on its own failed ({when(style.autoFailed.at)}): {style.autoFailed.message} It tries again after{' '}
+							{STYLE_REFRESH_EVERY} more comments.
+						</p>
+					)}
 
 					{draft === null ? (
 						<div className="form-actions start">
@@ -119,7 +128,8 @@ export function StyleSettings({ hasQuestionModel }: { hasQuestionModel: boolean 
 						<div className="style-proposed">
 							<h4>A rebuilt note</h4>
 							<p className="muted small">
-								You edited your note, so the rebuilt one waits here instead of replacing it. {basisText(style.proposed.basis)}.
+								{style.proposed.auto ? `Updated on its own from ${style.proposed.auto} new comments. ` : ''}You edited your note, so the
+								rebuilt one waits here instead of replacing it. {basisText(style.proposed.basis)}.
 							</p>
 							<div className="style-note">
 								<Markdown text={style.proposed.text} />

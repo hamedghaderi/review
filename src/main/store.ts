@@ -167,14 +167,20 @@ export function storedStyle(raw: unknown): ReviewStyle | null {
 		return { edits: n(o.edits), comments: n(o.comments), github: n(o.github) }
 	}
 	const p = r.proposed
+	const auto = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
+	const f = r.autoFailed
 	return {
 		text: r.text,
 		on: r.on !== false,
 		builtAt: r.builtAt,
 		edited: r.edited === true,
 		basis: basis(r.basis),
+		auto: auto(r.auto),
 		proposed:
-			p && typeof p.text === 'string' && typeof p.builtAt === 'string' ? { text: p.text, builtAt: p.builtAt, basis: basis(p.basis) } : null,
+			p && typeof p.text === 'string' && typeof p.builtAt === 'string'
+				? { text: p.text, builtAt: p.builtAt, basis: basis(p.basis), auto: auto(p.auto) }
+				: null,
+		autoFailed: f && typeof f.at === 'string' && typeof f.message === 'string' ? { at: f.at, message: f.message } : null,
 	}
 }
 

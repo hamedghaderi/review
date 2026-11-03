@@ -1,5 +1,6 @@
 import { findingCommentBody } from '../../shared/findings.ts'
-import type { AiRun, Review, StyleBasis } from '../../shared/types.ts'
+import { MAX_STYLE_CHARS, type AiRun, type Review, type StyleBasis } from '../../shared/types.ts'
+export { MAX_STYLE_CHARS, STYLE_REFRESH_EVERY } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
 import type { ProviderRequest } from './provider.ts'
 import { STYLE_JSON_SCHEMA, STYLE_SCHEMA_NAME, styleSchema } from './schema.ts'
@@ -16,7 +17,6 @@ const MAX_GITHUB = 80
 const MAX_EXAMPLE_CHARS = 1200
 const MAX_INPUT_CHARS = 60_000
 export const MIN_EXAMPLES = 5
-export const MAX_STYLE_CHARS = 2000
 
 export const STYLE_INSTRUCTIONS = `Below are code review comments one developer wrote, and edits they made to comments an AI drafted for them before posting. Write a short note that tells another writer how this developer words review comments, so comments written from the note sound like them.
 
@@ -72,15 +72,14 @@ export function withoutAdded(body: string): string {
 /** A comment the app posted from a finding starts with its level label. */
 export const fromFinding = (body: string): boolean => LEVEL_LINE.test(norm(body).split('\n')[0] ?? '')
 
-/**
- * Your examples from the app's reviews and from GitHub, newest first. A comment kept exactly as the finding wrote it is
- * the AI's words, not yours, so it is left out; so are automatic review summaries and, on GitHub, comments posted from
- * findings (the app's own copies say whether you edited them).
- */
-export function styleExamples(
-	repos: Iterable<{ reviews: Record<string, Review>; aiRuns: Record<string, Array<AiRun>> }>,
-	github: Array<GitHubComment>,
-): StyleExamples {
+type StyleRepo = { reviews: Record<string, Review>; aiRuns: Record<string, Array<AiRun>> }
+
+/** Your comments in the app's reviews, with when you last changed each, before any cap. */
+function localExamples(repos: Iterable<StyleRepo>): {
+	edits: Array<{ ai: string; yours: string; at: string }>
+	own: Array<{ text: string; at: string }>
+	seen: Set<string>
+} {
 	const edits: Array<{ ai: string; yours: string; at: string }> = []
 	const own: Array<{ text: string; at: string }> = []
 	const seen = new Set<string>()
@@ -108,6 +107,16 @@ export function styleExamples(
 				}
 			}
 		}
+	return { edits, own, seen }
+}
+
+/**
+ * Your examples from the app's reviews and from GitHub, newest first. A comment kept exactly as the finding wrote it is
+ * the AI's words, not yours, so it is left out; so are automatic review summaries and, on GitHub, comments posted from
+ * findings (the app's own copies say whether you edited them).
+ */
+export function styleExamples(repos: Iterable<StyleRepo>, github: Array<GitHubComment>): StyleExamples {
+	const { edits, own, seen } = localExamples(repos)
 	const fromGitHub: Array<{ text: string; at: string }> = []
 	for (const g of github) {
 		const body = norm(g.body)
@@ -121,6 +130,15 @@ export function styleExamples(
 		own: newest(own, MAX_OWN).map((x) => x.text),
 		github: newest(fromGitHub, MAX_GITHUB).map((x) => x.text),
 	}
+}
+
+/**
+ * How many findings you edited and comments you wrote in the app since `since`, for updating the note as you go.
+ * GitHub is not counted: reading it costs a request, and what you post from the app shows up here first.
+ */
+export function newExamplesSince(repos: Iterable<StyleRepo>, since: string): number {
+	const { edits, own } = localExamples(repos)
+	return [...edits, ...own].filter((x) => x.at > since).length
 }
 
 export function styleInput(x: StyleExamples): string {

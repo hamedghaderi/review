@@ -673,6 +673,8 @@ app.whenReady().then(async () => {
 			else runStatus.delete(run.id)
 			// Automatic reviews say so when they are submitted; a run you cancelled needs no sound.
 			if (before === 'running' && run.status !== 'running' && run.status !== 'cancelled' && !run.auto) runFinished(run)
+			// Your edits to its findings come after a run, so this is when there may be enough new ones to update your style.
+			if (before === 'running' && run.status === 'completed') void service.refreshReviewStyle(connections.view().questionModel)
 		},
 	)
 	connections.onRemoved((id) => ai.cancelForConnection(id))

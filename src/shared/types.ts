@@ -258,8 +258,15 @@ export interface ReviewStyle {
 	builtAt: string
 	edited: boolean // you changed the note by hand since it was built, so a rebuild asks before replacing it
 	basis: StyleBasis // what it was built from
-	proposed: { text: string; builtAt: string; basis: StyleBasis } | null // a rebuild waiting for you, when you had edited the note
+	auto: number | null // built on its own, after this many new examples; null when you built it
+	proposed: { text: string; builtAt: string; basis: StyleBasis; auto: number | null } | null // a rebuild waiting for you, when you had edited the note
+	autoFailed: { at: string; message: string } | null // the last update on its own that failed; the next waits for more examples
 }
+
+/** The longest a review style note can be. */
+export const MAX_STYLE_CHARS = 2000
+/** New examples that update the review style note on its own, after a review run. */
+export const STYLE_REFRESH_EVERY = 10
 
 /** How many examples of each kind a style note was built from. */
 export interface StyleBasis {
