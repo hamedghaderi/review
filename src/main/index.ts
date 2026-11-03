@@ -477,6 +477,11 @@ function registerIpc(): void {
 			'Your drafted reply',
 		)
 	})
+	handle(IPC.aiDraftSummary, async (reviewId: unknown, event: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return answered(service.draftSummary(comparisonId(reviewId), reviewEvent(event), selection), 'Your drafted review summary')
+	})
 	handle(IPC.reviewStyle, async () => service.reviewStyle())
 	handle(IPC.buildReviewStyle, async () => {
 		const selection = connections.view().questionModel

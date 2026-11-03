@@ -22,6 +22,7 @@ const KIND_LABEL: Record<UsageKind, string> = {
 	conclusion: 'Conclusions',
 	reply: 'Drafted replies',
 	style: 'Review style',
+	summary: 'Review summaries',
 }
 
 function Cost({ totals }: { totals: UsageTotals }) {

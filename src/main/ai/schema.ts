@@ -192,6 +192,13 @@ export const styleSchema = z.object({
 export const STYLE_SCHEMA_NAME = 'review_style'
 export const STYLE_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(styleSchema, { target: 'draft-7' }))
 
+/** The summary at the top of a review you are about to submit (issue #135). */
+export const summarySchema = z.object({
+	summary: z.string().describe('The review summary, in Markdown, written as the reviewer to the author.'),
+})
+export const SUMMARY_SCHEMA_NAME = 'review_summary'
+export const SUMMARY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(summarySchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

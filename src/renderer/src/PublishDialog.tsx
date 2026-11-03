@@ -5,6 +5,7 @@ import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 
 const oldCount = (ci: HeadChecks): number => ci.failed.filter((f) => f.atBase === 'fails').length
 import { ago } from './branches.ts'
+import { AiOrb } from './AiOrb.tsx'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
 import { useMentionCommand } from './Mention.tsx'
@@ -20,6 +21,7 @@ interface Props {
 	beforePublish(): Promise<void> // saves pending local edits first
 	blocking: BlockingSummary | null // where the AI review's blocking findings stand; null without AI findings
 	onPending(pending: PendingReview | null): void // what GitHub said about your pending review, each time it is read
+	canDraft: boolean // a model for questions is chosen, so the summary can be drafted with AI
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -51,6 +53,7 @@ export function PublishDialog({
 	beforePublish,
 	blocking,
 	onPending,
+	canDraft,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -68,6 +71,9 @@ export function PublishDialog({
 		else unsentSummaries.delete(reviewId)
 		setSummaryState(text)
 	}
+	const [drafting, setDrafting] = useState(false)
+	const [drafted, setDrafted] = useState(false) // the summary holds an AI draft you have not cleared
+	const [draftError, setDraftError] = useState<string | null>(null)
 	const [confirmSubmit, setConfirmSubmit] = useState(false)
 	const [showSent, setShowSent] = useState(false)
 	const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -76,6 +82,24 @@ export function PublishDialog({
 	const [ciError, setCiError] = useState<string | null>(null)
 	const dialog = useRef<HTMLDivElement>(null)
 	const summaryRef = useRef<HTMLTextAreaElement>(null)
+
+	// Your comments are saved first so the draft sees the latest. What you already typed stays; the draft goes after it.
+	const draftSummary = async (): Promise<void> => {
+		if (drafting) return
+		setDrafting(true)
+		setDraftError(null)
+		try {
+			await beforePublish()
+			const r = await window.review.draftSummary(reviewId, event)
+			if (!r.ok) return setDraftError(r.error.message)
+			const typed = summaryRef.current?.value ?? summary
+			setSummary(typed.trim() ? `${typed.trimEnd()}\n\n${r.value}` : r.value)
+			setDrafted(true)
+			requestAnimationFrame(() => summaryRef.current?.focus())
+		} finally {
+			setDrafting(false)
+		}
+	}
 
 	// Inserts at the cursor (replacing a selection), then puts the cursor after the inserted text.
 	const insertText = (text: string): void => {
@@ -191,6 +215,7 @@ export function PublishDialog({
 		if (!r.ok) return setError(r.error)
 		setSubmitted(r.value.url)
 		setSummary('')
+		setDrafted(false)
 		await load(true)
 	}
 
@@ -468,11 +493,19 @@ export function PublishDialog({
 									<textarea
 										ref={summaryRef}
 										className="summary"
-										placeholder={`Summary${event === 'APPROVE' ? ' (optional)' : ''} · type /gif and a word for a GIF`}
+										placeholder={
+											drafting
+												? 'Drafting a summary…'
+												: `Summary${event === 'APPROVE' ? ' (optional)' : ''} · type /gif and a word for a GIF`
+										}
 										value={summary}
-										onChange={(e) => setSummary(e.target.value)}
+										onChange={(e) => {
+											setSummary(e.target.value)
+											if (!e.target.value.trim()) setDrafted(false) // emptied: what you type next is yours
+										}}
 										onKeyDown={(e) => void (gifCommand.onKeyDown(e) || mention.onKeyDown(e))}
-										rows={4}
+										rows={drafted ? 6 : 4}
+										readOnly={drafting}
 										disabled={!!running}
 									/>
 									{gifCommand.panel}
@@ -480,7 +513,28 @@ export function PublishDialog({
 									<div className="summary-tools">
 										<EmojiPicker disabled={!!running} onPick={insertText} />
 										<GifPicker disabled={!!running} onPick={pickGif} onOpenSettings={onOpenGitHubSettings} />
+										{drafted && summary.trim() && (
+											<span className="muted small summary-note">Drafted by AI: check it before you submit.</span>
+										)}
+										<span className="spacer" />
+										{canDraft && (
+											<button
+												className="btn small ghost"
+												onClick={() => void draftSummary()}
+												disabled={drafting || !!running}
+												title={`Your model for questions drafts a summary for “${EVENTS.find((e) => e[0] === event)![1]}” from your comments in this review, in your review style when that is on. Nothing is sent until you submit.`}
+											>
+												{drafting ? (
+													<>
+														<AiOrb activity="reasoning" size={12} /> Drafting…
+													</>
+												) : (
+													'Draft with AI'
+												)}
+											</button>
+										)}
 									</div>
+									{draftError && <p className="small error-text">{draftError}</p>}
 								</div>
 							</section>
 						</>
