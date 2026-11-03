@@ -32,6 +32,7 @@ import {
 	type PricedModel,
 	type ReviewLimits,
 	type RunEstimate,
+	type ReviewEvent,
 	REVIEW_RULES,
 } from '../../shared/types.ts'
 import type { PersonaId } from '../../shared/personas.ts'
@@ -67,6 +68,7 @@ import { buildOverviewRequest, MAX_OVERVIEW_CHARS, OVERVIEW_INSTRUCTIONS, OVERVI
 import { type Background, buildBackground } from './background.ts'
 import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
 import { buildStyleRequest, parseStyle, type StyleExamples } from './style.ts'
+import { buildSummaryRequest, parseSummary } from './summary.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
@@ -1078,6 +1080,35 @@ export class AiController {
 				AbortSignal.timeout(180_000),
 			)
 			return parseReply(response.output)
+		} catch (e) {
+			if (e instanceof AppFail) throw e
+			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/** Drafts the summary of the review you are about to submit, from your comments in this snapshot (see summary.ts). */
+	async draftSummary(access: ComparisonAccess, reviewId: string, event: ReviewEvent, selection: ModelSelection): Promise<string> {
+		const repoId = access.comparison.repoId
+		const busy = `summary:${reviewId}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'A summary for this review is already being drafted.')
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'summary', repoId)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		try {
+			const review = this.store.read().repos[repoId]?.reviews[reviewId]
+			const findings = new Map(this.runsFor(repoId, reviewId).flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+			const pr = access.comparison.pr ? { title: access.comparison.pr.title, body: access.comparison.pr.body } : null
+			const response = await config.provider.review(
+				buildSummaryRequest({ event, comments: review?.comments ?? [], findings, pr, style: this.styleText() }),
+				AbortSignal.timeout(180_000),
+			)
+			return parseSummary(response.output)
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)

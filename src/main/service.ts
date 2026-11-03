@@ -1525,6 +1525,12 @@ export class ReviewService {
 		return ai.draftReply(access, reviewId, thread, d.viewer ?? null, own?.findingId ?? null, selection)
 	}
 
+	/** Drafts the summary of the review you are about to submit with `event` (see AiController.draftSummary). */
+	async draftSummary(reviewId: string, event: ReviewEvent, selection: ModelSelection): Promise<string> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.draftSummary(access, reviewId, event, selection)
+	}
+
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): ReviewStyle | null {
 		return this.store.read().reviewStyle ?? null

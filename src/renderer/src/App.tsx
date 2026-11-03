@@ -2114,6 +2114,7 @@ export function App() {
 						beforePublish={persist}
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 						onPending={setPendingReview}
+						canDraft={!!aiSettings?.questionModel}
 					/>
 				)}
 				{symbolPop && <SymbolPopover pop={symbolPop} onPick={jumpTo} onFindUses={(r) => void lookup(r)} onClose={closeSymbolPop} />}

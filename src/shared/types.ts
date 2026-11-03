@@ -1261,8 +1261,9 @@ export interface AiCost {
 
 // review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
 // verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
-// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style'
+// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
+// summary: a drafted review summary.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1802,6 +1803,7 @@ export const IPC = {
 	aiExplainChange: 'ai:explain-change',
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
+	aiDraftSummary: 'ai:draft-summary',
 	reviewStyle: 'ai:review-style',
 	stylePrs: 'ai:style-prs',
 	setStylePrs: 'ai:set-style-prs',
@@ -2038,6 +2040,8 @@ export interface ReviewApi {
 	conclude(reviewId: string, question: string | null): Promise<Result<ChangeConclusion>>
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
+	/** Drafts the summary of the review you are about to submit with `event`, from your comments in it. Nothing is sent. */
+	draftSummary(reviewId: string, event: ReviewEvent): Promise<Result<string>>
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): Promise<Result<ReviewStyle | null>>
 	/** Builds the note from your comments with the model for questions. When you had edited it, the new one waits in `proposed`. */

@@ -4391,6 +4391,7 @@ textarea.style-edit {
 }
 .summary-tools {
 	gap: 4px;
+	align-items: center;
 }
 .gif-grid button.on {
 	outline: 2px solid var(--accent);

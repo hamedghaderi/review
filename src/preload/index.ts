@@ -133,6 +133,7 @@ const api: ReviewApi = {
 	explainChange: (reviewId) => ipcRenderer.invoke(IPC.aiExplainChange, reviewId),
 	conclude: (reviewId, question) => ipcRenderer.invoke(IPC.aiConclude, reviewId, question),
 	draftReply: (repoId, reviewId, threadId) => ipcRenderer.invoke(IPC.aiDraftReply, repoId, reviewId, threadId),
+	draftSummary: (reviewId, event) => ipcRenderer.invoke(IPC.aiDraftSummary, reviewId, event),
 	reviewStyle: () => ipcRenderer.invoke(IPC.reviewStyle),
 	buildReviewStyle: () => ipcRenderer.invoke(IPC.buildReviewStyle),
 	setReviewStyle: (next) => ipcRenderer.invoke(IPC.setReviewStyle, next),
