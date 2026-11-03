@@ -44,6 +44,15 @@ export type ParsedPrQuery =
 
 const URL_RE = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)\/pull\/(\d+)(?:[/?#].*)?$/i
 
+/** One pull request named by its GitHub link or as "owner/name#123", or null when `raw` is anything else. */
+export function parsePrRef(raw: string): { repo: string; number: number } | null {
+	const t = raw.trim()
+	const m = URL_RE.exec(t) ?? /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)#(\d+)$/.exec(t)
+	if (!m || m[2] === '.' || m[2] === '..') return null
+	const number = Number(m[3])
+	return Number.isSafeInteger(number) && number > 0 ? { repo: `${m[1]}/${m[2]}`, number } : null
+}
+
 export function parsePrQuery(input: string): ParsedPrQuery {
 	const text = input.trim()
 	if (!text) return { kind: 'empty' }

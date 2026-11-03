@@ -48,6 +48,9 @@ import {
 	githubRepo,
 	notificationPrefs,
 	soundPrefs,
+	reviewStyleEdit,
+	stylePrList,
+	reviewedPrQuery,
 	githubToken,
 	prNumber,
 	prDescriptionText,
@@ -474,6 +477,17 @@ function registerIpc(): void {
 			'Your drafted reply',
 		)
 	})
+	handle(IPC.reviewStyle, async () => service.reviewStyle())
+	handle(IPC.buildReviewStyle, async () => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return service.buildReviewStyle(selection)
+	})
+	handle(IPC.setReviewStyle, async (raw: unknown) => service.setReviewStyle(reviewStyleEdit(raw)))
+	handle(IPC.settleReviewStyle, async (accept: unknown) => service.settleReviewStyle(bool(accept, 'accept')))
+	handle(IPC.stylePrs, async () => service.stylePrs())
+	handle(IPC.setStylePrs, async (raw: unknown) => service.setStylePrs(stylePrList(raw)))
+	handle(IPC.reviewedPrs, async (query: unknown) => service.reviewedPrs(reviewedPrQuery(query)))
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)
@@ -664,6 +678,8 @@ app.whenReady().then(async () => {
 			else runStatus.delete(run.id)
 			// Automatic reviews say so when they are submitted; a run you cancelled needs no sound.
 			if (before === 'running' && run.status !== 'running' && run.status !== 'cancelled' && !run.auto) runFinished(run)
+			// Your edits to its findings come after a run, so this is when there may be enough new ones to update your style.
+			if (before === 'running' && run.status === 'completed') void service.refreshReviewStyle(connections.view().questionModel)
 		},
 	)
 	connections.onRemoved((id) => ai.cancelForConnection(id))

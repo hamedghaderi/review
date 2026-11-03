@@ -28,6 +28,8 @@ import type {
 } from '../shared/types.ts'
 import { PERSONA_IDS } from '../shared/personas.ts'
 import { SOUND_EVENTS, SOUNDS, storedSounds, type SoundId, type SoundPrefs } from '../shared/sounds.ts'
+import { MAX_STYLE_CHARS } from './ai/style.ts'
+import { MAX_STYLE_PRS, type StylePr } from '../shared/types.ts'
 import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
@@ -91,6 +93,33 @@ export function soundPrefs(v: unknown): SoundPrefs {
 	const o = obj(v, 'sounds')
 	for (const e of SOUND_EVENTS) if (o[e] !== 'off' && !SOUNDS.includes(o[e] as SoundId)) bad('sound')
 	return storedSounds(o)
+}
+
+/** Your edit to the review style note (see ai/style.ts for its size). */
+export function reviewStyleEdit(v: unknown): { text: string; on: boolean } {
+	const o = obj(v, 'review style')
+	return { text: str(o.text, 'review style', MAX_STYLE_CHARS), on: bool(o.on, 'review style on') }
+}
+
+/** Search words or a pull request link, for finding pull requests you reviewed. */
+export function reviewedPrQuery(v: unknown): string {
+	return text(v, 'search', 512)
+}
+
+/** The pull requests you picked for your review style. */
+export function stylePrList(v: unknown): Array<StylePr> {
+	const list = arr(v, 'pull requests')
+	if (list.length > MAX_STYLE_PRS) bad(`pick at most ${MAX_STYLE_PRS} pull requests`)
+	const out = list.map((x) => {
+		const o = obj(x, 'pull request')
+		const repo = str(o.repo, 'repository', 200)
+		if (!REPO_RE.test(repo)) bad('repository')
+		if (!Number.isSafeInteger(o.number) || (o.number as number) <= 0) bad('pull request number')
+		return { repo, number: o.number as number, title: text(o.title, 'title', 1000) }
+	})
+	if (new Set(out.map((p) => `${p.repo.toLowerCase()}#${p.number}`)).size !== out.length)
+		bad('pull requests (a pull request is picked twice)')
+	return out
 }
 
 export function bool(v: unknown, what: string): boolean {

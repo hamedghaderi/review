@@ -248,6 +248,51 @@ export interface NotificationPrefs {
 	enabled: boolean
 }
 
+/**
+ * How you word review comments: a short note the question model wrote from your own comments, your edits to findings
+ * and your review comments on GitHub (issue #135). It is about wording only, never what counts as a finding.
+ */
+export interface ReviewStyle {
+	text: string // the note in use
+	on: boolean
+	builtAt: string
+	edited: boolean // you changed the note by hand since it was built, so a rebuild asks before replacing it
+	basis: StyleBasis // what it was built from
+	auto: number | null // built on its own, after this many new examples; null when you built it
+	proposed: { text: string; builtAt: string; basis: StyleBasis; auto: number | null } | null // a rebuild waiting for you, when you had edited the note
+	autoFailed: { at: string; message: string } | null // the last update on its own that failed; the next waits for more examples
+}
+
+/** The longest a review style note can be. */
+export const MAX_STYLE_CHARS = 2000
+/** New examples that update the review style note on its own, after a review run. */
+export const STYLE_REFRESH_EVERY = 10
+
+/** How many examples of each kind a style note was built from. */
+export interface StyleBasis {
+	edits: number // findings you edited before posting
+	comments: number // comments you wrote in the app
+	github: number // your review comments on GitHub
+	prs: number // the pull requests you picked that they came from; 0 when it read the ones you reviewed most recently
+}
+
+/** The most pull requests you can pick for your review style. */
+export const MAX_STYLE_PRS = 10
+
+/** A pull request you picked to learn your review style from. */
+export interface StylePr {
+	repo: string // "owner/name"
+	number: number
+	title: string
+}
+
+/** A pull request you reviewed, as listed to pick from. */
+export interface ReviewedPr extends StylePr {
+	url: string
+	updatedAt: string | null
+	comments: number // your review comments and review summaries on it
+}
+
 export interface AppUpdate {
 	version: string
 	current: string // the version running now
@@ -1216,8 +1261,8 @@ export interface AiCost {
 
 // review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
 // verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
-// change and questions about it; reply: a drafted reply in a GitHub thread.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply'
+// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note.
+export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1757,6 +1802,13 @@ export const IPC = {
 	aiExplainChange: 'ai:explain-change',
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
+	reviewStyle: 'ai:review-style',
+	stylePrs: 'ai:style-prs',
+	setStylePrs: 'ai:set-style-prs',
+	reviewedPrs: 'github:reviewed-prs',
+	buildReviewStyle: 'ai:build-review-style',
+	setReviewStyle: 'ai:set-review-style',
+	settleReviewStyle: 'ai:settle-review-style',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -1986,6 +2038,18 @@ export interface ReviewApi {
 	conclude(reviewId: string, question: string | null): Promise<Result<ChangeConclusion>>
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
+	/** Your review style note, or null until it is built. */
+	reviewStyle(): Promise<Result<ReviewStyle | null>>
+	/** Builds the note from your comments with the model for questions. When you had edited it, the new one waits in `proposed`. */
+	buildReviewStyle(): Promise<Result<ReviewStyle>>
+	setReviewStyle(next: { text: string; on: boolean }): Promise<Result<ReviewStyle>>
+	/** Takes or drops the rebuilt note waiting in `proposed`. */
+	settleReviewStyle(accept: boolean): Promise<Result<ReviewStyle>>
+	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
+	stylePrs(): Promise<Result<Array<StylePr>>>
+	setStylePrs(next: Array<StylePr>): Promise<Result<Array<StylePr>>>
+	/** Pull requests you reviewed to pick from, narrowed by search words; a pull request link finds that one. */
+	reviewedPrs(query: string): Promise<Result<Array<ReviewedPr>>>
 	/** Forgets one conversation about selected code. */
 	deleteCodeQuestion(reviewId: string, questionId: string): Promise<Result<Array<CodeQuestion>>>
 	gifStatus(): Promise<Result<GifStatus>>

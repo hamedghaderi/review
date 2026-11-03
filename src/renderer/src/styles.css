@@ -4005,6 +4005,66 @@ button.stack-row:hover {
 .sound-table td:last-child {
 	width: 1%;
 }
+.style-note {
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 4px 12px;
+	background: var(--panel);
+}
+.style-note.off {
+	opacity: 0.6;
+}
+textarea.style-edit {
+	width: 100%;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	padding: 8px 10px;
+	background: var(--bg);
+	resize: vertical;
+	user-select: text;
+}
+.style-prs {
+	border-top: 1px solid var(--border);
+	padding-top: 12px;
+	margin-top: 4px;
+}
+.style-prs h4 {
+	margin: 0 0 4px;
+}
+.style-pr-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.style-pr-list li,
+.style-pr-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	padding: 3px 0;
+}
+.style-pr-list li .ellipsis,
+.style-pr-row .ellipsis {
+	flex: 1;
+	min-width: 0;
+}
+.style-pr-results {
+	max-height: 260px;
+	overflow-y: auto;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 4px 8px;
+	margin-top: 6px;
+}
+.style-proposed {
+	border-top: 1px solid var(--border);
+	padding-top: 12px;
+	margin-top: 4px;
+}
+.style-proposed h4 {
+	margin: 0 0 4px;
+}
 .auto-review-warn {
 	background: var(--warn-bg);
 	color: var(--warn-fg);
