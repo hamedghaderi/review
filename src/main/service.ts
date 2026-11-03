@@ -43,6 +43,7 @@ import type {
 	ReviewerChoice,
 	RunEstimate,
 	ReviewRule,
+	ReviewStyle,
 	ReviewTarget,
 	SearchSlot,
 	Side,
@@ -52,6 +53,7 @@ import type {
 	TargetProbe,
 } from '../shared/types.ts'
 import { targetKey } from '../shared/types.ts'
+import { exampleCount, MIN_EXAMPLES, styleBasis, styleExamples } from './ai/style.ts'
 import {
 	aheadBehind,
 	AppFail,
@@ -1519,6 +1521,63 @@ export class ReviewService {
 				})
 			: undefined
 		return ai.draftReply(access, reviewId, thread, d.viewer ?? null, own?.findingId ?? null, selection)
+	}
+
+	/** Your review style note, or null until it is built. */
+	reviewStyle(): ReviewStyle | null {
+		return this.store.read().reviewStyle ?? null
+	}
+
+	/**
+	 * Builds your review style note from your comments in the app and your review comments on GitHub. A note you edited
+	 * by hand is kept: the new one waits in `proposed` until you take or drop it.
+	 */
+	async buildReviewStyle(selection: ModelSelection): Promise<ReviewStyle> {
+		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		// GitHub adds examples when it can; without a token or when it fails, the app's own comments still count.
+		const github = this.github ? await this.github.myReviewComments(AbortSignal.timeout(30_000)).catch(() => null) : null
+		const examples = styleExamples(Object.values(this.store.read().repos), github ?? [])
+		const count = exampleCount(examples)
+		if (count < MIN_EXAMPLES)
+			throw new AppFail(
+				'invalid-input',
+				`Only ${count} of your comments ${count === 1 ? 'was' : 'were'} found, and at least ${MIN_EXAMPLES} are needed. ${github === null ? 'Connect GitHub, or write' : 'Write'} a few more review comments, or edit some findings before posting them, then try again.`,
+			)
+		const text = await this.ai.buildReviewStyle(examples, selection)
+		const built = { text, builtAt: new Date().toISOString(), basis: styleBasis(examples) }
+		let next: ReviewStyle | null = null
+		await this.store.update((d) => {
+			const cur = d.reviewStyle
+			next = cur?.edited ? { ...cur, proposed: built } : { ...built, on: cur?.on ?? true, edited: false, proposed: null }
+			d.reviewStyle = next
+		})
+		return next!
+	}
+
+	/** Saves the note as you edited it, and whether it is used. */
+	async setReviewStyle(next: { text: string; on: boolean }): Promise<ReviewStyle> {
+		let out: ReviewStyle | null = null
+		await this.store.update((d) => {
+			const cur = d.reviewStyle
+			if (!cur) throw new AppFail('not-found', 'Build your review style first.')
+			const text = next.text.trim()
+			if (!text) throw new AppFail('invalid-input', 'The note is empty. Turn it off instead, or build it again.')
+			out = { ...cur, text, on: next.on, edited: cur.edited || text !== cur.text }
+			d.reviewStyle = out
+		})
+		return out!
+	}
+
+	/** Takes the rebuilt note in place of the one you edited, or drops it. */
+	async settleReviewStyle(accept: boolean): Promise<ReviewStyle> {
+		let out: ReviewStyle | null = null
+		await this.store.update((d) => {
+			const cur = d.reviewStyle
+			if (!cur) throw new AppFail('not-found', 'Build your review style first.')
+			out = accept && cur.proposed ? { ...cur, ...cur.proposed, edited: false, proposed: null } : { ...cur, proposed: null }
+			d.reviewStyle = out
+		})
+		return out!
 	}
 
 	async deleteCodeQuestion(reviewId: string, questionId: string): Promise<Array<CodeQuestion>> {

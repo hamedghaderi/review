@@ -66,6 +66,7 @@ import { buildExplainRequest, EXPLAIN_LOOKUPS, MAX_CODE_MESSAGES, MAX_CODE_QUEST
 import { buildOverviewRequest, MAX_OVERVIEW_CHARS, OVERVIEW_INSTRUCTIONS, OVERVIEW_LOOKUPS, parseOverview } from './overview.ts'
 import { type Background, buildBackground } from './background.ts'
 import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
+import { buildStyleRequest, parseStyle, type StyleExamples } from './style.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
@@ -243,10 +244,10 @@ export class AiController {
 	}
 
 	/** A fixed configuration whose provider books every response to the usage history. */
-	private async configFor(selection: ModelSelection, kind: UsageKind, repoId: string): Promise<RunConfig> {
+	private async configFor(selection: ModelSelection, kind: UsageKind, repoId: string | null): Promise<RunConfig> {
 		const config = await this.resolveRun(selection)
 		if (!this.usage) return config
-		const repo = this.store.read().repos[repoId]
+		const repo = repoId === null ? undefined : this.store.read().repos[repoId]
 		const ctx = {
 			kind,
 			repoId,
@@ -1070,6 +1071,28 @@ export class AiController {
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/** Writes your review style note from `examples` with the model for questions (see style.ts). */
+	async buildReviewStyle(examples: StyleExamples, selection: ModelSelection): Promise<string> {
+		const busy = 'style'
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'Your review style is already being built.')
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'style', null)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		try {
+			const response = await config.provider.review(buildStyleRequest(examples), AbortSignal.timeout(180_000))
+			return parseStyle(response.output)
+		} catch (e) {
+			if (e instanceof AppFail) throw e
+			throw new AppFail('ai-unavailable', `No style note: ${e instanceof Error ? e.message : String(e)}`)
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}

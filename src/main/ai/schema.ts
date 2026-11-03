@@ -183,6 +183,15 @@ export const replySchema = z.object({
 export const REPLY_SCHEMA_NAME = 'thread_reply'
 export const REPLY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(replySchema, { target: 'draft-7' }))
 
+/** How you word review comments, written from your own comments (issue #135). */
+export const styleSchema = z.object({
+	style: z
+		.string()
+		.describe('The note: 4 to 12 short Markdown bullet points, in the second person, on how this developer words review comments.'),
+})
+export const STYLE_SCHEMA_NAME = 'review_style'
+export const STYLE_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(styleSchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

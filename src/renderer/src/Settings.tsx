@@ -8,6 +8,7 @@ import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { KeymapSettings } from './KeymapSettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
+import { StyleSettings } from './StyleSettings.tsx'
 
 /**
  * A page in the settings window. Fixed pages have plain names; pages for one item carry its id after a colon:
@@ -156,6 +157,7 @@ export function Settings(props: {
 						})),
 					},
 					{ id: 'levels', label: 'Finding levels', keywords: 'blocking should fix question nit comments' },
+					{ id: 'style', label: 'Your review style', keywords: 'tone voice wording learn my comments sound like me' },
 					{ id: 'limits', label: 'Review input', keywords: 'limits context lines batch related code lookups verify duplicates' },
 					{
 						id: 'mcp',
@@ -466,6 +468,7 @@ export function Settings(props: {
 					<FindingLevels settings={ai} run={run} />
 				</div>
 			)
+		if (page === 'style') return <StyleSettings hasQuestionModel={!!ai.questionModel} />
 		if (page === 'limits')
 			return (
 				<div className="settings-main">

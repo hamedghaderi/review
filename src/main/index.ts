@@ -48,6 +48,7 @@ import {
 	githubRepo,
 	notificationPrefs,
 	soundPrefs,
+	reviewStyleEdit,
 	githubToken,
 	prNumber,
 	prDescriptionText,
@@ -474,6 +475,14 @@ function registerIpc(): void {
 			'Your drafted reply',
 		)
 	})
+	handle(IPC.reviewStyle, async () => service.reviewStyle())
+	handle(IPC.buildReviewStyle, async () => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return service.buildReviewStyle(selection)
+	})
+	handle(IPC.setReviewStyle, async (raw: unknown) => service.setReviewStyle(reviewStyleEdit(raw)))
+	handle(IPC.settleReviewStyle, async (accept: unknown) => service.settleReviewStyle(bool(accept, 'accept')))
 	handle(IPC.aiDeleteCodeQuestion, (reviewId: unknown, questionId: unknown) =>
 		service.deleteCodeQuestion(comparisonId(reviewId), str(questionId, 'question id', 64)),
 	)

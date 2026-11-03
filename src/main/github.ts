@@ -695,6 +695,28 @@ export class GitHubService {
 		return await res.text()
 	}
 
+	/**
+	 * Review comments and review summaries you wrote on other people's pull requests, newest pull requests first, for
+	 * your review style note. Pending (unsubmitted) reviews are left out. Null without a token.
+	 */
+	async myReviewComments(signal?: AbortSignal): Promise<Array<{ body: string; createdAt: string | null }> | null> {
+		if (!(await this.token())) return null
+		const login = this.login ?? (await this.graphql<{ viewer: { login: string } }>('query { viewer { login } }', {}, signal)).viewer.login
+		const data = await this.graphql<GqlMyReviews>(
+			MY_REVIEWS_QUERY,
+			{ q: 'is:pr reviewed-by:@me -author:@me archived:false sort:updated-desc', login },
+			signal,
+		)
+		const out: Array<{ body: string; createdAt: string | null }> = []
+		for (const pr of data.search.nodes)
+			for (const r of pr?.reviews?.nodes ?? []) {
+				if (!r) continue
+				if (r.body?.trim()) out.push({ body: r.body, createdAt: r.submittedAt })
+				for (const c of r.comments.nodes) if (c?.body?.trim()) out.push({ body: c.body, createdAt: c.createdAt })
+			}
+		return out
+	}
+
 	// ─── Stacks ───────────────────────────────────────────────────────────────
 
 	/**
@@ -1322,6 +1344,34 @@ const REVIEW_STATE_QUERY = `query($owner: String!, $name: String!, $number: Int!
     }
   }
   nodes(ids: $ids) { ... on PullRequestReview { id state url submittedAt } }
+}`
+
+interface GqlMyReviews {
+	search: {
+		nodes: Array<{
+			reviews?: {
+				nodes: Array<{
+					body: string | null
+					submittedAt: string | null
+					comments: { nodes: Array<{ body: string | null; createdAt: string | null } | null> }
+				} | null>
+			} | null
+		} | null>
+	}
+}
+
+// The newest 30 pull requests you reviewed, 10 reviews and 30 comments each, is plenty for a style note.
+const MY_REVIEWS_QUERY = `query($q: String!, $login: String!) {
+  rateLimit { remaining limit resetAt }
+  search(query: $q, type: ISSUE, first: 30) {
+    nodes {
+      ... on PullRequest {
+        reviews(author: $login, states: [COMMENTED, APPROVED, CHANGES_REQUESTED, DISMISSED], last: 10) {
+          nodes { body submittedAt comments(first: 30) { nodes { body createdAt } } }
+        }
+      }
+    }
+  }
 }`
 
 const ADD_REVIEW_MUTATION = `mutation($input: AddPullRequestReviewInput!) {

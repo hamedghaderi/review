@@ -28,6 +28,7 @@ import type {
 } from '../shared/types.ts'
 import { PERSONA_IDS } from '../shared/personas.ts'
 import { SOUND_EVENTS, SOUNDS, storedSounds, type SoundId, type SoundPrefs } from '../shared/sounds.ts'
+import { MAX_STYLE_CHARS } from './ai/style.ts'
 import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
@@ -91,6 +92,12 @@ export function soundPrefs(v: unknown): SoundPrefs {
 	const o = obj(v, 'sounds')
 	for (const e of SOUND_EVENTS) if (o[e] !== 'off' && !SOUNDS.includes(o[e] as SoundId)) bad('sound')
 	return storedSounds(o)
+}
+
+/** Your edit to the review style note (see ai/style.ts for its size). */
+export function reviewStyleEdit(v: unknown): { text: string; on: boolean } {
+	const o = obj(v, 'review style')
+	return { text: str(o.text, 'review style', MAX_STYLE_CHARS), on: bool(o.on, 'review style on') }
 }
 
 export function bool(v: unknown, what: string): boolean {
