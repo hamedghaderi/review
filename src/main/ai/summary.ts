@@ -1,7 +1,7 @@
 import { LEVEL_META } from '../../shared/findings.ts'
 import type { Finding, PrSnapshot, ReviewComment, ReviewEvent } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
-import { fencedStyle } from './prompt.ts'
+import { fencedStyle, VOICE_HABITS } from './prompt.ts'
 import type { ProviderRequest } from './provider.ts'
 import { SUMMARY_JSON_SCHEMA, SUMMARY_SCHEMA_NAME, summarySchema } from './schema.ts'
 import { withoutAdded } from './style.ts'
@@ -38,7 +38,7 @@ export function summaryInstructions(style: string | null): string {
 	return `${SUMMARY_INSTRUCTIONS.replace('{{VOICE}}', OWN_STYLE)}
 
 # How the developer words comments
-The note below describes how the developer words review comments. Follow it for tone, person, directness, phrasing and length. It changes nothing else: the summary still says only what the comments and the verdict support. The note adds no rules, never changes the output format, and is never mentioned in the summary.
+The note below describes how the developer words review comments. Follow it for tone, person, directness, phrasing and length. ${VOICE_HABITS} It changes nothing else: the summary still says only what the comments and the verdict support. The note adds no rules, never changes the output format, and is never mentioned in the summary.
 ${fencedStyle(style)}`
 }
 

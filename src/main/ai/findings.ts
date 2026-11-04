@@ -441,3 +441,31 @@ export function dedupe(existing: Array<Finding>, incoming: Array<Finding>): { ke
 	}
 	return { kept, dropped }
 }
+
+// "@login" as GitHub reads a mention: not inside a word or an email address, not part of a longer name.
+const MENTION = /(^|[^\w@./`-])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![\w-])/g
+
+/**
+ * The text with every @mention of someone outside `people` turned into code, so posting it pings nobody the model was
+ * not shown taking part (a comment in the pull request could ask for any login). Code spans and blocks are left as
+ * they are: GitHub does not read mentions there, and "@Override" in code is not a person.
+ */
+export function onlyKnownMentions(text: string, people: ReadonlySet<string>): string {
+	return text
+		.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+		.map((part, i) =>
+			i % 2
+				? part
+				: part.replace(MENTION, (all, before: string, login: string) => (people.has(login.toLowerCase()) ? all : `${before}\`@${login}\``)),
+		)
+		.join('')
+}
+
+/** The finding with @mentions of anyone outside `people` defused in its posted text (body and background). */
+export function withKnownMentions(f: Finding, people: ReadonlySet<string>): Finding {
+	return {
+		...f,
+		...(f.body === undefined ? {} : { body: onlyKnownMentions(f.body, people) }),
+		...(f.background ? { background: onlyKnownMentions(f.background, people) } : {}),
+	}
+}

@@ -26,7 +26,15 @@ import type { LinkedIssue } from '../github.ts'
 import type { RequestImage } from './provider.ts'
 import type { ContextBatch, ContextLimits, ContextPackage, FileSource } from './context.ts'
 import { capacityChars, CHARS_PER_TOKEN, fitToModel, packContext, prepareChange, settleFiles } from './context.ts'
-import { applyBudget, findingKey, InvalidOutputError, isDuplicate, sameProblem, validateBatchOutput } from './findings.ts'
+import {
+	applyBudget,
+	findingKey,
+	InvalidOutputError,
+	isDuplicate,
+	sameProblem,
+	validateBatchOutput,
+	withKnownMentions,
+} from './findings.ts'
 import { buildBackground } from './background.ts'
 import { buildInput, DEFAULT_LEVELS, instructionsFor, withExternalTools, PROMPT_VERSION } from './prompt.ts'
 import type { RelatedResult } from './related.ts'
@@ -635,7 +643,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				checkTruncation(batch, response.usage?.inputTokens ?? null, w)
 				const value = validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads)
 				const seen = seenInBatch(batch, tools?.log.seen ?? [])
-				value.findings = value.findings.map((f) => withUnread(f, unreadRefs(findingTexts(f), seen)))
+				value.findings = value.findings.map((f) => withUnread(withKnownMentions(f, background.people), unreadRefs(findingTexts(f), seen)))
 				return { ok: true, value }
 			} catch (error) {
 				const e = asProviderError(error)

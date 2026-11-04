@@ -14,6 +14,7 @@ export interface Background {
 	summary: string | null // for the run's coverage, e.g. "description; issue #12 (closes, 4 comments); conversation: 3 threads (1 open), 2 comments"
 	threads: Map<string, EarlierThread> // the conversation's review threads by the label they were sent under ("T1"), for findings that cite one
 	outside: Array<string> // text in the run written by people without write access, e.g. "the pull request by @x"; empty: none
+	people: Set<string> // lowercased logins of who opened the pull request and wrote its issues and comments: the only ones a finding may @mention
 }
 
 /**
@@ -292,5 +293,18 @@ export function buildBackground(o: {
 		summary: parts.length ? parts.join('; ') : null,
 		threads,
 		outside: outsiders(o.pr ?? null, o.issues, o.discussion),
+		people: participants(prLogin, o.issues, o.discussion),
 	}
+}
+
+/** Who took part: the pull request's author and everyone who wrote an issue or comment sent with it. */
+function participants(prLogin: string | null, issues: Array<LinkedIssue>, d: Discussion | null): Set<string> {
+	const logins = [
+		prLogin,
+		...issues.flatMap((i) => [i.author ?? null, ...i.comments.map((c) => c.author)]),
+		...(d && d.status !== 'unavailable'
+			? [...d.threads.flatMap((t) => t.comments), ...d.conversation, ...d.reviews].map((c) => c.author)
+			: []),
+	]
+	return new Set(logins.filter((l): l is string => !!l).map((l) => l.toLowerCase()))
 }
