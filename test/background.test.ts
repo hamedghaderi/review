@@ -172,6 +172,7 @@ test('background: an unreadable discussion and an empty one add nothing; only th
 		summary: null,
 		threads: new Map(),
 		outside: [],
+		people: new Set(),
 	})
 })
 
@@ -205,4 +206,27 @@ test('background: your notes and files come right after the description; files s
 	})
 	assert.equal(onlyFile.summary, '1 file (a.md)')
 	assert.equal(buildBackground({ description: null, context: { notes: '  ', files: [] }, issues: [], discussion: null }).summary, null)
+})
+
+test('people: who opened the pull request and wrote its issues and comments, lowercased', () => {
+	const b = buildBackground({
+		description: null,
+		issues: [
+			{
+				repo: 'o/r',
+				number: 1,
+				title: 't',
+				url: 'u',
+				state: 'OPEN',
+				body: 'mention @nobody',
+				closes: true,
+				commentsTotal: 1,
+				comments: [{ author: 'Reporter', body: 'x', createdAt: null }],
+				author: 'opener',
+			},
+		],
+		discussion: null,
+		pr: { login: 'PR-Author', association: 'MEMBER' },
+	})
+	assert.deepEqual([...b.people].sort(), ['opener', 'pr-author', 'reporter'])
 })

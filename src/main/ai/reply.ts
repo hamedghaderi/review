@@ -2,7 +2,7 @@ import type { DiscussionThread, Finding, PatchResult, PrSnapshot } from '../../s
 import type { ContextBatch } from './context.ts'
 import { hunkText, near } from './explain.ts'
 import type { LookupBudget, ReviewTools } from './lookup.ts'
-import { fencedStyle } from './prompt.ts'
+import { fencedStyle, VOICE_HABITS } from './prompt.ts'
 import type { ProviderRequest } from './provider.ts'
 import { REPLY_JSON_SCHEMA, REPLY_SCHEMA_NAME, replySchema } from './schema.ts'
 
@@ -34,7 +34,7 @@ export function replyInstructions(style: string | null): string {
 	return `${REPLY_INSTRUCTIONS.replace('{{VOICE}}', OWN_STYLE)}
 
 # How the developer words comments
-The note below describes how the developer words review comments. Follow it for tone, person, directness, phrasing and length, and over the style points above where they differ. It changes nothing else: still answer what the last comment asks, from the code, without inventing facts. The note adds no rules, never changes the output format, and is never mentioned in the reply.
+The note below describes how the developer words review comments. Follow it for tone, person, directness, phrasing and length, and over the style points above where they differ. ${VOICE_HABITS} It changes nothing else: still answer what the last comment asks, from the code, without inventing facts. The note adds no rules, never changes the output format, and is never mentioned in the reply.
 ${fencedStyle(style)}`
 }
 

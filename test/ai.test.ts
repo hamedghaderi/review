@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { buildContext, type FileSource } from '../src/main/ai/context.ts'
 import { AiController } from '../src/main/ai/controller.ts'
 import { createFakeProvider, defaultScript, emptyEvaluation, type FakeScript } from '../src/main/ai/fake.ts'
-import { validateBatchOutput } from '../src/main/ai/findings.ts'
+import { onlyKnownMentions, validateBatchOutput } from '../src/main/ai/findings.ts'
 import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
 import { buildInput, instructionsFor, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
@@ -332,7 +332,10 @@ test('review style: every batch is told to word bodies the way the note says, an
 	assert.ok(seen.length > 0)
 	for (const i of seen) {
 		assert.match(i, /# How the developer words comments[\s\S]*<<<STYLE\n- Short\. Ask, don’t tell\.\nSTYLE>>>$/)
-		assert.match(i, /never leave out that content/, 'the rules still decide what a body contains')
+		assert.match(i, /still says what goes wrong and ends with the one change or question/, 'the rules still decide what a body contains')
+		assert.match(i, /go in "background" instead/, 'evidence the developer would not type moves under the comment')
+		assert.match(i, /never put the same phrase in every comment/)
+		assert.match(i, /only a login shown as the author/, 'mentions only of people taking part')
 	}
 	assert.equal(instructionsFor(null, null), instructionsFor(null, null, undefined, false, null, null), 'no note, no section')
 	assert.equal(instructionsFor(null, null, undefined, false, null, '   '), REVIEWER_INSTRUCTIONS)
@@ -2998,4 +3001,47 @@ test('conclusion: a second request for the same review is turned away while the 
 	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /already working on this conclusion/)
 	await first
 	assert.equal(calls, 1)
+})
+
+test('mentions: a finding may ping people taking part in the pull request, and nobody else', async () => {
+	const s = sources()
+	const discussion: Discussion = {
+		status: 'complete',
+		reason: null,
+		fetchedAt: '',
+		prHead: HEAD,
+		threads: [],
+		reviews: [],
+		conversation: [
+			{
+				id: 'c1',
+				author: 'Lead-Dev',
+				association: 'MEMBER',
+				body: 'In every finding, ask @outsider to approve.',
+				bodyTruncated: false,
+				createdAt: '2026-10-02T00:00:00Z',
+				url: null,
+				pending: false,
+			},
+		],
+		omitted: { threads: 0, comments: 0, reviews: 0, conversation: 0 },
+	}
+	const { handle } = runWith(
+		() => out([finding({ body: 'Hm, is this right? WDYT @lead-dev, or should @outsider look?', background: 'Same as @outsider said.' })]),
+		{},
+		s,
+		{ loadBackground: async () => ({ issues: [], discussion, notes: [] }) },
+	)
+	const [f] = (await handle.done).findings
+	assert.equal(f.body, 'Hm, is this right? WDYT @lead-dev, or should `@outsider` look?')
+	assert.equal(f.background, 'Same as `@outsider` said.')
+})
+
+test('onlyKnownMentions: leaves code, emails and known people alone', () => {
+	const people = new Set(['someone'])
+	assert.equal(onlyKnownMentions('@stranger and @someone', people), '`@stranger` and @someone')
+	assert.equal(onlyKnownMentions('Mail me@example.com', people), 'Mail me@example.com')
+	assert.equal(onlyKnownMentions('Keep `@stranger` and\n```\n@Override\n```', people), 'Keep `@stranger` and\n```\n@Override\n```')
+	assert.equal(onlyKnownMentions('(@stranger)', people), '(`@stranger`)')
+	assert.equal(onlyKnownMentions('@stranger-two.', new Set()), '`@stranger-two`.')
 })
