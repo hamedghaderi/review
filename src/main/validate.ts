@@ -455,6 +455,11 @@ export function symbolName(v: unknown): string {
 	return s
 }
 
+export function commitSha(v: unknown): string {
+	if (!isSha(v)) bad('commit')
+	return v
+}
+
 export function comparisonId(v: unknown): string {
 	const s = str(v, 'comparison id', 200)
 	const [a, b, extra] = s.split('..')

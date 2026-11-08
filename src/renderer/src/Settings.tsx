@@ -7,6 +7,7 @@ import { McpImport, McpServerEditor } from './McpSettings.tsx'
 import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { KeymapSettings } from './KeymapSettings.tsx'
+import { ReviewingSettings } from './ReviewingSettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
 import { StyleSettings } from './StyleSettings.tsx'
 
@@ -111,6 +112,7 @@ export function Settings(props: {
 	const tree: Array<Node> = useMemo(
 		() => [
 			{ id: 'appearance', label: 'Appearance', keywords: 'theme light dark colour color' },
+			{ id: 'reviewing', label: 'Reviewing', keywords: 'commits commit by commit step one at a time history message' },
 			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
 			{ id: 'sounds', label: 'Sounds', keywords: 'sound audio chime alert notification ai answer review finished' },
 			{
@@ -281,6 +283,7 @@ export function Settings(props: {
 
 	function body(): ReactNode {
 		if (page === 'appearance') return <AppearanceSettings />
+		if (page === 'reviewing') return <ReviewingSettings />
 		if (page === 'keymap') return <KeymapSettings />
 		if (page === 'sounds') return <SoundSettings githubNotifications={github.notifications.enabled} />
 		if (page === 'github') return <GitHubAccount status={github} act={act} />

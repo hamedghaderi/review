@@ -39,7 +39,8 @@ import type {
 	SymbolHit,
 	TargetProbe,
 } from '../../shared/types.ts'
-import { commitsLabel, targetKey } from '../../shared/types.ts'
+import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData } from '../../shared/types.ts'
+import { CommitView, type DraftHandlers } from './CommitView.tsx'
 import { AiRunControl } from './AiRunControl.tsx'
 import { Browser, type BrowserHandle } from './Browser.tsx'
 import { BranchPrHint, isAuthProblem, lookupProblem, useBranchPr } from './BranchPrHint.tsx'
@@ -809,6 +810,7 @@ export function App() {
 	const selectFile = (key: string): void => {
 		setOutside(null)
 		setConclusionOpen(false)
+		void showCommit(null) // a comment, finding or thread is opened at its place in all the changes
 		if (key === selected) return
 		if (activeDraftId) {
 			const d = review?.drafts.find((x) => x.id === activeDraftId)
@@ -1318,6 +1320,117 @@ export function App() {
 		return m
 	}, [comparison?.pr, fileComments, fileThreads, review?.publication]) // eslint-disable-line react-hooks/exhaustive-deps
 
+	// Settings › Reviewing › Step through commits: a commit picker on pull request and branch reviews. Off: none of this
+	// reads anything, and the review shows all its changes as always.
+	const [stepCommits, setStepCommits] = useState(false)
+	useEffect(() => {
+		void window.review.reviewing().then((r) => r.ok && setStepCommits(r.value.stepCommits))
+		return window.review.onReviewingChanged((next) => setStepCommits(next.stepCommits))
+	}, [])
+	const steppable = stepCommits && !!comparison && comparison.target?.kind !== 'commits'
+	const [commitList, setCommitList] = useState<CommitList | null>(null)
+	const [commitListError, setCommitListError] = useState<string | null>(null)
+	const [openCommit, setOpenCommit] = useState<CommitData | null>(null)
+	const [commitLoading, setCommitLoading] = useState<string | null>(null) // the commit being opened
+	const [seenCommits, setSeenCommits] = useState<ReadonlySet<string>>(new Set()) // "review id:sha", this session
+	const commitGen = useRef(0)
+	useEffect(() => {
+		commitGen.current++
+		setOpenCommit(null)
+		setCommitLoading(null)
+		setCommitList(null)
+		setCommitListError(null)
+		if (!steppable || !comparison) return
+		const id = comparison.id
+		void window.review.commitList(id).then((r) => {
+			if (comparisonIdRef.current !== id) return
+			if (r.ok) setCommitList(r.value)
+			else setCommitListError(r.error.message)
+		})
+	}, [steppable, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+	const commitsHere = commitList && commitList.reviewId === comparison?.id ? commitList.commits : []
+	const commitIndex = openCommit ? commitsHere.findIndex((x) => x.sha === openCommit.entry.sha) : -1
+	/** Shows one commit on its own, or all the review's changes for null. */
+	const showCommit = async (sha: string | null): Promise<void> => {
+		const gen = ++commitGen.current
+		if (!sha || !comparison) {
+			setOpenCommit(null)
+			setCommitLoading(null)
+			return
+		}
+		setCommitLoading(sha)
+		const id = comparison.id
+		const r = await window.review.openCommit(id, sha)
+		if (gen !== commitGen.current || comparisonIdRef.current !== id) return
+		setCommitLoading(null)
+		if (!r.ok) return setNotice(`Could not open commit ${sha.slice(0, 7)}: ${r.error.message}`)
+		setConclusionOpen(false)
+		setOutside(null)
+		setOpenCommit(r.value)
+		setSeenCommits((s) => new Set(s).add(`${id}:${sha}`))
+	}
+	const stepCommit = (dir: 1 | -1): void => {
+		if (!commitsHere.length) return
+		const i = openCommit ? commitIndex : -1
+		const next = i + dir
+		if (next < -1 || next >= commitsHere.length) return
+		void showCommit(next === -1 ? null : commitsHere[next].sha)
+	}
+	const stepRef = useRef(stepCommit)
+	stepRef.current = stepCommit
+	const steppableRef = useRef(false)
+	steppableRef.current = steppable && view === 'review'
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent): void => {
+			if (!steppableRef.current || document.querySelector('.modal') || isTyping(document.activeElement)) return
+			const dir = isKey(e, 'commitNext') ? 1 : isKey(e, 'commitPrev') ? -1 : 0
+			if (!dir) return
+			e.preventDefault()
+			stepRef.current(dir)
+		}
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	}, [])
+	// The conclusion, a file outside the change and a finding's place are views of the whole review.
+	useEffect(() => {
+		if (conclusionOpen || outside) void showCommit(null)
+	}, [conclusionOpen, outside]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	const draftHandlers: DraftHandlers = {
+		start: (a) => {
+			if (!review) return
+			const res = ops.startDraft(review, a, activeDraftId)
+			change(() => res.review)
+			setActiveDraftId(res.id)
+		},
+		update: (id, patch) => change((r) => ops.updateDraft(r, id, patch)),
+		activate: (id) => {
+			const cur = review?.drafts.find((d) => d.id === activeDraftId)
+			if (cur && cur.id !== id && ops.isBlank(cur)) change((r) => ops.discardDraft(r, cur.id))
+			setActiveDraftId(id)
+		},
+		submit: (id) => {
+			change((r) => ops.submitDraft(r, id))
+			setActiveDraftId(null)
+		},
+		discard: (id) => {
+			change((r) => ops.discardDraft(r, id))
+			if (id === activeDraftId) setActiveDraftId(null)
+		},
+		edit: (cid) => {
+			if (!review) return
+			const res = ops.editComment(review, cid)
+			if (!res.id) return
+			change(() => res.review)
+			setActiveDraftId(res.id)
+		},
+		remove: (cid) => {
+			if (!window.confirm('Delete this comment?')) return
+			change((r) => ops.deleteComment(r, cid))
+		},
+		showFinding,
+	}
+
 	// A pending review this app started, from the local record (no GitHub read); the Publish dialog corrects it.
 	useEffect(() => {
 		const r = reviewRef.current
@@ -1581,6 +1694,41 @@ export function App() {
 											</select>
 										</label>
 									)}
+									{steppable && (
+										<label
+											className="hfield shrink commit-pick"
+											title={
+												commitListError
+													? `Could not list the commits: ${commitListError}`
+													: `Read one commit at a time${keyLabel('commitNext') ? ` (${keyLabel('commitNext')} / ${keyLabel('commitPrev')})` : ''}. Merge commits are left out.`
+											}
+										>
+											<span className="muted">Commit</span>
+											<select
+												value={commitLoading ?? openCommit?.entry.sha ?? ''}
+												disabled={!commitsHere.length}
+												onChange={(e) => void showCommit(e.target.value || null)}
+											>
+												<option value="">
+													{commitListError
+														? 'Commits unavailable'
+														: !commitList
+															? 'Loading commits…'
+															: `All changes · ${commitList.total} commit${commitList.total === 1 ? '' : 's'}`}
+												</option>
+												{commitsHere.map((x, i) => (
+													<option key={x.sha} value={x.sha}>
+														{seenCommits.has(`${comparison.id}:${x.sha}`) ? '✓ ' : ''}
+														{i + 1}. {x.sha.slice(0, 7)} {x.subject}
+													</option>
+												))}
+											</select>
+											{commitList && commitList.total > commitsHere.length && (
+												<span className="muted small nowrap">first {commitsHere.length}</span>
+											)}
+											{commitLoading && <span className="spinner small" aria-label="Opening the commit" />}
+										</label>
+									)}
 									{comparison.files.length > 0 && (
 										<button
 											className={`btn small conclusion-toggle${conclusionOpen ? ' on' : ''}`}
@@ -1805,133 +1953,134 @@ export function App() {
 											{repoError.message} ✕
 										</button>
 									)}
-									<aside className="side left" style={{ width: left.width }}>
-										<FileTree
-											files={comparison.files}
-											selected={selected}
-											viewed={viewed}
-											commented={commented}
-											onSelect={selectFile}
-											onToggleViewed={(k) => change((r) => ops.setViewed(r, k, !viewed.has(k)))}
-											onNextUnreviewed={nextUnreviewed}
+									{openCommit ? (
+										<CommitView
+											key={openCommit.comparison.id}
+											head={comparison}
+											commit={openCommit}
+											position={{ index: Math.max(0, commitIndex), total: commitsHere.length }}
+											review={review}
+											activeDraftId={activeDraftId}
+											drafts={draftHandlers}
+											leftWidth={left.width}
+											onSplitter={left.start(1)}
+											onStep={stepCommit}
+											onAllChanges={() => void showCommit(null)}
+											onLookup={(r) => {
+												void showCommit(null)
+												void lookup(r)
+											}}
+											placeRef={placeRef}
 										/>
-									</aside>
-									<Splitter onPointerDown={left.start(1)} />
-									<section className="center">
-										{comparison.files.length === 0 ? (
-											<div className="empty">
-												<EmptyFigure figure="branches" />
-												<h2>No committed changes</h2>
-												<p className="muted">{emptyReason(comparison)}</p>
-												{repo && repo.uncommitted > 0 && (
-													<p className="muted">
-														{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} excluded. Review only reads
-														commits, so commit the work (for example on a feature branch) to review it here.
-													</p>
+									) : (
+										<>
+											<aside className="side left" style={{ width: left.width }}>
+												<FileTree
+													files={comparison.files}
+													selected={selected}
+													viewed={viewed}
+													commented={commented}
+													onSelect={selectFile}
+													onToggleViewed={(k) => change((r) => ops.setViewed(r, k, !viewed.has(k)))}
+													onNextUnreviewed={nextUnreviewed}
+												/>
+											</aside>
+											<Splitter onPointerDown={left.start(1)} />
+											<section className="center">
+												{comparison.files.length === 0 ? (
+													<div className="empty">
+														<EmptyFigure figure="branches" />
+														<h2>No committed changes</h2>
+														<p className="muted">{emptyReason(comparison)}</p>
+														{repo && repo.uncommitted > 0 && (
+															<p className="muted">
+																{repo.uncommitted} uncommitted change{repo.uncommitted === 1 ? ' is' : 's are'} excluded. Review only reads
+																commits, so commit the work (for example on a feature branch) to review it here.
+															</p>
+														)}
+														<p className="muted">
+															<button className="link" onClick={() => void backToBrowser()}>
+																Back to browser
+															</button>{' '}
+															to pick a different base branch or target.
+														</p>
+													</div>
+												) : conclusionOpen ? (
+													<Conclusion
+														conclusion={conclusion}
+														busy={concludingHere?.kind ?? null}
+														asked={concludingHere?.asked ?? null}
+														error={conclusionError}
+														disabled={concludeDisabled}
+														askDisabled={askDisabled}
+														stale={!!conclusion && !!lastFinished && conclusion.runId !== lastFinished.id}
+														modelPicker={askModelPicker}
+														paths={changedPaths}
+														onOpenPath={openPath}
+														onWrite={() => void conclude(null)}
+														onAsk={conclude}
+														onHide={() => setConclusionOpen(false)}
+													/>
+												) : outside ? (
+													<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
+												) : file ? (
+													<DiffView
+														key={`${comparison.id}:${file.key}`}
+														comparison={comparison}
+														file={file}
+														viewed={viewed.has(file.key)}
+														comments={fileComments}
+														drafts={fileDrafts}
+														activeDraftId={activeDraftId}
+														reveal={reveal}
+														highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
+														threads={fileThreads}
+														mine={current?.value?.mine ?? null}
+														published={published}
+														questions={fileQuestions}
+														asking={asking}
+														askDisabled={askDisabled}
+														askModel={aiSettings?.questionModel?.modelId ?? null}
+														askModelPicker={askModelPicker}
+														onAskCode={askCode}
+														onDeleteQuestion={(id) => void deleteQuestion(id)}
+														discussed={discussed}
+														onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
+														onStartDraft={draftHandlers.start}
+														onUpdateDraft={draftHandlers.update}
+														onActivateDraft={draftHandlers.activate}
+														onSubmitDraft={draftHandlers.submit}
+														onDiscardDraft={draftHandlers.discard}
+														onEditComment={draftHandlers.edit}
+														onDeleteComment={draftHandlers.remove}
+														onShowFinding={showFinding}
+														onDraftReply={
+															comparison.pr
+																? async (threadId) => {
+																		const r = await window.review.draftReply(session.repo.id, comparison.id, threadId)
+																		return r.ok ? { text: r.value } : { error: r.error.message }
+																	}
+																: undefined
+														}
+														onReply={
+															comparison.pr
+																? async (threadId, body, resolve) => {
+																		const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, resolve)
+																		if (!r.ok) return r.error.message
+																		loadDiscussion(session.repo.id, comparison.id)
+																		return null
+																	}
+																: undefined
+														}
+														onLookup={(r) => void lookup(r)}
+														placeRef={placeRef}
+													/>
+												) : (
+													<div className="empty muted">Select a file.</div>
 												)}
-												<p className="muted">
-													<button className="link" onClick={() => void backToBrowser()}>
-														Back to browser
-													</button>{' '}
-													to pick a different base branch or target.
-												</p>
-											</div>
-										) : conclusionOpen ? (
-											<Conclusion
-												conclusion={conclusion}
-												busy={concludingHere?.kind ?? null}
-												asked={concludingHere?.asked ?? null}
-												error={conclusionError}
-												disabled={concludeDisabled}
-												askDisabled={askDisabled}
-												stale={!!conclusion && !!lastFinished && conclusion.runId !== lastFinished.id}
-												modelPicker={askModelPicker}
-												paths={changedPaths}
-												onOpenPath={openPath}
-												onWrite={() => void conclude(null)}
-												onAsk={conclude}
-												onHide={() => setConclusionOpen(false)}
-											/>
-										) : outside ? (
-											<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />
-										) : file ? (
-											<DiffView
-												key={`${comparison.id}:${file.key}`}
-												comparison={comparison}
-												file={file}
-												viewed={viewed.has(file.key)}
-												comments={fileComments}
-												drafts={fileDrafts}
-												activeDraftId={activeDraftId}
-												reveal={reveal}
-												highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
-												threads={fileThreads}
-												mine={current?.value?.mine ?? null}
-												published={published}
-												questions={fileQuestions}
-												asking={asking}
-												askDisabled={askDisabled}
-												askModel={aiSettings?.questionModel?.modelId ?? null}
-												askModelPicker={askModelPicker}
-												onAskCode={askCode}
-												onDeleteQuestion={(id) => void deleteQuestion(id)}
-												discussed={discussed}
-												onToggleViewed={() => change((r) => ops.setViewed(r, file.key, !viewed.has(file.key)))}
-												onStartDraft={(a) => {
-													const res = ops.startDraft(review, a, activeDraftId)
-													change(() => res.review)
-													setActiveDraftId(res.id)
-												}}
-												onUpdateDraft={(id, patch) => change((r) => ops.updateDraft(r, id, patch))}
-												onActivateDraft={(id) => {
-													const cur = review.drafts.find((d) => d.id === activeDraftId)
-													if (cur && cur.id !== id && ops.isBlank(cur)) change((r) => ops.discardDraft(r, cur.id))
-													setActiveDraftId(id)
-												}}
-												onSubmitDraft={(id) => {
-													change((r) => ops.submitDraft(r, id))
-													setActiveDraftId(null)
-												}}
-												onDiscardDraft={(id) => {
-													change((r) => ops.discardDraft(r, id))
-													if (id === activeDraftId) setActiveDraftId(null)
-												}}
-												onEditComment={(cid) => {
-													const res = ops.editComment(review, cid)
-													if (!res.id) return
-													change(() => res.review)
-													setActiveDraftId(res.id)
-												}}
-												onDeleteComment={(cid) => {
-													if (!window.confirm('Delete this comment?')) return
-													change((r) => ops.deleteComment(r, cid))
-												}}
-												onShowFinding={showFinding}
-												onDraftReply={
-													comparison.pr
-														? async (threadId) => {
-																const r = await window.review.draftReply(session.repo.id, comparison.id, threadId)
-																return r.ok ? { text: r.value } : { error: r.error.message }
-															}
-														: undefined
-												}
-												onReply={
-													comparison.pr
-														? async (threadId, body, resolve) => {
-																const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, resolve)
-																if (!r.ok) return r.error.message
-																loadDiscussion(session.repo.id, comparison.id)
-																return null
-															}
-														: undefined
-												}
-												onLookup={(r) => void lookup(r)}
-												placeRef={placeRef}
-											/>
-										) : (
-											<div className="empty muted">Select a file.</div>
-										)}
-									</section>
+											</section>
+										</>
+									)}
 									<Splitter onPointerDown={right.start(-1)} />
 									<aside className="side right" style={{ width: right.width }}>
 										<div className="panel-title tabs" role="tablist">

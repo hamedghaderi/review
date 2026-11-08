@@ -1,4 +1,5 @@
 import { AppFail, changesBetween, git, readAt, readBlob } from './git.ts'
+import { shiftRange, type LineShift } from '../shared/commitStep.ts'
 
 const CODE_LINES = 40 // old lines kept to show an outdated comment's code
 const BLOB_LIMIT = 8 * 1024 * 1024
@@ -6,12 +7,7 @@ const BLOB_LIMIT = 8 * 1024 * 1024
 /** How a path from the earlier commit appears in the later one. `null` blobs: the file is unchanged. */
 export type PathMove = { path: string | null; oldBlob: string | null; newBlob: string | null }
 
-interface Hunk0 {
-	oldStart: number
-	oldCount: number
-	newStart: number
-	newCount: number
-}
+type Hunk0 = LineShift
 
 /** Maps paths and line numbers from one commit to another. */
 export class Mapper {
@@ -46,17 +42,14 @@ export class Mapper {
 
 	/** The range in the later commit, or null when any of its lines changed or lines were inserted inside it. */
 	async range(m: PathMove, start: number, end: number): Promise<{ start: number; end: number } | null> {
-		if (!m.oldBlob || !m.newBlob || m.oldBlob === m.newBlob) return { start, end }
-		const hunks = await this.diff(m.oldBlob, m.newBlob)
-		if (!hunks) return null
-		let delta = 0
-		for (const h of hunks) {
-			const inside = h.oldCount ? h.oldStart <= end && h.oldStart + h.oldCount - 1 >= start : h.oldStart >= start && h.oldStart < end
-			if (inside) return null
-			const before = h.oldCount ? h.oldStart + h.oldCount - 1 < start : h.oldStart < start
-			if (before) delta += h.newCount - h.oldCount
-		}
-		return { start: start + delta, end: end + delta }
+		const shifts = await this.shifts(m)
+		return shifts ? shiftRange(shifts, start, end) : null
+	}
+
+	/** The regions that changed between the two versions (none when unchanged), or null for a binary change. */
+	async shifts(m: PathMove): Promise<Array<LineShift> | null> {
+		if (!m.oldBlob || !m.newBlob || m.oldBlob === m.newBlob) return []
+		return this.diff(m.oldBlob, m.newBlob)
 	}
 
 	/**

@@ -10,8 +10,9 @@ interface Props {
 	viewed: Set<string>
 	commented: Map<string, number>
 	onSelect(key: string): void
-	onToggleViewed(key: string): void
-	onNextUnreviewed(): void
+	// Both absent: no viewed checkboxes, Unreviewed filter or progress (a commit's files, where viewed doesn't apply).
+	onToggleViewed?(key: string): void
+	onNextUnreviewed?(): void
 }
 
 const STATUS_LETTER: Record<ChangedFile['status'], string> = {
@@ -88,14 +89,16 @@ export function FileTree({ files, selected, viewed, commented, onSelect, onToggl
 						onClick={() => onSelect(f.key)}
 						title={f.oldPath && f.newPath && f.oldPath !== f.newPath ? `${f.oldPath} → ${f.newPath}` : path}
 					>
-						<input
-							type="checkbox"
-							className="viewed-box"
-							checked={isViewed}
-							aria-label={`Mark ${path} as viewed`}
-							onClick={(e) => e.stopPropagation()}
-							onChange={() => onToggleViewed(f.key)}
-						/>
+						{onToggleViewed && (
+							<input
+								type="checkbox"
+								className="viewed-box"
+								checked={isViewed}
+								aria-label={`Mark ${path} as viewed`}
+								onClick={(e) => e.stopPropagation()}
+								onChange={() => onToggleViewed(f.key)}
+							/>
+						)}
 						<span className={`status st-${f.status}`} title={f.status}>
 							{STATUS_LETTER[f.status]}
 						</span>
@@ -133,33 +136,33 @@ export function FileTree({ files, selected, viewed, commented, onSelect, onToggl
 					onChange={(e) => setQuery(e.target.value)}
 				/>
 				<div className="seg" role="tablist">
-					{(
-						[
-							['all', 'All'],
-							['unreviewed', 'Unreviewed'],
-							['commented', 'Commented'],
-						] as const
-					).map(([k, label]) => (
-						<button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
-							{label} <span className="count">{counts[k]}</span>
-						</button>
-					))}
+					{([['all', 'All'], ...(onToggleViewed ? [['unreviewed', 'Unreviewed'] as const] : []), ['commented', 'Commented']] as const).map(
+						([k, label]) => (
+							<button key={k} role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
+								{label} <span className="count">{counts[k]}</span>
+							</button>
+						),
+					)}
 				</div>
-				<div
-					className="tree-viewed"
-					role="progressbar"
-					aria-label="Files marked as viewed"
-					aria-valuemin={0}
-					aria-valuemax={counts.all}
-					aria-valuenow={counts.all - counts.unreviewed}
-					title={`${counts.all - counts.unreviewed} of ${counts.all} files marked as viewed`}
-				>
-					<span style={{ width: `${counts.all ? (100 * (counts.all - counts.unreviewed)) / counts.all : 0}%` }} />
-				</div>
+				{onToggleViewed && (
+					<div
+						className="tree-viewed"
+						role="progressbar"
+						aria-label="Files marked as viewed"
+						aria-valuemin={0}
+						aria-valuemax={counts.all}
+						aria-valuenow={counts.all - counts.unreviewed}
+						title={`${counts.all - counts.unreviewed} of ${counts.all} files marked as viewed`}
+					>
+						<span style={{ width: `${counts.all ? (100 * (counts.all - counts.unreviewed)) / counts.all : 0}%` }} />
+					</div>
+				)}
 				<div className="tree-actions">
-					<button className="btn small" onClick={onNextUnreviewed} disabled={counts.unreviewed === 0}>
-						Next unreviewed
-					</button>
+					{onNextUnreviewed && (
+						<button className="btn small" onClick={onNextUnreviewed} disabled={counts.unreviewed === 0}>
+							Next unreviewed
+						</button>
+					)}
 					<button className="btn small ghost" onClick={() => setCollapsed(new Set())}>
 						Expand all
 					</button>

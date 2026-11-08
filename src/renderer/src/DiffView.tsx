@@ -47,7 +47,8 @@ interface Props {
 	onAskCode(anchor: Anchor, text: string, questionId: string | null): Promise<string | null>
 	onDeleteQuestion(id: string): void
 	discussed(anchor: Anchor, commentId: string | null): Array<DiscussionThread>
-	onToggleViewed(): void
+	onToggleViewed?(): void // absent: no Viewed checkbox (a commit's view, where only part of the file's change shows)
+	refuseAnchor?(anchor: Anchor): string | null // why a comment can't go on these lines, shown instead of starting it
 	onStartDraft(anchor: Anchor): void
 	onUpdateDraft(id: string, patch: { body?: string; anchor?: Anchor }): void
 	onActivateDraft(id: string | null): void
@@ -247,8 +248,14 @@ export function DiffView(p: Props) {
 			}
 			const from = pivot ?? activeRange.start
 			const r = { side: activeRange.side, start: Math.min(from, m), end: Math.max(from, m) }
+			const next = makeAnchor(r)
+			const refused = p.refuseAnchor?.(next)
+			if (refused) {
+				flash(refused)
+				return
+			}
 			if (pivot === null) setPivot(from)
-			p.onUpdateDraft(activeDraft.id, { anchor: makeAnchor(r) })
+			p.onUpdateDraft(activeDraft.id, { anchor: next })
 			setExtending(false)
 			return
 		}
@@ -256,7 +263,13 @@ export function DiffView(p: Props) {
 		if (n === null) return
 		setPivot(n)
 		setExtending(false)
-		p.onStartDraft(makeAnchor({ side, start: n, end: n }))
+		startDraft(makeAnchor({ side, start: n, end: n }))
+	}
+
+	const startDraft = (a: Anchor): void => {
+		const refused = p.refuseAnchor?.(a)
+		if (refused) flash(refused)
+		else p.onStartDraft(a)
 	}
 
 	const onMouseUp = (e: React.MouseEvent): void => {
@@ -277,7 +290,7 @@ export function DiffView(p: Props) {
 		if (!r) return
 		setPivot(r.start)
 		setExtending(false)
-		p.onStartDraft(makeAnchor(r))
+		startDraft(makeAnchor(r))
 	}
 
 	const expand = (row: Row & { t: 'gap' }, dir: 'up' | 'down' | 'all'): void => {
@@ -565,12 +578,14 @@ export function DiffView(p: Props) {
 						</button>
 					</span>
 				)}
-				<button className="btn small" onClick={() => p.onStartDraft(makeAnchor(null))}>
+				<button className="btn small" onClick={() => startDraft(makeAnchor(null))}>
 					Comment on file
 				</button>
-				<label className="viewed-toggle">
-					<input type="checkbox" checked={p.viewed} onChange={p.onToggleViewed} /> Viewed
-				</label>
+				{p.onToggleViewed && (
+					<label className="viewed-toggle">
+						<input type="checkbox" checked={p.viewed} onChange={p.onToggleViewed} /> Viewed
+					</label>
+				)}
 			</div>
 			{notice && <div className="notice">{notice}</div>}
 			<div className="diff-scroll" ref={scroller}>

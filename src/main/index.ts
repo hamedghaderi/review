@@ -17,7 +17,7 @@ import {
 	type IpcMainInvokeEvent,
 } from 'electron'
 import { storedSounds, type SoundEvent, type SoundPrefs } from '../shared/sounds.ts'
-import { IPC, type AiRun, type AppUpdate, type BudgetView, type InboxOpen, type Result } from '../shared/types.ts'
+import { IPC, type AiRun, type AppUpdate, type BudgetView, type InboxOpen, type Result, type ReviewingPrefs } from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { UsageLog } from './ai/usage.ts'
@@ -58,6 +58,7 @@ import {
 	reviewBody,
 	reviewEvent,
 	comparisonId,
+	commitSha,
 	repoPath,
 	repoPaths,
 	symbolName,
@@ -242,6 +243,22 @@ function registerIpc(): void {
 		await store.update((d) => void (d.sounds = next))
 		return next
 	})
+	handle(IPC.reviewing, async () => currentReviewing())
+	handle(IPC.setReviewing, async (raw: unknown) => {
+		const on = bool((raw as { stepCommits?: unknown } | null)?.stepCommits, 'step through commits')
+		await store.update((d) => {
+			if (on) d.stepCommits = true
+			else delete d.stepCommits
+		})
+		const next = currentReviewing()
+		for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.reviewingChanged, next)
+		return next
+	})
+	handle(IPC.commitList, (rid: unknown) => service.commitList(comparisonId(rid)))
+	handle(IPC.openCommit, (rid: unknown, sha: unknown) => service.openCommit(comparisonId(rid), commitSha(sha)))
+	handle(IPC.commitFileMap, (rid: unknown, cid: unknown, key: unknown) =>
+		service.commitFileMap(comparisonId(rid), comparisonId(cid), str(key, 'file')),
+	)
 	handle(IPC.keymap, async () => store.read().keymap ?? {})
 	handle(IPC.setKeymap, async (raw: unknown) => setKeymap(parseKeymap(raw, IS_MAC)))
 	handle(IPC.keymapRecording, async (on: unknown) => {
@@ -922,6 +939,10 @@ function playSound(event: SoundEvent): boolean {
 	if (!win || win.isDestroyed()) return false
 	win.webContents.send(IPC.playSound, choice)
 	return true
+}
+
+function currentReviewing(): ReviewingPrefs {
+	return { stepCommits: store.read().stepCommits === true }
 }
 
 /** Each event's sound; until you pick one, the defaults (or all off, if "Play a sound" was off in the old setting). */

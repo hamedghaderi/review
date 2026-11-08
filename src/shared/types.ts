@@ -4,6 +4,7 @@ import type { PersonaId } from './personas.ts'
 import type { SoundId, SoundPrefs } from './sounds.ts'
 import type { ThemeSettings } from './theme.ts'
 import type { KeymapOverrides } from './keymap.ts'
+import type { CommitFileMap } from './commitStep.ts'
 import type { NotesRange } from './releases.ts'
 export type Side = 'old' | 'new'
 
@@ -414,6 +415,36 @@ export interface Comparison {
 	pr: PrSnapshot | null
 	stackedOn?: StackedBase | null // compared with a merged lower PR's last commit instead of the merge base
 	files: Array<ChangedFile>
+}
+
+/** A commit of a pull request or branch review, to step through one at a time. Merge commits are left out. */
+export interface CommitEntry {
+	sha: string
+	parent: string // its first parent: the commit's own change is parent..sha
+	subject: string
+	author: string
+	at: string // author date, ISO
+}
+
+/** The commits of a review, oldest first; at most MAX_STEP_COMMITS of `total`. */
+export interface CommitList {
+	reviewId: string
+	commits: Array<CommitEntry>
+	total: number
+}
+
+export const MAX_STEP_COMMITS = 300
+
+/** One commit opened on its own: its changes as a comparison of parent..sha, and its full message. */
+export interface CommitView {
+	comparison: Comparison
+	entry: CommitEntry
+	body: string
+}
+
+/** Settings › Reviewing. Each is off until you turn it on. */
+export interface ReviewingPrefs {
+	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
 }
 
 /**
@@ -1856,6 +1887,12 @@ export const IPC = {
 	setKeymap: 'app:set-keymap',
 	keymapChanged: 'app:keymap-changed',
 	keymapRecording: 'app:keymap-recording',
+	reviewing: 'app:reviewing',
+	setReviewing: 'app:set-reviewing',
+	reviewingChanged: 'app:reviewing-changed',
+	commitList: 'diff:commit-list',
+	openCommit: 'diff:open-commit',
+	commitFileMap: 'diff:commit-file-map',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
@@ -2094,6 +2131,16 @@ export interface ReviewApi {
 	onKeymapChanged(handler: (next: KeymapOverrides) => void): () => void
 	/** While a new shortcut is being recorded, the menu's shortcuts are off so the press reaches the page. */
 	keymapRecording(on: boolean): Promise<Result<boolean>>
+	/** Settings › Reviewing. */
+	reviewing(): Promise<Result<ReviewingPrefs>>
+	setReviewing(next: ReviewingPrefs): Promise<Result<ReviewingPrefs>>
+	onReviewingChanged(handler: (next: ReviewingPrefs) => void): () => void
+	/** The open review's commits, to step through; refused unless Settings › Reviewing has it on. */
+	commitList(reviewId: string): Promise<Result<CommitList>>
+	/** One of those commits on its own. Its comparison id works with loadPatch and the other diff reads. */
+	openCommit(reviewId: string, sha: string): Promise<Result<CommitView>>
+	/** How a file of an opened commit lines up with the review's head, to move comments between the two. */
+	commitFileMap(reviewId: string, commitId: string, fileKey: string): Promise<Result<CommitFileMap>>
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
 	installUpdate(): Promise<Result<boolean>>
 	/** Download progress of `installUpdate`, from 0 to 1. */
