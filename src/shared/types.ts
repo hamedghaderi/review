@@ -442,6 +442,38 @@ export interface CommitView {
 	body: string
 }
 
+/**
+ * One thing the AI found when it read a commit's diff against its message. `missing`: the message says it but the
+ * diff doesn't do it; `unmentioned`: the diff does it but the message doesn't say. `path` and `line` point into the
+ * commit's own version of a file (null when it is about the commit as a whole).
+ */
+export interface CommitCheckNote {
+	kind: 'missing' | 'unmentioned' | 'other'
+	text: string
+	path: string | null
+	line: number | null
+}
+
+/** The AI's reading of one commit's diff against its message; kept on the review, by commit. */
+export interface CommitCheck {
+	sha: string
+	verdict: 'matches' | 'partly' | 'differs'
+	summary: string
+	notes: Array<CommitCheckNote>
+	omitted: Array<string> // files whose diff did not fit the request
+	model: string
+	at: string
+}
+
+/** What checking these commits would send and cost: a range, not a promise. */
+export interface CommitCheckEstimate {
+	requests: number
+	inputTokens: { low: number; high: number }
+	cost: { low: number; high: number; estimated: boolean } | null // null: the model has no price
+	subscription: boolean // a CLI's plan: counted against its usage limits, no price
+	over: Array<string> // budgets already reached, in words; empty when none is set
+}
+
 /** Settings › Reviewing. Each is off until you turn it on. */
 export interface ReviewingPrefs {
 	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
@@ -569,6 +601,7 @@ export interface Review {
 	questions?: Array<CodeQuestion> // questions you asked the AI about selected code; written by the main process only
 	explanation?: ChangeExplanation // what the AI says this change is for; written by the main process only
 	conclusion?: ChangeConclusion // the AI's conclusion on the whole change, and your conversation about it; main process only
+	commitChecks?: Record<string, CommitCheck> // by commit SHA: the AI's reading of its diff against its message; main process only
 }
 
 /**
@@ -1294,7 +1327,8 @@ export interface AiCost {
 // verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
 // change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
 // summary: a drafted review summary.
-export type UsageKind = 'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary'
+export type UsageKind =
+	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit'
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -1893,6 +1927,8 @@ export const IPC = {
 	commitList: 'diff:commit-list',
 	openCommit: 'diff:open-commit',
 	commitFileMap: 'diff:commit-file-map',
+	checkCommit: 'ai:check-commit',
+	estimateCommitChecks: 'ai:estimate-commit-checks',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
 	flushRequest: 'app:flush',
@@ -2141,6 +2177,13 @@ export interface ReviewApi {
 	openCommit(reviewId: string, sha: string): Promise<Result<CommitView>>
 	/** How a file of an opened commit lines up with the review's head, to move comments between the two. */
 	commitFileMap(reviewId: string, commitId: string, fileKey: string): Promise<Result<CommitFileMap>>
+	/**
+	 * The AI reads one commit's diff against its message, with the model for questions; saved on the review. Refused
+	 * with `over-budget` when a daily or monthly budget is reached, unless `overBudget` (you chose to go on).
+	 */
+	checkCommit(reviewId: string, sha: string, overBudget: boolean): Promise<Result<CommitCheck>>
+	/** What checking these commits would send and cost. */
+	estimateCommitChecks(reviewId: string, shas: Array<string>): Promise<Result<CommitCheckEstimate>>
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */
 	installUpdate(): Promise<Result<boolean>>
 	/** Download progress of `installUpdate`, from 0 to 1. */

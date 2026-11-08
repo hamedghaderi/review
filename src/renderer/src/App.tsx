@@ -41,6 +41,10 @@ import type {
 } from '../../shared/types.ts'
 import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData } from '../../shared/types.ts'
 import { CommitView, type DraftHandlers } from './CommitView.tsx'
+import { useCommitChecks } from './CommitCheck.tsx'
+
+// After a commit in the picker, once the AI checked it against its message.
+const VERDICT_SHORT = { matches: 'matches message', partly: 'partly matches', differs: 'differs from message' } as const
 import { AiRunControl } from './AiRunControl.tsx'
 import { Browser, type BrowserHandle } from './Browser.tsx'
 import { BranchPrHint, isAuthProblem, lookupProblem, useBranchPr } from './BranchPrHint.tsx'
@@ -1350,6 +1354,7 @@ export function App() {
 	}, [steppable, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 	const commitsHere = commitList && commitList.reviewId === comparison?.id ? commitList.commits : []
 	const commitIndex = openCommit ? commitsHere.findIndex((x) => x.sha === openCommit.entry.sha) : -1
+	const commitChecks = useCommitChecks(steppable && comparison ? comparison.id : null, loaded?.review.commitChecks, commitsHere)
 	/** Shows one commit on its own, or all the review's changes for null. */
 	const showCommit = async (sha: string | null): Promise<void> => {
 		const gen = ++commitGen.current
@@ -1401,6 +1406,12 @@ export function App() {
 			if (!review) return
 			const res = ops.startDraft(review, a, activeDraftId)
 			change(() => res.review)
+			setActiveDraftId(res.id)
+		},
+		startWith: (a, body) => {
+			if (!review) return
+			const res = ops.startDraft(review, a, activeDraftId)
+			change(() => ops.updateDraft(res.review, res.id, { body }))
 			setActiveDraftId(res.id)
 		},
 		update: (id, patch) => change((r) => ops.updateDraft(r, id, patch)),
@@ -1720,6 +1731,7 @@ export function App() {
 													<option key={x.sha} value={x.sha}>
 														{seenCommits.has(`${comparison.id}:${x.sha}`) ? '✓ ' : ''}
 														{i + 1}. {x.sha.slice(0, 7)} {x.subject}
+														{commitChecks.checks[x.sha] ? ` · ${VERDICT_SHORT[commitChecks.checks[x.sha].verdict]}` : ''}
 													</option>
 												))}
 											</select>
@@ -1971,6 +1983,8 @@ export function App() {
 												void lookup(r)
 											}}
 											placeRef={placeRef}
+											checks={commitChecks}
+											checkDisabled={askDisabled}
 										/>
 									) : (
 										<>

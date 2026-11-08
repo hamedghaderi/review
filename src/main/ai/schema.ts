@@ -157,6 +157,32 @@ export const conclusionSchema = z.object({
 export const CONCLUSION_SCHEMA_NAME = 'change_conclusion'
 export const CONCLUSION_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(conclusionSchema, { target: 'draft-7' }))
 
+/** One commit's diff read against its message. */
+export const commitCheckSchema = z.object({
+	verdict: z
+		.enum(['matches', 'partly', 'differs'])
+		.describe(
+			'"matches": the diff does what the message says and nothing else of note. "partly": mostly, with gaps or extras. "differs": the message and the diff tell different stories.',
+		),
+	summary: z.string().describe('One or two plain sentences on how the diff compares with the message.'),
+	notes: z
+		.array(
+			z.object({
+				kind: z
+					.enum(['missing', 'unmentioned', 'other'])
+					.describe(
+						'"missing": the message says it but the diff does not do it. "unmentioned": the diff does it but the message does not say. "other": anything else worth knowing.',
+					),
+				text: z.string().describe('What it is, in one or two plain sentences.'),
+				path: z.string().nullable().describe('The changed file it is about, as listed; null when it is about the commit as a whole.'),
+				line: z.number().int().nullable().describe('A line number in the new version of that file, from the diff; null when none fits.'),
+			}),
+		)
+		.describe('Up to eight differences between the message and the diff, most important first. Empty when it matches.'),
+})
+export const COMMIT_CHECK_SCHEMA_NAME = 'commit_check'
+export const COMMIT_CHECK_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(commitCheckSchema, { target: 'draft-7' }))
+
 export const overviewSchema = z.object({
 	purpose: z
 		.string()
