@@ -7,6 +7,7 @@ import { Splitter } from './Splitter.tsx'
 import type { PostedState } from './Comment.tsx'
 import type { SymbolRequest } from './SymbolNav.tsx'
 import { keyLabel } from './keymap.ts'
+import { buildTree, displayPath, flatten } from './tree.ts'
 import { CommitCheckPanel, type CommitChecks } from './CommitCheck.tsx'
 import type { CommitCheckNote } from '../../shared/types.ts'
 
@@ -38,6 +39,8 @@ interface Props {
 	placeRef: React.RefObject<(() => number) | null>
 	checks: CommitChecks
 	checkDisabled: string | null // why the AI can't check commits now
+	// Walking through the commits: file by file, then on to the next commit when you say so. Null: not walking.
+	walk: { onStop(): void; onFinish(): void } | null
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -54,7 +57,11 @@ const NOT_ASKING: ReadonlySet<string> = new Set()
 export function CommitView(p: Props) {
 	const { commit, head } = p
 	const c = commit.comparison
-	const [selected, setSelected] = useState<string | null>(c.files[0]?.key ?? null)
+	// The order the file list shows them in, which the walkthrough follows.
+	const ordered = useMemo(() => flatten(buildTree(c.files)), [c.files])
+	const [selected, setSelected] = useState<string | null>(ordered[0]?.key ?? null)
+	const fileIndex = ordered.findIndex((f) => f.key === selected)
+	const nextFile = fileIndex >= 0 ? (ordered[fileIndex + 1] ?? null) : null
 	const [maps, setMaps] = useState<ReadonlyMap<string, MapState>>(new Map())
 	const [bodyOpen, setBodyOpen] = useState(true)
 	const [notice, setNotice] = useState<string | null>(null)
@@ -265,6 +272,31 @@ export function CommitView(p: Props) {
 					/>
 				) : (
 					<div className="empty muted">Select a file.</div>
+				)}
+				{p.walk && (
+					<div className="walk-bar" role="region" aria-label="Walkthrough">
+						<span className="muted small nowrap">
+							Walkthrough · commit {index + 1} of {total}
+							{ordered.length > 1 && fileIndex >= 0 ? ` · file ${fileIndex + 1} of ${ordered.length}` : ''}
+						</span>
+						<span className="spacer" />
+						<button className="btn small ghost" onClick={p.walk.onStop}>
+							Stop walkthrough
+						</button>
+						{nextFile ? (
+							<button className="btn small primary" onClick={() => setSelected(nextFile.key)}>
+								Next file: {displayPath(nextFile)}
+							</button>
+						) : index < total - 1 ? (
+							<button className="btn small primary" onClick={() => p.onStep(1)}>
+								Continue to commit {index + 2} of {total}
+							</button>
+						) : (
+							<button className="btn small primary" onClick={p.walk.onFinish}>
+								Finish: see all changes
+							</button>
+						)}
+					</div>
 				)}
 			</section>
 		</>

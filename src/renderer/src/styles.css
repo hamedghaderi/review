@@ -5753,3 +5753,22 @@ textarea.style-edit {
 .commit-check-kind.kind-unmentioned {
 	color: var(--warn-fg);
 }
+.check.sub-check {
+	margin-left: 24px;
+}
+.walk-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border-top: 1px solid var(--border);
+	background: var(--panel);
+	flex-shrink: 0;
+	min-width: 0;
+}
+.walk-bar .btn.primary {
+	max-width: 50%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
