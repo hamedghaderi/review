@@ -205,6 +205,40 @@ export async function commitMessages(
 		.map(([sha, subject, body]) => ({ sha, subject, body: body.trim() }))
 }
 
+/**
+ * The commits from `base` (left out) to `head` to step through one at a time: oldest first, without merges, the first
+ * `max` when there are more. `total` counts them all.
+ */
+export async function listCommits(
+	cwd: string,
+	base: string,
+	head: string,
+	max: number,
+): Promise<{ commits: Array<{ sha: string; parent: string; subject: string; author: string; at: string }>; total: number }> {
+	if (!isSha(base) || !isSha(head)) return { commits: [], total: 0 }
+	const r = await git(
+		cwd,
+		['log', '--no-merges', '--reverse', '--format=%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1e', `${base}..${head}`],
+		32 * 1024 * 1024,
+	)
+	if (r.code !== 0) throw new AppFail('git-failed', `Could not list the commits: ${r.stderr.trim() || `exit ${r.code}`}`)
+	const all = r.stdout
+		.toString('utf8')
+		.split('\x1e')
+		.map((x) => x.replace(/^\n/, '').split('\x1f'))
+		.filter((x) => x.length === 5 && isSha(x[0]))
+		.map(([sha, parents, author, at, subject]) => ({ sha, parent: parents.split(' ')[0] ?? '', subject, author, at }))
+		.filter((c) => isSha(c.parent)) // a root commit has nothing to compare with
+	return { commits: all.slice(0, max), total: all.length }
+}
+
+/** A commit's message without its subject line, trimmed. */
+export async function commitBody(cwd: string, sha: string): Promise<string> {
+	if (!isSha(sha)) return ''
+	const r = await git(cwd, ['log', '-1', '--format=%b', sha], 1024 * 1024)
+	return r.code === 0 ? r.stdout.toString('utf8').trim() : ''
+}
+
 export async function resolveCommit(cwd: string, rev: string): Promise<string | null> {
 	const r = await git(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${rev}^{commit}`])
 	const sha = r.stdout.toString('utf8').trim()

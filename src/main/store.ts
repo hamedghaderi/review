@@ -25,6 +25,7 @@ export interface StoreData {
 	theme?: ThemeSettings // light or dark and the colour theme; absent until you choose one
 	keymap?: KeymapOverrides // the shortcuts you changed; the others keep their defaults
 	sounds?: SoundPrefs // the sound each event plays; absent until you change one
+	stepCommits?: boolean // Settings › Reviewing: step through a review's commits; absent (off) until turned on
 	reviewStyle?: ReviewStyle // how you word review comments; absent until you build it
 	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
@@ -155,6 +156,7 @@ export function migrate(raw: unknown): StoreData {
 		...(d.theme ? { theme: parseTheme(d.theme) } : {}),
 		...(d.keymap ? { keymap: parseKeymap(d.keymap, process.platform === 'darwin') } : {}),
 		...(d.sounds ? { sounds: storedSounds(d.sounds) } : {}),
+		...(d.stepCommits === true ? { stepCommits: true } : {}),
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
 		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
 	}

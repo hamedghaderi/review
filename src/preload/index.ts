@@ -9,6 +9,7 @@ import {
 	type McpSettingsView,
 	type Review,
 	type ReviewApi,
+	type ReviewingPrefs,
 } from '../shared/types.ts'
 import type { SoundId } from '../shared/sounds.ts'
 import type { ThemeSettings } from '../shared/theme.ts'
@@ -209,6 +210,16 @@ const api: ReviewApi = {
 		return () => ipcRenderer.removeListener(IPC.keymapChanged, listener)
 	},
 	keymapRecording: (on) => ipcRenderer.invoke(IPC.keymapRecording, on),
+	reviewing: () => ipcRenderer.invoke(IPC.reviewing),
+	setReviewing: (next) => ipcRenderer.invoke(IPC.setReviewing, next),
+	onReviewingChanged: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, next: ReviewingPrefs): void => handler(next)
+		ipcRenderer.on(IPC.reviewingChanged, listener)
+		return () => ipcRenderer.removeListener(IPC.reviewingChanged, listener)
+	},
+	commitList: (reviewId) => ipcRenderer.invoke(IPC.commitList, reviewId),
+	openCommit: (reviewId, sha) => ipcRenderer.invoke(IPC.openCommit, reviewId, sha),
+	commitFileMap: (reviewId, commitId, fileKey) => ipcRenderer.invoke(IPC.commitFileMap, reviewId, commitId, fileKey),
 	onSidebarToggle: (handler) => {
 		const listener = (): void => handler()
 		ipcRenderer.on(IPC.sidebarToggle, listener)

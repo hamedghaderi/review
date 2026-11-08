@@ -54,7 +54,7 @@ import type {
 	SymbolLookup,
 	TargetProbe,
 } from '../shared/types.ts'
-import { targetKey } from '../shared/types.ts'
+import { MAX_STEP_COMMITS, targetKey, type CommitList, type CommitView } from '../shared/types.ts'
 import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
 import {
 	aheadBehind,
@@ -63,7 +63,9 @@ import {
 	compareBranches,
 	compareCommits,
 	changesBetween,
+	commitBody,
 	commitMessages,
+	listCommits,
 	compareSnapshot,
 	ensureCommits,
 	filesAt,
@@ -82,6 +84,8 @@ import {
 	shortRef,
 	type ComparisonData,
 } from './git.ts'
+import { Mapper } from './linemap.ts'
+import type { CommitFileMap } from '../shared/commitStep.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
 import { parsePatch, pickSection } from './patch.ts'
 import { Publisher } from './publish.ts'
@@ -146,6 +150,9 @@ export function defaultBrowserState(): BrowserState {
 export class ReviewService {
 	private repos = new Map<string, RepoInfo>()
 	private comparisons = new Map<string, ComparisonData>()
+	// Commits opened on their own (parent..sha), most recent last; only the diff reads use them.
+	private commitViews = new Map<string, ComparisonData>()
+	private commitMappers = new Map<string, Mapper>() // "commit view id>head sha" → its line map, which caches what it reads
 	private store: ReviewStore
 	private images: ContextImages
 	private watched: { at: number; prs: Array<WatchedPr> } | null = null
@@ -1698,6 +1705,88 @@ export class ReviewService {
 		return m.selected
 	}
 
+	/** Settings › Reviewing: stepping through commits is off until turned on, and nothing here runs while it is off. */
+	private requireStepCommits(): void {
+		if (this.store.read().stepCommits !== true)
+			throw new AppFail('invalid-input', 'Stepping through commits is off. Turn it on in Settings › Reviewing.')
+	}
+
+	/** An open pull request or branch review, to step through its commits. */
+	private steppable(reviewId: string): ComparisonData {
+		this.requireStepCommits()
+		const data = this.comparisons.get(reviewId)
+		if (!data) throw new AppFail('not-found', 'That comparison is not loaded.')
+		if (data.comparison.target?.kind === 'commits') throw new AppFail('invalid-input', 'A commits review is already a view of its commits.')
+		return data
+	}
+
+	/** The review's own commits, oldest first, without merges. */
+	async commitList(reviewId: string): Promise<CommitList> {
+		const data = this.steppable(reviewId)
+		const c = data.comparison
+		const { commits, total } = await listCommits(data.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
+		return { reviewId, commits, total }
+	}
+
+	/** One of the review's commits on its own: parent..sha, kept so its files can be read like any comparison's. */
+	async openCommit(reviewId: string, sha: string): Promise<CommitView> {
+		const data = this.steppable(reviewId)
+		const c = data.comparison
+		const { commits } = await listCommits(data.root, c.baseSha, c.headSha, Number.MAX_SAFE_INTEGER)
+		const entry = commits.find((x) => x.sha === sha)
+		if (!entry) throw new AppFail('not-found', 'That commit is not one of this review’s commits.')
+		const id = `${entry.parent}..${entry.sha}`
+		let view = this.commitViews.get(id)
+		if (!view) {
+			const { files, blobs } = await changesBetween(data.root, entry.parent, entry.sha, true)
+			view = {
+				root: data.root,
+				blobs,
+				comparison: {
+					id,
+					repoId: c.repoId,
+					baseRef: entry.parent,
+					baseTipSha: entry.parent,
+					baseSha: entry.parent,
+					headSha: entry.sha,
+					headRef: null,
+					target: { kind: 'commits', from: entry.parent, to: entry.sha, mergeBase: false },
+					pr: null,
+					files,
+				},
+			}
+		}
+		this.commitViews.delete(id)
+		this.commitViews.set(id, view)
+		while (this.commitViews.size > 40) this.commitViews.delete(this.commitViews.keys().next().value!)
+		return { comparison: view.comparison, entry, body: await commitBody(data.root, entry.sha) }
+	}
+
+	/** How a file of an opened commit lines up with the review's head: the file there, and what changed in between. */
+	async commitFileMap(reviewId: string, commitId: string, fileKey: string): Promise<CommitFileMap> {
+		const data = this.steppable(reviewId)
+		const view = this.commitViews.get(commitId)
+		if (!view) throw new AppFail('not-found', 'Open that commit again.')
+		const file = view.comparison.files.find((x) => x.key === fileKey)
+		if (!file) throw new AppFail('not-found', 'That file is not part of this commit.')
+		const none = (reason: string): CommitFileMap => ({ headFileKey: null, reason, shifts: [] })
+		if (!file.newPath) return none('This commit deletes the file, so there are no lines of it left to comment on.')
+		const key = `${commitId}>${data.comparison.headSha}`
+		let mapper = this.commitMappers.get(key)
+		if (!mapper) {
+			mapper = new Mapper(data.root, view.comparison.headSha, data.comparison.headSha)
+			this.commitMappers.set(key, mapper)
+			while (this.commitMappers.size > 40) this.commitMappers.delete(this.commitMappers.keys().next().value!)
+		}
+		const m = await mapper.move(file.newPath)
+		if (!m.path) return none(`A later commit deletes ${file.newPath}, so comments on it have nowhere to go.`)
+		const at = data.comparison.files.find((x) => x.newPath === m.path)
+		if (!at) return none(`${m.path} ends up unchanged in this review, so GitHub has no lines of it to comment on.`)
+		const shifts = await mapper.shifts(m)
+		if (!shifts) return none('This file is binary, so its lines can’t be followed to the latest commit.')
+		return { headFileKey: at.key, reason: null, shifts }
+	}
+
 	private repo(repoId: string): RepoInfo {
 		const r = this.repos.get(repoId)
 		if (!r) throw new AppFail('not-found', 'That repository is not open.')
@@ -1705,7 +1794,7 @@ export class ReviewService {
 	}
 
 	private loaded(comparisonId: string): ComparisonData {
-		const data = this.comparisons.get(comparisonId)
+		const data = this.comparisons.get(comparisonId) ?? this.commitViews.get(comparisonId)
 		if (!data) throw new AppFail('not-found', 'That comparison is not loaded.')
 		return data
 	}
