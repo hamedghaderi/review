@@ -448,6 +448,12 @@ function registerIpc(): void {
 		connections.checkChoice(choice)
 		return service.startAi(comparisonId(reviewId), scope, choice, overBudget === true)
 	})
+	handle(IPC.startCommitReview, (reviewId: unknown, sha: unknown, reviewer: unknown, overBudget: unknown) => {
+		const choice = reviewerChoice(reviewer)
+		connections.checkChoice(choice)
+		return service.startCommitReview(comparisonId(reviewId), commitSha(sha), choice, overBudget === true)
+	})
+	handle(IPC.commitRuns, async (reviewId: unknown) => service.commitRuns(comparisonId(reviewId)))
 	handle(IPC.aiEstimate, async (reviewId: unknown, reviewer: unknown, scope: unknown) =>
 		service.estimateAi(comparisonId(reviewId), reviewerChoice(reviewer), scope),
 	)

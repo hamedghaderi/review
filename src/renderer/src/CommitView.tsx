@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Anchor, Comparison, CommitView as CommitData, Review } from '../../shared/types.ts'
+import type { Anchor, Comparison, CommitView as CommitData, Finding, Review, ReviewerChoice } from '../../shared/types.ts'
 import { anchorToCommit, anchorToHead, type CommitFileMap } from '../../shared/commitStep.ts'
 import { DiffView } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
@@ -10,6 +10,8 @@ import { keyLabel } from './keymap.ts'
 import { buildTree, displayPath, flatten } from './tree.ts'
 import { CommitCheckPanel, type CommitChecks } from './CommitCheck.tsx'
 import type { CommitCheckNote } from '../../shared/types.ts'
+import { CommitFindings, type CommitRuns } from './CommitRuns.tsx'
+import type { RevealRequest } from './DiffView.tsx'
 
 /** What the review does with drafts and comments; shared by the review's own diff and a commit's. */
 export interface DraftHandlers {
@@ -40,7 +42,13 @@ interface Props {
 	checks: CommitChecks
 	checkDisabled: string | null // why the AI can't check commits now
 	// Walking through the commits: file by file, then on to the next commit when you say so. Null: not walking.
-	walk: { onStop(): void; onFinish(): void } | null
+	// `ai`: each commit is reviewed by the AI as you reach it, and moving on waits for that review.
+	walk: { ai: boolean; onStop(): void; onFinish(): void } | null
+	runs: CommitRuns // the AI's reviews of the review's commits
+	reviewer: ReviewerChoice | null // who reviews a commit
+	aiDisabled: string | null // why the AI can't review now
+	onAddFinding(f: Finding): void // a commit's finding, its anchor already moved to the head, as a draft
+	onDecide(f: Finding, status: 'dismissed' | 'open'): void
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -65,6 +73,8 @@ export function CommitView(p: Props) {
 	const [maps, setMaps] = useState<ReadonlyMap<string, MapState>>(new Map())
 	const [bodyOpen, setBodyOpen] = useState(true)
 	const [notice, setNotice] = useState<string | null>(null)
+	const [finding, setFinding] = useState<Finding | null>(null) // the commit finding opened in the list
+	const [reveal, setReveal] = useState<RevealRequest | null>(null)
 
 	useEffect(() => {
 		let live = true
@@ -157,6 +167,34 @@ export function CommitView(p: Props) {
 		p.drafts.startWith(r.anchor, body)
 	}
 
+	// The commit's findings: where they would go at the head, and opening one at its line here.
+	const laterChange = (f: Finding): string | null => {
+		const m = maps.get(f.anchor.fileKey)
+		if (!m || 'error' in m || !m.headFileKey || f.anchor.side !== 'new') return null
+		const r = anchorToHead(f.anchor, m, head, commit.entry.sha)
+		return 'refused' in r ? r.refused : null
+	}
+	const openFinding = (f: Finding): void => {
+		setFinding((cur) => (cur?.id === f.id ? null : f))
+		setSelected(f.anchor.fileKey)
+		setReveal({ fileKey: f.anchor.fileKey, itemId: null, anchor: f.anchor, nonce: Date.now() })
+	}
+	const addFinding = (f: Finding): void => {
+		setNotice(null)
+		const m = maps.get(f.anchor.fileKey)
+		if (!m || 'error' in m) return setNotice('That file can’t be lined up with the latest commit yet. Try again in a moment.')
+		const r = anchorToHead(f.anchor, m, head, commit.entry.sha)
+		if ('anchor' in r) return p.onAddFinding({ ...f, anchor: r.anchor })
+		// Its lines changed later (or are removed lines): the comment goes on the file and says where it was.
+		const onFile = anchorToHead({ ...f.anchor, side: null, startLine: null, endLine: null }, m, head, commit.entry.sha)
+		if ('refused' in onFile) return setNotice(onFile.refused)
+		const lines = f.anchor.startLine === f.anchor.endLine ? `line ${f.anchor.startLine}` : `lines ${f.anchor.startLine}–${f.anchor.endLine}`
+		const where = `In ${commit.entry.sha.slice(0, 7)}, ${lines}${f.anchor.side === 'old' ? ' (removed)' : ', changed in a later commit'}`
+		p.onAddFinding({ ...f, anchor: onFile.anchor, body: `${where}: ${f.body}` })
+	}
+	const reviewing = p.runs.running(commit.entry.sha)
+	const waitForAi = !!p.walk?.ai && reviewing
+
 	const { index, total } = p.position
 	const next = keyLabel('commitNext')
 	const prev = keyLabel('commitPrev')
@@ -208,6 +246,19 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
+					<CommitFindings
+						sha={commit.entry.sha}
+						runs={p.runs}
+						review={p.review}
+						reviewer={p.reviewer}
+						disabled={p.aiDisabled}
+						selected={finding?.id ?? null}
+						laterChange={laterChange}
+						onSelect={openFinding}
+						onAdd={addFinding}
+						onDismiss={(f) => p.onDecide(f, 'dismissed')}
+						onRestore={(f) => p.onDecide(f, 'open')}
+					/>
 					<CommitCheckPanel
 						sha={commit.entry.sha}
 						cc={p.checks}
@@ -236,8 +287,8 @@ export function CommitView(p: Props) {
 						comments={fileComments}
 						drafts={fileDrafts}
 						activeDraftId={p.activeDraftId}
-						reveal={null}
-						highlight={null}
+						reveal={reveal}
+						highlight={finding && finding.anchor.fileKey === file.key ? finding.anchor : null}
 						threads={NO_THREADS}
 						published={published}
 						questions={NO_QUESTIONS}
@@ -288,11 +339,21 @@ export function CommitView(p: Props) {
 								Next file: {displayPath(nextFile)}
 							</button>
 						) : index < total - 1 ? (
-							<button className="btn small primary" onClick={() => p.onStep(1)}>
+							<button
+								className="btn small primary"
+								onClick={() => p.onStep(1)}
+								disabled={waitForAi}
+								title={waitForAi ? 'Wait for the AI to finish reviewing this commit' : undefined}
+							>
 								Continue to commit {index + 2} of {total}
 							</button>
 						) : (
-							<button className="btn small primary" onClick={p.walk.onFinish}>
+							<button
+								className="btn small primary"
+								onClick={p.walk.onFinish}
+								disabled={waitForAi}
+								title={waitForAi ? 'Wait for the AI to finish reviewing this commit' : undefined}
+							>
 								Finish: see all changes
 							</button>
 						)}

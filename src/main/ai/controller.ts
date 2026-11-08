@@ -336,7 +336,7 @@ export class AiController {
 		scope: AiScope,
 		choice: ModelSelection | ReviewerChoice,
 		// overBudget: you were told a daily or monthly budget is reached and chose to start anyway.
-		options: { background?: string; carried?: RunInput['carried']; overBudget?: boolean } = {},
+		options: { background?: string; carried?: RunInput['carried']; overBudget?: boolean; commitOf?: RunInput['commitOf'] } = {},
 	): Promise<AiRun> {
 		this.assertIdle()
 		this.starting = true
@@ -410,6 +410,7 @@ export class AiController {
 				scope,
 				previousFindings: this.runsFor(access.comparison.repoId, reviewId).flatMap((r) => r.findings),
 				carried: options.carried ?? null,
+				...(options.commitOf ? { commitOf: options.commitOf } : {}),
 			},
 			{
 				...this.runOptions(config),
@@ -1287,7 +1288,7 @@ export class AiController {
 	private async launch(
 		access: ComparisonAccess,
 		reviewId: string,
-		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry' | 'carried'>,
+		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry' | 'carried' | 'commitOf'>,
 		options: RunnerOptions,
 		connectionIds: Array<string>,
 		background: string | null = null,

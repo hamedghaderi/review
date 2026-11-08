@@ -5772,3 +5772,59 @@ textarea.style-edit {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+.commit-ai {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 4px;
+}
+.commit-findings {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 200px;
+	overflow: auto;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+.commit-findings li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 8px;
+	padding: 4px 8px;
+	border-top: 1px solid var(--border);
+}
+.commit-findings li:first-child {
+	border-top: 0;
+}
+.commit-findings li.on {
+	background: var(--accent-soft);
+}
+.commit-findings li.dismissed .commit-finding {
+	opacity: 0.6;
+}
+.commit-finding {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.commit-finding-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+.commit-finding-body {
+	flex-basis: 100%;
+	margin: 2px 0 4px;
+	white-space: pre-wrap;
+}

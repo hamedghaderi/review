@@ -474,6 +474,11 @@ export interface CommitCheckEstimate {
 	over: Array<string> // budgets already reached, in words; empty when none is set
 }
 
+/** Where the AI runs on one commit of a review are kept: apart from the review's own runs. */
+export function commitRunKey(reviewId: string, sha: string): string {
+	return `commit:${sha}@${reviewId}`
+}
+
 /** Settings › Reviewing. Each is off until you turn it on. */
 export interface ReviewingPrefs {
 	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
@@ -1525,6 +1530,9 @@ export interface AiRun {
 		outputTokens: number
 	} | null
 	notices?: Array<string> // informational, e.g. limits reduced to fit the model, JSON-mode fallback
+	// A review of one commit of a pull request or branch review (its anchors are in that commit's version). Its
+	// `reviewId` is commitRunKey(reviewId, sha), so it never mixes with the review's own runs.
+	commitOf?: { reviewId: string; sha: string }
 	promptVersion: string
 	scope: AiScope
 	status: AiRunStatus
@@ -1929,6 +1937,8 @@ export const IPC = {
 	openCommit: 'diff:open-commit',
 	commitFileMap: 'diff:commit-file-map',
 	checkCommit: 'ai:check-commit',
+	startCommitReview: 'ai:start-commit-review',
+	commitRuns: 'ai:commit-runs',
 	estimateCommitChecks: 'ai:estimate-commit-checks',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
@@ -2183,6 +2193,13 @@ export interface ReviewApi {
 	 * with `over-budget` when a daily or monthly budget is reached, unless `overBudget` (you chose to go on).
 	 */
 	checkCommit(reviewId: string, sha: string, overBudget: boolean): Promise<Result<CommitCheck>>
+	/**
+	 * Starts an AI review of one of the review's commits, on its own diff, with its message and the earlier commits'
+	 * messages as context. Its run updates arrive through onAiRunUpdate, with `commitOf` set.
+	 */
+	startCommitReview(reviewId: string, sha: string, reviewer: ReviewerChoice, overBudget: boolean): Promise<Result<AiRun>>
+	/** The AI runs on the review's commits, by commit SHA, oldest first. */
+	commitRuns(reviewId: string): Promise<Result<Record<string, Array<AiRun>>>>
 	/** What checking these commits would send and cost. */
 	estimateCommitChecks(reviewId: string, shas: Array<string>): Promise<Result<CommitCheckEstimate>>
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */

@@ -59,8 +59,10 @@ import {
 	targetKey,
 	type CommitCheck,
 	type CommitCheckEstimate,
+	type CommitEntry,
 	type CommitList,
 	type CommitView,
+	commitRunKey,
 } from '../shared/types.ts'
 import type { CommitCheckInput } from './ai/commitCheck.ts'
 import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
@@ -129,6 +131,32 @@ const CHANGED_LINES_LIMIT = 10_000
 const FILE_LINES_LIMIT = 8 * 1024 * 1024
 const PR_ATTEMPTS = 3
 const MAX_EARLIER_LIMITATIONS = 12
+const MAX_COMMIT_BODY = 4000
+const MAX_EARLIER_COMMITS = 60
+
+/**
+ * The notes an AI review of one commit is given: which commit of how many, its message, the earlier commits' subjects
+ * (so it knows what was done before), then your own notes for the review.
+ */
+export function commitRunNotes(view: CommitView, index: number, commits: Array<CommitEntry>, yours: string): string {
+	const body = view.body.length > MAX_COMMIT_BODY ? `${view.body.slice(0, MAX_COMMIT_BODY)}\n(message cut)` : view.body
+	const earlier = index > 0 ? commits.slice(Math.max(0, index - MAX_EARLIER_COMMITS), index) : []
+	return [
+		`This review covers one commit${index >= 0 ? `, commit ${index + 1} of ${commits.length}` : ''}, on its own diff. Later commits may change this code again; judge this commit as it is, and do not guess about what comes after it.`,
+		'',
+		'The commit message:',
+		view.entry.subject,
+		...(body ? ['', body] : []),
+		...(earlier.length
+			? [
+					'',
+					`The commits before it, oldest first${index > earlier.length ? ` (the last ${earlier.length})` : ''}:`,
+					...earlier.map((c) => `- ${c.subject}`),
+				]
+			: []),
+		...(yours.trim() ? ['', 'The reviewer’s own notes for this pull request:', yours.trim()] : []),
+	].join('\n')
+}
 
 function blobLines(buf: Buffer, truncated: boolean): FileLinesResult {
 	if (truncated) return { kind: 'too-large', reason: `File exceeds ${mb(FILE_LINES_LIMIT)}` }
@@ -1294,7 +1322,9 @@ export class ReviewService {
 		const id = typeof o?.id === 'string' ? o.id : ''
 		const stored = this.store.read().repos[repoId]?.reviews[id]
 		if (!stored || !this.repos.has(repoId)) throw new AppFail('not-found', 'This review is not open.')
-		const next = reviewUpdate(input, stored, findingRoots(this.ai?.runsFor(repoId, id) ?? []))
+		// Comments and decisions may point at findings of the review's own runs or of its commits' runs.
+		const runs = [...(this.ai?.runsFor(repoId, id) ?? []), ...this.commitRunsOf(repoId, id)]
+		const next = reviewUpdate(input, stored, findingRoots(runs))
 		// Comments an automatic review added that this window has not loaded yet stay; once it saves them, it owns them.
 		const unseen = this.unseenComments.get(id)
 		if (unseen) {
@@ -1777,6 +1807,57 @@ export class ReviewService {
 		for (const f of view.comparison.files)
 			if (!f.binary && !f.submodule) patches.set(f.key, await this.loadPatch(view.comparison.id, f.key, false).catch(() => null))
 		return { entry: view.entry, body: view.body, files: view.comparison.files, patches }
+	}
+
+	/**
+	 * Starts an AI review of one of the review's commits, on that commit's own diff, with its message and the earlier
+	 * commits' messages as context (beside your notes and files for the review). Its run is kept under
+	 * commitRunKey(reviewId, sha), apart from the review's own runs; its findings are anchored in that commit's version.
+	 */
+	async startCommitReview(reviewId: string, sha: string, choice: ReviewerChoice, overBudget: boolean): Promise<AiRun> {
+		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		const head = this.steppable(reviewId)
+		const repoId = head.comparison.repoId
+		if (!this.store.read().repos[repoId]?.reviews[reviewId]) throw new AppFail('not-found', 'That review is not open.')
+		const view = await this.openCommit(reviewId, sha)
+		const data = this.commitViews.get(view.comparison.id)!
+		const { commits } = await listCommits(head.root, head.comparison.baseSha, head.comparison.headSha, MAX_STEP_COMMITS)
+		const at = commits.findIndex((x) => x.sha === sha)
+		const notes = commitRunNotes(view, at, commits, this.store.read().repos[repoId]?.reviews[reviewId]?.context?.notes ?? '')
+		const id = view.comparison.id
+		const access: ComparisonAccess = {
+			comparison: data.comparison,
+			loadPatch: (key) => this.loadPatch(id, key, false),
+			loadFileLines: (key) => this.loadFileLines(id, key),
+			findRelated: (sources, signal) => findRelated(data.root, data.comparison.headSha, sources, signal),
+			testExamples: (fileKey) => this.testExamples(data, fileKey),
+			tools: (budget, external) =>
+				createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
+			openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
+			reviewContext: () => {
+				const c = this.store.read().repos[repoId]?.reviews[reviewId]?.context
+				return { notes, files: c?.files ?? [], images: c?.images ?? [] }
+			},
+		}
+		return this.ai.start(access, commitRunKey(reviewId, sha), { kind: 'all' }, choice, {
+			overBudget,
+			commitOf: { reviewId, sha },
+		})
+	}
+
+	/** The AI runs on the review's commits, by commit SHA, oldest first. */
+	commitRuns(reviewId: string): Record<string, Array<AiRun>> {
+		const data = this.steppable(reviewId)
+		const out: Record<string, Array<AiRun>> = {}
+		for (const r of this.commitRunsOf(data.comparison.repoId, reviewId)) (out[r.commitOf!.sha] ??= []).push(structuredClone(r))
+		return out
+	}
+
+	private commitRunsOf(repoId: string, reviewId: string): Array<AiRun> {
+		const all = this.store.read().repos[repoId]?.aiRuns ?? {}
+		return Object.entries(all).flatMap(([key, runs]) =>
+			key.startsWith('commit:') ? runs.filter((r) => r.commitOf?.reviewId === reviewId) : [],
+		)
 	}
 
 	/** Whether one commit's diff does what its message says; see AiController.checkCommit. */
