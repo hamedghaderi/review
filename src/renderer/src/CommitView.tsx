@@ -7,6 +7,8 @@ import { Splitter } from './Splitter.tsx'
 import type { PostedState } from './Comment.tsx'
 import type { SymbolRequest } from './SymbolNav.tsx'
 import { keyLabel } from './keymap.ts'
+import { CommitCheckPanel, type CommitChecks } from './CommitCheck.tsx'
+import type { CommitCheckNote } from '../../shared/types.ts'
 
 /** What the review does with drafts and comments; shared by the review's own diff and a commit's. */
 export interface DraftHandlers {
@@ -18,6 +20,7 @@ export interface DraftHandlers {
 	edit(commentId: string): void
 	remove(commentId: string): void
 	showFinding?(findingId: string): void
+	startWith(a: Anchor, body: string): void // a draft with text already in it
 }
 
 interface Props {
@@ -33,6 +36,8 @@ interface Props {
 	onAllChanges(): void
 	onLookup(r: SymbolRequest): void
 	placeRef: React.RefObject<(() => number) | null>
+	checks: CommitChecks
+	checkDisabled: string | null // why the AI can't check commits now
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -52,6 +57,7 @@ export function CommitView(p: Props) {
 	const [selected, setSelected] = useState<string | null>(c.files[0]?.key ?? null)
 	const [maps, setMaps] = useState<ReadonlyMap<string, MapState>>(new Map())
 	const [bodyOpen, setBodyOpen] = useState(true)
+	const [notice, setNotice] = useState<string | null>(null)
 
 	useEffect(() => {
 		let live = true
@@ -112,6 +118,38 @@ export function CommitView(p: Props) {
 		return anchorToHead(a, map, head, commit.entry.sha)
 	}
 
+	const fileAt = (path: string) => c.files.find((f) => f.newPath === path || f.oldPath === path) ?? null
+	// A check's note as a comment: at its line in the latest commit, or on the file (naming the commit and line) when
+	// that line changed later.
+	const commentFrom = (n: CommitCheckNote): void => {
+		setNotice(null)
+		const f = n.path ? fileAt(n.path) : null
+		const m = f ? maps.get(f.key) : undefined
+		if (!f || !m || 'error' in m) return setNotice('That file can’t be lined up with the latest commit yet. Try again in a moment.')
+		const at = (line: number | null): Anchor => ({
+			repoId: c.repoId,
+			baseSha: c.baseSha,
+			headSha: c.headSha,
+			fileKey: f.key,
+			oldPath: f.oldPath,
+			newPath: f.newPath,
+			side: line ? 'new' : null,
+			startLine: line,
+			endLine: line,
+			excerpt: '',
+		})
+		const sha = commit.entry.sha.slice(0, 7)
+		let r = anchorToHead(at(n.line), m, head, commit.entry.sha)
+		let body = n.text
+		if ('refused' in r && n.line) {
+			r = anchorToHead(at(null), m, head, commit.entry.sha)
+			body = `In ${sha}, line ${n.line}: ${n.text}`
+		}
+		if ('refused' in r) return setNotice(r.refused)
+		setSelected(f.key)
+		p.drafts.startWith(r.anchor, body)
+	}
+
 	const { index, total } = p.position
 	const next = keyLabel('commitNext')
 	const prev = keyLabel('commitPrev')
@@ -163,7 +201,22 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
+					<CommitCheckPanel
+						sha={commit.entry.sha}
+						cc={p.checks}
+						disabled={p.checkDisabled}
+						onOpenFile={(path) => {
+							const f = fileAt(path)
+							if (f) setSelected(f.key)
+						}}
+						onComment={commentFrom}
+					/>
 					{map && !map.headFileKey && <div className="muted small commit-note">Comments can’t go on this file here: {map.reason}</div>}
+					{notice && (
+						<button className="link small error-text" onClick={() => setNotice(null)} title="Dismiss">
+							{notice} ✕
+						</button>
+					)}
 				</div>
 				{c.files.length === 0 ? (
 					<div className="empty muted">This commit changes no files.</div>

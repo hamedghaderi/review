@@ -5704,3 +5704,52 @@ textarea.style-edit {
 .commit-note {
 	font-style: italic;
 }
+.commit-check {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 4px;
+}
+.commit-check-head,
+.commit-check-all {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	min-width: 0;
+}
+.commit-check-all {
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--chrome);
+	font-size: 12px;
+}
+.pill.verdict-matches {
+	background: color-mix(in srgb, var(--ok) 14%, transparent);
+	color: var(--ok);
+}
+.pill.verdict-partly {
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+}
+.pill.verdict-differs {
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--danger);
+}
+.commit-check-summary {
+	margin: 0;
+}
+.commit-check-notes {
+	margin: 0;
+	padding-left: 18px;
+	max-height: 160px;
+	overflow: auto;
+}
+.commit-check-kind {
+	font-weight: 600;
+}
+.commit-check-kind.kind-missing,
+.commit-check-kind.kind-unmentioned {
+	color: var(--warn-fg);
+}

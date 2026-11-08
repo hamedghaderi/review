@@ -33,8 +33,18 @@ import {
 	type ReviewLimits,
 	type RunEstimate,
 	type ReviewEvent,
+	type CommitCheck,
+	type CommitCheckEstimate,
 	REVIEW_RULES,
 } from '../../shared/types.ts'
+import {
+	buildCommitCheckRequest,
+	COMMIT_CHECK_INSTRUCTIONS,
+	MAX_COMMIT_CHECK_CHARS,
+	parseCommitCheck,
+	type CommitCheckInput,
+} from './commitCheck.ts'
+import { CHARS_PER_TOKEN } from './context.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import { AppFail } from '../git.ts'
 import type { ReviewStore } from '../store.ts'
@@ -887,6 +897,81 @@ export class AiController {
 			if (r) r.explanation = explanation
 		})
 		return structuredClone(explanation)
+	}
+
+	/**
+	 * Asks `selection`'s model whether one commit's diff does what its message says, and nothing else of note. Only the
+	 * message and that commit's diff are sent, no lookups. Saved on the review by commit, replacing an earlier check.
+	 * With a daily or monthly budget reached it refuses, unless `overBudget`: you were told and chose to go on.
+	 */
+	async checkCommit(
+		repoId: string,
+		reviewId: string,
+		input: Omit<CommitCheckInput, 'maxChars'>,
+		selection: ModelSelection,
+		overBudget: boolean,
+	): Promise<CommitCheck> {
+		const busy = `commit:${reviewId}:${input.entry.sha}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'This commit is already being checked.')
+		this.onDemandBusy.add(busy)
+		let check: CommitCheck
+		try {
+			let config: RunConfig
+			try {
+				config = await this.configFor(selection, 'commit', repoId)
+			} catch (e) {
+				throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+			}
+			const budget = this.budget?.check(connectionsOf([config])) ?? null
+			if (budget?.over.length && !overBudget) throw new AppFail('over-budget', budget.over.join(' '))
+			const l = config.provider.limits
+			const room = capacityChars(l.contextWindow, outputBudget(l), COMMIT_CHECK_INSTRUCTIONS.length)
+			const { request, omitted } = buildCommitCheckRequest({ ...input, maxChars: Math.min(MAX_COMMIT_CHECK_CHARS, room) })
+			try {
+				const response = await config.provider.review(request, AbortSignal.timeout(180_000))
+				check = parseCommitCheck(response.output, input.entry.sha, input.files, omitted, selection.modelId)
+			} catch (e) {
+				throw new AppFail('ai-unavailable', `No check: ${e instanceof Error ? e.message : String(e)}`)
+			}
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.reviews[reviewId]
+			if (r) r.commitChecks = { ...r.commitChecks, [check.sha]: check }
+		})
+		return structuredClone(check)
+	}
+
+	/** What checking these commits with `selection`'s model would send and cost, from the requests it would build. */
+	estimateCommitChecks(inputs: Array<Omit<CommitCheckInput, 'maxChars'>>, selection: ModelSelection): CommitCheckEstimate {
+		const info = this.models?.info(selection)
+		if (!info) throw new AppFail('ai-unavailable', `“${selection.modelId}” is not offered any more.`)
+		const room = capacityChars(info.limits.contextWindow, outputBudget(info.limits), COMMIT_CHECK_INSTRUCTIONS.length)
+		let chars = 0
+		for (const i of inputs) {
+			const { request } = buildCommitCheckRequest({ ...i, maxChars: Math.min(MAX_COMMIT_CHECK_CHARS, room) })
+			chars += request.instructions.length + request.input.length
+		}
+		const tokens = chars / CHARS_PER_TOKEN
+		// As the review estimate measured for requests without lookups; the answer is a short JSON object.
+		const input = { low: Math.round(tokens * 0.8), high: Math.round(tokens * 1.05) }
+		const output = { low: inputs.length * 150, high: inputs.length * 900 }
+		const p = info.price
+		const priced = p && p.source !== 'subscription'
+		return {
+			requests: inputs.length,
+			inputTokens: input,
+			cost: priced
+				? {
+						low: (input.low * p.input + output.low * p.output) / 1_000_000,
+						high: (input.high * p.input + output.high * p.output) / 1_000_000,
+						estimated: p.source === 'catalog',
+					}
+				: null,
+			subscription: p?.source === 'subscription',
+			over: this.budget?.check([{ id: selection.connectionId, label: this.models!.label(selection.connectionId) }]).over ?? [],
+		}
 	}
 
 	/**

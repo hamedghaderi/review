@@ -17,7 +17,16 @@ import {
 	type IpcMainInvokeEvent,
 } from 'electron'
 import { storedSounds, type SoundEvent, type SoundPrefs } from '../shared/sounds.ts'
-import { IPC, type AiRun, type AppUpdate, type BudgetView, type InboxOpen, type Result, type ReviewingPrefs } from '../shared/types.ts'
+import {
+	IPC,
+	MAX_STEP_COMMITS,
+	type AiRun,
+	type AppUpdate,
+	type BudgetView,
+	type InboxOpen,
+	type Result,
+	type ReviewingPrefs,
+} from '../shared/types.ts'
 import { sdkAdapters } from './ai/adapters.ts'
 import { ConnectionService } from './ai/connections.ts'
 import { UsageLog } from './ai/usage.ts'
@@ -259,6 +268,17 @@ function registerIpc(): void {
 	handle(IPC.commitFileMap, (rid: unknown, cid: unknown, key: unknown) =>
 		service.commitFileMap(comparisonId(rid), comparisonId(cid), str(key, 'file')),
 	)
+	handle(IPC.checkCommit, async (rid: unknown, sha: unknown, overBudget: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return service.checkCommit(comparisonId(rid), commitSha(sha), selection, overBudget === true)
+	})
+	handle(IPC.estimateCommitChecks, async (rid: unknown, shas: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		if (!Array.isArray(shas) || shas.length > MAX_STEP_COMMITS) throw new AppFail('invalid-input', 'Invalid commits.')
+		return service.estimateCommitChecks(comparisonId(rid), shas.map(commitSha), selection)
+	})
 	handle(IPC.keymap, async () => store.read().keymap ?? {})
 	handle(IPC.setKeymap, async (raw: unknown) => setKeymap(parseKeymap(raw, IS_MAC)))
 	handle(IPC.keymapRecording, async (on: unknown) => {

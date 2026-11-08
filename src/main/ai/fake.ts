@@ -1,6 +1,7 @@
 import { REVIEW_RULES } from '../../shared/types.ts'
 import {
 	ANSWER_SCHEMA_NAME,
+	COMMIT_CHECK_SCHEMA_NAME,
 	MERGE_SCHEMA_NAME,
 	VERIFY_SCHEMA_NAME,
 	type ModelAnswer,
@@ -127,6 +128,14 @@ export function defaultScript(request: ProviderRequest): ReviewOutput | ModelAns
 		return { verdict: 'unsure', reason: 'Fixture: the finding was not checked.', level: null, checked: [] }
 	if (request.schema?.name === ANSWER_SCHEMA_NAME)
 		return { answer: 'Fixture answer. It does not read the question or the code.', verdict: 'unsure', level: null }
+	if (request.schema?.name === COMMIT_CHECK_SCHEMA_NAME) {
+		const path = /^## (.+)$/m.exec(request.input)?.[1] ?? null
+		return {
+			verdict: 'partly',
+			summary: 'Fixture check. It does not read the message or the diff.',
+			notes: path ? [{ kind: 'unmentioned', text: 'Fixture note on the first changed file, line 2.', path, line: 2 }] : [],
+		} as unknown as ModelAnswer
+	}
 	const findings: Array<ModelFinding> = []
 	for (const excerpt of request.batch.excerpts) {
 		const line =

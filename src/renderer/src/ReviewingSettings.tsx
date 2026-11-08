@@ -32,7 +32,9 @@ export function ReviewingSettings() {
 						Pull request and branch reviews get a commit picker next to the title. Pick a commit to read only its changes, with its message
 						above them{next && prev ? `; ${next} and ${prev} go to the next and previous commit` : ''}. All changes stays the default. A
 						comment you write in a commit moves to the same lines in the latest commit, so it publishes as usual; when those lines change
-						again in a later commit, it asks you to comment there instead. Merge commits are left out.
+						again in a later commit, it asks you to comment there instead. Merge commits are left out. In a commit, the AI (the model for
+						questions) can check whether its diff does what its message says, one commit at a time or all of them after showing the cost; it
+						only runs when you click.
 					</span>
 				</span>
 			</label>

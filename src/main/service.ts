@@ -54,7 +54,15 @@ import type {
 	SymbolLookup,
 	TargetProbe,
 } from '../shared/types.ts'
-import { MAX_STEP_COMMITS, targetKey, type CommitList, type CommitView } from '../shared/types.ts'
+import {
+	MAX_STEP_COMMITS,
+	targetKey,
+	type CommitCheck,
+	type CommitCheckEstimate,
+	type CommitList,
+	type CommitView,
+} from '../shared/types.ts'
+import type { CommitCheckInput } from './ai/commitCheck.ts'
 import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
 import {
 	aheadBehind,
@@ -1760,6 +1768,31 @@ export class ReviewService {
 		this.commitViews.set(id, view)
 		while (this.commitViews.size > 40) this.commitViews.delete(this.commitViews.keys().next().value!)
 		return { comparison: view.comparison, entry, body: await commitBody(data.root, entry.sha) }
+	}
+
+	/** One of the review's commits as the AI check reads it: its message, files and their diffs. */
+	private async commitCheckInput(reviewId: string, sha: string): Promise<Omit<CommitCheckInput, 'maxChars'>> {
+		const view = await this.openCommit(reviewId, sha)
+		const patches = new Map<string, PatchResult | null>()
+		for (const f of view.comparison.files)
+			if (!f.binary && !f.submodule) patches.set(f.key, await this.loadPatch(view.comparison.id, f.key, false).catch(() => null))
+		return { entry: view.entry, body: view.body, files: view.comparison.files, patches }
+	}
+
+	/** Whether one commit's diff does what its message says; see AiController.checkCommit. */
+	async checkCommit(reviewId: string, sha: string, selection: ModelSelection, overBudget: boolean): Promise<CommitCheck> {
+		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		const input = await this.commitCheckInput(reviewId, sha)
+		const repoId = this.loaded(reviewId).comparison.repoId
+		return this.ai.checkCommit(repoId, reviewId, input, selection, overBudget)
+	}
+
+	/** What checking these commits would cost; see AiController.estimateCommitChecks. */
+	async estimateCommitChecks(reviewId: string, shas: Array<string>, selection: ModelSelection): Promise<CommitCheckEstimate> {
+		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		const inputs = []
+		for (const sha of shas) inputs.push(await this.commitCheckInput(reviewId, sha))
+		return this.ai.estimateCommitChecks(inputs, selection)
 	}
 
 	/** How a file of an opened commit lines up with the review's head: the file there, and what changed in between. */

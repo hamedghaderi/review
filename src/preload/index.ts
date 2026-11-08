@@ -220,6 +220,8 @@ const api: ReviewApi = {
 	commitList: (reviewId) => ipcRenderer.invoke(IPC.commitList, reviewId),
 	openCommit: (reviewId, sha) => ipcRenderer.invoke(IPC.openCommit, reviewId, sha),
 	commitFileMap: (reviewId, commitId, fileKey) => ipcRenderer.invoke(IPC.commitFileMap, reviewId, commitId, fileKey),
+	checkCommit: (reviewId, sha, overBudget) => ipcRenderer.invoke(IPC.checkCommit, reviewId, sha, overBudget),
+	estimateCommitChecks: (reviewId, shas) => ipcRenderer.invoke(IPC.estimateCommitChecks, reviewId, shas),
 	onSidebarToggle: (handler) => {
 		const listener = (): void => handler()
 		ipcRenderer.on(IPC.sidebarToggle, listener)
