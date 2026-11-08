@@ -39,7 +39,7 @@ import type {
 	SymbolHit,
 	TargetProbe,
 } from '../../shared/types.ts'
-import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData } from '../../shared/types.ts'
+import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData, type ReviewingPrefs } from '../../shared/types.ts'
 import { CommitView, type DraftHandlers } from './CommitView.tsx'
 import { useCommitChecks } from './CommitCheck.tsx'
 
@@ -1326,11 +1326,16 @@ export function App() {
 
 	// Settings › Reviewing › Step through commits: a commit picker on pull request and branch reviews. Off: none of this
 	// reads anything, and the review shows all its changes as always.
-	const [stepCommits, setStepCommits] = useState(false)
+	const [reviewing, setReviewing] = useState<ReviewingPrefs>({ stepCommits: false, offerWalk: false })
 	useEffect(() => {
-		void window.review.reviewing().then((r) => r.ok && setStepCommits(r.value.stepCommits))
-		return window.review.onReviewingChanged((next) => setStepCommits(next.stepCommits))
+		void window.review.reviewing().then((r) => r.ok && setReviewing(r.value))
+		return window.review.onReviewingChanged(setReviewing)
 	}, [])
+	const stepCommits = reviewing.stepCommits
+	// The walkthrough: commit by commit, file by file, asking before each next commit. It ends when you leave the commits
+	// for all the changes. The offer to start one is made once per review this session.
+	const [walking, setWalking] = useState(false)
+	const [walkOffered, setWalkOffered] = useState<ReadonlySet<string>>(new Set())
 	const steppable = stepCommits && !!comparison && comparison.target?.kind !== 'commits'
 	const [commitList, setCommitList] = useState<CommitList | null>(null)
 	const [commitListError, setCommitListError] = useState<string | null>(null)
@@ -1344,6 +1349,7 @@ export function App() {
 		setCommitLoading(null)
 		setCommitList(null)
 		setCommitListError(null)
+		setWalking(false)
 		if (!steppable || !comparison) return
 		const id = comparison.id
 		void window.review.commitList(id).then((r) => {
@@ -1361,6 +1367,7 @@ export function App() {
 		if (!sha || !comparison) {
 			setOpenCommit(null)
 			setCommitLoading(null)
+			setWalking(false)
 			return
 		}
 		setCommitLoading(sha)
@@ -1374,6 +1381,20 @@ export function App() {
 		setOpenCommit(r.value)
 		setSeenCommits((s) => new Set(s).add(`${id}:${sha}`))
 	}
+	const startWalk = (): void => {
+		if (!comparison || !commitsHere.length) return
+		setWalkOffered((s) => new Set(s).add(comparison.id))
+		void showCommit(commitsHere[0].sha).then(() => setWalking(true))
+	}
+	const offerWalk =
+		reviewing.offerWalk &&
+		steppable &&
+		view === 'review' &&
+		commitsHere.length >= 2 &&
+		!openCommit &&
+		!walking &&
+		!!comparison &&
+		!walkOffered.has(comparison.id)
 	const stepCommit = (dir: 1 | -1): void => {
 		if (!commitsHere.length) return
 		const i = openCommit ? commitIndex : -1
@@ -1741,6 +1762,15 @@ export function App() {
 											{commitLoading && <span className="spinner small" aria-label="Opening the commit" />}
 										</label>
 									)}
+									{steppable && commitsHere.length > 0 && !walking && (
+										<button
+											className="btn small"
+											onClick={startWalk}
+											title="Go through the commits oldest first, file by file, and say when to move on to the next commit"
+										>
+											Walk through
+										</button>
+									)}
 									{comparison.files.length > 0 && (
 										<button
 											className={`btn small conclusion-toggle${conclusionOpen ? ' on' : ''}`}
@@ -1827,6 +1857,21 @@ export function App() {
 										</button>
 									</div>
 								)}
+							{offerWalk && comparison && (
+								<div className="banner" role="status">
+									<span>
+										{comparison.pr ? 'This pull request' : 'This branch'} has {commitsHere.length} commits. Walk through them one at a time,
+										oldest first? You go file by file, and it asks before each next commit.
+									</span>
+									<span className="spacer" />
+									<button className="btn small primary" onClick={startWalk}>
+										Walk through {commitsHere.length} commits
+									</button>
+									<button className="btn small ghost" onClick={() => setWalkOffered((s) => new Set(s).add(comparison.id))}>
+										See all changes
+									</button>
+								</div>
+							)}
 							{view === 'review' && notice && (
 								<button className="banner notice-banner" onClick={() => setNotice(null)} title="Dismiss">
 									{notice} ✕
@@ -1985,6 +2030,7 @@ export function App() {
 											placeRef={placeRef}
 											checks={commitChecks}
 											checkDisabled={askDisabled}
+											walk={walking ? { onStop: () => setWalking(false), onFinish: () => void showCommit(null) } : null}
 										/>
 									) : (
 										<>

@@ -38,6 +38,22 @@ export function ReviewingSettings() {
 					</span>
 				</span>
 			</label>
+			<label className="check sub-check">
+				<input
+					type="checkbox"
+					checked={prefs.offerWalk}
+					disabled={!prefs.stepCommits}
+					onChange={(e) => void set({ ...prefs, offerWalk: e.target.checked })}
+				/>
+				<span>
+					Offer a walkthrough when a review opens
+					<span className="muted block">
+						When a review has two or more commits, it asks whether to walk through them. The walkthrough goes file by file through each
+						commit, oldest first, and asks before moving on to the next commit. Without this, the Walk through button next to the commit
+						picker starts one.
+					</span>
+				</span>
+			</label>
 			{error && <p className="small error-text">{error}</p>}
 		</div>
 	)

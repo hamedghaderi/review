@@ -477,6 +477,7 @@ export interface CommitCheckEstimate {
 /** Settings › Reviewing. Each is off until you turn it on. */
 export interface ReviewingPrefs {
 	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
+	offerWalk: boolean // with stepCommits: on opening a review with several commits, offer to walk through them
 }
 
 /**

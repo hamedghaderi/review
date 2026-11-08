@@ -254,10 +254,14 @@ function registerIpc(): void {
 	})
 	handle(IPC.reviewing, async () => currentReviewing())
 	handle(IPC.setReviewing, async (raw: unknown) => {
-		const on = bool((raw as { stepCommits?: unknown } | null)?.stepCommits, 'step through commits')
+		const o = raw as { stepCommits?: unknown; offerWalk?: unknown } | null
+		const on = bool(o?.stepCommits, 'step through commits')
+		const offer = o?.offerWalk === undefined ? false : bool(o.offerWalk, 'offer a walkthrough')
 		await store.update((d) => {
 			if (on) d.stepCommits = true
 			else delete d.stepCommits
+			if (offer) d.offerWalk = true
+			else delete d.offerWalk
 		})
 		const next = currentReviewing()
 		for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.reviewingChanged, next)
@@ -962,7 +966,8 @@ function playSound(event: SoundEvent): boolean {
 }
 
 function currentReviewing(): ReviewingPrefs {
-	return { stepCommits: store.read().stepCommits === true }
+	const d = store.read()
+	return { stepCommits: d.stepCommits === true, offerWalk: d.offerWalk === true }
 }
 
 /** Each event's sound; until you pick one, the defaults (or all off, if "Play a sound" was off in the old setting). */
