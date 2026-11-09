@@ -270,7 +270,10 @@ test('a Claude Code connection: a program not a URL, priced as the plan, never a
 	const saved = [...catalog]
 	try {
 		catalog.unshift({ id: 'claude-new-9', label: 'Claude New 9', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null })
-		catalog.splice(catalog.findIndex((m) => m.id === 'claude-sonnet-5-5'), 1)
+		catalog.splice(
+			catalog.findIndex((m) => m.id === 'claude-sonnet-5-5'),
+			1,
+		)
 		const now = connections.view().connections[0].models
 		const added = now.find((m) => m.id === 'claude-new-9')!
 		assert.deepEqual([added.source, added.structuredOutput, added.price?.source], ['discovered', 'yes', 'subscription'])
