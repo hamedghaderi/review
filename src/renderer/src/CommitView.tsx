@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Anchor, Comparison, CommitView as CommitData, Review } from '../../shared/types.ts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Anchor, Comparison, CommitView as CommitData, Finding, Review } from '../../shared/types.ts'
 import { anchorToCommit, anchorToHead, type CommitFileMap } from '../../shared/commitStep.ts'
 import { DiffView } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
@@ -10,6 +10,8 @@ import { keyLabel } from './keymap.ts'
 import { buildTree, displayPath, flatten } from './tree.ts'
 import { CommitCheckPanel, type CommitChecks } from './CommitCheck.tsx'
 import type { CommitCheckNote } from '../../shared/types.ts'
+import { CommitNotes, type CommitRuns } from './CommitRuns.tsx'
+import type { RevealRequest } from './DiffView.tsx'
 
 /** What the review does with drafts and comments; shared by the review's own diff and a commit's. */
 export interface DraftHandlers {
@@ -40,7 +42,10 @@ interface Props {
 	checks: CommitChecks
 	checkDisabled: string | null // why the AI can't check commits now
 	// Walking through the commits: file by file, then on to the next commit when you say so. Null: not walking.
-	walk: { onStop(): void; onFinish(): void } | null
+	// `ai`: each commit is reviewed by the AI as you reach it, and moving on waits for that review; finishing checks
+	// all the notes against the final code (`finishing` while it does).
+	walk: { ai: boolean; finishing: boolean; onStop(): void; onFinish(): void } | null
+	runs: CommitRuns // the AI's reviews of the review's commits
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -65,6 +70,8 @@ export function CommitView(p: Props) {
 	const [maps, setMaps] = useState<ReadonlyMap<string, MapState>>(new Map())
 	const [bodyOpen, setBodyOpen] = useState(true)
 	const [notice, setNotice] = useState<string | null>(null)
+	const [finding, setFinding] = useState<Finding | null>(null) // the commit finding opened in the list
+	const [reveal, setReveal] = useState<RevealRequest | null>(null)
 
 	useEffect(() => {
 		let live = true
@@ -157,7 +164,63 @@ export function CommitView(p: Props) {
 		p.drafts.startWith(r.anchor, body)
 	}
 
+	const openFinding = (f: Finding): void => {
+		setFinding((cur) => (cur?.id === f.id ? null : f))
+		setSelected(f.anchor.fileKey)
+		setReveal({ fileKey: f.anchor.fileKey, itemId: null, anchor: f.anchor, nonce: Date.now() })
+	}
+	const sha = commit.entry.sha
+	const aiRun = p.runs.latest(sha)
+	const skipped = p.runs.skipped[sha] ?? null
+	// Moving on waits for this commit's review (and, at the end, for the check of all notes).
+	const waitForAi = !!p.walk?.ai && (p.runs.running(sha) || p.walk.finishing)
+	const settled = !!aiRun && (aiRun.status === 'completed' || aiRun.status === 'partial')
+	const noted = (aiRun?.findings ?? []).filter((f) => !f.mergedInto).length
+
+	// In an AI walkthrough, a commit with nothing to look at says so and moves on to the next one by itself, unless you
+	// stay: the AI noted nothing, or later commits changed everything the commit added (then it isn't reviewed at all).
+	// Only a review seen finishing here counts, so coming back to such a commit doesn't bounce you.
+	const [empty, setEmpty] = useState<{ why: EmptyWhy; state: 'moving' | 'last' | 'stayed' } | null>(null)
+	const watched = useRef<string | null>(null) // the run seen running here
+	const isLast = p.position.index >= p.position.total - 1
+	const settle = (why: EmptyWhy): void => setEmpty({ why, state: isLast ? 'last' : 'moving' })
+	useEffect(() => {
+		if (!p.walk?.ai || !aiRun) return
+		if (aiRun.status === 'running') {
+			watched.current = aiRun.id
+			return
+		}
+		if (watched.current !== aiRun.id || !settled) return
+		watched.current = null
+		if (noted === 0) settle('none')
+	}, [aiRun?.id, aiRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		if (p.walk?.ai && skipped) settle('skipped')
+	}, [skipped]) // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		if (empty?.state !== 'moving') return
+		const t = window.setTimeout(() => p.onStep(1), 2500)
+		return () => window.clearTimeout(t)
+	}, [empty?.state]) // eslint-disable-line react-hooks/exhaustive-deps
+
 	const { index, total } = p.position
+	const wait = waitForAi
+		? p.walk?.finishing
+			? 'Checking the notes against the final code'
+			: 'Wait for the AI to finish reviewing this commit'
+		: undefined
+	// On to the next commit (or the end), always there in a walkthrough, whatever file you are on.
+	const onward = p.walk ? (
+		index < total - 1 ? (
+			<button className="btn small primary" onClick={() => p.onStep(1)} disabled={waitForAi} title={wait}>
+				Continue to commit {index + 2} of {total} →
+			</button>
+		) : (
+			<button className="btn small primary" onClick={p.walk.onFinish} disabled={waitForAi} title={wait}>
+				{p.walk.ai ? 'Finish: check the notes against the final code' : 'Finish: see all changes'}
+			</button>
+		)
+	) : null
 	const next = keyLabel('commitNext')
 	const prev = keyLabel('commitPrev')
 	const date = new Date(commit.entry.at)
@@ -208,6 +271,20 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
+					{(p.walk?.ai || aiRun || p.runs.skipped[sha]) && (
+						<CommitNotes sha={sha} runs={p.runs} selected={finding?.id ?? null} onSelect={openFinding} />
+					)}
+					{p.walk?.ai && settled && noted > 0 && (
+						<div className="walk-prompt" role="status">
+							<span className="small">
+								The AI noted {noted} thing{noted === 1 ? '' : 's'} in this commit.{' '}
+								{p.position.index < p.position.total - 1
+									? 'Look at them if you like, then go on; they are checked against the final code after the last commit.'
+									: 'This is the last commit: finishing checks every note against the final code and keeps those that still hold as findings.'}
+							</span>
+							{onward}
+						</div>
+					)}
 					<CommitCheckPanel
 						sha={commit.entry.sha}
 						cc={p.checks}
@@ -236,8 +313,8 @@ export function CommitView(p: Props) {
 						comments={fileComments}
 						drafts={fileDrafts}
 						activeDraftId={p.activeDraftId}
-						reveal={null}
-						highlight={null}
+						reveal={reveal}
+						highlight={finding && finding.anchor.fileKey === file.key ? finding.anchor : null}
 						threads={NO_THREADS}
 						published={published}
 						questions={NO_QUESTIONS}
@@ -279,23 +356,36 @@ export function CommitView(p: Props) {
 							Walkthrough · commit {index + 1} of {total}
 							{ordered.length > 1 && fileIndex >= 0 ? ` · file ${fileIndex + 1} of ${ordered.length}` : ''}
 						</span>
+						{empty && empty.state !== 'stayed' && (
+							<span className="small walk-empty" role="status">
+								{EMPTY_TEXT[empty.why]}{' '}
+								{empty.state === 'moving' ? (
+									<>
+										Moving on to commit {index + 2}…{' '}
+										<button className="link" onClick={() => setEmpty({ ...empty, state: 'stayed' })}>
+											Stay here
+										</button>
+									</>
+								) : (
+									'That was the last one.'
+								)}
+							</span>
+						)}
+						{p.walk.finishing && (
+							<span className="small walk-empty" role="status">
+								Checking every note against the final code…
+							</span>
+						)}
 						<span className="spacer" />
 						<button className="btn small ghost" onClick={p.walk.onStop}>
 							Stop walkthrough
 						</button>
-						{nextFile ? (
-							<button className="btn small primary" onClick={() => setSelected(nextFile.key)}>
+						{nextFile && (
+							<button className={`btn small${index < total - 1 ? '' : ' primary'}`} onClick={() => setSelected(nextFile.key)}>
 								Next file: {displayPath(nextFile)}
 							</button>
-						) : index < total - 1 ? (
-							<button className="btn small primary" onClick={() => p.onStep(1)}>
-								Continue to commit {index + 2} of {total}
-							</button>
-						) : (
-							<button className="btn small primary" onClick={p.walk.onFinish}>
-								Finish: see all changes
-							</button>
 						)}
+						{onward}
 					</div>
 				)}
 			</section>
@@ -304,3 +394,9 @@ export function CommitView(p: Props) {
 }
 
 const NO_VIEWED: Set<string> = new Set()
+
+type EmptyWhy = 'none' | 'skipped'
+const EMPTY_TEXT: Record<EmptyWhy, string> = {
+	none: 'The AI noted nothing in this commit.',
+	skipped: 'Later commits changed everything this commit added, so the AI didn’t review it on its own.',
+}

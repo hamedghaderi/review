@@ -336,7 +336,7 @@ export class AiController {
 		scope: AiScope,
 		choice: ModelSelection | ReviewerChoice,
 		// overBudget: you were told a daily or monthly budget is reached and chose to start anyway.
-		options: { background?: string; carried?: RunInput['carried']; overBudget?: boolean } = {},
+		options: { background?: string; carried?: RunInput['carried']; overBudget?: boolean; commitOf?: RunInput['commitOf'] } = {},
 	): Promise<AiRun> {
 		this.assertIdle()
 		this.starting = true
@@ -410,6 +410,7 @@ export class AiController {
 				scope,
 				previousFindings: this.runsFor(access.comparison.repoId, reviewId).flatMap((r) => r.findings),
 				carried: options.carried ?? null,
+				...(options.commitOf ? { commitOf: options.commitOf } : {}),
 			},
 			{
 				...this.runOptions(config),
@@ -658,6 +659,67 @@ export class AiController {
 			},
 			runId,
 		)
+	}
+
+	/**
+	 * Asks whether a finding of a commit run (`runKey`, see commitRunKey) is still a problem in the latest code, after
+	 * later commits changed its lines: the double-check, told the code changed since `commitSha`, given the latest code
+	 * where the finding would be now (`at`, `around`). The run's model answers. No lookups: one small request. The
+	 * verdict is saved on the finding as `atHead`.
+	 */
+	async checkAtHead(
+		repoId: string,
+		runKey: string,
+		runId: string,
+		findingId: string,
+		at: Anchor,
+		around: Array<string>,
+		commitSha: string,
+	): Promise<FindingVerification> {
+		const run = this.runsFor(repoId, runKey).find((r) => r.id === runId)
+		const finding = run?.findings.find((f) => f.id === findingId)
+		if (!run || !finding) throw new AppFail('not-found', 'That finding no longer exists.')
+		const connectionId = run.connectionId
+		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding.')
+		let result: FindingVerification
+		try {
+			const config = await this.configFor({ connectionId, modelId: run.model }, 'verify', repoId)
+			const response = await config.provider.review(
+				buildVerifyRequest({ ...finding, anchor: at }, null, [], undefined, around, commitSha),
+				AbortSignal.timeout(300_000),
+			)
+			result = { ...parseVerification(response.output), model: run.model, memberId: null, checked: [] }
+		} catch (e) {
+			const why = e instanceof Error ? e.message : String(e)
+			result = { verdict: 'unsure', reason: `Not checked: ${why}`, level: null, checked: [], model: run.model, error: true }
+		}
+		await this.patchRun(repoId, runKey, runId, (r) => {
+			const f = r.findings.find((x) => x.id === findingId)
+			if (f) f.atHead = result
+		})
+		return result
+	}
+
+	/** Stores a finished run the app put together (a commit-by-commit review's findings) and tells the window. */
+	async addRun(repoId: string, run: AiRun): Promise<AiRun> {
+		await this.persist(repoId, run)
+		this.notify(structuredClone(run))
+		return structuredClone(run)
+	}
+
+	/** Changes a stored run and tells the window; for what the app adds to a finished run (see checkAtHead). */
+	async patchRun(repoId: string, runKey: string, runId: string, change: (r: AiRun) => void): Promise<AiRun | null> {
+		let saved: AiRun | null = null
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.aiRuns?.[runKey]?.find((x) => x.id === runId)
+			if (!r) return
+			change(r)
+			saved = r
+		})
+		if (!saved) return null
+		const out = structuredClone(saved as AiRun)
+		this.notify(out)
+		return out
 	}
 
 	/**
@@ -1287,7 +1349,7 @@ export class AiController {
 	private async launch(
 		access: ComparisonAccess,
 		reviewId: string,
-		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry' | 'carried'>,
+		input: Pick<RunInput, 'scope' | 'previousFindings' | 'retry' | 'carried' | 'commitOf'>,
 		options: RunnerOptions,
 		connectionIds: Array<string>,
 		background: string | null = null,

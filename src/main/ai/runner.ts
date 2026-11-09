@@ -140,6 +140,8 @@ export interface RunInput {
 	carried?: { from: CarriedRun; files: Array<FileCoverage>; findings: Array<Finding>; recheck?: Array<RecheckedFile> } | null
 	/** The newest finished run on an earlier snapshot, to tell which findings are new, still present or gone once this run finishes. */
 	history?: Baseline | null
+	/** A review of one commit of that review; recorded on the run. */
+	commitOf?: AiRun['commitOf']
 }
 
 export interface RunHandle {
@@ -195,6 +197,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				limitsUsed: null,
 				notices: [],
 				promptVersion: PROMPT_VERSION,
+				...(input.commitOf ? { commitOf: input.commitOf } : {}),
 				scope: input.scope,
 				status: 'running',
 				startedAt: now(),
