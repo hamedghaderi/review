@@ -88,3 +88,14 @@ export function anchorToCommit(a: Anchor, map: CommitFileMap, commit: Comparison
 	const r = shiftRange(invertShifts(map.shifts), a.startLine, a.endLine)
 	return r ? { ...base, startLine: r.start, endLine: r.end } : null
 }
+
+/**
+ * Where you last left a review's commits: of the heads you reviewed (your last GitHub review's, earlier snapshots'),
+ * each placed at the index of the last of these commits it contains (-1: none, as after a rebase), the one furthest
+ * along. Null when none reaches any of them. The new commits start at `index + 1`.
+ */
+export function lastReviewed<T>(reviewed: ReadonlyArray<T & { index: number }>): (T & { index: number }) | null {
+	let best: (T & { index: number }) | null = null
+	for (const r of reviewed) if (r.index >= 0 && (!best || r.index > best.index)) best = r
+	return best
+}

@@ -475,8 +475,12 @@ export interface CommitCheckEstimate {
 }
 
 /** Where the AI runs on one commit of a review are kept: apart from the review's own runs. */
-export function commitRunKey(reviewId: string, sha: string): string {
-	return `commit:${sha}@${reviewId}`
+/**
+ * Where the AI runs on one commit are kept: by the pull request or branch (`target`, a targetKey) and the commit, apart
+ * from any snapshot's own runs. A commit's diff never changes, so its review holds for every later snapshot.
+ */
+export function commitRunKey(target: string, sha: string): string {
+	return `commit:${sha}@${target}`
 }
 
 /** Settings › Reviewing. Each is off until you turn it on. */
@@ -1531,8 +1535,9 @@ export interface AiRun {
 	} | null
 	notices?: Array<string> // informational, e.g. limits reduced to fit the model, JSON-mode fallback
 	// A review of one commit of a pull request or branch review (its anchors are in that commit's version). Its
-	// `reviewId` is commitRunKey(reviewId, sha), so it never mixes with the review's own runs.
-	commitOf?: { reviewId: string; sha: string }
+	// `reviewId` is commitRunKey(target, sha), so it never mixes with a snapshot's own runs. `reviewId` here is the
+	// snapshot it was started from; `target` is that snapshot's targetKey, which later snapshots share.
+	commitOf?: { reviewId: string; target: string; sha: string }
 	promptVersion: string
 	scope: AiScope
 	status: AiRunStatus
@@ -1939,6 +1944,7 @@ export const IPC = {
 	checkCommit: 'ai:check-commit',
 	startCommitReview: 'ai:start-commit-review',
 	commitRuns: 'ai:commit-runs',
+	reviewedUpTo: 'diff:reviewed-up-to',
 	estimateCommitChecks: 'ai:estimate-commit-checks',
 	installUpdate: 'update:install',
 	updateProgress: 'update:progress',
@@ -2200,6 +2206,8 @@ export interface ReviewApi {
 	startCommitReview(reviewId: string, sha: string, reviewer: ReviewerChoice, overBudget: boolean): Promise<Result<AiRun>>
 	/** The AI runs on the review's commits, by commit SHA, oldest first. */
 	commitRuns(reviewId: string): Promise<Result<Record<string, Array<AiRun>>>>
+	/** For each head you reviewed earlier, the index of the last of the review's commits it contains; -1 for none. */
+	reviewedUpTo(reviewId: string, tips: Array<string>): Promise<Result<Array<number>>>
 	/** What checking these commits would send and cost. */
 	estimateCommitChecks(reviewId: string, shas: Array<string>): Promise<Result<CommitCheckEstimate>>
 	/** Downloads this system's installer and opens it; the app then quits so it can be replaced. */

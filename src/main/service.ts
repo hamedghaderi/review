@@ -74,6 +74,7 @@ import {
 	compareCommits,
 	changesBetween,
 	commitBody,
+	commitsUpTo,
 	commitMessages,
 	listCommits,
 	compareSnapshot,
@@ -1812,7 +1813,8 @@ export class ReviewService {
 	/**
 	 * Starts an AI review of one of the review's commits, on that commit's own diff, with its message and the earlier
 	 * commits' messages as context (beside your notes and files for the review). Its run is kept under
-	 * commitRunKey(reviewId, sha), apart from the review's own runs; its findings are anchored in that commit's version.
+	 * commitRunKey(target, sha), apart from any snapshot's own runs, so later snapshots of the same pull request or branch
+	 * reuse it; its findings are anchored in that commit's version.
 	 */
 	async startCommitReview(reviewId: string, sha: string, choice: ReviewerChoice, overBudget: boolean): Promise<AiRun> {
 		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
@@ -1839,10 +1841,28 @@ export class ReviewService {
 				return { notes, files: c?.files ?? [], images: c?.images ?? [] }
 			},
 		}
-		return this.ai.start(access, commitRunKey(reviewId, sha), { kind: 'all' }, choice, {
+		const target = targetKey(targetOf(this.store.read().repos[repoId].reviews[reviewId]))
+		return this.ai.start(access, commitRunKey(target, sha), { kind: 'all' }, choice, {
 			overBudget,
-			commitOf: { reviewId, sha },
+			commitOf: { reviewId, target, sha },
 		})
+	}
+
+	/**
+	 * How far along the review's commits each of `tips` (heads you reviewed earlier) reaches: the index of the last of
+	 * these commits it contains, or -1 when it contains none of them (rebased away, unknown here, or nothing reviewed).
+	 */
+	async reviewedUpTo(reviewId: string, tips: Array<string>): Promise<Array<number>> {
+		const data = this.steppable(reviewId)
+		const c = data.comparison
+		const { commits } = await listCommits(data.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
+		return Promise.all(
+			tips.map(async (tip) => {
+				const reached = await commitsUpTo(data.root, c.baseSha, tip)
+				if (!reached) return -1
+				return commits.findLastIndex((x) => reached.has(x.sha))
+			}),
+		)
 	}
 
 	/** The AI runs on the review's commits, by commit SHA, oldest first. */
@@ -1853,10 +1873,14 @@ export class ReviewService {
 		return out
 	}
 
+	/** The AI runs on the commits of the review's pull request or branch, from any of its snapshots. */
 	private commitRunsOf(repoId: string, reviewId: string): Array<AiRun> {
-		const all = this.store.read().repos[repoId]?.aiRuns ?? {}
-		return Object.entries(all).flatMap(([key, runs]) =>
-			key.startsWith('commit:') ? runs.filter((r) => r.commitOf?.reviewId === reviewId) : [],
+		const repo = this.store.read().repos[repoId]
+		const review = repo?.reviews[reviewId]
+		if (!review) return []
+		const target = targetKey(targetOf(review))
+		return Object.entries(repo.aiRuns ?? {}).flatMap(([key, runs]) =>
+			key.startsWith('commit:') ? runs.filter((r) => r.commitOf?.target === target) : [],
 		)
 	}
 

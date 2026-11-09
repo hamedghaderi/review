@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore, migrate } from '../src/main/store.ts'
-import { anchorToCommit, anchorToHead, invertShifts, shiftRange, type CommitFileMap } from '../src/shared/commitStep.ts'
+import { anchorToCommit, anchorToHead, invertShifts, lastReviewed, shiftRange, type CommitFileMap } from '../src/shared/commitStep.ts'
 import type { Anchor, ChangedFile, Comparison } from '../src/shared/types.ts'
 
 function tmp(): string {
@@ -176,4 +176,15 @@ test('commit stepping: comments move to the head when their lines survive, and b
 	assert.equal(anchorToCommit({ ...at('new', 7), baseSha: 'B', headSha: 'H' }, map, commit, commitFile), null, 'rewritten after it')
 	assert.equal(anchorToCommit({ ...at('old', 3), baseSha: 'B', headSha: 'H' }, map, commit, commitFile), null)
 	assert.deepEqual(invertShifts(invertShifts(map.shifts)), map.shifts)
+})
+
+test('commit stepping: where you last left the commits is the reviewed head that reaches furthest along them', () => {
+	const r = lastReviewed([
+		{ sha: 'b', label: 'snapshot', index: 1 },
+		{ sha: 'merge', label: 'GitHub', index: 2 },
+		{ sha: 'gone', label: 'before a rebase', index: -1 },
+	])
+	assert.deepEqual(r, { sha: 'merge', label: 'GitHub', index: 2 })
+	assert.equal(lastReviewed([{ sha: 'gone', label: 'x', index: -1 }]), null, 'rebased away: start from the first commit')
+	assert.equal(lastReviewed([]), null)
 })

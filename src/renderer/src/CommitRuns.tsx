@@ -7,12 +7,14 @@ import { AiOrb } from './AiOrb.tsx'
  * The AI runs on a review's commits (one commit at a time, from the walkthrough), by commit SHA. They are kept apart
  * from the review's own runs, and arrive through the same run updates with `commitOf` set.
  */
-export function useCommitRuns(reviewId: string | null) {
+export function useCommitRuns(reviewId: string | null, target: string | null) {
 	const [runs, setRuns] = useState<Record<string, Array<AiRun>>>({})
 	const [errors, setErrors] = useState<Record<string, { message: string; overBudget: boolean }>>({})
 	const [loaded, setLoaded] = useState<string | null>(null) // the review whose stored runs have been read
 	const idRef = useRef(reviewId)
 	idRef.current = reviewId
+	const targetRef = useRef(target) // the pull request or branch: its commits' reviews are shared by every snapshot
+	targetRef.current = target
 	useEffect(() => {
 		setRuns({})
 		setErrors({})
@@ -27,7 +29,7 @@ export function useCommitRuns(reviewId: string | null) {
 		() =>
 			window.review.onAiRunUpdate((run) => {
 				const of = run.commitOf
-				if (!of || of.reviewId !== idRef.current) return
+				if (!of || of.target !== targetRef.current) return
 				setRuns((all) => {
 					const list = all[of.sha] ?? []
 					const i = list.findIndex((x) => x.id === run.id)
@@ -170,19 +172,21 @@ export function CommitFindings({
 }
 
 /**
- * Run AI review › Commit by commit asks this before it starts: what will happen, the commits it will go through, and
- * the choice to review all the changes at once instead.
+ * Run AI review › Commit by commit asks this before it starts: the commits it will go through, from the first one after
+ * your last review when there is one, and the choice to review all the changes at once instead.
  */
 export function CommitReviewAsk({
 	commits,
 	pr,
+	since,
 	onStart,
 	onAllChanges,
 	onCancel,
 }: {
 	commits: Array<{ sha: string; subject: string }>
 	pr: boolean
-	onStart(): void
+	since: { sha: string; label: string; index: number } | null // the commit you last reviewed, and its place in `commits`
+	onStart(from: number): void // the index of the commit to start with
 	onAllChanges(): void
 	onCancel(): void
 }) {
@@ -195,6 +199,9 @@ export function CommitReviewAsk({
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
 	}, [onCancel])
+	const from = since ? since.index + 1 : 0
+	const fresh = commits.length - from // commits after your last review (all of them without one)
+	const sha = since?.sha.slice(0, 7)
 	return (
 		<div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
 			<div className="modal commit-ask" role="dialog" aria-modal="true" aria-labelledby="commit-ask-title">
@@ -203,19 +210,26 @@ export function CommitReviewAsk({
 				</div>
 				<div className="commit-ask-body">
 					<p>
-						The AI reviews the {commits.length} commits one at a time, oldest first. It starts with commit 1 now; you read its findings,
-						then continue, and it reviews the next one. When it finds nothing in a commit, it tells you and moves on.
+						{!since
+							? `The AI reviews the ${commits.length} commits one at a time, oldest first, starting with commit 1.`
+							: fresh > 0
+								? `${fresh} new commit${fresh === 1 ? '' : 's'} since ${since.label} (${sha}). The AI starts with commit ${from + 1} and reviews them one at a time.`
+								: `No new commits since ${since.label} (${sha}). You can still go through all ${commits.length} commits.`}{' '}
+						You read each commit’s findings, then continue, and it reviews the next one. When it finds nothing in a commit, it tells you and
+						moves on.
 					</p>
 					<ol className="small commit-ask-list">
-						{commits.map((c) => (
-							<li key={c.sha}>
+						{commits.map((c, i) => (
+							<li key={c.sha} className={i < from ? 'muted' : ''}>
 								<span className="mono muted">{c.sha.slice(0, 7)}</span> {c.subject}
+								{since && i >= from && <span className="pill small-pill">new</span>}
 							</li>
 						))}
 					</ol>
 					<p className="muted small">
-						Each commit is reviewed on its own changes, with its message. A file changed in several commits is reviewed each time, so this
-						can cost more than reviewing all the changes at once. Merge commits are left out.
+						Each commit is reviewed on its own changes, with its message. A commit the AI already reviewed in this{' '}
+						{pr ? 'pull request' : 'branch'} keeps that review and is not sent again. A file changed in several commits is reviewed each
+						time, so this can cost more than reviewing all the changes at once. Merge commits are left out.
 					</p>
 				</div>
 				<div className="commit-ask-actions">
@@ -226,8 +240,13 @@ export function CommitReviewAsk({
 					<button className="btn small" onClick={onAllChanges}>
 						Review all changes at once
 					</button>
-					<button ref={start} className="btn small primary" onClick={onStart}>
-						Start with commit 1
+					{since && fresh > 0 && (
+						<button className="btn small" onClick={() => onStart(0)}>
+							All {commits.length} commits
+						</button>
+					)}
+					<button ref={start} className="btn small primary" onClick={() => onStart(fresh > 0 ? from : 0)}>
+						{fresh > 0 && since ? `Start with commit ${from + 1}` : since ? `Go through all ${commits.length}` : 'Start with commit 1'}
 					</button>
 				</div>
 			</div>

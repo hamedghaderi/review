@@ -232,6 +232,14 @@ export async function listCommits(
 	return { commits: all.slice(0, max), total: all.length }
 }
 
+/** The commits from `base` (left out) to `tip`, without merges; null when `tip` can't be read here. */
+export async function commitsUpTo(cwd: string, base: string, tip: string): Promise<Set<string> | null> {
+	if (!isSha(base) || !isSha(tip)) return null
+	const r = await git(cwd, ['rev-list', '--no-merges', `${base}..${tip}`], 32 * 1024 * 1024)
+	if (r.code !== 0) return null
+	return new Set(r.stdout.toString('utf8').split('\n').filter(isSha))
+}
+
 /** A commit's message without its subject line, trimmed. */
 export async function commitBody(cwd: string, sha: string): Promise<string> {
 	if (!isSha(sha)) return ''

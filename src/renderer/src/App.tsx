@@ -43,6 +43,7 @@ import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData
 import { CommitView, type DraftHandlers } from './CommitView.tsx'
 import { useCommitChecks } from './CommitCheck.tsx'
 import { CommitReviewAsk, useCommitRuns } from './CommitRuns.tsx'
+import { lastReviewed } from '../../shared/commitStep.ts'
 
 /** An AI review commit by commit: who reviews, and whether you chose to go over a reached budget. */
 type WalkAi = { choice: ReviewerChoice; overBudget: boolean }
@@ -1365,7 +1366,10 @@ export function App() {
 	}, [steppable, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 	const commitsHere = commitList && commitList.reviewId === comparison?.id ? commitList.commits : []
 	const commitIndex = openCommit ? commitsHere.findIndex((x) => x.sha === openCommit.entry.sha) : -1
-	const commitRuns = useCommitRuns(steppable && comparison ? comparison.id : null)
+	const commitRuns = useCommitRuns(
+		steppable && comparison ? comparison.id : null,
+		steppable && comparison ? targetKey(targetOf(comparison)) : null,
+	)
 	const commitChecks = useCommitChecks(steppable && comparison ? comparison.id : null, loaded?.review.commitChecks, commitsHere)
 	/** Shows one commit on its own, or all the review's changes for null. */
 	const showCommit = async (sha: string | null): Promise<void> => {
@@ -1391,11 +1395,11 @@ export function App() {
 	 * `ai`: an AI review commit by commit (from Run AI review): the AI reviews each commit as the walkthrough reaches
 	 * it, with the reviewer chosen there, and moving on waits for it. Null: a walkthrough without the AI.
 	 */
-	const startWalk = (ai: WalkAi | null): void => {
-		if (!comparison || !commitsHere.length) return
+	const startWalk = (ai: WalkAi | null, from = 0): void => {
+		if (!comparison || !commitsHere[from]) return
 		setWalkOffered((s) => new Set(s).add(comparison.id))
 		if (ai) setRightTab('comments')
-		void showCommit(commitsHere[0].sha).then(() => {
+		void showCommit(commitsHere[from].sha).then(() => {
 			setWalking(true)
 			setWalkAi(ai)
 		})
@@ -1406,12 +1410,38 @@ export function App() {
 		if (!walking || !walkAi || !openCommit || !comparison || !commitRuns.loaded) return
 		const sha = openCommit.entry.sha
 		const key = `${comparison.id}:${sha}`
-		if (autoReviewed.current.has(key) || commitRuns.runs[sha]?.length) return
+		// A review from any snapshot of this pull request or branch holds; one that failed or was stopped doesn't.
+		const reviewed = commitRuns.runs[sha]?.some((r) => r.status !== 'failed' && r.status !== 'cancelled')
+		if (autoReviewed.current.has(key) || reviewed) return
 		autoReviewed.current.add(key)
 		void commitRuns.start(sha, walkAi.choice, walkAi.overBudget)
 	}, [walking, walkAi, openCommit?.entry.sha, commitRuns.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
 	// Run AI review › Commit by commit asks first, in a modal, before the walkthrough starts.
-	const [askCommits, setAskCommits] = useState<WalkAi | null>(null)
+	const [askCommits, setAskCommits] = useState<(WalkAi & { since: { sha: string; label: string; index: number } | null }) | null>(null)
+	/**
+	 * Opens that question, knowing where you last left the commits: your last review on GitHub, or an earlier snapshot
+	 * you opened here, whichever reaches furthest along them (a head is often a merge, so git says what it contains).
+	 */
+	const askCommitByCommit = async (ai: WalkAi): Promise<void> => {
+		if (!comparison) return
+		const id = comparison.id
+		const day = (at: string): string => new Date(at).toLocaleDateString([], { month: 'short', day: 'numeric' })
+		const tips = [
+			...(current?.value?.mine?.commit ? [{ sha: current.value.mine.commit, label: 'your last review on GitHub' }] : []),
+			...snapshotsForTarget
+				.filter((x) => x.id !== id && x.headSha !== comparison.headSha)
+				.map((x) => ({ sha: x.headSha, label: `the snapshot you opened on ${day(x.updatedAt)}` })),
+		]
+		const r = tips.length
+			? await window.review.reviewedUpTo(
+					id,
+					tips.map((t) => t.sha),
+				)
+			: null
+		if (comparisonIdRef.current !== id) return
+		const since = r?.ok ? lastReviewed(tips.map((t, i) => ({ ...t, index: r.value[i] }))) : null
+		setAskCommits({ ...ai, since })
+	}
 	const acceptCommitFinding = (f: Finding): void => {
 		if (!review) return
 		const res = ops.acceptFinding(review, f, findingRoots([...aiRuns, ...commitRuns.all]))
@@ -1671,7 +1701,7 @@ export function App() {
 													onCancel={() => activeRun && void window.review.cancelAiReview(activeRun.id)}
 													onSelectModel={(sel) => void selectModel(sel)}
 													commits={steppable ? commitsHere.length : 0}
-													onStartCommits={(choice, overBudget) => setAskCommits({ choice, overBudget })}
+													onStartCommits={(choice, overBudget) => void askCommitByCommit({ choice, overBudget })}
 												/>
 											)}
 										</div>
@@ -2388,8 +2418,9 @@ export function App() {
 					<CommitReviewAsk
 						commits={commitsHere}
 						pr={!!comparison.pr}
-						onStart={() => {
-							startWalk(askCommits)
+						since={askCommits.since}
+						onStart={(from) => {
+							startWalk(askCommits, from)
 							setAskCommits(null)
 						}}
 						onAllChanges={() => {

@@ -62,7 +62,7 @@ async function setup(stepCommits = true) {
 			target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
 		})
 	).comparison
-	return { svc, ai, store, asked, review, repoId: s.repo.id, c1, c2 }
+	return { svc, ai, store, asked, review, repoId: s.repo.id, c1, c2, commit }
 }
 
 async function finished(ai: AiController, run: AiRun): Promise<AiRun> {
@@ -81,8 +81,9 @@ test('commit review: only that commit’s diff, with its message and the earlier
 	const w = await setup()
 	const run = await finished(w.ai, await w.svc.startCommitReview(w.review.id, w.c2, MODEL, false))
 	assert.equal(run.status, 'completed')
-	assert.equal(run.reviewId, commitRunKey(w.review.id, w.c2))
-	assert.deepEqual(run.commitOf, { reviewId: w.review.id, sha: w.c2 })
+	const target = 'branch:refs/heads/topic|refs/heads/main'
+	assert.equal(run.reviewId, commitRunKey(target, w.c2))
+	assert.deepEqual(run.commitOf, { reviewId: w.review.id, target, sha: w.c2 })
 	assert.deepEqual([run.baseSha, run.headSha], [w.c1, w.c2], 'anchored in that commit')
 	const sent = w.asked.filter((r) => !r.schema || r.batch.excerpts.length)
 	assert.deepEqual([...new Set(sent.flatMap((r) => r.batch.excerpts.map((e) => e.file.key)))], ['a.ts'], 'only c2’s file')
@@ -114,4 +115,53 @@ test('commit review: only that commit’s diff, with its message and the earlier
 		findingDecisions: { [f.id]: { status: 'accepted', decidedAt: '2026-11-09T10:00:00.000Z' } },
 	})
 	assert.equal(w.store.read().repos[w.repoId].reviews[w.review.id].comments[0].findingId, f.id)
+})
+
+test('commit review: kept for the pull request or branch, so a later snapshot reuses it after a new push', async () => {
+	const w = await setup()
+	await finished(w.ai, await w.svc.startCommitReview(w.review.id, w.c1, MODEL, false))
+	w.commit({ 'c.ts': 'export const c = 1\n' }, 'Add c')
+	const next = (
+		await w.svc.loadComparison(w.repoId, {
+			kind: 'target',
+			target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+		})
+	).comparison
+	assert.notEqual(next.id, w.review.id, 'a new snapshot')
+	assert.deepEqual(Object.keys(w.svc.commitRuns(next.id)), [w.c1], 'c1’s review carries over')
+	// Its findings can still be linked from the new snapshot's comments.
+	const f = w.svc.commitRuns(next.id)[w.c1][0].findings[0]
+	const stored = w.store.read().repos[w.repoId].reviews[next.id]
+	await w.svc.saveReview({
+		...stored,
+		findingDecisions: { [f.id]: { status: 'dismissed', decidedAt: '2026-11-09T10:00:00.000Z' } },
+	})
+	assert.equal(w.store.read().repos[w.repoId].reviews[next.id].findingDecisions[f.id].status, 'dismissed')
+})
+
+test('commit review: a head you reviewed earlier, even a merge, says how far along the commits you got', async () => {
+	const w = await setup()
+	const root = w.store.read().repos[w.repoId].root
+	const git = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: root,
+			encoding: 'utf8',
+		}).trim()
+	git('checkout', '-q', 'main')
+	w.commit({ 'm.ts': 'm\n' }, 'main moves')
+	git('checkout', '-q', 'topic')
+	git('merge', '-q', '--no-edit', 'main')
+	const merged = git('rev-parse', 'HEAD') // a head that is a merge, after c1 and c2
+	const c3 = w.commit({ 'd.ts': 'd\n' }, 'Add d')
+	const next = (
+		await w.svc.loadComparison(w.repoId, {
+			kind: 'target',
+			target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+		})
+	).comparison
+	assert.deepEqual(
+		(await w.svc.commitList(next.id)).commits.map((c) => c.sha),
+		[w.c1, w.c2, c3],
+	)
+	assert.deepEqual(await w.svc.reviewedUpTo(next.id, [merged, w.c1, '0'.repeat(40)]), [1, 0, -1])
 })
