@@ -254,14 +254,17 @@ function registerIpc(): void {
 	})
 	handle(IPC.reviewing, async () => currentReviewing())
 	handle(IPC.setReviewing, async (raw: unknown) => {
-		const o = raw as { stepCommits?: unknown; offerWalk?: unknown } | null
+		const o = raw as { stepCommits?: unknown; offerWalk?: unknown; autoConclusion?: unknown } | null
 		const on = bool(o?.stepCommits, 'step through commits')
 		const offer = o?.offerWalk === undefined ? false : bool(o.offerWalk, 'offer a walkthrough')
+		const conclude = o?.autoConclusion === undefined ? true : bool(o.autoConclusion, 'write the conclusion')
 		await store.update((d) => {
 			if (on) d.stepCommits = true
 			else delete d.stepCommits
 			if (offer) d.offerWalk = true
 			else delete d.offerWalk
+			if (conclude) delete d.autoConclusion
+			else d.autoConclusion = false
 		})
 		const next = currentReviewing()
 		for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC.reviewingChanged, next)
@@ -518,10 +521,19 @@ function registerIpc(): void {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
 		const q = question === null ? null : str(question, 'question', 4000)
-		return answered(
-			service.conclude(comparisonId(reviewId), q, selection),
-			q === null ? 'The conclusion on this change' : 'The answer about the conclusion',
-		)
+		const rid = comparisonId(reviewId)
+		// The conclusion written after a run: the run's notification, held until now, says both at once.
+		if (q === null && awaitConclusion(rid)) {
+			let written = false
+			try {
+				const c = await service.conclude(rid, null, selection)
+				written = !c.messages[0]?.error
+				return c
+			} finally {
+				releaseRun(rid, written ? 'ready' : 'failed')
+			}
+		}
+		return answered(service.conclude(rid, q, selection), q === null ? 'The conclusion on this change' : 'The answer about the conclusion')
 	})
 	handle(IPC.aiDraftReply, async (repoId: unknown, reviewId: unknown, threadId: unknown) => {
 		const selection = connections.view().questionModel
@@ -980,7 +992,7 @@ function playSound(event: SoundEvent): boolean {
 
 function currentReviewing(): ReviewingPrefs {
 	const d = store.read()
-	return { stepCommits: d.stepCommits === true, offerWalk: d.offerWalk === true }
+	return { stepCommits: d.stepCommits === true, offerWalk: d.offerWalk === true, autoConclusion: d.autoConclusion !== false }
 }
 
 /** Each event's sound; until you pick one, the defaults (or all off, if "Play a sound" was off in the old setting). */
@@ -1003,12 +1015,50 @@ function answered<T>(p: Promise<T>, what: string): Promise<T> {
 	})
 }
 
+/**
+ * Settings › Reviewing › Write the conclusion after each AI review: a finished run's sound and notification wait for the
+ * conclusion the window writes next, and come once, after it. When the window starts none in time (the review isn't
+ * on screen, another run is still going…), the run's notification comes on its own.
+ */
+const heldRuns = new Map<string, { run: AiRun; timer: NodeJS.Timeout | null }>() // by review id
+const CONCLUSION_START_WAIT_MS = 10_000
+
 function runFinished(run: AiRun): void {
+	if (run.status !== 'failed' && store.read().autoConclusion !== false && connections.view().questionModel) {
+		const earlier = heldRuns.get(run.reviewId)
+		if (earlier?.timer) clearTimeout(earlier.timer)
+		const timer = setTimeout(() => releaseRun(run.reviewId, null), CONCLUSION_START_WAIT_MS)
+		heldRuns.set(run.reviewId, { run, timer })
+		return
+	}
+	notifyRun(run, null)
+}
+
+/** The conclusion for a held run has started: its notification now waits for it, however long it takes. */
+function awaitConclusion(reviewId: string): boolean {
+	const h = heldRuns.get(reviewId)
+	if (!h) return false
+	if (h.timer) clearTimeout(h.timer)
+	h.timer = null
+	return true
+}
+
+function releaseRun(reviewId: string, conclusion: 'ready' | 'failed' | null): void {
+	const h = heldRuns.get(reviewId)
+	if (!h) return
+	heldRuns.delete(reviewId)
+	if (h.timer) clearTimeout(h.timer)
+	notifyRun(h.run, conclusion)
+}
+
+function notifyRun(run: AiRun, conclusion: 'ready' | 'failed' | null): void {
 	const r = store.read().repos[run.repoId]?.reviews[run.reviewId]
 	const name = r?.pr ? `${r.pr.repo.split('/')[1]}#${r.pr.number}` : (r?.headRef ?? 'your branch')
 	if (run.status === 'failed') return aiDone('runFinished', `AI review failed: ${name}`, run.errors[0] ?? 'The run stopped with an error.')
 	const n = run.findings.filter((f) => !f.mergedInto && !f.heldBack).length
-	aiDone('runFinished', `AI review finished: ${name}`, n ? `${n} finding${n === 1 ? '' : 's'}` : 'No findings')
+	const found = n ? `${n} finding${n === 1 ? '' : 's'}` : 'No findings'
+	const then = conclusion === 'ready' ? ' · conclusion ready' : conclusion === 'failed' ? ' · the conclusion could not be written' : ''
+	aiDone('runFinished', `AI review finished: ${name}`, found + then)
 }
 
 /**

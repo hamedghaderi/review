@@ -77,8 +77,13 @@ export function Conclusion({
 						Write again
 					</button>
 				)}
-				<button className="btn small ghost" onClick={onHide} title="Back to the code">
-					Hide
+				<button
+					className="btn small conclusion-close"
+					onClick={onHide}
+					title="Close the conclusion and go back to the code"
+					aria-label="Close the conclusion"
+				>
+					✕ Close
 				</button>
 			</div>
 			<div className="conclusion-scroll">

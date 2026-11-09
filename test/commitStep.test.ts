@@ -69,6 +69,10 @@ test('commit stepping: refused while the setting is off, and the setting is off 
 	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null }).offerWalk, undefined, 'the walkthrough offer is off too')
 	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null, offerWalk: 1 }).offerWalk, undefined)
 	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null, offerWalk: true }).offerWalk, true)
+	// The conclusion after each AI review is on until turned off, so only "off" is stored.
+	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null }).autoConclusion, undefined)
+	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null, autoConclusion: true }).autoConclusion, undefined)
+	assert.equal(migrate({ version: 2, repos: {}, lastRepoId: null, autoConclusion: false }).autoConclusion, false)
 })
 
 test('commit stepping: the review’s own commits, oldest first, without the merge', async () => {
