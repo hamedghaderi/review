@@ -35,6 +35,10 @@ interface Props {
 	onCancel(): void
 	/** Changes the model the next run uses, as choosing another effort does. */
 	onSelectModel(selection: ModelSelection): void
+	/** The review's commits, when it can be reviewed commit by commit (Settings › Reviewing › Step through commits); else 0. */
+	commits: number
+	/** Review commit by commit: asks first, then walks you through the commits, the AI reviewing each as you reach it. */
+	onStartCommits(choice: ReviewerChoice, overBudget: boolean): void
 }
 
 /** Header control: opens a confirmation popover showing scope, provider and model; nothing is sent before "Start". */
@@ -52,6 +56,8 @@ export function AiRunControl({
 	onStart,
 	onCancel,
 	onSelectModel,
+	commits,
+	onStartCommits,
 }: Props) {
 	const selection = reviewer.kind === 'model' ? reviewer.selection : null
 	const team = reviewer.kind === 'team' ? settings?.teams.find((t) => t.id === reviewer.teamId) : undefined
@@ -61,6 +67,9 @@ export function AiRunControl({
 	const [passes, setPasses] = useState(readPasses)
 	// Not remembered: a partial review should never be the default without anyone noticing.
 	const [bugsOnly, setBugsOnly] = useState(false)
+	// Not remembered either: it changes how the whole review goes, so it is picked each time.
+	const [byCommit, setByCommit] = useState(false)
+	const commitByCommit = byCommit && commits >= 2
 	const [persona, setPersona] = useState(readPersona)
 	const [offer, setOffer] = useState<IncrementalOffer | null>(null)
 	const [estimate, setEstimate] = useState<{ key: string; value: RunEstimate | null } | null>(null)
@@ -205,7 +214,7 @@ export function AiRunControl({
 			{open && (
 				<div className="popover" role="dialog" aria-label="Run AI review" style={anchor ?? undefined}>
 					<div className="popover-title">Run AI review</div>
-					<div className="seg soft" role="radiogroup" aria-label="Scope">
+					<div className="seg soft" role="radiogroup" aria-label="Scope" hidden={commitByCommit}>
 						{incremental && (
 							<button
 								role="radio"
@@ -253,7 +262,20 @@ export function AiRunControl({
 							Current file
 						</button>
 					</div>
-					{effectiveScope === 'changed' && incremental ? (
+					{commits >= 2 && (
+						<label
+							className="option passes"
+							title="Review one commit at a time, oldest first: the AI reviews a commit when the walkthrough reaches it, and you continue to the next one when you are ready"
+						>
+							<input type="checkbox" checked={byCommit} onChange={(e) => setByCommit(e.target.checked)} />
+							<span>Commit by commit ({commits} commits)</span>
+						</label>
+					)}
+					{commitByCommit ? (
+						<p className="muted small">
+							Each commit is reviewed on its own changes, with its message, when you reach it. You are asked to confirm before it starts.
+						</p>
+					) : effectiveScope === 'changed' && incremental ? (
 						<p className="muted small">
 							{incremental.review.length
 								? `Reviews ${incremental.review.length} changed file${incremental.review.length === 1 ? '' : 's'}. `
@@ -371,7 +393,7 @@ export function AiRunControl({
 							)}
 						</>
 					)}
-					<RunCost estimate={shown} />
+					{!commitByCommit && <RunCost estimate={shown} />}
 					<details className="run-info small">
 						<summary>What gets sent</summary>
 						<dl className="ai-meta" hidden={!!team}>
@@ -445,10 +467,11 @@ export function AiRunControl({
 							disabled={problem !== null}
 							onClick={() => {
 								setOpen(false)
-								onStart(startScope, !team && passes, !team && bugsOnly, team ? null : persona, !!shown?.over.length)
+								if (commitByCommit) onStartCommits(team ? reviewer : choice, !!shown?.over.length)
+								else onStart(startScope, !team && passes, !team && bugsOnly, team ? null : persona, !!shown?.over.length)
 							}}
 						>
-							{shown?.over.length ? 'Start anyway' : 'Start review'}
+							{commitByCommit ? 'Continue…' : shown?.over.length ? 'Start anyway' : 'Start review'}
 						</button>
 					</div>
 				</div>

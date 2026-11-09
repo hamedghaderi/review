@@ -42,7 +42,8 @@ export function useCommitRuns(reviewId: string | null) {
 		setErrors(({ [sha]: _, ...rest }) => rest)
 		const r = await window.review.startCommitReview(id, sha, reviewer, overBudget)
 		if (idRef.current !== id) return
-		if (r.ok) setRuns((all) => ({ ...all, [sha]: [...(all[sha] ?? []).filter((x) => x.id !== r.value.id), r.value] }))
+		// Its updates may have arrived first; those are newer than this reply.
+		if (r.ok) setRuns((all) => (all[sha]?.some((x) => x.id === r.value.id) ? all : { ...all, [sha]: [...(all[sha] ?? []), r.value] }))
 		else setErrors((e) => ({ ...e, [sha]: { message: r.error.message, overBudget: r.error.code === 'over-budget' } }))
 	}, [])
 	const all = useMemo(() => Object.values(runs).flat(), [runs])
@@ -67,8 +68,6 @@ export function CommitFindings({
 	sha,
 	runs,
 	review,
-	reviewer,
-	disabled,
 	selected,
 	laterChange,
 	onSelect,
@@ -79,8 +78,6 @@ export function CommitFindings({
 	sha: string
 	runs: CommitRuns
 	review: Review
-	reviewer: ReviewerChoice | null
-	disabled: string | null
 	selected: string | null
 	laterChange: LaterChange
 	onSelect(f: Finding): void
@@ -96,9 +93,6 @@ export function CommitFindings({
 		() => [...(run?.findings ?? [])].filter((f) => !f.mergedInto).sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
 		[run],
 	)
-	const start = (overBudget = false): void => {
-		if (reviewer) void runs.start(sha, reviewer, overBudget)
-	}
 	return (
 		<div className="commit-ai">
 			<div className="commit-check-head">
@@ -123,29 +117,10 @@ export function CommitFindings({
 						<span className="muted"> · {run.model}</span>
 					</span>
 				) : (
-					<span className="muted small">Not reviewed by the AI.</span>
-				)}
-				{run?.status !== 'running' && (
-					<button
-						className="btn small"
-						disabled={!!disabled || !reviewer}
-						title={disabled ?? (reviewer ? 'Review only this commit’s changes with the AI' : 'Choose a model for AI reviews first')}
-						onClick={() => start()}
-					>
-						{run ? 'Review again' : 'Review this commit'}
-					</button>
+					<span className="muted small">Waiting for the AI…</span>
 				)}
 			</div>
-			{error && (
-				<div className="small error-text">
-					{error.message}{' '}
-					{error.overBudget && (
-						<button className="link" onClick={() => start(true)}>
-							Review anyway
-						</button>
-					)}
-				</div>
-			)}
+			{error && <div className="small error-text">The AI could not review this commit: {error.message}</div>}
 			{findings.length > 0 && (
 				<ul className="commit-findings">
 					{findings.map((f) => {
@@ -190,6 +165,72 @@ export function CommitFindings({
 					})}
 				</ul>
 			)}
+		</div>
+	)
+}
+
+/**
+ * Run AI review › Commit by commit asks this before it starts: what will happen, the commits it will go through, and
+ * the choice to review all the changes at once instead.
+ */
+export function CommitReviewAsk({
+	commits,
+	pr,
+	onStart,
+	onAllChanges,
+	onCancel,
+}: {
+	commits: Array<{ sha: string; subject: string }>
+	pr: boolean
+	onStart(): void
+	onAllChanges(): void
+	onCancel(): void
+}) {
+	const start = useRef<HTMLButtonElement>(null)
+	useEffect(() => start.current?.focus(), [])
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent): void => {
+			if (e.key === 'Escape') onCancel()
+		}
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	}, [onCancel])
+	return (
+		<div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+			<div className="modal commit-ask" role="dialog" aria-modal="true" aria-labelledby="commit-ask-title">
+				<div className="modal-head">
+					<h2 id="commit-ask-title">Review {pr ? 'this pull request' : 'this branch'} commit by commit?</h2>
+				</div>
+				<div className="commit-ask-body">
+					<p>
+						The AI reviews the {commits.length} commits one at a time, oldest first. It starts with commit 1 now; you read its findings,
+						then continue, and it reviews the next one. When it finds nothing in a commit, it tells you and moves on.
+					</p>
+					<ol className="small commit-ask-list">
+						{commits.map((c) => (
+							<li key={c.sha}>
+								<span className="mono muted">{c.sha.slice(0, 7)}</span> {c.subject}
+							</li>
+						))}
+					</ol>
+					<p className="muted small">
+						Each commit is reviewed on its own changes, with its message. A file changed in several commits is reviewed each time, so this
+						can cost more than reviewing all the changes at once. Merge commits are left out.
+					</p>
+				</div>
+				<div className="commit-ask-actions">
+					<button className="btn small ghost" onClick={onCancel}>
+						Cancel
+					</button>
+					<span className="spacer" />
+					<button className="btn small" onClick={onAllChanges}>
+						Review all changes at once
+					</button>
+					<button ref={start} className="btn small primary" onClick={onStart}>
+						Start with commit 1
+					</button>
+				</div>
+			</div>
 		</div>
 	)
 }

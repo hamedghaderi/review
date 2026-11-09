@@ -5828,3 +5828,29 @@ textarea.style-edit {
 	margin: 2px 0 4px;
 	white-space: pre-wrap;
 }
+.modal.commit-ask {
+	width: min(560px, 100%);
+}
+.commit-ask-body {
+	padding: 12px 14px;
+	overflow: auto;
+}
+.commit-ask-body p {
+	margin: 0 0 8px;
+}
+.commit-ask-list {
+	margin: 0 0 8px;
+	padding-left: 22px;
+	max-height: 220px;
+	overflow: auto;
+}
+.commit-ask-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-top: 1px solid var(--border);
+}
+.walk-empty {
+	color: var(--text);
+}

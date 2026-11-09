@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Anchor, Comparison, CommitView as CommitData, Finding, Review, ReviewerChoice } from '../../shared/types.ts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Anchor, Comparison, CommitView as CommitData, Finding, Review } from '../../shared/types.ts'
 import { anchorToCommit, anchorToHead, type CommitFileMap } from '../../shared/commitStep.ts'
 import { DiffView } from './DiffView.tsx'
 import { FileTree } from './FileTree.tsx'
@@ -45,8 +45,6 @@ interface Props {
 	// `ai`: each commit is reviewed by the AI as you reach it, and moving on waits for that review.
 	walk: { ai: boolean; onStop(): void; onFinish(): void } | null
 	runs: CommitRuns // the AI's reviews of the review's commits
-	reviewer: ReviewerChoice | null // who reviews a commit
-	aiDisabled: string | null // why the AI can't review now
 	onAddFinding(f: Finding): void // a commit's finding, its anchor already moved to the head, as a draft
 	onDecide(f: Finding, status: 'dismissed' | 'open'): void
 }
@@ -194,6 +192,30 @@ export function CommitView(p: Props) {
 	}
 	const reviewing = p.runs.running(commit.entry.sha)
 	const waitForAi = !!p.walk?.ai && reviewing
+	const aiRun = p.runs.latest(commit.entry.sha)
+
+	// In an AI walkthrough, a review that finishes here with nothing to report says so and moves on to the next commit
+	// by itself, unless you stay. Only a review seen finishing counts: coming back to an empty commit doesn't bounce you.
+	const [empty, setEmpty] = useState<'moving' | 'last' | 'stayed' | null>(null)
+	const watched = useRef<string | null>(null) // the run seen running here
+	const isLast = p.position.index >= p.position.total - 1
+	useEffect(() => {
+		if (!p.walk?.ai || !aiRun) return
+		if (aiRun.status === 'running') {
+			watched.current = aiRun.id
+			return
+		}
+		if (watched.current !== aiRun.id) return
+		watched.current = null
+		const found = aiRun.findings.some((f) => !f.mergedInto)
+		if (found || (aiRun.status !== 'completed' && aiRun.status !== 'partial')) return
+		setEmpty(isLast ? 'last' : 'moving')
+	}, [aiRun?.id, aiRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		if (empty !== 'moving') return
+		const t = window.setTimeout(() => p.onStep(1), 2500)
+		return () => window.clearTimeout(t)
+	}, [empty]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	const { index, total } = p.position
 	const next = keyLabel('commitNext')
@@ -246,19 +268,19 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
-					<CommitFindings
-						sha={commit.entry.sha}
-						runs={p.runs}
-						review={p.review}
-						reviewer={p.reviewer}
-						disabled={p.aiDisabled}
-						selected={finding?.id ?? null}
-						laterChange={laterChange}
-						onSelect={openFinding}
-						onAdd={addFinding}
-						onDismiss={(f) => p.onDecide(f, 'dismissed')}
-						onRestore={(f) => p.onDecide(f, 'open')}
-					/>
+					{(p.walk?.ai || aiRun) && (
+						<CommitFindings
+							sha={commit.entry.sha}
+							runs={p.runs}
+							review={p.review}
+							selected={finding?.id ?? null}
+							laterChange={laterChange}
+							onSelect={openFinding}
+							onAdd={addFinding}
+							onDismiss={(f) => p.onDecide(f, 'dismissed')}
+							onRestore={(f) => p.onDecide(f, 'open')}
+						/>
+					)}
 					<CommitCheckPanel
 						sha={commit.entry.sha}
 						cc={p.checks}
@@ -330,6 +352,19 @@ export function CommitView(p: Props) {
 							Walkthrough · commit {index + 1} of {total}
 							{ordered.length > 1 && fileIndex >= 0 ? ` · file ${fileIndex + 1} of ${ordered.length}` : ''}
 						</span>
+						{empty === 'moving' && (
+							<span className="small walk-empty" role="status">
+								The AI found nothing in this commit. Moving on to commit {index + 2}…{' '}
+								<button className="link" onClick={() => setEmpty('stayed')}>
+									Stay here
+								</button>
+							</span>
+						)}
+						{empty === 'last' && (
+							<span className="small walk-empty" role="status">
+								The AI found nothing in this commit. That was the last one.
+							</span>
+						)}
 						<span className="spacer" />
 						<button className="btn small ghost" onClick={p.walk.onStop}>
 							Stop walkthrough
