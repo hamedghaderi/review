@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
@@ -61,6 +62,7 @@ import {
 	type CommitCheckEstimate,
 	type Anchor,
 	type CommitEntry,
+	type FindingVerification,
 	type CommitList,
 	type CommitView,
 	commitRunKey,
@@ -1854,11 +1856,6 @@ export class ReviewService {
 		const target = targetKey(targetOf(this.store.read().repos[repoId].reviews[reviewId]))
 		const key = commitRunKey(target, sha)
 		const run = await this.ai.start(access, key, { kind: 'all' }, choice, { overBudget, commitOf: { reviewId, target, sha } })
-		// Once it finishes, its findings on lines later commits changed are checked against the latest code.
-		// (A run that is already over has no promise to wait for.)
-		void Promise.resolve(this.ai.whenDone(run.id))
-			.then(() => this.checkCommitFindings(reviewId, key, run.id, sha))
-			.catch((e: unknown) => console.warn('Commit findings could not be checked against the latest code:', e))
 		return run
 	}
 
@@ -1882,63 +1879,142 @@ export class ReviewService {
 	}
 
 	/**
-	 * After a commit run: each finding whose lines a later commit changed is asked about once against the latest code
-	 * (see AiController.checkAtHead); one on a file a later commit deleted is gone without asking. Findings on lines
-	 * that are unchanged since are left alone. The run says while this happens (`laterCheck`).
+	 * Ends a commit-by-commit review: the notes each commit's review raised (the newest finished review of each of the
+	 * review's commits, from any snapshot) are checked against the final code, like a reviewer reading the commits in
+	 * order would at the end. A note on lines nobody changed later holds as it is. One on lines a later commit changed is
+	 * asked about once (see AiController.checkAtHead) and kept only if it is still there. One whose file a later commit
+	 * deleted, or that the pull request ends up not changing, is gone. What holds becomes an ordinary finished run of the
+	 * review, its findings anchored in the final code, each saying the commit it came from.
 	 */
-	private async checkCommitFindings(reviewId: string, runKey: string, runId: string, sha: string): Promise<void> {
+	async finishCommitReview(reviewId: string): Promise<AiRun> {
 		const ai = this.ai
-		const head = this.comparisons.get(reviewId)
-		if (!ai || !head) return
-		const repoId = head.comparison.repoId
-		// The run's last update is stored just after it is done.
-		let run = ai.runsFor(repoId, runKey).find((r) => r.id === runId)
-		for (let i = 0; i < 50 && run?.status === 'running'; i++) {
-			await new Promise((r) => setTimeout(r, 20))
-			run = ai.runsFor(repoId, runKey).find((r) => r.id === runId)
-		}
-		if (!run || (run.status !== 'completed' && run.status !== 'partial')) return
-		const mapper = new Mapper(head.root, sha, head.comparison.headSha)
-		const asks: Array<{ findingId: string; at: Anchor; around: Array<string> }> = []
-		const gone = new Map<string, string>() // finding id → why it is gone
-		for (const f of run.findings) {
-			const a = f.anchor
-			if (f.mergedInto || f.atHead || a.side !== 'new' || a.startLine === null || a.endLine === null || !a.newPath) continue
-			const m = await mapper.move(a.newPath)
-			if (!m.path) {
-				gone.set(f.id, `A later commit deletes ${a.newPath}.`)
-				continue
+		if (!ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
+		const head = this.steppable(reviewId)
+		const c = head.comparison
+		const repoId = c.repoId
+		const { commits } = await listCommits(head.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
+		const byCommit = new Map<string, AiRun>()
+		for (const r of this.commitRunsOf(repoId, reviewId))
+			if ((r.status === 'completed' || r.status === 'partial') && r.commitOf) byCommit.set(r.commitOf.sha, r) // newest last
+		const reviewed = commits.flatMap((x) => (byCommit.has(x.sha) ? [{ entry: x, run: byCommit.get(x.sha)! }] : []))
+		if (!reviewed.length) throw new AppFail('invalid-input', 'No commit of this review has an AI review yet.')
+
+		const kept: Array<Finding> = []
+		const dropped: Array<{ sha: string; title: string; why: string }> = []
+		let notes = 0
+		for (const { entry, run } of reviewed) {
+			const mapper = new Mapper(head.root, entry.sha, c.headSha)
+			const runKey = run.reviewId
+			for (const f of run.findings) {
+				if (f.mergedInto) continue
+				notes++
+				const a = f.anchor
+				const drop = (why: string): void => void dropped.push({ sha: entry.sha, title: f.title, why })
+				const path = a.newPath ?? a.oldPath
+				const m = path ? await mapper.move(path) : null
+				if (!m?.path) {
+					drop(`A later commit deletes ${path}.`)
+					continue
+				}
+				const file = c.files.find((x) => x.newPath === m.path)
+				if (!file) {
+					drop(`${m.path} ends up unchanged in this ${c.pr ? 'pull request' : 'branch'}: later commits undid this commit’s change.`)
+					continue
+				}
+				const keep = (at: Partial<Anchor>, atHead?: FindingVerification): void => {
+					const { repeatOf: _r, previous: _p, carried: _c, atHead: _a, ...rest } = f
+					kept.push({
+						...rest,
+						id: randomUUID(),
+						anchor: {
+							...a,
+							baseSha: c.baseSha,
+							headSha: c.headSha,
+							fileKey: file.key,
+							oldPath: file.oldPath,
+							newPath: file.newPath,
+							...at,
+						},
+						repeatOf: null,
+						fromCommit: { sha: entry.sha, subject: entry.subject },
+						...(atHead ? { atHead } : {}),
+					})
+				}
+				if (a.side !== 'new' || a.startLine === null || a.endLine === null) {
+					keep({ side: null, startLine: null, endLine: null }) // on the file, or on lines this commit removed
+					continue
+				}
+				const same = await mapper.range(m, a.startLine, a.endLine)
+				if (same) {
+					keep({ side: 'new', startLine: same.start, endLine: same.end })
+					continue
+				}
+				// Its lines changed later: is the problem still in the final code?
+				const near = await mapper.near(m, a.startLine, a.endLine)
+				const at: Anchor = {
+					...a,
+					baseSha: c.baseSha,
+					headSha: c.headSha,
+					fileKey: file.key,
+					oldPath: file.oldPath,
+					newPath: file.newPath,
+					startLine: near.start,
+					endLine: near.end,
+				}
+				const text = await readAt(head.root, c.headSha, m.path, FILE_LINES_LIMIT).catch(() => null)
+				const lines = text ? blobLines(text.buf, text.truncated) : null
+				const around = codeAround({ ...f, anchor: at }, null, lines?.kind === 'text' ? lines.lines : null)
+				const check = await ai.checkAtHead(repoId, runKey, run.id, f.id, at, around, entry.sha)
+				if (check.verdict === 'wrong') drop(check.reason || 'A later commit fixed it.')
+				else keep({ side: 'new', startLine: near.start, endLine: near.end }, check)
 			}
-			if (await mapper.range(m, a.startLine, a.endLine)) continue // still there, unchanged
-			const near = await mapper.near(m, a.startLine, a.endLine)
-			const file = head.comparison.files.find((x) => x.newPath === m.path)
-			const at: Anchor = {
-				...a,
-				baseSha: head.comparison.baseSha,
-				headSha: head.comparison.headSha,
-				fileKey: file?.key ?? m.path,
-				oldPath: file?.oldPath ?? m.path,
-				newPath: m.path,
-				startLine: near.start,
-				endLine: near.end,
-			}
-			const text = await readAt(head.root, head.comparison.headSha, m.path, FILE_LINES_LIMIT).catch(() => null)
-			const lines = text ? blobLines(text.buf, text.truncated) : null
-			asks.push({ findingId: f.id, at, around: codeAround({ ...f, anchor: at }, null, lines?.kind === 'text' ? lines.lines : null) })
 		}
-		await ai.patchRun(repoId, runKey, runId, (r) => {
-			r.laterCheck = asks.length ? 'running' : 'done'
-			for (const f of r.findings) {
-				const why = gone.get(f.id)
-				if (why) f.atHead = { verdict: 'wrong', reason: why, level: null, checked: [], model: r.model }
-			}
-		})
-		if (!asks.length) return
-		try {
-			for (const x of asks) await ai.checkAtHead(repoId, runKey, runId, x.findingId, x.at, x.around, sha)
-		} finally {
-			await ai.patchRun(repoId, runKey, runId, (r) => void (r.laterCheck = 'done'))
+		const last = reviewed[reviewed.length - 1].run
+		const now = new Date().toISOString()
+		const id = randomUUID()
+		const run: AiRun = {
+			id,
+			reviewId,
+			repoId,
+			baseSha: c.baseSha,
+			headSha: c.headSha,
+			provider: last.provider,
+			providerLabel: last.providerLabel,
+			model: last.model,
+			fixture: last.fixture,
+			connectionId: last.connectionId ?? null,
+			connectionLabel: last.connectionLabel ?? null,
+			protocol: last.protocol ?? null,
+			endpoint: last.endpoint ?? null,
+			limitsUsed: last.limitsUsed ?? null,
+			notices: [
+				`Reviewed commit by commit: ${reviewed.length} of ${commits.length} commits. ${notes} note${notes === 1 ? '' : 's'}, ${dropped.length} of them no longer true in the final code.`,
+			],
+			promptVersion: last.promptVersion,
+			scope: { kind: 'all' },
+			status: 'completed',
+			startedAt: reviewed[0].run.startedAt,
+			finishedAt: now,
+			coverage: {
+				files: c.files.map((f) => ({ fileKey: f.key, state: 'reviewed', reason: null })),
+				skippedRanges: [],
+				supplied: [],
+				batchesTotal: reviewed.length,
+				batchesDone: reviewed.length,
+				batchesFailed: 0,
+				inputChars: reviewed.reduce((n, x) => n + x.run.coverage.inputChars, 0),
+			},
+			findings: kept.map((f) => ({ ...f, runId: id })),
+			rejected: [],
+			limitations: [],
+			errors: [],
+			usage: null,
+			team: last.team ?? null,
+			persona: last.persona ?? null,
+			levels: last.levels,
+			byCommit: { commits: reviewed.length, notes, dropped },
 		}
+		return ai.addRun(repoId, run)
 	}
 
 	/**

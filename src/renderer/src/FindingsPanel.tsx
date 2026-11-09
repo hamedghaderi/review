@@ -945,6 +945,25 @@ const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
 function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewRule>) => void) | null }) {
 	const [all, setAll] = useState(false)
 	const ev = run.evaluation
+	const b = run.byCommit
+	if (b)
+		return (
+			<div className="small muted checklist-note">
+				Reviewed commit by commit: {b.commits} commit{b.commits === 1 ? '' : 's'}, {b.notes} note{b.notes === 1 ? '' : 's'}.{' '}
+				{b.dropped.length
+					? `${b.dropped.length} dropped because later commits fixed or removed what ${b.dropped.length === 1 ? 'it was' : 'they were'} about:`
+					: 'Every note still holds in the final code.'}
+				{b.dropped.length > 0 && (
+					<ul className="byc-dropped">
+						{b.dropped.map((d, i) => (
+							<li key={i}>
+								<span className="mono">{d.sha.slice(0, 7)}</span> {d.title}: {d.why}
+							</li>
+						))}
+					</ul>
+				)}
+			</div>
+		)
 	if (!ev) {
 		return (
 			<div className="small muted checklist-note">
@@ -1470,6 +1489,13 @@ function FindingCard(p: CardProps) {
 				{p.sameModel ? <span title={SAME_MODEL_HINT}>, checked by the same model</span> : null}
 				{f.support?.some((s) => s.strength === 'flags') ? ' · CI flagged these lines too' : ''}
 				{team && f.memberId ? ` · ${team.members.find((m) => m.id === f.memberId)?.role ?? 'reviewer'}` : ''}
+				{f.fromCommit && (
+					<span title={`Noted while reviewing commit ${f.fromCommit.sha.slice(0, 7)}: ${f.fromCommit.subject}`}>
+						{' '}
+						· from commit {f.fromCommit.sha.slice(0, 7)}
+						{f.atHead && !f.atHead.error ? (f.atHead.verdict === 'holds' ? ', still in the final code' : ', may still be there') : ''}
+					</span>
+				)}
 				{team && f.alsoBy?.length
 					? `, also ${f.alsoBy.map((id) => team.members.find((m) => m.id === id)?.role ?? 'another reviewer').join(', ')}`
 					: ''}

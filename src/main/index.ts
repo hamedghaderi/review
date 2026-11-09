@@ -454,6 +454,9 @@ function registerIpc(): void {
 		return service.startCommitReview(comparisonId(reviewId), commitSha(sha), choice, overBudget === true)
 	})
 	handle(IPC.commitRuns, async (reviewId: unknown) => service.commitRuns(comparisonId(reviewId)))
+	handle(IPC.finishCommitReview, (reviewId: unknown) =>
+		answered(service.finishCommitReview(comparisonId(reviewId)), 'The commit-by-commit review'),
+	)
 	handle(IPC.reviewedUpTo, (reviewId: unknown, tips: unknown) => {
 		if (!Array.isArray(tips) || tips.length > 50) throw new AppFail('invalid-input', 'Invalid commits.')
 		return service.reviewedUpTo(comparisonId(reviewId), tips.map(commitSha))

@@ -174,15 +174,6 @@ const reopen = async (w: Awaited<ReturnType<typeof setup>>) =>
 		})
 	).comparison
 
-async function checked(w: Awaited<ReturnType<typeof setup>>, reviewId: string, sha: string): Promise<AiRun> {
-	for (let i = 0; i < 200; i++) {
-		const run = w.svc.commitRuns(reviewId)[sha]?.at(-1)
-		if (run?.laterCheck === 'done') return run
-		await new Promise((r) => setTimeout(r, 10))
-	}
-	throw new Error('the findings were never checked against the latest code')
-}
-
 test('commit review: a commit whose additions later commits all changed is skipped, not sent', async () => {
 	const w = await setup()
 	w.commit({ 'b.ts': 'export const b = 20\nexport const c = 30\n' }, 'Rewrite b')
@@ -197,24 +188,43 @@ test('commit review: a commit whose additions later commits all changed is skipp
 	await finished(w.ai, kept)
 })
 
-test('commit review: findings on code later commits changed are checked against the latest code; a deleted file is gone', async () => {
+test('commit review: finishing checks every note against the final code and keeps what holds as the review’s findings', async () => {
 	const w = await setup(true, { 'b.ts': 'export const b = 2\nexport const c = 3\n', 'x.ts': 'export const x = 1\n' })
-	w.commit({ 'b.ts': 'export const b = 22\nexport const c = 3\n' }, 'Change b’s first line') // c1’s b.ts:1 changes, :2 stays
-	w.commit({ 'x.ts': 'export const x = 2\n' }, 'Change x')
+	w.commit({ 'b.ts': 'export const b = 22\nexport const c = 3\n' }, 'Change b’s first line') // c1’s b.ts:1 changes later
 	const { execFileSync: run } = await import('node:child_process')
 	const root = w.store.read().repos[w.repoId].root
-	run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'rm', '-q', 'x.ts'], { cwd: root })
-	run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Drop x'], { cwd: root })
+	const git = (...a: Array<string>) =>
+		run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: root })
+	git('rm', '-q', 'x.ts')
+	git('commit', '-qm', 'Drop x') // c1’s x.ts is gone
 	const next = await reopen(w)
-	const started = await w.svc.startCommitReview(next.id, w.c1, MODEL, false)
-	assert.ok(!('skipped' in started), 'b.ts:2 is still there')
-	await finished(w.ai, started)
-	const done = await checked(w, next.id, w.c1)
-	const at = (path: string) => done.findings.find((f) => f.anchor.newPath === path && !f.mergedInto)
-	assert.equal(at('x.ts')?.atHead?.verdict, 'wrong', 'x.ts is deleted later: gone, without asking')
-	assert.match(at('x.ts')?.atHead?.reason ?? '', /deletes x\.ts/)
-	assert.ok(at('b.ts')?.atHead, 'b.ts:1 changed later: asked about the latest code')
-	const verify = w.asked.filter((r) => r.schema?.name === 'finding_verification' || /# The finding/.test(r.input))
-	assert.equal(verify.length, 1, 'one request, for b.ts only')
-	assert.match(verify[0].input, /export const b = 22/, 'with the latest code')
+	await assert.rejects(w.svc.finishCommitReview(next.id), /No commit of this review has an AI review yet/)
+	for (const sha of [w.c1, w.c2]) {
+		const r = await w.svc.startCommitReview(next.id, sha, MODEL, false)
+		assert.ok(!('skipped' in r))
+		await finished(w.ai, r)
+	}
+	const asked = w.asked.length
+	const done = await w.svc.finishCommitReview(next.id)
+
+	assert.equal(done.reviewId, next.id, 'a run of the review itself')
+	assert.equal(done.commitOf, undefined)
+	assert.deepEqual([done.baseSha, done.headSha], [next.baseSha, next.headSha])
+	assert.ok(
+		w.ai.runsFor(w.repoId, next.id).some((r) => r.id === done.id),
+		'stored with the review’s runs',
+	)
+	const at = (path: string) => done.findings.find((f) => f.anchor.newPath === path)
+	assert.equal(at('x.ts'), undefined, 'x.ts was deleted later: dropped')
+	assert.ok(done.byCommit?.dropped.some((d) => d.sha === w.c1 && /deletes x\.ts/.test(d.why)))
+	assert.deepEqual(at('a.ts')?.fromCommit?.sha, w.c2, 'c2’s note on a.ts holds as it is')
+	assert.equal(at('a.ts')?.anchor.headSha, next.headSha, 'anchored in the final code')
+	assert.equal(at('a.ts')?.atHead, undefined, 'not asked: nobody changed those lines later')
+	// b.ts:1 changed later: asked once, with the final code; the fixture can't tell, so it is kept.
+	const checks = w.asked.slice(asked)
+	assert.equal(checks.length, 1, 'one request, for b.ts only')
+	assert.match(checks[0].input, /export const b = 22/)
+	assert.equal(at('b.ts')?.atHead?.verdict, 'unsure')
+	assert.ok(done.findings.every((f) => f.runId === done.id))
+	assert.equal(done.byCommit?.commits, 2)
 })

@@ -700,6 +700,13 @@ export class AiController {
 		return result
 	}
 
+	/** Stores a finished run the app put together (a commit-by-commit review's findings) and tells the window. */
+	async addRun(repoId: string, run: AiRun): Promise<AiRun> {
+		await this.persist(repoId, run)
+		this.notify(structuredClone(run))
+		return structuredClone(run)
+	}
+
 	/** Changes a stored run and tells the window; for what the app adds to a finished run (see checkAtHead). */
 	async patchRun(repoId: string, runKey: string, runId: string, change: (r: AiRun) => void): Promise<AiRun | null> {
 		let saved: AiRun | null = null

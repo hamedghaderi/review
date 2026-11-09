@@ -1061,9 +1061,11 @@ export interface Finding {
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
 	verification?: FindingVerification // a second request that tried to prove it wrong (see FindingVerification)
-	// A commit run's finding whose lines a later commit changed or removed: whether it is still a problem in the latest
-	// code ('wrong': fixed or gone there). Set by the app after the run; absent for findings on lines that survive.
+	// A commit run's note whose lines a later commit changed: whether it is still a problem in the final code ('wrong':
+	// fixed or gone there). Set when the commit-by-commit review finishes; absent for notes on lines that survive.
 	atHead?: FindingVerification
+	// A finding of a commit-by-commit review: the commit whose review noted it (its anchor is moved to the final code).
+	fromCommit?: { sha: string; subject: string }
 	reproducer?: FindingReproducer // a failing test you asked for; only the newest is kept
 	mergedInto?: string | null // the same problem as this finding of the run, which stays open; this one is folded under it
 	mergedReason?: string | null // the shared cause, in one sentence
@@ -1541,8 +1543,8 @@ export interface AiRun {
 	// `reviewId` is commitRunKey(target, sha), so it never mixes with a snapshot's own runs. `reviewId` here is the
 	// snapshot it was started from; `target` is that snapshot's targetKey, which later snapshots share.
 	commitOf?: { reviewId: string; target: string; sha: string }
-	// A commit run: its findings on lines later commits changed are being checked against the latest code, or were.
-	laterCheck?: 'running' | 'done'
+	// A commit-by-commit review, once finished: how many commits had notes, and the notes later commits made wrong.
+	byCommit?: { commits: number; notes: number; dropped: Array<{ sha: string; title: string; why: string }> } | null
 	promptVersion: string
 	scope: AiScope
 	status: AiRunStatus
@@ -1949,6 +1951,7 @@ export const IPC = {
 	checkCommit: 'ai:check-commit',
 	startCommitReview: 'ai:start-commit-review',
 	commitRuns: 'ai:commit-runs',
+	finishCommitReview: 'ai:finish-commit-review',
 	reviewedUpTo: 'diff:reviewed-up-to',
 	estimateCommitChecks: 'ai:estimate-commit-checks',
 	installUpdate: 'update:install',
@@ -2217,6 +2220,11 @@ export interface ReviewApi {
 	): Promise<Result<AiRun | { skipped: string }>>
 	/** The AI runs on the review's commits, by commit SHA, oldest first. */
 	commitRuns(reviewId: string): Promise<Result<Record<string, Array<AiRun>>>>
+	/**
+	 * Ends a commit-by-commit review: the commits' notes are checked against the final code, and those that still hold
+	 * become a finished run of the review (its findings, each saying the commit it came from).
+	 */
+	finishCommitReview(reviewId: string): Promise<Result<AiRun>>
 	/** For each head you reviewed earlier, the index of the last of the review's commits it contains; -1 for none. */
 	reviewedUpTo(reviewId: string, tips: Array<string>): Promise<Result<Array<number>>>
 	/** What checking these commits would send and cost. */

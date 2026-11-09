@@ -1442,11 +1442,27 @@ export function App() {
 		const since = r?.ok ? lastReviewed(tips.map((t, i) => ({ ...t, index: r.value[i] }))) : null
 		setAskCommits({ ...ai, since })
 	}
-	const acceptCommitFinding = (f: Finding): void => {
-		if (!review) return
-		const res = ops.acceptFinding(review, f, findingRoots([...aiRuns, ...commitRuns.all]))
-		if (res.created) change(() => res.review)
-		if (res.draftId) setActiveDraftId(res.draftId)
+	// After the last commit: every note is checked against the final code, and those that still hold become the
+	// review's findings (a run of its own, which arrives like any other); then the review shows all its changes.
+	const [finishing, setFinishing] = useState(false)
+	const finishWalk = async (): Promise<void> => {
+		if (!walkAi || !comparison) return void showCommit(null)
+		const id = comparison.id
+		setFinishing(true)
+		setAiError(null)
+		const r = await window.review.finishCommitReview(id)
+		setFinishing(false)
+		if (comparisonIdRef.current !== id) return
+		if (!r.ok) return setNotice(`The notes could not be checked: ${r.error.message}`)
+		setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
+		const b = r.value.byCommit
+		setNotice(
+			b
+				? `${r.value.findings.length} finding${r.value.findings.length === 1 ? '' : 's'} from ${b.commits} commit${b.commits === 1 ? '' : 's'}. ${b.dropped.length} note${b.dropped.length === 1 ? ' was' : 's were'} dropped because later commits fixed or removed what ${b.dropped.length === 1 ? 'it was' : 'they were'} about.`
+				: null,
+		)
+		await showCommit(null)
+		setRightTab('findings')
 	}
 	const offerWalk =
 		reviewing.offerWalk &&
@@ -2094,10 +2110,10 @@ export function App() {
 											placeRef={placeRef}
 											checks={commitChecks}
 											checkDisabled={askDisabled}
-											walk={walking ? { ai: !!walkAi, onStop: () => setWalking(false), onFinish: () => void showCommit(null) } : null}
+											walk={
+												walking ? { ai: !!walkAi, finishing, onStop: () => setWalking(false), onFinish: () => void finishWalk() } : null
+											}
 											runs={commitRuns}
-											onAddFinding={acceptCommitFinding}
-											onDecide={(f, status) => change((r) => ops.setFindingDecision(r, f.id, status))}
 										/>
 									) : (
 										<>

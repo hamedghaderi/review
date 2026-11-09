@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AiRun, Finding, Review, ReviewerChoice } from '../../shared/types.ts'
-import { findingRoots, findingState, LEVEL_META, SEVERITY_ORDER } from '../../shared/findings.ts'
+import type { AiRun, Finding, ReviewerChoice } from '../../shared/types.ts'
+import { LEVEL_META, SEVERITY_ORDER } from '../../shared/findings.ts'
 import { AiOrb } from './AiOrb.tsx'
 
 /**
@@ -67,131 +67,74 @@ export function useCommitRuns(reviewId: string | null, target: string | null) {
 
 export type CommitRuns = ReturnType<typeof useCommitRuns>
 
-/** "changed in a later commit", for findings whose lines a later commit changes; null when they survive. */
-export type LaterChange = (f: Finding) => string | null
-
-/** The AI's review of one commit: its status, and its findings to open, add as comments or dismiss. */
-export function CommitFindings({
+/**
+ * The AI's notes on one commit, while you walk through the commits. They are not findings yet: after the last commit
+ * they are checked against the final code, and only those that still hold become the review's findings. Clicking one
+ * shows its lines.
+ */
+export function CommitNotes({
 	sha,
 	runs,
-	review,
 	selected,
-	laterChange,
 	onSelect,
-	onAdd,
-	onDismiss,
-	onRestore,
 }: {
 	sha: string
 	runs: CommitRuns
-	review: Review
 	selected: string | null
-	laterChange: LaterChange
 	onSelect(f: Finding): void
-	onAdd(f: Finding): void
-	onDismiss(f: Finding): void
-	onRestore(f: Finding): void
 }) {
 	const run = runs.latest(sha)
 	const error = runs.errors[sha]
-	const roots = useMemo(() => findingRoots(runs.all), [runs.all])
-	const byId = useMemo(() => new Map(runs.all.flatMap((r) => r.findings.map((f) => [f.id, f] as const))), [runs.all])
-	// Findings later commits fixed go last.
-	const findings = useMemo(
-		() =>
-			[...(run?.findings ?? [])]
-				.filter((f) => !f.mergedInto)
-				.sort((a, b) => Number(isFixed(a)) - Number(isFixed(b)) || SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
+	const notes = useMemo(
+		() => [...(run?.findings ?? [])].filter((f) => !f.mergedInto).sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
 		[run],
 	)
-	const fixedCount = findings.filter(isFixed).length
 	const skipped = runs.skipped[sha]
 	return (
 		<div className="commit-ai">
 			<div className="commit-check-head">
 				{skipped ? (
 					<span className="small">
-						<strong>AI review:</strong> <span className="muted">skipped. {skipped}</span>
+						<strong>AI:</strong> <span className="muted">skipped. {skipped}</span>
 					</span>
 				) : run?.status === 'running' ? (
 					<>
 						<AiOrb activity="reasoning" size={14} label="AI review running" />
-						<span className="small">Reviewing this commit…</span>
+						<span className="small">The AI is reviewing this commit…</span>
 						<button className="btn small ghost" onClick={() => void window.review.cancelAiReview(run.id)}>
 							Stop
 						</button>
 					</>
 				) : run ? (
 					<span className="small">
-						<strong>AI review:</strong>{' '}
+						<strong>AI notes:</strong>{' '}
 						{run.status === 'failed'
-							? `failed${run.errors[0] ? `: ${run.errors[0]}` : ''}`
+							? `the review failed${run.errors[0] ? `: ${run.errors[0]}` : ''}`
 							: run.status === 'cancelled'
 								? 'stopped'
-								: findings.length
-									? `${findings.length} finding${findings.length === 1 ? '' : 's'}${fixedCount ? `, ${fixedCount} fixed by later commits` : ''}`
-									: 'no findings'}
+								: notes.length
+									? `${notes.length}. They become findings after the last commit, if they still hold in the final code.`
+									: 'nothing in this commit.'}
 						<span className="muted"> · {run.model}</span>
-						{run.laterCheck === 'running' && (
-							<span className="muted">
-								{' '}
-								· <AiOrb activity="reasoning" size={12} /> checking findings on code later commits changed against the latest code…
-							</span>
-						)}
 					</span>
 				) : (
-					<span className="muted small">Checking whether this commit’s changes are still in the latest code…</span>
+					<span className="muted small">Checking whether this commit’s changes are still in the final code…</span>
 				)}
 			</div>
 			{error && <div className="small error-text">The AI could not review this commit: {error.message}</div>}
-			{findings.length > 0 && (
+			{notes.length > 0 && (
 				<ul className="commit-findings">
-					{findings.map((f) => {
-						const state = findingState(review, roots, f, byId)
-						const later = f.atHead ? null : laterChange(f)
-						const atHead = f.atHead
+					{notes.map((f) => {
 						const where = f.anchor.startLine
 							? `${f.anchor.newPath ?? f.anchor.oldPath}:${f.anchor.startLine}`
 							: (f.anchor.newPath ?? f.anchor.oldPath)
 						return (
-							<li key={f.id} className={`${selected === f.id ? 'on' : ''} ${state}${isFixed(f) ? ' fixed-later' : ''}`}>
+							<li key={f.id} className={selected === f.id ? 'on' : ''}>
 								<button className="commit-finding" onClick={() => onSelect(f)} title={f.body}>
 									<span className={`sev ${f.severity}`}>{LEVEL_META[f.severity].label}</span>
 									<span className="ellipsis">{f.title}</span>
 									<span className="muted mono small nowrap">{where}</span>
 								</button>
-								<span className="commit-finding-actions small">
-									{atHead && (
-										<span className={`pill${atHead.verdict === 'wrong' ? '' : ' warn'}`} title={atHead.reason}>
-											{atHead.verdict === 'wrong'
-												? 'Fixed in a later commit'
-												: atHead.verdict === 'holds'
-													? 'Still in the latest code'
-													: 'Couldn’t tell if it’s still there'}
-										</span>
-									)}
-									{later && (
-										<span className="pill warn" title={later}>
-											Changed in a later commit
-										</span>
-									)}
-									{state === 'accepted' ? (
-										<span className="muted">Added</span>
-									) : state === 'dismissed' ? (
-										<button className="link" onClick={() => onRestore(f)}>
-											Restore
-										</button>
-									) : (
-										<>
-											<button className="link" onClick={() => onAdd(f)}>
-												Add as comment
-											</button>
-											<button className="link muted" onClick={() => onDismiss(f)}>
-												Dismiss
-											</button>
-										</>
-									)}
-								</span>
 								{selected === f.id && <p className="small selectable commit-finding-body">{f.body}</p>}
 							</li>
 						)
@@ -246,8 +189,8 @@ export function CommitReviewAsk({
 							: fresh > 0
 								? `${fresh} new commit${fresh === 1 ? '' : 's'} since ${since.label} (${sha}). The AI starts with commit ${from + 1} and reviews them one at a time.`
 								: `No new commits since ${since.label} (${sha}). You can still go through all ${commits.length} commits.`}{' '}
-						You read each commit’s findings, then continue, and it reviews the next one. When it finds nothing in a commit, it tells you and
-						moves on.
+						You read what it notes in each commit, then continue, and it reviews the next one. After the last commit it checks every note
+						against the final code: notes later commits fixed are dropped, and the ones that still hold become the review’s findings.
 					</p>
 					<ol className="small commit-ask-list">
 						{commits.map((c, i) => (
@@ -283,9 +226,4 @@ export function CommitReviewAsk({
 			</div>
 		</div>
 	)
-}
-
-/** A commit finding the check against the latest code found gone: a later commit fixed it or removed its code. */
-function isFixed(f: Finding): boolean {
-	return f.atHead?.verdict === 'wrong'
 }

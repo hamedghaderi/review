@@ -10,7 +10,7 @@ import { keyLabel } from './keymap.ts'
 import { buildTree, displayPath, flatten } from './tree.ts'
 import { CommitCheckPanel, type CommitChecks } from './CommitCheck.tsx'
 import type { CommitCheckNote } from '../../shared/types.ts'
-import { CommitFindings, type CommitRuns } from './CommitRuns.tsx'
+import { CommitNotes, type CommitRuns } from './CommitRuns.tsx'
 import type { RevealRequest } from './DiffView.tsx'
 
 /** What the review does with drafts and comments; shared by the review's own diff and a commit's. */
@@ -42,11 +42,10 @@ interface Props {
 	checks: CommitChecks
 	checkDisabled: string | null // why the AI can't check commits now
 	// Walking through the commits: file by file, then on to the next commit when you say so. Null: not walking.
-	// `ai`: each commit is reviewed by the AI as you reach it, and moving on waits for that review.
-	walk: { ai: boolean; onStop(): void; onFinish(): void } | null
+	// `ai`: each commit is reviewed by the AI as you reach it, and moving on waits for that review; finishing checks
+	// all the notes against the final code (`finishing` while it does).
+	walk: { ai: boolean; finishing: boolean; onStop(): void; onFinish(): void } | null
 	runs: CommitRuns // the AI's reviews of the review's commits
-	onAddFinding(f: Finding): void // a commit's finding, its anchor already moved to the head, as a draft
-	onDecide(f: Finding, status: 'dismissed' | 'open'): void
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -165,46 +164,22 @@ export function CommitView(p: Props) {
 		p.drafts.startWith(r.anchor, body)
 	}
 
-	// The commit's findings: where they would go at the head, and opening one at its line here.
-	const laterChange = (f: Finding): string | null => {
-		const m = maps.get(f.anchor.fileKey)
-		if (!m || 'error' in m || !m.headFileKey || f.anchor.side !== 'new') return null
-		const r = anchorToHead(f.anchor, m, head, commit.entry.sha)
-		return 'refused' in r ? r.refused : null
-	}
 	const openFinding = (f: Finding): void => {
 		setFinding((cur) => (cur?.id === f.id ? null : f))
 		setSelected(f.anchor.fileKey)
 		setReveal({ fileKey: f.anchor.fileKey, itemId: null, anchor: f.anchor, nonce: Date.now() })
 	}
-	const addFinding = (f: Finding): void => {
-		setNotice(null)
-		const m = maps.get(f.anchor.fileKey)
-		if (!m || 'error' in m) return setNotice('That file can’t be lined up with the latest commit yet. Try again in a moment.')
-		const r = anchorToHead(f.anchor, m, head, commit.entry.sha)
-		if ('anchor' in r) return p.onAddFinding({ ...f, anchor: r.anchor })
-		// Its lines changed later (or are removed lines): the comment goes on the file and says where it was.
-		const onFile = anchorToHead({ ...f.anchor, side: null, startLine: null, endLine: null }, m, head, commit.entry.sha)
-		if ('refused' in onFile) return setNotice(onFile.refused)
-		const lines = f.anchor.startLine === f.anchor.endLine ? `line ${f.anchor.startLine}` : `lines ${f.anchor.startLine}–${f.anchor.endLine}`
-		const where = `In ${commit.entry.sha.slice(0, 7)}, ${lines}${f.anchor.side === 'old' ? ' (removed)' : ', changed in a later commit'}`
-		p.onAddFinding({ ...f, anchor: onFile.anchor, body: `${where}: ${f.body}` })
-	}
 	const sha = commit.entry.sha
 	const aiRun = p.runs.latest(sha)
 	const skipped = p.runs.skipped[sha] ?? null
-	// The review, then the check of its findings against the latest code; moving on waits for both.
-	const checking = aiRun?.status !== 'running' && aiRun?.laterCheck === 'running'
-	const waitForAi = !!p.walk?.ai && (p.runs.running(sha) || checking)
-	const settled = !!aiRun && (aiRun.status === 'completed' || aiRun.status === 'partial') && aiRun.laterCheck !== 'running'
-	const shown = (aiRun?.findings ?? []).filter((f) => !f.mergedInto)
-	const fixedLater = shown.filter((f) => f.atHead?.verdict === 'wrong').length
-	const relevant = shown.length - fixedLater
+	// Moving on waits for this commit's review (and, at the end, for the check of all notes).
+	const waitForAi = !!p.walk?.ai && (p.runs.running(sha) || p.walk.finishing)
+	const settled = !!aiRun && (aiRun.status === 'completed' || aiRun.status === 'partial')
+	const noted = (aiRun?.findings ?? []).filter((f) => !f.mergedInto).length
 
-	// In an AI walkthrough, a commit with nothing left to look at says so and moves on to the next one by itself, unless
-	// you stay: the AI found nothing, everything it found was fixed by later commits, or later commits changed
-	// everything the commit added (then it isn't reviewed at all). Only a review seen finishing here counts, so coming
-	// back to such a commit doesn't bounce you.
+	// In an AI walkthrough, a commit with nothing to look at says so and moves on to the next one by itself, unless you
+	// stay: the AI noted nothing, or later commits changed everything the commit added (then it isn't reviewed at all).
+	// Only a review seen finishing here counts, so coming back to such a commit doesn't bounce you.
 	const [empty, setEmpty] = useState<{ why: EmptyWhy; state: 'moving' | 'last' | 'stayed' } | null>(null)
 	const watched = useRef<string | null>(null) // the run seen running here
 	const isLast = p.position.index >= p.position.total - 1
@@ -217,8 +192,8 @@ export function CommitView(p: Props) {
 		}
 		if (watched.current !== aiRun.id || !settled) return
 		watched.current = null
-		if (relevant === 0) settle(shown.length ? 'fixed' : 'none')
-	}, [aiRun?.id, aiRun?.status, aiRun?.laterCheck]) // eslint-disable-line react-hooks/exhaustive-deps
+		if (noted === 0) settle('none')
+	}, [aiRun?.id, aiRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 	useEffect(() => {
 		if (p.walk?.ai && skipped) settle('skipped')
 	}, [skipped]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -230,8 +205,8 @@ export function CommitView(p: Props) {
 
 	const { index, total } = p.position
 	const wait = waitForAi
-		? checking
-			? 'Wait for the check against the latest code'
+		? p.walk?.finishing
+			? 'Checking the notes against the final code'
 			: 'Wait for the AI to finish reviewing this commit'
 		: undefined
 	// On to the next commit (or the end), always there in a walkthrough, whatever file you are on.
@@ -242,7 +217,7 @@ export function CommitView(p: Props) {
 			</button>
 		) : (
 			<button className="btn small primary" onClick={p.walk.onFinish} disabled={waitForAi} title={wait}>
-				Finish: see all changes
+				{p.walk.ai ? 'Finish: check the notes against the final code' : 'Finish: see all changes'}
 			</button>
 		)
 	) : null
@@ -296,24 +271,16 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
-					{(p.walk?.ai || aiRun) && (
-						<CommitFindings
-							sha={commit.entry.sha}
-							runs={p.runs}
-							review={p.review}
-							selected={finding?.id ?? null}
-							laterChange={laterChange}
-							onSelect={openFinding}
-							onAdd={addFinding}
-							onDismiss={(f) => p.onDecide(f, 'dismissed')}
-							onRestore={(f) => p.onDecide(f, 'open')}
-						/>
+					{(p.walk?.ai || aiRun || p.runs.skipped[sha]) && (
+						<CommitNotes sha={sha} runs={p.runs} selected={finding?.id ?? null} onSelect={openFinding} />
 					)}
-					{p.walk?.ai && settled && relevant > 0 && (
+					{p.walk?.ai && settled && noted > 0 && (
 						<div className="walk-prompt" role="status">
 							<span className="small">
-								The AI found {relevant} thing{relevant === 1 ? '' : 's'} to look at in this commit
-								{fixedLater ? ` (and ${fixedLater} that later commits fixed)` : ''}. When you’re done:
+								The AI noted {noted} thing{noted === 1 ? '' : 's'} in this commit.{' '}
+								{p.position.index < p.position.total - 1
+									? 'Look at them if you like, then go on; they are checked against the final code after the last commit.'
+									: 'This is the last commit: finishing checks every note against the final code and keeps those that still hold as findings.'}
 							</span>
 							{onward}
 						</div>
@@ -404,6 +371,11 @@ export function CommitView(p: Props) {
 								)}
 							</span>
 						)}
+						{p.walk.finishing && (
+							<span className="small walk-empty" role="status">
+								Checking every note against the final code…
+							</span>
+						)}
 						<span className="spacer" />
 						<button className="btn small ghost" onClick={p.walk.onStop}>
 							Stop walkthrough
@@ -423,9 +395,8 @@ export function CommitView(p: Props) {
 
 const NO_VIEWED: Set<string> = new Set()
 
-type EmptyWhy = 'none' | 'fixed' | 'skipped'
+type EmptyWhy = 'none' | 'skipped'
 const EMPTY_TEXT: Record<EmptyWhy, string> = {
-	none: 'The AI found nothing in this commit.',
-	fixed: 'Everything the AI found in this commit was fixed by later commits.',
+	none: 'The AI noted nothing in this commit.',
 	skipped: 'Later commits changed everything this commit added, so the AI didn’t review it on its own.',
 }
