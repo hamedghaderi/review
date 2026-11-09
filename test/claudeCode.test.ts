@@ -263,6 +263,25 @@ test('a Claude Code connection: a program not a URL, priced as the plan, never a
 	assert.equal(max.label, 'Claude Opus 5.5 · max')
 	assert.equal(max.price?.source, 'subscription')
 	assert.equal(connections.modelInfo({ connectionId: cc.id, modelId: max.id })?.limits.contextWindow, 1_000_000)
+
+	// The list follows the catalog as it is now, not as it was at the test: a model added since is offered, one removed
+	// is not, and models added by hand stay.
+	const catalog = MODEL_CATALOG['claude-code']!
+	const saved = [...catalog]
+	try {
+		catalog.unshift({ id: 'claude-new-9', label: 'Claude New 9', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null })
+		catalog.splice(
+			catalog.findIndex((m) => m.id === 'claude-sonnet-5-5'),
+			1,
+		)
+		const now = connections.view().connections[0].models
+		const added = now.find((m) => m.id === 'claude-new-9')!
+		assert.deepEqual([added.source, added.structuredOutput, added.price?.source], ['discovered', 'yes', 'subscription'])
+		assert.ok(!now.some((m) => m.id === 'claude-sonnet-5-5'))
+		assert.ok(now.some((m) => m.id === 'claude-opus-5-5-max' && m.source === 'manual'))
+	} finally {
+		catalog.splice(0, catalog.length, ...saved)
+	}
 })
 
 test('a Claude Code model named with an effort runs the model at that effort; other names run as they are', async () => {

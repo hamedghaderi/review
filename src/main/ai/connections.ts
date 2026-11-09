@@ -705,24 +705,30 @@ export class ConnectionService {
 
 	/** Discovered and manual models, plus catalog entries not confirmed by discovery. */
 	private models(c: StoredConnection, verified: boolean): Array<ModelView> {
-		const out: Array<ModelView> = c.models.map((m) => ({ ...m, price: modelPrice(c, m.id) }))
+		const cli = descriptor(c.kind).cli
+		const catalog = MODEL_CATALOG[c.kind] ?? []
+		// A CLI's "discovered" list is the catalog as it stood at the last test, so a stored copy hides every later catalog
+		// change. Its discovered models are read from the catalog as it is now; manual ones are kept.
+		const stored = cli ? c.models.filter((m) => m.source !== 'discovered') : c.models
+		const out: Array<ModelView> = stored.map((m) => ({ ...m, price: modelPrice(c, m.id) }))
 		const discovered = c.models.some((m) => m.source === 'discovered')
-		for (const cat of MODEL_CATALOG[c.kind] ?? []) {
+		for (const cat of catalog) {
 			if (out.some((m) => m.id === cat.id)) continue
 			// Once discovery has run, catalog entries missing from the account's list are not offered.
-			if (discovered && verified) continue
+			if (discovered && verified && !cli) continue
+			const confirmed = cli && verified
 			out.push({
 				id: cat.id,
 				label: cat.label,
-				source: 'catalog',
+				source: confirmed ? 'discovered' : 'catalog',
 				contextWindow: cat.contextWindow,
 				maxOutputTokens: cat.maxOutputTokens,
-				structuredOutput: 'unknown',
-				probe: null,
+				structuredOutput: confirmed ? 'yes' : 'unknown',
+				probe: (confirmed && c.models.find((m) => m.id === cat.id)?.probe) || null,
 				price: modelPrice(c, cat.id),
 			})
 		}
-		return descriptor(c.kind).cli ? withVariants(c, out) : out
+		return cli ? withVariants(c, out) : out
 	}
 
 	private validSelection(sel: ModelSelection | null, connections: Array<ConnectionView>): ModelSelection | null {
