@@ -17,7 +17,7 @@ const MODEL: ReviewerChoice = { kind: 'model', selection: SEL }
 const tmp = (): string => mkdtempSync(join(tmpdir(), 'review-commit-run-'))
 
 /** main: a.ts. topic: c1 adds b.ts, c2 changes a.ts. */
-async function setup(stepCommits = true) {
+async function setup(stepCommits = true, c1Files: Record<string, string> = { 'b.ts': 'export const b = 2\nexport const c = 3\n' }) {
 	const dir = tmp()
 	const git = (...a: Array<string>): string =>
 		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
@@ -33,7 +33,7 @@ async function setup(stepCommits = true) {
 	git('init', '-q', '-b', 'main')
 	commit({ 'a.ts': 'const a = 1\n' }, 'base')
 	git('checkout', '-qb', 'topic')
-	const c1 = commit({ 'b.ts': 'export const b = 2\nexport const c = 3\n' }, 'Add b\n\nb is needed by the cart.')
+	const c1 = commit(c1Files, 'Add b\n\nb is needed by the cart.')
 	const c2 = commit({ 'a.ts': 'const a = 10\n' }, 'Bump a')
 	const store = ReviewStore.in(tmp())
 	await store.load()
@@ -164,4 +164,57 @@ test('commit review: a head you reviewed earlier, even a merge, says how far alo
 		[w.c1, w.c2, c3],
 	)
 	assert.deepEqual(await w.svc.reviewedUpTo(next.id, [merged, w.c1, '0'.repeat(40)]), [1, 0, -1])
+})
+
+const reopen = async (w: Awaited<ReturnType<typeof setup>>) =>
+	(
+		await w.svc.loadComparison(w.repoId, {
+			kind: 'target',
+			target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+		})
+	).comparison
+
+async function checked(w: Awaited<ReturnType<typeof setup>>, reviewId: string, sha: string): Promise<AiRun> {
+	for (let i = 0; i < 200; i++) {
+		const run = w.svc.commitRuns(reviewId)[sha]?.at(-1)
+		if (run?.laterCheck === 'done') return run
+		await new Promise((r) => setTimeout(r, 10))
+	}
+	throw new Error('the findings were never checked against the latest code')
+}
+
+test('commit review: a commit whose additions later commits all changed is skipped, not sent', async () => {
+	const w = await setup()
+	w.commit({ 'b.ts': 'export const b = 20\nexport const c = 30\n' }, 'Rewrite b')
+	const next = await reopen(w)
+	const asked = w.asked.length
+	const r = await w.svc.startCommitReview(next.id, w.c1, MODEL, false)
+	assert.ok('skipped' in r, 'nothing of c1 is left')
+	assert.match(r.skipped, /changed again by later commits/)
+	assert.equal(w.asked.length, asked, 'nothing sent')
+	const kept = await w.svc.startCommitReview(next.id, w.c2, MODEL, false)
+	assert.ok(!('skipped' in kept), 'c2’s change is still there')
+	await finished(w.ai, kept)
+})
+
+test('commit review: findings on code later commits changed are checked against the latest code; a deleted file is gone', async () => {
+	const w = await setup(true, { 'b.ts': 'export const b = 2\nexport const c = 3\n', 'x.ts': 'export const x = 1\n' })
+	w.commit({ 'b.ts': 'export const b = 22\nexport const c = 3\n' }, 'Change b’s first line') // c1’s b.ts:1 changes, :2 stays
+	w.commit({ 'x.ts': 'export const x = 2\n' }, 'Change x')
+	const { execFileSync: run } = await import('node:child_process')
+	const root = w.store.read().repos[w.repoId].root
+	run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'rm', '-q', 'x.ts'], { cwd: root })
+	run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Drop x'], { cwd: root })
+	const next = await reopen(w)
+	const started = await w.svc.startCommitReview(next.id, w.c1, MODEL, false)
+	assert.ok(!('skipped' in started), 'b.ts:2 is still there')
+	await finished(w.ai, started)
+	const done = await checked(w, next.id, w.c1)
+	const at = (path: string) => done.findings.find((f) => f.anchor.newPath === path && !f.mergedInto)
+	assert.equal(at('x.ts')?.atHead?.verdict, 'wrong', 'x.ts is deleted later: gone, without asking')
+	assert.match(at('x.ts')?.atHead?.reason ?? '', /deletes x\.ts/)
+	assert.ok(at('b.ts')?.atHead, 'b.ts:1 changed later: asked about the latest code')
+	const verify = w.asked.filter((r) => r.schema?.name === 'finding_verification' || /# The finding/.test(r.input))
+	assert.equal(verify.length, 1, 'one request, for b.ts only')
+	assert.match(verify[0].input, /export const b = 22/, 'with the latest code')
 })

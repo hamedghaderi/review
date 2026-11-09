@@ -190,34 +190,62 @@ export function CommitView(p: Props) {
 		const where = `In ${commit.entry.sha.slice(0, 7)}, ${lines}${f.anchor.side === 'old' ? ' (removed)' : ', changed in a later commit'}`
 		p.onAddFinding({ ...f, anchor: onFile.anchor, body: `${where}: ${f.body}` })
 	}
-	const reviewing = p.runs.running(commit.entry.sha)
-	const waitForAi = !!p.walk?.ai && reviewing
-	const aiRun = p.runs.latest(commit.entry.sha)
+	const sha = commit.entry.sha
+	const aiRun = p.runs.latest(sha)
+	const skipped = p.runs.skipped[sha] ?? null
+	// The review, then the check of its findings against the latest code; moving on waits for both.
+	const checking = aiRun?.status !== 'running' && aiRun?.laterCheck === 'running'
+	const waitForAi = !!p.walk?.ai && (p.runs.running(sha) || checking)
+	const settled = !!aiRun && (aiRun.status === 'completed' || aiRun.status === 'partial') && aiRun.laterCheck !== 'running'
+	const shown = (aiRun?.findings ?? []).filter((f) => !f.mergedInto)
+	const fixedLater = shown.filter((f) => f.atHead?.verdict === 'wrong').length
+	const relevant = shown.length - fixedLater
 
-	// In an AI walkthrough, a review that finishes here with nothing to report says so and moves on to the next commit
-	// by itself, unless you stay. Only a review seen finishing counts: coming back to an empty commit doesn't bounce you.
-	const [empty, setEmpty] = useState<'moving' | 'last' | 'stayed' | null>(null)
+	// In an AI walkthrough, a commit with nothing left to look at says so and moves on to the next one by itself, unless
+	// you stay: the AI found nothing, everything it found was fixed by later commits, or later commits changed
+	// everything the commit added (then it isn't reviewed at all). Only a review seen finishing here counts, so coming
+	// back to such a commit doesn't bounce you.
+	const [empty, setEmpty] = useState<{ why: EmptyWhy; state: 'moving' | 'last' | 'stayed' } | null>(null)
 	const watched = useRef<string | null>(null) // the run seen running here
 	const isLast = p.position.index >= p.position.total - 1
+	const settle = (why: EmptyWhy): void => setEmpty({ why, state: isLast ? 'last' : 'moving' })
 	useEffect(() => {
 		if (!p.walk?.ai || !aiRun) return
 		if (aiRun.status === 'running') {
 			watched.current = aiRun.id
 			return
 		}
-		if (watched.current !== aiRun.id) return
+		if (watched.current !== aiRun.id || !settled) return
 		watched.current = null
-		const found = aiRun.findings.some((f) => !f.mergedInto)
-		if (found || (aiRun.status !== 'completed' && aiRun.status !== 'partial')) return
-		setEmpty(isLast ? 'last' : 'moving')
-	}, [aiRun?.id, aiRun?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+		if (relevant === 0) settle(shown.length ? 'fixed' : 'none')
+	}, [aiRun?.id, aiRun?.status, aiRun?.laterCheck]) // eslint-disable-line react-hooks/exhaustive-deps
 	useEffect(() => {
-		if (empty !== 'moving') return
+		if (p.walk?.ai && skipped) settle('skipped')
+	}, [skipped]) // eslint-disable-line react-hooks/exhaustive-deps
+	useEffect(() => {
+		if (empty?.state !== 'moving') return
 		const t = window.setTimeout(() => p.onStep(1), 2500)
 		return () => window.clearTimeout(t)
-	}, [empty]) // eslint-disable-line react-hooks/exhaustive-deps
+	}, [empty?.state]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	const { index, total } = p.position
+	const wait = waitForAi
+		? checking
+			? 'Wait for the check against the latest code'
+			: 'Wait for the AI to finish reviewing this commit'
+		: undefined
+	// On to the next commit (or the end), always there in a walkthrough, whatever file you are on.
+	const onward = p.walk ? (
+		index < total - 1 ? (
+			<button className="btn small primary" onClick={() => p.onStep(1)} disabled={waitForAi} title={wait}>
+				Continue to commit {index + 2} of {total} →
+			</button>
+		) : (
+			<button className="btn small primary" onClick={p.walk.onFinish} disabled={waitForAi} title={wait}>
+				Finish: see all changes
+			</button>
+		)
+	) : null
 	const next = keyLabel('commitNext')
 	const prev = keyLabel('commitPrev')
 	const date = new Date(commit.entry.at)
@@ -280,6 +308,15 @@ export function CommitView(p: Props) {
 							onDismiss={(f) => p.onDecide(f, 'dismissed')}
 							onRestore={(f) => p.onDecide(f, 'open')}
 						/>
+					)}
+					{p.walk?.ai && settled && relevant > 0 && (
+						<div className="walk-prompt" role="status">
+							<span className="small">
+								The AI found {relevant} thing{relevant === 1 ? '' : 's'} to look at in this commit
+								{fixedLater ? ` (and ${fixedLater} that later commits fixed)` : ''}. When you’re done:
+							</span>
+							{onward}
+						</div>
 					)}
 					<CommitCheckPanel
 						sha={commit.entry.sha}
@@ -352,46 +389,31 @@ export function CommitView(p: Props) {
 							Walkthrough · commit {index + 1} of {total}
 							{ordered.length > 1 && fileIndex >= 0 ? ` · file ${fileIndex + 1} of ${ordered.length}` : ''}
 						</span>
-						{empty === 'moving' && (
+						{empty && empty.state !== 'stayed' && (
 							<span className="small walk-empty" role="status">
-								The AI found nothing in this commit. Moving on to commit {index + 2}…{' '}
-								<button className="link" onClick={() => setEmpty('stayed')}>
-									Stay here
-								</button>
-							</span>
-						)}
-						{empty === 'last' && (
-							<span className="small walk-empty" role="status">
-								The AI found nothing in this commit. That was the last one.
+								{EMPTY_TEXT[empty.why]}{' '}
+								{empty.state === 'moving' ? (
+									<>
+										Moving on to commit {index + 2}…{' '}
+										<button className="link" onClick={() => setEmpty({ ...empty, state: 'stayed' })}>
+											Stay here
+										</button>
+									</>
+								) : (
+									'That was the last one.'
+								)}
 							</span>
 						)}
 						<span className="spacer" />
 						<button className="btn small ghost" onClick={p.walk.onStop}>
 							Stop walkthrough
 						</button>
-						{nextFile ? (
-							<button className="btn small primary" onClick={() => setSelected(nextFile.key)}>
+						{nextFile && (
+							<button className={`btn small${index < total - 1 ? '' : ' primary'}`} onClick={() => setSelected(nextFile.key)}>
 								Next file: {displayPath(nextFile)}
 							</button>
-						) : index < total - 1 ? (
-							<button
-								className="btn small primary"
-								onClick={() => p.onStep(1)}
-								disabled={waitForAi}
-								title={waitForAi ? 'Wait for the AI to finish reviewing this commit' : undefined}
-							>
-								Continue to commit {index + 2} of {total}
-							</button>
-						) : (
-							<button
-								className="btn small primary"
-								onClick={p.walk.onFinish}
-								disabled={waitForAi}
-								title={waitForAi ? 'Wait for the AI to finish reviewing this commit' : undefined}
-							>
-								Finish: see all changes
-							</button>
 						)}
+						{onward}
 					</div>
 				)}
 			</section>
@@ -400,3 +422,10 @@ export function CommitView(p: Props) {
 }
 
 const NO_VIEWED: Set<string> = new Set()
+
+type EmptyWhy = 'none' | 'fixed' | 'skipped'
+const EMPTY_TEXT: Record<EmptyWhy, string> = {
+	none: 'The AI found nothing in this commit.',
+	fixed: 'Everything the AI found in this commit was fixed by later commits.',
+	skipped: 'Later commits changed everything this commit added, so the AI didn’t review it on its own.',
+}

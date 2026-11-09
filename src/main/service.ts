@@ -59,6 +59,7 @@ import {
 	targetKey,
 	type CommitCheck,
 	type CommitCheckEstimate,
+	type Anchor,
 	type CommitEntry,
 	type CommitList,
 	type CommitView,
@@ -96,7 +97,8 @@ import {
 	type ComparisonData,
 } from './git.ts'
 import { Mapper } from './linemap.ts'
-import type { CommitFileMap } from '../shared/commitStep.ts'
+import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
+import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
 import { parsePatch, pickSection } from './patch.ts'
 import { Publisher } from './publish.ts'
@@ -1816,13 +1818,21 @@ export class ReviewService {
 	 * commitRunKey(target, sha), apart from any snapshot's own runs, so later snapshots of the same pull request or branch
 	 * reuse it; its findings are anchored in that commit's version.
 	 */
-	async startCommitReview(reviewId: string, sha: string, choice: ReviewerChoice, overBudget: boolean): Promise<AiRun> {
+	async startCommitReview(
+		reviewId: string,
+		sha: string,
+		choice: ReviewerChoice,
+		overBudget: boolean,
+	): Promise<AiRun | { skipped: string }> {
 		if (!this.ai) throw new AppFail('ai-unavailable', 'AI review is not available.')
 		const head = this.steppable(reviewId)
 		const repoId = head.comparison.repoId
 		if (!this.store.read().repos[repoId]?.reviews[reviewId]) throw new AppFail('not-found', 'That review is not open.')
 		const view = await this.openCommit(reviewId, sha)
 		const data = this.commitViews.get(view.comparison.id)!
+		// Nothing it added is left in the latest code: reviewing it on its own would only find problems that are gone.
+		if (await this.superseded(reviewId, view))
+			return { skipped: 'Everything this commit added was changed again by later commits, so the AI did not review it on its own.' }
 		const { commits } = await listCommits(head.root, head.comparison.baseSha, head.comparison.headSha, MAX_STEP_COMMITS)
 		const at = commits.findIndex((x) => x.sha === sha)
 		const notes = commitRunNotes(view, at, commits, this.store.read().repos[repoId]?.reviews[reviewId]?.context?.notes ?? '')
@@ -1842,10 +1852,93 @@ export class ReviewService {
 			},
 		}
 		const target = targetKey(targetOf(this.store.read().repos[repoId].reviews[reviewId]))
-		return this.ai.start(access, commitRunKey(target, sha), { kind: 'all' }, choice, {
-			overBudget,
-			commitOf: { reviewId, target, sha },
+		const key = commitRunKey(target, sha)
+		const run = await this.ai.start(access, key, { kind: 'all' }, choice, { overBudget, commitOf: { reviewId, target, sha } })
+		// Once it finishes, its findings on lines later commits changed are checked against the latest code.
+		// (A run that is already over has no promise to wait for.)
+		void Promise.resolve(this.ai.whenDone(run.id))
+			.then(() => this.checkCommitFindings(reviewId, key, run.id, sha))
+			.catch((e: unknown) => console.warn('Commit findings could not be checked against the latest code:', e))
+		return run
+	}
+
+	/**
+	 * Whether later commits changed everything a commit added: it adds lines, none of them is in the latest code, and it
+	 * deletes no file. Binary files, and commits that only remove lines, are never counted as gone.
+	 */
+	private async superseded(reviewId: string, view: CommitView): Promise<boolean> {
+		let added = 0
+		for (const f of view.comparison.files) {
+			if (f.status === 'deleted' || f.binary || f.submodule) return false
+			const p = await this.loadPatch(view.comparison.id, f.key, false).catch(() => null)
+			if (!p || p.kind !== 'text') return false
+			const lines = p.hunks.flatMap((h) => h.lines.filter((l) => l.kind === 'add').map((l) => l.newNo!))
+			if (!lines.length) continue
+			added += lines.length
+			const map = await this.commitFileMap(reviewId, view.comparison.id, f.key)
+			if (map.headFileKey && lines.some((n) => shiftRange(map.shifts, n, n))) return false
+		}
+		return added > 0
+	}
+
+	/**
+	 * After a commit run: each finding whose lines a later commit changed is asked about once against the latest code
+	 * (see AiController.checkAtHead); one on a file a later commit deleted is gone without asking. Findings on lines
+	 * that are unchanged since are left alone. The run says while this happens (`laterCheck`).
+	 */
+	private async checkCommitFindings(reviewId: string, runKey: string, runId: string, sha: string): Promise<void> {
+		const ai = this.ai
+		const head = this.comparisons.get(reviewId)
+		if (!ai || !head) return
+		const repoId = head.comparison.repoId
+		// The run's last update is stored just after it is done.
+		let run = ai.runsFor(repoId, runKey).find((r) => r.id === runId)
+		for (let i = 0; i < 50 && run?.status === 'running'; i++) {
+			await new Promise((r) => setTimeout(r, 20))
+			run = ai.runsFor(repoId, runKey).find((r) => r.id === runId)
+		}
+		if (!run || (run.status !== 'completed' && run.status !== 'partial')) return
+		const mapper = new Mapper(head.root, sha, head.comparison.headSha)
+		const asks: Array<{ findingId: string; at: Anchor; around: Array<string> }> = []
+		const gone = new Map<string, string>() // finding id → why it is gone
+		for (const f of run.findings) {
+			const a = f.anchor
+			if (f.mergedInto || f.atHead || a.side !== 'new' || a.startLine === null || a.endLine === null || !a.newPath) continue
+			const m = await mapper.move(a.newPath)
+			if (!m.path) {
+				gone.set(f.id, `A later commit deletes ${a.newPath}.`)
+				continue
+			}
+			if (await mapper.range(m, a.startLine, a.endLine)) continue // still there, unchanged
+			const near = await mapper.near(m, a.startLine, a.endLine)
+			const file = head.comparison.files.find((x) => x.newPath === m.path)
+			const at: Anchor = {
+				...a,
+				baseSha: head.comparison.baseSha,
+				headSha: head.comparison.headSha,
+				fileKey: file?.key ?? m.path,
+				oldPath: file?.oldPath ?? m.path,
+				newPath: m.path,
+				startLine: near.start,
+				endLine: near.end,
+			}
+			const text = await readAt(head.root, head.comparison.headSha, m.path, FILE_LINES_LIMIT).catch(() => null)
+			const lines = text ? blobLines(text.buf, text.truncated) : null
+			asks.push({ findingId: f.id, at, around: codeAround({ ...f, anchor: at }, null, lines?.kind === 'text' ? lines.lines : null) })
+		}
+		await ai.patchRun(repoId, runKey, runId, (r) => {
+			r.laterCheck = asks.length ? 'running' : 'done'
+			for (const f of r.findings) {
+				const why = gone.get(f.id)
+				if (why) f.atHead = { verdict: 'wrong', reason: why, level: null, checked: [], model: r.model }
+			}
 		})
+		if (!asks.length) return
+		try {
+			for (const x of asks) await ai.checkAtHead(repoId, runKey, runId, x.findingId, x.at, x.around, sha)
+		} finally {
+			await ai.patchRun(repoId, runKey, runId, (r) => void (r.laterCheck = 'done'))
+		}
 	}
 
 	/**

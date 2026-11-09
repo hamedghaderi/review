@@ -5854,3 +5854,16 @@ textarea.style-edit {
 .walk-empty {
 	color: var(--text);
 }
+.walk-prompt {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 6px 8px;
+	border: 1px solid var(--accent);
+	border-radius: 6px;
+	background: var(--accent-soft);
+}
+.commit-findings li.fixed-later .commit-finding {
+	opacity: 0.6;
+}

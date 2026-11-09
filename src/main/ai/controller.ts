@@ -662,6 +662,60 @@ export class AiController {
 	}
 
 	/**
+	 * Asks whether a finding of a commit run (`runKey`, see commitRunKey) is still a problem in the latest code, after
+	 * later commits changed its lines: the double-check, told the code changed since `commitSha`, given the latest code
+	 * where the finding would be now (`at`, `around`). The run's model answers. No lookups: one small request. The
+	 * verdict is saved on the finding as `atHead`.
+	 */
+	async checkAtHead(
+		repoId: string,
+		runKey: string,
+		runId: string,
+		findingId: string,
+		at: Anchor,
+		around: Array<string>,
+		commitSha: string,
+	): Promise<FindingVerification> {
+		const run = this.runsFor(repoId, runKey).find((r) => r.id === runId)
+		const finding = run?.findings.find((f) => f.id === findingId)
+		if (!run || !finding) throw new AppFail('not-found', 'That finding no longer exists.')
+		const connectionId = run.connectionId
+		if (!connectionId) throw new AppFail('invalid-input', 'This run does not record which model raised the finding.')
+		let result: FindingVerification
+		try {
+			const config = await this.configFor({ connectionId, modelId: run.model }, 'verify', repoId)
+			const response = await config.provider.review(
+				buildVerifyRequest({ ...finding, anchor: at }, null, [], undefined, around, commitSha),
+				AbortSignal.timeout(300_000),
+			)
+			result = { ...parseVerification(response.output), model: run.model, memberId: null, checked: [] }
+		} catch (e) {
+			const why = e instanceof Error ? e.message : String(e)
+			result = { verdict: 'unsure', reason: `Not checked: ${why}`, level: null, checked: [], model: run.model, error: true }
+		}
+		await this.patchRun(repoId, runKey, runId, (r) => {
+			const f = r.findings.find((x) => x.id === findingId)
+			if (f) f.atHead = result
+		})
+		return result
+	}
+
+	/** Changes a stored run and tells the window; for what the app adds to a finished run (see checkAtHead). */
+	async patchRun(repoId: string, runKey: string, runId: string, change: (r: AiRun) => void): Promise<AiRun | null> {
+		let saved: AiRun | null = null
+		await this.store.update((d) => {
+			const r = d.repos[repoId]?.aiRuns?.[runKey]?.find((x) => x.id === runId)
+			if (!r) return
+			change(r)
+			saved = r
+		})
+		if (!saved) return null
+		const out = structuredClone(saved as AiRun)
+		this.notify(out)
+		return out
+	}
+
+	/**
 	 * Writes a test that should fail on the head commit while the finding holds, in the style of the tests that import
 	 * its file. It replaces the one shown. The test is only stored on the finding: nothing is written to disk or run.
 	 */

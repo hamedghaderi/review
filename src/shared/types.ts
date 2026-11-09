@@ -1061,6 +1061,9 @@ export interface Finding {
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
 	verification?: FindingVerification // a second request that tried to prove it wrong (see FindingVerification)
+	// A commit run's finding whose lines a later commit changed or removed: whether it is still a problem in the latest
+	// code ('wrong': fixed or gone there). Set by the app after the run; absent for findings on lines that survive.
+	atHead?: FindingVerification
 	reproducer?: FindingReproducer // a failing test you asked for; only the newest is kept
 	mergedInto?: string | null // the same problem as this finding of the run, which stays open; this one is folded under it
 	mergedReason?: string | null // the shared cause, in one sentence
@@ -1538,6 +1541,8 @@ export interface AiRun {
 	// `reviewId` is commitRunKey(target, sha), so it never mixes with a snapshot's own runs. `reviewId` here is the
 	// snapshot it was started from; `target` is that snapshot's targetKey, which later snapshots share.
 	commitOf?: { reviewId: string; target: string; sha: string }
+	// A commit run: its findings on lines later commits changed are being checked against the latest code, or were.
+	laterCheck?: 'running' | 'done'
 	promptVersion: string
 	scope: AiScope
 	status: AiRunStatus
@@ -2203,7 +2208,13 @@ export interface ReviewApi {
 	 * Starts an AI review of one of the review's commits, on its own diff, with its message and the earlier commits'
 	 * messages as context. Its run updates arrive through onAiRunUpdate, with `commitOf` set.
 	 */
-	startCommitReview(reviewId: string, sha: string, reviewer: ReviewerChoice, overBudget: boolean): Promise<Result<AiRun>>
+	// `skipped`: later commits changed everything this commit added, so it was not reviewed; says why.
+	startCommitReview(
+		reviewId: string,
+		sha: string,
+		reviewer: ReviewerChoice,
+		overBudget: boolean,
+	): Promise<Result<AiRun | { skipped: string }>>
 	/** The AI runs on the review's commits, by commit SHA, oldest first. */
 	commitRuns(reviewId: string): Promise<Result<Record<string, Array<AiRun>>>>
 	/** For each head you reviewed earlier, the index of the last of the review's commits it contains; -1 for none. */

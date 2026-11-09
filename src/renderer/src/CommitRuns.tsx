@@ -10,6 +10,7 @@ import { AiOrb } from './AiOrb.tsx'
 export function useCommitRuns(reviewId: string | null, target: string | null) {
 	const [runs, setRuns] = useState<Record<string, Array<AiRun>>>({})
 	const [errors, setErrors] = useState<Record<string, { message: string; overBudget: boolean }>>({})
+	const [skipped, setSkipped] = useState<Record<string, string>>({}) // commits not reviewed: why
 	const [loaded, setLoaded] = useState<string | null>(null) // the review whose stored runs have been read
 	const idRef = useRef(reviewId)
 	idRef.current = reviewId
@@ -18,6 +19,7 @@ export function useCommitRuns(reviewId: string | null, target: string | null) {
 	useEffect(() => {
 		setRuns({})
 		setErrors({})
+		setSkipped({})
 		if (!reviewId) return
 		void window.review.commitRuns(reviewId).then((r) => {
 			if (idRef.current !== reviewId) return
@@ -44,9 +46,11 @@ export function useCommitRuns(reviewId: string | null, target: string | null) {
 		setErrors(({ [sha]: _, ...rest }) => rest)
 		const r = await window.review.startCommitReview(id, sha, reviewer, overBudget)
 		if (idRef.current !== id) return
+		if (!r.ok) return setErrors((e) => ({ ...e, [sha]: { message: r.error.message, overBudget: r.error.code === 'over-budget' } }))
+		const v = r.value
+		if ('skipped' in v) return setSkipped((x) => ({ ...x, [sha]: v.skipped }))
 		// Its updates may have arrived first; those are newer than this reply.
-		if (r.ok) setRuns((all) => (all[sha]?.some((x) => x.id === r.value.id) ? all : { ...all, [sha]: [...(all[sha] ?? []), r.value] }))
-		else setErrors((e) => ({ ...e, [sha]: { message: r.error.message, overBudget: r.error.code === 'over-budget' } }))
+		setRuns((all) => (all[sha]?.some((x) => x.id === v.id) ? all : { ...all, [sha]: [...(all[sha] ?? []), v] }))
 	}, [])
 	const all = useMemo(() => Object.values(runs).flat(), [runs])
 	return {
@@ -54,6 +58,7 @@ export function useCommitRuns(reviewId: string | null, target: string | null) {
 		all,
 		loaded: loaded !== null && loaded === reviewId,
 		errors,
+		skipped,
 		start,
 		latest: (sha: string): AiRun | null => runs[sha]?.at(-1) ?? null,
 		running: (sha: string): boolean => runs[sha]?.some((x) => x.status === 'running') ?? false,
@@ -91,14 +96,24 @@ export function CommitFindings({
 	const error = runs.errors[sha]
 	const roots = useMemo(() => findingRoots(runs.all), [runs.all])
 	const byId = useMemo(() => new Map(runs.all.flatMap((r) => r.findings.map((f) => [f.id, f] as const))), [runs.all])
+	// Findings later commits fixed go last.
 	const findings = useMemo(
-		() => [...(run?.findings ?? [])].filter((f) => !f.mergedInto).sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
+		() =>
+			[...(run?.findings ?? [])]
+				.filter((f) => !f.mergedInto)
+				.sort((a, b) => Number(isFixed(a)) - Number(isFixed(b)) || SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
 		[run],
 	)
+	const fixedCount = findings.filter(isFixed).length
+	const skipped = runs.skipped[sha]
 	return (
 		<div className="commit-ai">
 			<div className="commit-check-head">
-				{run?.status === 'running' ? (
+				{skipped ? (
+					<span className="small">
+						<strong>AI review:</strong> <span className="muted">skipped. {skipped}</span>
+					</span>
+				) : run?.status === 'running' ? (
 					<>
 						<AiOrb activity="reasoning" size={14} label="AI review running" />
 						<span className="small">Reviewing this commit…</span>
@@ -114,12 +129,18 @@ export function CommitFindings({
 							: run.status === 'cancelled'
 								? 'stopped'
 								: findings.length
-									? `${findings.length} finding${findings.length === 1 ? '' : 's'}`
+									? `${findings.length} finding${findings.length === 1 ? '' : 's'}${fixedCount ? `, ${fixedCount} fixed by later commits` : ''}`
 									: 'no findings'}
 						<span className="muted"> · {run.model}</span>
+						{run.laterCheck === 'running' && (
+							<span className="muted">
+								{' '}
+								· <AiOrb activity="reasoning" size={12} /> checking findings on code later commits changed against the latest code…
+							</span>
+						)}
 					</span>
 				) : (
-					<span className="muted small">Waiting for the AI…</span>
+					<span className="muted small">Checking whether this commit’s changes are still in the latest code…</span>
 				)}
 			</div>
 			{error && <div className="small error-text">The AI could not review this commit: {error.message}</div>}
@@ -127,18 +148,28 @@ export function CommitFindings({
 				<ul className="commit-findings">
 					{findings.map((f) => {
 						const state = findingState(review, roots, f, byId)
-						const later = laterChange(f)
+						const later = f.atHead ? null : laterChange(f)
+						const atHead = f.atHead
 						const where = f.anchor.startLine
 							? `${f.anchor.newPath ?? f.anchor.oldPath}:${f.anchor.startLine}`
 							: (f.anchor.newPath ?? f.anchor.oldPath)
 						return (
-							<li key={f.id} className={`${selected === f.id ? 'on' : ''} ${state}`}>
+							<li key={f.id} className={`${selected === f.id ? 'on' : ''} ${state}${isFixed(f) ? ' fixed-later' : ''}`}>
 								<button className="commit-finding" onClick={() => onSelect(f)} title={f.body}>
 									<span className={`sev ${f.severity}`}>{LEVEL_META[f.severity].label}</span>
 									<span className="ellipsis">{f.title}</span>
 									<span className="muted mono small nowrap">{where}</span>
 								</button>
 								<span className="commit-finding-actions small">
+									{atHead && (
+										<span className={`pill${atHead.verdict === 'wrong' ? '' : ' warn'}`} title={atHead.reason}>
+											{atHead.verdict === 'wrong'
+												? 'Fixed in a later commit'
+												: atHead.verdict === 'holds'
+													? 'Still in the latest code'
+													: 'Couldn’t tell if it’s still there'}
+										</span>
+									)}
 									{later && (
 										<span className="pill warn" title={later}>
 											Changed in a later commit
@@ -252,4 +283,9 @@ export function CommitReviewAsk({
 			</div>
 		</div>
 	)
+}
+
+/** A commit finding the check against the latest code found gone: a later commit fixed it or removed its code. */
+function isFixed(f: Finding): boolean {
+	return f.atHead?.verdict === 'wrong'
 }
