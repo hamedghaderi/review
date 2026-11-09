@@ -6,7 +6,7 @@ import type { EndpointPreset, ModelPrice, ProviderDescriptor, ProviderKind } fro
  * Prices are list prices in US dollars per million tokens at the standard tier, for prompts under the long-context
  * threshold, as published on CATALOG_UPDATED; they are shown as estimates. Update CATALOG_UPDATED when this list changes.
  */
-export const CATALOG_UPDATED = '2026-10-08'
+export const CATALOG_UPDATED = '2026-11-09'
 
 export interface CatalogModel {
 	id: string
@@ -31,6 +31,13 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		{ id: 'gpt-6-luna', label: 'GPT-6 Luna', contextWindow: 400_000, maxOutputTokens: 128_000, price: price(0.1, 0.01, 0.5, 0.125) },
 	],
 	anthropic: [
+		{
+			id: 'claude-fable-5-2',
+			label: 'Claude Fable 5.2',
+			contextWindow: 1_000_000,
+			maxOutputTokens: 128_000,
+			price: price(8, 0.2, 40, 10),
+		},
 		{
 			id: 'claude-fable-5-1',
 			label: 'Claude Fable 5.1',
@@ -80,6 +87,7 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 	],
 	// The models Claude Code offers on a Claude plan. No price: it counts against the plan's limits, not per token.
 	'claude-code': [
+		{ id: 'claude-fable-5-2', label: 'Claude Fable 5.2', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'claude-fable-5-1', label: 'Claude Fable 5.1', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
