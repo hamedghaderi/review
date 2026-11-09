@@ -3666,6 +3666,9 @@ input.member-role {
 	border-bottom: 1px solid var(--border);
 	background: var(--panel);
 }
+.conclusion-close {
+	font-weight: 600;
+}
 .conclusion-scroll {
 	flex: 1;
 	min-height: 0;

@@ -27,6 +27,7 @@ export interface StoreData {
 	sounds?: SoundPrefs // the sound each event plays; absent until you change one
 	stepCommits?: boolean // Settings › Reviewing: step through a review's commits; absent (off) until turned on
 	offerWalk?: boolean // Settings › Reviewing: offer a walkthrough of the commits when a review opens; absent (off) until turned on
+	autoConclusion?: false // Settings › Reviewing: write the conclusion after each AI review; absent (on) until turned off
 	reviewStyle?: ReviewStyle // how you word review comments; absent until you build it
 	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
@@ -159,6 +160,7 @@ export function migrate(raw: unknown): StoreData {
 		...(d.sounds ? { sounds: storedSounds(d.sounds) } : {}),
 		...(d.stepCommits === true ? { stepCommits: true } : {}),
 		...(d.offerWalk === true ? { offerWalk: true } : {}),
+		...(d.autoConclusion === false ? { autoConclusion: false as const } : {}),
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
 		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
 	}

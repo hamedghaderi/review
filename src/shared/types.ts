@@ -483,10 +483,11 @@ export function commitRunKey(target: string, sha: string): string {
 	return `commit:${sha}@${target}`
 }
 
-/** Settings › Reviewing. Each is off until you turn it on. */
+/** Settings › Reviewing. Each is off until you turn it on, except autoConclusion. */
 export interface ReviewingPrefs {
 	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
 	offerWalk: boolean // with stepCommits: on opening a review with several commits, offer to walk through them
+	autoConclusion: boolean // when an AI review run finishes on the review on screen, write the conclusion and show it; on by default
 }
 
 /**

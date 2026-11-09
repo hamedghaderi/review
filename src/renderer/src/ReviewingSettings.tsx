@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReviewingPrefs } from '../../shared/types.ts'
 import { keyLabel } from './keymap.ts'
 
-/** Settings › Reviewing: how reviews are read. Each option is off until you turn it on. */
+/** Settings › Reviewing: how reviews are read. Each option is off until you turn it on, except the conclusion. */
 export function ReviewingSettings() {
 	const [prefs, setPrefs] = useState<ReviewingPrefs | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -51,6 +51,18 @@ export function ReviewingSettings() {
 						When a review has two or more commits, it asks whether to walk through them. The walkthrough goes file by file through each
 						commit, oldest first, and asks before moving on to the next commit. Without this, the Walk through button next to the commit
 						picker starts one.
+					</span>
+				</span>
+			</label>
+			<label className="check">
+				<input type="checkbox" checked={prefs.autoConclusion} onChange={(e) => void set({ ...prefs, autoConclusion: e.target.checked })} />
+				<span>
+					Write the conclusion after each AI review
+					<span className="muted block">
+						When an AI review run finishes on the review you have open, the AI (the model for questions) steps back and writes its
+						conclusion on the whole change, and it opens in place of the code. Close it to go back to the code; the Conclusion button brings
+						it back. The “AI review finished” sound and notification wait until the conclusion is written. Off: it is only written when you
+						click Conclusion.
 					</span>
 				</span>
 			</label>

@@ -1331,11 +1331,29 @@ export function App() {
 
 	// Settings › Reviewing › Step through commits: a commit picker on pull request and branch reviews. Off: none of this
 	// reads anything, and the review shows all its changes as always.
-	const [reviewing, setReviewing] = useState<ReviewingPrefs>({ stepCommits: false, offerWalk: false })
+	const [reviewing, setReviewing] = useState<ReviewingPrefs>({ stepCommits: false, offerWalk: false, autoConclusion: true })
 	useEffect(() => {
 		void window.review.reviewing().then((r) => r.ok && setReviewing(r.value))
 		return window.review.onReviewingChanged(setReviewing)
 	}, [])
+	// Settings › Reviewing › Write the conclusion after each AI review: when a run finishes on the review on screen and no
+	// other run is still going, the conclusion is written and shown in place of the code. Only runs that finish while the
+	// review is open count: opening a review whose run finished earlier writes nothing, so nothing is spent unseen.
+	const concludedRunRef = useRef<{ reviewId: string | null; runId: string | null }>({ reviewId: null, runId: null })
+	useEffect(() => {
+		const reviewId = comparison?.id ?? null
+		const runId = lastFinished?.id ?? null
+		const seen = concludedRunRef.current
+		if (seen.reviewId !== reviewId) {
+			concludedRunRef.current = { reviewId, runId } // just opened: what already finished is not new
+			return
+		}
+		if (activeRun || !runId || runId === seen.runId) return
+		concludedRunRef.current = { reviewId, runId }
+		if (!reviewing.autoConclusion || concludeDisabled || conclusion?.runId === runId) return
+		setConclusionOpen(true)
+		void conclude(null)
+	}, [comparison?.id, lastFinished?.id, activeRun?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 	const stepCommits = reviewing.stepCommits
 	// The walkthrough: commit by commit, file by file, asking before each next commit. It ends when you leave the commits
 	// for all the changes. The offer to start one is made once per review this session.
