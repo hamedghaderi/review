@@ -1450,7 +1450,13 @@ export function App() {
 		const id = comparison.id
 		setFinishing(true)
 		setAiError(null)
-		const r = await window.review.finishCommitReview(id)
+		let r: Result<AiRun>
+		try {
+			r = await window.review.finishCommitReview(id)
+		} catch (e) {
+			// e.g. a window newer than the app behind it; never leave the walk saying it is still checking
+			r = { ok: false, error: { code: 'ai-unavailable', message: e instanceof Error ? e.message : String(e) } }
+		}
 		setFinishing(false)
 		if (comparisonIdRef.current !== id) return
 		if (!r.ok) return setNotice(`The notes could not be checked: ${r.error.message}`)
