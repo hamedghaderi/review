@@ -37,14 +37,17 @@ const GLOBAL_ARGS = [
 	'submodule.recurse=false',
 ]
 
-const EXTRA_PATH = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
+// Homebrew's folders come before the inherited PATH: an app opened from the Dock or Finder gets a minimal PATH that
+// finds Apple's /usr/bin/git first, which usually lags behind on security fixes.
+const PREFERRED_PATH = ['/opt/homebrew/bin', '/usr/local/bin']
+const FALLBACK_PATH = ['/usr/bin', '/bin']
 
 // Git needs the user's environment (HOME, SSH agent, config) but never AI provider credentials.
 export const env: NodeJS.ProcessEnv = {
 	...Object.fromEntries(
 		Object.entries(process.env).filter(([k]) => !/^(OPENAI|ANTHROPIC|GEMINI|GOOGLE_API|GOOGLE_GENAI|OPENROUTER)_/.test(k)),
 	),
-	PATH: [process.env.PATH, ...EXTRA_PATH].filter(Boolean).join(process.platform === 'win32' ? ';' : ':'),
+	PATH: [...PREFERRED_PATH, process.env.PATH, ...FALLBACK_PATH].filter(Boolean).join(process.platform === 'win32' ? ';' : ':'),
 	GIT_TERMINAL_PROMPT: '0',
 	GIT_OPTIONAL_LOCKS: '0',
 	GIT_PAGER: 'cat',
