@@ -36,6 +36,7 @@ import {
 	type CommitCheck,
 	type CommitCheckEstimate,
 	REVIEW_RULES,
+	runMembers,
 } from '../../shared/types.ts'
 import {
 	buildCommitCheckRequest,
@@ -222,7 +223,7 @@ export class AiController {
 						roles.length
 							? roles.map((r) => ({ role: r.role, rules: r.rules, persona: choice.persona ?? null, selection: choice.selection }))
 							: [{ role: null, rules: null, persona: choice.persona ?? null, selection: choice.selection }])(passRoles(choice))
-				: (this.teams?.(choice.teamId).members ?? []).map((m) => ({
+				: (this.teams ? runMembers(this.teams(choice.teamId)) : []).map((m) => ({
 						role: m.role,
 						rules: m.rules,
 						persona: m.persona ?? null,
@@ -303,7 +304,12 @@ export class AiController {
 			promptVersion: PROMPT_VERSION,
 			levels,
 			depth,
-			workers: team.members.map((m) => ({ connectionId: m.connectionId, model: m.modelId, persona: m.persona ?? null, rules: m.rules })),
+			workers: runMembers(team).map((m) => ({
+				connectionId: m.connectionId,
+				model: m.modelId,
+				persona: m.persona ?? null,
+				rules: m.rules,
+			})),
 		}
 	}
 
@@ -376,7 +382,7 @@ export class AiController {
 				if (!t.members.length) throw new AppFail('invalid-input', `${t.name} has no members.`)
 				// Every member's credential and model are captured before anything is sent, so a bad member fails the start, not the run.
 				const members = []
-				for (const m of t.members) {
+				for (const m of runMembers(t)) {
 					try {
 						members.push({
 							id: m.id,
@@ -460,24 +466,35 @@ export class AiController {
 		// Several rules at once (Retry all) skip the ones with nothing left to ask; one rule says why it cannot be retried.
 		let skipped: AppFail | null = null
 		for (const rule of asked) {
-			const ev = run.evaluation?.find((e) => e.rule === rule)
-			const answered = ev && answeredRequests(run, ev)
-			const member = ev?.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
-			const connectionId = member?.connectionId ?? run.connectionId
-			const why =
-				!ev || !answered
-					? new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
-					: answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal)
-						? new AppFail('invalid-input', `${rule} was already checked in every request.`)
-						: !connectionId
-							? new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
-							: null
-			if (why) {
+			// A rule several members check (everyone checks bugs) is asked again of each one that missed requests.
+			const evs = run.evaluation?.filter((e) => e.rule === rule) ?? []
+			let why: AppFail | null = evs.length
+				? new AppFail('invalid-input', `${rule} was already checked in every request.`)
+				: new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
+			const mine = new Map<string | null, { connectionId: string; modelId: string }>()
+			for (const ev of evs) {
+				const answered = answeredRequests(run, ev)
+				const member = ev.checkedBy ? run.team?.members.find((m) => m.id === ev.checkedBy) : undefined
+				const connectionId = member?.connectionId ?? run.connectionId
+				if (!answered) {
+					why = new AppFail('invalid-input', 'This run does not record which requests covered each rule. Run the review again.')
+					mine.clear()
+					break
+				}
+				if (answered.length >= (member ? member.requestsTotal : run.coverage.batchesTotal)) continue
+				if (!connectionId) {
+					why = new AppFail('invalid-input', 'This run does not record its connection. Run the review again.')
+					mine.clear()
+					break
+				}
+				mine.set(member?.id ?? null, { connectionId, modelId: member?.model ?? run.model })
+			}
+			if (!mine.size) {
 				skipped ??= why
 				continue
 			}
 			wanted.push(rule)
-			owners.set(member?.id ?? null, { connectionId: connectionId!, modelId: member?.model ?? run.model })
+			for (const [id, selection] of mine) owners.set(id, selection)
 		}
 		if (!wanted.length) throw skipped!
 		this.starting = true

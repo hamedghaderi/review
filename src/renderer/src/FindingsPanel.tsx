@@ -35,6 +35,7 @@ import type {
 	GoneFinding,
 	Review,
 	ReviewRule,
+	RuleEvaluation,
 	Severity,
 	StoredRule,
 } from '../../shared/types.ts'
@@ -930,6 +931,54 @@ function requestsFor(run: AiRun, memberId: string | null | undefined): number {
 	return m ? m.requestsTotal : run.coverage.batchesTotal
 }
 
+interface RuleRow {
+	rule: StoredRule
+	complete: boolean
+	requests: number // answered, across every member that checks it
+	need: number // requests that must answer it, across those members
+	nearMisses: RuleEvaluation['nearMisses']
+	why: Array<string>
+	by: string | null // who checks it, short
+	byAll: string | null // every member that checks it
+}
+
+/**
+ * One row per rule. A rule several members check (everyone checks bugs) has an entry for each; the row adds them up and
+ * is complete once each of them is. A member given no files has nothing to check; a run that sent no request checked nothing.
+ */
+function ruleRows(run: AiRun, ev: Array<RuleEvaluation>): Map<StoredRule, RuleRow> {
+	const rows = new Map<StoredRule, RuleRow>()
+	for (const e of ev) {
+		const need = requestsFor(run, e.checkedBy)
+		const complete = need > 0 ? e.requests >= need : run.coverage.batchesTotal > 0
+		const name = memberName(run, e.checkedBy)
+		const row = rows.get(e.rule)
+		if (!row) {
+			rows.set(e.rule, {
+				rule: e.rule,
+				complete,
+				requests: e.requests,
+				need,
+				nearMisses: [...e.nearMisses],
+				why: [...e.why],
+				by: name,
+				byAll: name,
+			})
+			continue
+		}
+		row.complete &&= complete
+		row.requests += e.requests
+		row.need += need
+		row.nearMisses.push(...e.nearMisses)
+		row.why.push(...e.why.filter((w) => !row.why.includes(w)))
+		if (name) {
+			row.byAll = row.byAll ? `${row.byAll}, ${name}` : name
+			row.by = `${row.byAll.split(', ').length} reviewers`
+		}
+	}
+	return rows
+}
+
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
 	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
@@ -978,26 +1027,22 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 		const key = f.category === 'residue' ? `residue-${f.signature}` : (f.category ?? '')
 		found.set(key, (found.get(key) ?? 0) + 1)
 	}
-	const byRule = new Map(ev.map((e) => [e.rule, e]))
-	// A team member given no files has nothing to check; a run that sent no request at all checked nothing.
-	const complete = (e: (typeof ev)[number]): boolean => {
-		const need = requestsFor(run, e.checkedBy)
-		return need > 0 ? e.requests >= need : run.coverage.batchesTotal > 0
-	}
-	const doneCount = ev.filter(complete).length
+	const byRule = ruleRows(run, ev)
+	const rows = [...byRule.values()]
+	const doneCount = rows.filter((r) => r.complete).length
 	const stateOf = (rule: StoredRule): 'found' | 'clear' | 'pending' | 'missing' => {
-		const e = byRule.get(rule)!
+		const r = byRule.get(rule)!
 		// A retry runs only its rules; the others it leaves incomplete stay missing rather than looking checked again.
 		const checking = running && (!run.retrying || run.retrying.includes(rule as ReviewRule))
-		return complete(e) ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
+		return r.complete ? ((found.get(rule) ?? 0) ? 'found' : 'clear') : checking ? 'pending' : 'missing'
 	}
 	// A finished run lists only the rules that need a look (findings, or not checked everywhere); the rest on request.
-	const notable = ev.filter((e) => stateOf(e.rule) !== 'clear')
+	const notable = rows.filter((r) => stateOf(r.rule) !== 'clear')
 	const showAll = all || (running && !run.retrying)
-	const withFindings = ev.filter((e) => stateOf(e.rule) === 'found').length
-	const missing = ev.filter((e) => stateOf(e.rule) === 'missing').map((e) => e.rule)
+	const withFindings = rows.filter((r) => stateOf(r.rule) === 'found').length
+	const missing = rows.filter((r) => stateOf(r.rule) === 'missing').map((r) => r.rule)
 	// Only current rules with requests to repeat can be retried; residue-7 of older runs is now part of test-value.
-	const canRetry = (rule: StoredRule): boolean => requestsFor(run, byRule.get(rule)!.checkedBy) > 0
+	const canRetry = (rule: StoredRule): boolean => byRule.get(rule)!.need > 0
 	const retryable = REVIEW_RULES.filter((r) => missing.includes(r) && canRetry(r))
 	// A stopped run resumes by asking every rule it did not finish, even a single one.
 	const stopped = run.status === 'cancelled'
@@ -1008,7 +1053,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 			<div className="checklist-head">
 				<b>Rules checked</b>
 				<span className="muted">
-					{doneCount} of {ev.length}
+					{doneCount} of {rows.length}
 					{!running && withFindings ? ` · ${withFindings} with findings` : ''}
 					{!running && missing.length ? ` · ${missing.length} not fully checked` : ''}
 					{notAsked.length ? ` · ${notAsked.length} not part of this run` : ''}
@@ -1029,9 +1074,9 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 						{stopped ? 'Resume' : 'Retry all'}
 					</button>
 				)}
-				{!running && notable.length < ev.length + notAsked.length && (
+				{!running && notable.length < rows.length + notAsked.length && (
 					<button className="link checklist-toggle" onClick={() => setAll(!all)}>
-						{all ? (notable.length ? 'Only rules to look at' : 'Hide rules') : `Show all ${ev.length + notAsked.length}`}
+						{all ? (notable.length ? 'Only rules to look at' : 'Hide rules') : `Show all ${rows.length + notAsked.length}`}
 					</button>
 				)}
 			</div>
@@ -1052,7 +1097,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 									</div>
 								)
 							const n = found.get(rule) ?? 0
-							const need = requestsFor(run, e.checkedBy)
+							const need = e.need
 							const state = stateOf(rule)
 							const status =
 								(state === 'found'
@@ -1078,7 +1123,11 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 											</span>
 										)}
 										<span className="check-label">{RULE_LABEL[rule]}</span>
-										{memberName(run, e.checkedBy) && <span className="check-by muted">{memberName(run, e.checkedBy)}</span>}
+										{e.by && (
+											<span className="check-by muted" title={e.byAll ?? undefined}>
+												{e.by}
+											</span>
+										)}
 										<span className="spacer" />
 										<span className="muted nowrap check-status" title={status}>
 											{status}
@@ -1086,7 +1135,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 										{state === 'missing' && onRetry && canRetry(rule) && (
 											<button
 												className="btn small ghost check-retry"
-												title={`Ask ${memberName(run, e.checkedBy) ?? 'the model'} again about this rule only, on the requests that did not cover it`}
+												title={`Ask ${e.byAll ?? 'the model'} again about this rule only, on the requests that did not cover it`}
 												onClick={(ev) => {
 													ev.preventDefault()
 													onRetry([rule])

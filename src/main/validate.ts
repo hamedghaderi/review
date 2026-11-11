@@ -571,6 +571,7 @@ export function reviewTeam(v: unknown): ReviewTeam {
 				...(x.persona == null ? {} : { persona: oneOf(x.persona, PERSONA_IDS, 'persona') }),
 			}
 		}),
+		...(o.everyoneChecksBugs === undefined ? {} : { everyoneChecksBugs: bool(o.everyoneChecksBugs, 'everyone checks bugs setting') }),
 	}
 	if (new Set(team.members.map((m) => m.id)).size !== team.members.length) bad('team members (duplicate id)')
 	return team

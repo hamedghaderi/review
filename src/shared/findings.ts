@@ -271,12 +271,15 @@ export function droppedFindings(
 export function ruleChecked(run: AiRun, f: Pick<Finding, 'anchor' | 'category' | 'signature'>): boolean {
 	const rule = f.category === 'residue' ? `residue-${f.signature}` : f.category
 	if (!rule || !run.evaluation) return true
-	const e = run.evaluation.find((x) => x.rule === rule)
-	if (!e) return false
-	if (!e.checkedBy) return e.requests > 0
-	const supplied = run.coverage.supplied
-	const shared = !supplied.some((s) => s.memberId) // older team runs shared one set of requests
-	return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
+	// A rule several members check (everyone checks bugs) was asked if any of them had the file.
+	const evs = run.evaluation.filter((x) => x.rule === rule)
+	if (!evs.length) return false
+	return evs.some((e) => {
+		if (!e.checkedBy) return e.requests > 0
+		const supplied = run.coverage.supplied
+		const shared = !supplied.some((s) => s.memberId) // older team runs shared one set of requests
+		return shared || supplied.some((s) => s.fileKey === f.anchor.fileKey && s.memberId === e.checkedBy)
+	})
 }
 
 /** The double-check's verdict as it counts: a "holds" that cites lines the check never read is not settled. */
