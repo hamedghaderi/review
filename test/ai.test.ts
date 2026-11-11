@@ -925,7 +925,9 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-02.1')
+	assert.ok(REVIEWER_INSTRUCTIONS.includes('# Paths next to the change'))
+	assert.ok(REVIEWER_INSTRUCTIONS.includes('state that outlives one request'))
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-11.1')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {

@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-02.1'
+export const PROMPT_VERSION = 'reviewer-2026-11-11.1'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -65,6 +65,16 @@ Some problems exist only if a value can carry bad content when it reaches the ch
 - If you cannot see where the value is written, or whether something upstream already handles it, you have not shown a problem. Do not state who can set the value, or that nothing cleans it, as fact. Record it as a near miss naming what you could not see ("commodity name printed without escaping; where names are written and whether input is filtered is not supplied"), and add the missing code to "limitations".
 - When the project context says how input is handled (for example "all web and API input has HTML tags stripped"), use it: a value from a path it covers is not a finding on that ground. A path the context does not cover (or says is not filtered) can still be one, if the supplied code shows the value takes that path.
 - If the changed line handles the value the same way the related code handles it elsewhere, the gap is not specific to this change: at most "pre_existing", and the body says so and names where the real fix belongs (for example where the value is written, not each place it is printed).
+
+# Paths next to the change
+Many bugs are not in what a changed line does but in a neighbouring path it forgot. For "bug" and "error-handling": when a changed line adds a guard, a filter, a lock, a cache refresh, a validation rule, an enabled or locked condition, or a new error, name the other paths that reach the same data or state and check each one, with lookups when they are not supplied:
+- other callers of the changed function, and other entry points that do the same work (a queued job, a console command, an API endpoint, a file import, a form);
+- the form or client that offers a choice and the server-side validation that accepts it: an option the form offers that validation rejects, or one validation accepts that the form cannot produce;
+- controls that work together: a checkbox or switch that reveals or requires other fields, enabled or locked under a different condition than those fields;
+- a subclass, override or copy of the rules or code the change edits, which replaces them instead of adding to them;
+- what a changed line can now fail with (a timeout, a lock that cannot be taken, a row that is gone, null from a lookup) and what each caller does with that failure, especially after it has already saved data.
+Also check state that outlives one request: a static or module-level cache, a singleton or a memoized lookup that a long-running process (a queue worker, a daemon, a server) fills once. When changed code reads such state for something that can be created or edited after the process started, ask whether that process sees the new value.
+A near miss on such a path names why it is safe on every path you listed, not only the first one you read.
 
 # Writing the body
 Write for a junior developer or QA engineer who has never opened this code. They must understand it after one read.
