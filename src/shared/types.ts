@@ -990,6 +990,22 @@ export interface NearMiss {
 	fileKey: string | null
 	line: number | null
 	note: string
+	excerptId?: string | null // the excerpt the line is in; absent on older runs
+	check?: NearMissCheck // a second request that tried to prove the "not a problem" decision wrong
+}
+
+/**
+ * The double-check of a near miss on a risky file: another reviewer (another model when the team has one) tries to
+ * show the reviewer was wrong to let it go. "problem" comes with the finding it raised (or an existing one it matches).
+ */
+export interface NearMissCheck {
+	verdict: 'safe' | 'problem' | 'unsure'
+	reason: string
+	checked: Array<string>
+	model: string
+	memberId: string | null
+	findingId: string | null
+	error?: boolean // the check itself failed; verdict is "unsure"
 }
 
 /** What the reviewer reported for one rule across the run, including cases it looked at and did not flag. */
@@ -1073,6 +1089,8 @@ export interface Finding {
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
 	verification?: FindingVerification // a second request that tried to prove it wrong (see FindingVerification)
+	// Raised by the double-check of a near miss: the reviewer (memberId) that let it go under `rule`, and its note.
+	fromNearMiss?: { rule: ReviewRule; note: string; memberId: string | null }
 	// A commit run's note whose lines a later commit changed: whether it is still a problem in the final code ('wrong':
 	// fixed or gone there). Set when the commit-by-commit review finishes; absent for notes on lines that survive.
 	atHead?: FindingVerification

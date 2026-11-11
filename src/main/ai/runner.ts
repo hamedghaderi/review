@@ -16,6 +16,7 @@ import {
 	type RunMember,
 	type SuppliedExcerpt,
 	type FindingVerification,
+	type NearMissCheck,
 	type PastDecision,
 	type EarlierLimitations,
 	type ReviewContext,
@@ -24,7 +25,7 @@ import { addCost } from '../../shared/cost.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import type { LinkedIssue } from '../github.ts'
 import type { RequestImage } from './provider.ts'
-import type { ContextBatch, ContextLimits, ContextPackage, FileSource } from './context.ts'
+import type { ContextBatch, ContextExcerpt, ContextFact, ContextLimits, ContextPackage, FileSource } from './context.ts'
 import { capacityChars, CHARS_PER_TOKEN, fitToModel, packContext, prepareChange, settleFiles } from './context.ts'
 import {
 	applyBudget,
@@ -42,6 +43,7 @@ import { classifyRisk } from './risk.ts'
 import { routeFiles, unroutedReason } from './routing.ts'
 import { buildEvidence, supportFor, uncoveredCi, type EvidenceIndex } from './evidence.ts'
 import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts'
+import { buildNearMissRequest, parseNearMissCheck, pickNearMisses, type NearMissCandidate } from './nearMiss.ts'
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
 import { recheckFacts } from './incremental.ts'
@@ -469,6 +471,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 			emit()
 			await Promise.all(workers.map((w) => runBatches(w.pkg!, w)))
+			await checkNearMisses()
 			await mergeDuplicates()
 			await verifyBlocking()
 			const pkg = pkgs[0]
@@ -785,6 +788,106 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 		}
 		await Promise.all(Array.from({ length: Math.min(options.concurrency, queue.length) }, next))
+	}
+
+	/**
+	 * Challenges the riskiest near misses (see nearMiss.ts) once every review request is answered: each goes to another
+	 * member, on a different model when there is one, which tries to show the reviewer was wrong to let it go. A problem
+	 * it traces becomes a finding, or joins one already listed; every check is kept on its near miss. Part of the
+	 * double-check setting, and counted in the same progress.
+	 */
+	async function checkNearMisses(): Promise<void> {
+		if (!verify || overBudget || controller.signal.aborted || run.status !== 'running') return
+		const riskOf = (k: string) => run.coverage.files.find((f) => f.fileKey === k)?.risk?.level
+		const queue = pickNearMisses(run.evaluation ?? [], riskOf).flatMap((c) => {
+			const raiser = workers.find((x) => x.id === c.raiserId)
+			const batch = raiser?.pkg?.batches.find((b) => b.excerpts.some((e) => e.id === c.miss.excerptId))
+			const excerpt = batch?.excerpts.find((e) => e.id === c.miss.excerptId)
+			if (!raiser || !batch || !excerpt) return []
+			const facts = batch.facts.filter((x) => x.fileKeys?.includes(excerpt.file.key))
+			return [{ c, excerpt, facts, checker: checkerFor(raiser) }]
+		})
+		if (!queue.length) return
+		const progress = (run.verification ??= { total: 0, done: 0, failed: 0 })
+		progress.total += queue.length
+		emit()
+		const next = async (): Promise<void> => {
+			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
+				const check = await checkNearMiss(item.c, item.excerpt, item.facts, item.checker)
+				if (controller.signal.aborted || run.status !== 'running') return
+				item.c.miss.check = check
+				if (check.error) progress.failed++
+				else progress.done++
+				emit()
+			}
+		}
+		await Promise.all(Array.from({ length: Math.min(options.concurrency, queue.length) }, next))
+	}
+
+	async function checkNearMiss(
+		c: NearMissCandidate,
+		excerpt: ContextExcerpt,
+		facts: Array<ContextFact>,
+		w: Worker,
+	): Promise<NearMissCheck> {
+		const failed = (why: string): NearMissCheck => ({
+			verdict: 'unsure',
+			reason: `Not double-checked: ${why}`,
+			checked: [],
+			model: w.provider.model,
+			memberId: w.id,
+			findingId: null,
+			error: true,
+		})
+		for (let attempt = 0; ; attempt++) {
+			const draft = buildNearMissRequest(c, excerpt, facts, undefined, levels)
+			const l = w.provider.limits
+			// A risky file's decision is worth reading for: the full lookup budget, never more than the window has left.
+			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
+			const tools =
+				lookups && input.tools && room >= 2000
+					? input.tools(
+							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
+							external !== null,
+						)
+					: undefined
+			try {
+				const response = await w.provider.review(buildNearMissRequest(c, excerpt, facts, tools, levels), controller.signal)
+				addUsage(response.usage, w)
+				const v = parseNearMissCheck(response.output, c, excerpt, input.comparison, run.id, levels)
+				const where = `${excerpt.file.newPath ?? excerpt.file.key}:${c.miss.line}`
+				if (v.rejected)
+					run.rejected.push({ title: `Near miss at ${where}`, excerptId: excerpt.id, reason: `Near-miss check: ${v.rejected}` })
+				let findingId: string | null = null
+				if (v.finding) {
+					const seen = new Seen().lines(tools?.log.seen ?? [])
+					seen.excerpt(excerpt)
+					const f = withUnread(withSupport({ ...markRepeat(v.finding), memberId: w.id }), unreadRefs(findingTexts(v.finding), seen))
+					const dup = run.findings.find((e) => isDuplicate(e, f) || (e.memberId !== f.memberId && sameProblem(e, f)))
+					if (dup) {
+						if (w.id && dup.memberId !== w.id) dup.alsoBy = [...new Set([...(dup.alsoBy ?? []), w.id])]
+						run.rejected.push({
+							title: f.title,
+							excerptId: f.excerptId,
+							reason: `Same problem as "${dup.title}", found again when a near miss was double-checked`,
+						})
+						findingId = dup.id
+					} else {
+						const budget = applyBudget(run.findings, [f])
+						run.findings.push(...budget.kept, ...budget.held)
+						findingId = f.id
+					}
+				}
+				return { verdict: v.verdict, reason: v.reason, checked: v.checked, model: w.provider.model, memberId: w.id, findingId }
+			} catch (error) {
+				const e = asProviderError(error)
+				if (controller.signal.aborted || e.kind === 'cancelled') return failed('cancelled')
+				if (!e.retryable || attempt + 1 >= options.maxAttempts) return failed(e.message)
+				await sleep(options.backoffMs(attempt, e), controller.signal)
+			} finally {
+				if (tools && run.coverage.lookups && !controller.signal.aborted) addLookups(run.coverage.lookups, tools.log)
+			}
+		}
 	}
 
 	/**

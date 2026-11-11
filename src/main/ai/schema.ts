@@ -238,6 +238,21 @@ export type ModelVerification = z.infer<typeof verifySchema>
 export const VERIFY_SCHEMA_NAME = 'finding_verification'
 export const VERIFY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(verifySchema, { target: 'draft-7' }))
 
+/** The double-check of a near miss: was the reviewer right to let it go? */
+export const nearMissCheckSchema = z.object({
+	verdict: z
+		.enum(['safe', 'problem', 'unsure'])
+		.describe(
+			'"safe": the code shows it is fine on every path. "problem": traced a real problem. "unsure": the code read does not settle it.',
+		),
+	reason: z.string().describe('One to three sentences naming the files and lines that decide it.'),
+	checked: z.array(z.string()).describe('Files and line ranges read to decide, like "src/cart.ts:12-30".'),
+	finding: modelFindingSchema.nullable().describe('With "problem": the problem as one review finding. Otherwise null.'),
+})
+export type ModelNearMissCheck = z.infer<typeof nearMissCheckSchema>
+export const NEAR_MISS_SCHEMA_NAME = 'near_miss_check'
+export const NEAR_MISS_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(nearMissCheckSchema, { target: 'draft-7' }))
+
 /** A test that fails on the head commit while the finding holds, written on demand. */
 export const reproducerSchema = z.object({
 	path: z

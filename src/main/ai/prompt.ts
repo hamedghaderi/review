@@ -152,7 +152,7 @@ export function residueLevel(levels: ReadonlyArray<FindingLevel>): FindingLevel 
 	return (['nit', 'suggestion', 'should_fix'] as const).find((l) => levels.includes(l)) ?? null
 }
 
-function severitySection(levels: ReadonlyArray<FindingLevel>): string {
+export function severitySection(levels: ReadonlyArray<FindingLevel>): string {
 	const on = FINDING_LEVELS.filter((l) => levels.includes(l))
 	const off = FINDING_LEVELS.filter((l) => !levels.includes(l))
 	const residue = residueLevel(on)

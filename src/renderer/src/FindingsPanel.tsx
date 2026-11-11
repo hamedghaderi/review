@@ -33,6 +33,7 @@ import type {
 	FindingVerification,
 	FindingReproducer,
 	GoneFinding,
+	NearMissCheck,
 	Review,
 	ReviewRule,
 	RuleEvaluation,
@@ -979,6 +980,23 @@ function ruleRows(run: AiRun, ev: Array<RuleEvaluation>): Map<StoredRule, RuleRo
 	return rows
 }
 
+/** What the double-check of a near miss decided, under the note. */
+function NearMissVerdict({ check, run }: { check: NearMissCheck; run: AiRun }) {
+	const who = memberName(run, check.memberId) ?? check.model
+	const label = check.error
+		? 'Not double-checked'
+		: check.verdict === 'problem'
+			? `Double-checked by ${who}: a problem, listed as a finding`
+			: check.verdict === 'safe'
+				? `Double-checked by ${who}: fine`
+				: `Double-checked by ${who}: not settled`
+	return (
+		<div className={`near-miss-check ${check.error ? 'muted' : check.verdict}`} title={check.checked.join('\n') || undefined}>
+			{label}. {check.error ? check.reason.replace(/^Not double-checked: /, '') : check.reason}
+		</div>
+	)
+}
+
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
 	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
@@ -1163,6 +1181,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 																</span>
 															)}{' '}
 															{m.note}
+															{m.check && <NearMissVerdict check={m.check} run={run} />}
 														</li>
 													))}
 												</ul>
@@ -1548,6 +1567,15 @@ function FindingCard(p: CardProps) {
 				{team && f.alsoBy?.length
 					? `, also ${f.alsoBy.map((id) => team.members.find((m) => m.id === id)?.role ?? 'another reviewer').join(', ')}`
 					: ''}
+				{f.fromNearMiss && (
+					<span title={`The reviewer let this go with the note: “${f.fromNearMiss.note}”`}>
+						{' '}
+						· found by double-checking a near miss
+						{team && f.fromNearMiss.memberId
+							? ` of ${team.members.find((m) => m.id === f.fromNearMiss!.memberId)?.role ?? 'another reviewer'}`
+							: ''}
+					</span>
+				)}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}
 				{f.carried ? ` · carried from the run on ${f.carried.from.headSha.slice(0, 7)}, the file's diff is unchanged` : ''}
 				{p.timeline && <Timeline heads={p.timeline} />}

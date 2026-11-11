@@ -112,11 +112,15 @@ export function validateBatchOutput(
 		return {
 			rule,
 			why: clip(e.why.trim(), TEXT_LIMITS.note),
-			nearMisses: e.near_misses.slice(0, 10).map((m) => ({
-				fileKey: (m.excerpt_id && excerpts.get(m.excerpt_id)?.file.key) || null,
-				line: m.line,
-				note: clip(m.note.trim(), TEXT_LIMITS.note),
-			})),
+			nearMisses: e.near_misses.slice(0, 10).map((m) => {
+				const excerpt = m.excerpt_id ? excerpts.get(m.excerpt_id) : undefined
+				return {
+					fileKey: excerpt?.file.key ?? null,
+					line: m.line,
+					note: clip(m.note.trim(), TEXT_LIMITS.note),
+					...(excerpt ? { excerptId: excerpt.id } : {}),
+				}
+			}),
 		}
 	})
 	const byPath = new Map(
