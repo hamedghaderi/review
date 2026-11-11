@@ -9,7 +9,7 @@ import { modelFindingSchema, NEAR_MISS_JSON_SCHEMA, NEAR_MISS_SCHEMA_NAME, nearM
 
 /**
  * A near miss is a reviewer's "I looked at this and it is fine". Findings get a second look that tries to prove them
- * wrong; until now the decisions to let something go got none, so a wrong reason ("only the job calls this") silently
+ * wrong; until now the decisions to let something go got none, so a wrong reason ("nothing else calls this") silently
  * hid a real problem. On risky files, the correctness rules' near misses are now challenged the same way, by another
  * reviewer when the team has one.
  */
