@@ -542,7 +542,10 @@ export function shellEnv(): Promise<Record<string, string>> {
 		const fallback = Object.fromEntries(Object.entries(baseEnv).filter((e): e is [string, string] => typeof e[1] === 'string'))
 		if (process.platform === 'win32') return resolve(fallback)
 		const shell = process.env.SHELL || '/bin/zsh'
-		execFile(shell, ['-ilc', 'command env -0'], { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true }, (err, stdout) => {
+		// Detached, so the shell gets no controlling terminal. Under `npm run dev` an interactive shell would take over
+		// the terminal and, exec'ing its last command instead of exiting, never hand it back: Ctrl+C would stop working.
+		const options = { timeout: 5000, maxBuffer: 1024 * 1024, windowsHide: true, detached: true }
+		execFile(shell, ['-ilc', 'command env -0'], options, (err, stdout) => {
 			if (err) return resolve(fallback)
 			const vars: Record<string, string> = {}
 			for (const rec of String(stdout).split('\0')) {
