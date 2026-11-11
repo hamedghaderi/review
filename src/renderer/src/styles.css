@@ -3405,6 +3405,16 @@ h3.small-h {
 	margin: 2px 0 0;
 	padding-left: 14px;
 }
+.near-miss-check {
+	color: var(--text-2);
+	padding-top: 1px;
+}
+.near-miss-check.safe {
+	color: var(--ok);
+}
+.near-miss-check.problem {
+	color: var(--danger);
+}
 .checklist-note {
 	padding-top: 4px;
 }

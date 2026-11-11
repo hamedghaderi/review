@@ -958,7 +958,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.equal(run.evaluation!.length, 16)
 	assert.ok(run.evaluation!.every((e) => e.requests === 1))
 	const r4 = run.evaluation!.find((e) => e.rule === 'residue-4')!
-	assert.deepEqual(r4.nearMisses, [{ fileKey: 'src/app.ts', line: 3, note: 'one unused import' }])
+	assert.deepEqual(r4.nearMisses, [{ fileKey: 'src/app.ts', line: 3, note: 'one unused import', excerptId: 'E1' }])
 	assert.deepEqual(run.unexplained, [{ fileKey: 'src/gone.ts', why: 'deleting it is not mentioned anywhere' }])
 	assert.equal(run.findings[0].category, 'bug')
 	assert.equal(run.findings[0].disproof, 'Call add(5, 3) and check it still returns 2.')

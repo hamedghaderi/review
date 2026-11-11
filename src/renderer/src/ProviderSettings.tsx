@@ -701,10 +701,11 @@ export function Limits({ settings, run }: { settings: AiSettingsView; run(p: Pro
 			<label className="option">
 				<input type="checkbox" checked={v.verify} onChange={(e) => setV({ ...v, verify: e.target.checked })} />
 				<span>
-					<span>Double-check blocking findings</span>
+					<span>Double-check blocking findings and risky near misses</span>
 					<span className="muted">
-						After the review, each blocking finding gets a second request that tries to prove it wrong. One more request per blocking
-						finding, at most 8 per run.
+						After the review, each blocking finding gets a second request that tries to prove it wrong. On high-risk files, the places a
+						reviewer looked at for bugs, error handling or security and decided were fine get one too, which tries to prove that decision
+						wrong; a problem it finds is added as a finding. One more request each, at most 8 blocking findings and 6 near misses per run.
 					</span>
 				</span>
 			</label>

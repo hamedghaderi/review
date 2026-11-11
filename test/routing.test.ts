@@ -325,6 +325,64 @@ function bugTeam(seen: Seen, fail: Set<string> = new Set()): Array<TeamRunMember
 	}))
 }
 
+/**
+ * Defects lets one place go in each of login.ts (high risk) and Button.tsx, under "bug"; whoever is asked to check a
+ * near miss answers with `verdict`, and with "problem" describes it as a finding on login.ts.
+ */
+function nearMissTeam(verdict: 'safe' | 'problem' | 'unsure', asked: Array<{ member: string; input: string }>): Array<TeamRunMember> {
+	return TEAM.map((m, i) => ({
+		id: m.id,
+		role: m.role,
+		rules: m.rules,
+		provenance: { connectionId: 'c-shared', connectionLabel: 'Gateway', endpoint: 'http://x' },
+		provider: createFakeProvider({
+			model: `model-${i}`,
+			limits: { contextWindow: m.window, maxOutputTokens: 2000 },
+			script: (req) => {
+				if (req.schema?.name === 'near_miss_check') {
+					asked.push({ member: m.id, input: req.input })
+					const e = req.batch.excerpts[0]
+					return {
+						verdict,
+						reason: 'The webhook handler calls this too and retries it (src/webhook.ts:40).',
+						checked: ['src/webhook.ts:30-50'],
+						finding:
+							verdict === 'problem'
+								? {
+										excerpt_id: e.id,
+										file_path: 'src/auth/login.ts',
+										side: 'new',
+										start_line: 2,
+										end_line: 2,
+										category: 'error-handling',
+										signature: null,
+										test_pattern: null,
+										severity: 'should_fix',
+										title: 'A retried webhook sends the refund twice',
+										body: 'A customer can be refunded twice when the webhook is retried.',
+										reasoning: 'The webhook path does not check for an earlier refund.',
+										disproof: null,
+										background: null,
+										evidence: e.lines[1].text,
+										raised_before: null,
+									}
+								: null,
+					}
+				}
+				const evaluation = emptyEvaluation().filter((x) => m.rules.includes(x.rule))
+				if (m.id === 'defects') {
+					const near = ['src/auth/login.ts', 'src/ui/Button.tsx'].flatMap((path) => {
+						const e = req.batch.excerpts.find((ex) => ex.file.newPath === path)
+						return e ? [{ excerpt_id: e.id, line: 1, note: `Only the checkout page calls ${path}, once per order.` }] : []
+					})
+					evaluation.find((x) => x.rule === 'bug')!.near_misses = near
+				}
+				return { findings: [], evaluation, unexplained_files: [], limitations: [] }
+			},
+		}),
+	}))
+}
+
 test('everyone checks bugs: only members that lack "bug" get it, and turning it off changes nothing', () => {
 	const members = TEAM.map((m) => ({ id: m.id, role: m.role, connectionId: 'c', modelId: 'm', rules: m.rules }))
 	assert.equal(runMembers({ id: 't', name: 'T', members }), members)
@@ -371,4 +429,42 @@ test('everyone checks bugs: retrying "bug" asks only the member that missed it',
 	for (const e of run.evaluation!.filter((x) => x.rule === 'bug')) assert.equal(e.answered!.length, total(e.checkedBy!), e.checkedBy!)
 	// Its own rule was not asked again, so it is still missing.
 	assert.equal(run.evaluation!.find((e) => e.rule === 'security')!.answered!.length, 0)
+})
+
+test('near misses on high-risk files are challenged by another member; a problem it traces becomes a finding', async () => {
+	const asked: Array<{ member: string; input: string }> = []
+	const run = await startRun(input(), options(nearMissTeam('problem', asked)), () => {}).done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	// Only login.ts is rated high risk, so only its near miss is checked, by a member other than Defects.
+	assert.equal(asked.length, 1)
+	assert.notEqual(asked[0].member, 'defects')
+	assert.match(asked[0].input, /The reviewer's note: Only the checkout page calls src\/auth\/login\.ts/)
+	const bug = run.evaluation!.find((e) => e.rule === 'bug')!
+	const login = bug.nearMisses.find((m) => m.fileKey === 'src/auth/login.ts')!
+	const button = bug.nearMisses.find((m) => m.fileKey === 'src/ui/Button.tsx')!
+	assert.equal(button.check, undefined)
+	assert.equal(login.check?.verdict, 'problem')
+	assert.equal(login.check?.memberId, asked[0].member)
+	const f = run.findings.find((x) => x.id === login.check!.findingId)!
+	assert.equal(f.title, 'A retried webhook sends the refund twice')
+	assert.equal(f.memberId, asked[0].member)
+	assert.deepEqual(f.fromNearMiss, { rule: 'bug', note: login.note, memberId: 'defects' })
+	assert.deepEqual(f.anchor.startLine, 2)
+	assert.equal(run.verification?.total, 1)
+	assert.equal(run.verification?.done, 1)
+})
+
+test('a near miss the check finds safe adds no finding; with double-checking off nothing is checked', async () => {
+	const asked: Array<{ member: string; input: string }> = []
+	const run = await startRun(input(), options(nearMissTeam('safe', asked)), () => {}).done
+	assert.equal(run.findings.length, 0)
+	const login = run.evaluation!.find((e) => e.rule === 'bug')!.nearMisses.find((m) => m.fileKey === 'src/auth/login.ts')!
+	assert.equal(login.check?.verdict, 'safe')
+	assert.equal(login.check?.findingId, null)
+
+	const none: Array<{ member: string; input: string }> = []
+	const base = options(nearMissTeam('problem', none))
+	const off = await startRun(input(), { ...base, limits: { ...base.limits, verify: false } }, () => {}).done
+	assert.equal(none.length, 0)
+	assert.equal(off.findings.length, 0)
 })
