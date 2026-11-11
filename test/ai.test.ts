@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { buildContext, type FileSource } from '../src/main/ai/context.ts'
 import { AiController } from '../src/main/ai/controller.ts'
 import { createFakeProvider, defaultScript, emptyEvaluation, type FakeScript } from '../src/main/ai/fake.ts'
-import { onlyKnownMentions, validateBatchOutput } from '../src/main/ai/findings.ts'
+import { evidenceMatches, locateEvidence, onlyKnownMentions, validateBatchOutput } from '../src/main/ai/findings.ts'
 import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
 import { buildInput, instructionsFor, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
@@ -295,6 +295,46 @@ test('evidence tolerates re-indentation but not changed text', () => {
 	const batch = buildContext(comp, srcs, LIMITS).batches[0]
 	const r = validateBatchOutput(out([finding({ evidence: '   return   a + b  ' })]), batch, comp, 'run-1')
 	assert.equal(r.findings.length, 1)
+})
+
+test('evidence quoted a few lines from the cited range moves the finding to the quoted lines', () => {
+	const { comp, srcs } = sources()
+	const batch = buildContext(comp, srcs, LIMITS).batches[0]
+	const r = validateBatchOutput(
+		out([
+			// Cited the closing brace, quoted the changed line above it.
+			finding({ start_line: 4, end_line: 4, evidence: 'return a + b', title: 'Off by one line' }),
+			// Quoted two lines with an omission marker between them.
+			finding({ start_line: 1, end_line: 3, evidence: 'function add(a, b) {\n  ...\n  return a + b', title: 'With an omission' }),
+			// Nothing in reach quotes it.
+			finding({ start_line: 4, end_line: 4, evidence: 'return a * b', title: 'Not in the file' }),
+		]),
+		batch,
+		comp,
+		'run-1',
+	)
+	assert.deepEqual(
+		r.findings.map((f) => [f.title, f.anchor.startLine, f.anchor.endLine, f.anchor.excerpt]),
+		[
+			['Off by one line', 3, 3, '  return a + b'],
+			['With an omission', 1, 3, 'function add(a, b) {\n  // adds\n  return a + b'],
+		],
+	)
+	assert.match(r.findings[0].adjusted ?? '', /Moved from lines 4-4 to 3-3/)
+	assert.equal(r.findings[1].adjusted, null)
+	assert.deepEqual(
+		r.rejected.map((x) => x.reason),
+		['Evidence is not found verbatim in new lines 4-4'],
+	)
+})
+
+test('evidence is found only near the cited range, closest first, and never as a bare omission marker', () => {
+	const lines = new Map(Array.from({ length: 40 }, (_, i) => [i + 1, i === 4 || i === 30 ? 'save(order)' : `line ${i + 1}`]))
+	assert.deepEqual(locateEvidence('save(order)', lines, 8, 8), { start: 5, end: 5 })
+	assert.deepEqual(locateEvidence('save(order)', lines, 26, 27), { start: 31, end: 31 })
+	assert.equal(locateEvidence('save(order)', lines, 18, 18), null, 'more than ten lines away either way')
+	assert.equal(evidenceMatches('...', ['save(order)']), false)
+	assert.equal(evidenceMatches('// …', ['save(order)']), false)
 })
 
 function options(provider: ReturnType<typeof createFakeProvider>, over: Partial<RunnerOptions> = {}): RunnerOptions {
