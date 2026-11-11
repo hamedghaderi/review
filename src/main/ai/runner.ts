@@ -267,9 +267,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		run.providerLabel = options.team.name
 		run.model = workers.length === 1 ? workers[0].provider.model : `${workers.length} reviewers`
 		run.fixture = workers.every((w) => w.provider.fixture)
-		for (const w of workers) for (const r of w.rules) run.evaluation!.find((e) => e.rule === r)!.checkedBy = w.id
-		// A rule no reviewer owns (a bugs-only run) was not asked, so it is left out rather than shown as missing and retried.
-		run.evaluation = run.evaluation!.filter((e) => e.checkedBy)
+		// One entry per rule and member that checks it: a rule several members check ("bug" when everyone checks bugs) is
+		// answered, counted and retried for each of them. A rule no reviewer owns (a bugs-only run) was not asked, so it
+		// is left out rather than shown as missing and retried.
+		run.evaluation = REVIEW_RULES.flatMap((rule) =>
+			workers
+				.filter((w) => w.rules.includes(rule))
+				.map((w) => ({ rule, requests: 0, answered: [], nearMisses: [], why: [], checkedBy: w.id })),
+		)
 	}
 	// Settled once the background is read: text from outsiders turns the MCP tools off.
 	let external = lookups && input.external?.definitions.length ? input.external : null
@@ -460,7 +465,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				if (w.member) w.member.requestsTotal = w.pkg!.batches.length
 				// A member none of whose rules applies to any changed file has nothing to check.
 				if (!w.pkg!.batches.length && options.team)
-					for (const r of w.rules) evaluationOf(r).why.push('None of the changed files is a kind this rule applies to.')
+					for (const r of w.rules) evaluationOf(r, w).why.push('None of the changed files is a kind this rule applies to.')
 			}
 			emit()
 			await Promise.all(workers.map((w) => runBatches(w.pkg!, w)))
@@ -604,7 +609,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		run.findings.push(...budget.kept, ...budget.held)
 		run.rejected.push(...value.rejected.map((r) => (w.role ? { ...r, reason: `${w.role}: ${r.reason}` } : r)))
 		for (const e of value.evaluation) {
-			const agg = run.evaluation!.find((x) => x.rule === e.rule)!
+			const agg = evaluationOf(e.rule, w)
 			agg.requests++
 			agg.answered?.push(batchIndex)
 			agg.nearMisses.push(...e.nearMisses.slice(0, Math.max(0, 20 - agg.nearMisses.length)))
@@ -837,8 +842,9 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		}
 	}
 
-	function evaluationOf(rule: ReviewRule): RuleEvaluation {
-		return run.evaluation!.find((e) => e.rule === rule)!
+	/** The entry for `rule` as `w` checks it; single-model runs have one entry per rule, with no member. */
+	function evaluationOf(rule: ReviewRule, w: Worker): RuleEvaluation {
+		return run.evaluation!.find((e) => e.rule === rule && (e.checkedBy ?? null) === w.id)!
 	}
 
 	/**
@@ -1055,13 +1061,11 @@ function retryWorkers(
 	lookups: boolean,
 	style: string | null,
 ): Array<Worker> {
-	const evaluations = REVIEW_RULES.filter((r) => rules.includes(r)).map((r) => run.evaluation!.find((e) => e.rule === r)!)
+	// Every member that checks a retried rule asks it again, on its own requests that missed it.
+	const evaluations = REVIEW_RULES.filter((r) => rules.includes(r)).flatMap((r) => run.evaluation!.filter((e) => e.rule === r))
 	const workers: Array<Worker> = []
 	for (const owner of [...new Set(evaluations.map((e) => e.checkedBy ?? null))]) {
 		const member = owner ? (run.team?.members.find((m) => m.id === owner) ?? null) : null
-		const provider = providers.get(owner)
-		if (!provider) throw new Error(`No reviewer was given for ${member?.role ?? 'this run'}.`)
-		if (member) member.status = 'running'
 		const mine = evaluations.filter((e) => (e.checkedBy ?? null) === owner)
 		const groups = new Map<string, { rules: Array<ReviewRule>; batches: Array<number> }>()
 		for (let i = 0; i < (member ? member.requestsTotal : run.coverage.batchesTotal); i++) {
@@ -1071,6 +1075,11 @@ function retryWorkers(
 			group.batches.push(i)
 			groups.set(missed.join(), group)
 		}
+		// A member that checks a shared rule everywhere already has nothing to ask.
+		if (!groups.size) continue
+		const provider = providers.get(owner)
+		if (!provider) throw new Error(`No reviewer was given for ${member?.role ?? 'this run'}.`)
+		if (member) member.status = 'running'
 		for (const g of groups.values())
 			workers.push({
 				id: member?.id ?? null,

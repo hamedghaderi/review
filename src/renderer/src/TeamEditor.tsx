@@ -73,7 +73,7 @@ export function suggestTeam(settings: AiSettingsView, personas = false): ReviewT
 		used.add(pick.modelId)
 		return { id: crypto.randomUUID(), role: r.role, rules: r.rules, ...(r.persona ? { persona: r.persona } : {}), ...pick }
 	})
-	return { id: crypto.randomUUID(), name: personas ? 'Persona team' : 'Review team', members }
+	return { id: crypto.randomUUID(), name: personas ? 'Persona team' : 'Review team', members, everyoneChecksBugs: true }
 }
 
 interface Props {
@@ -85,7 +85,10 @@ interface Props {
 	onCancel(): void
 }
 
-/** Edits a review team: named roles, one model each, and which rules each role checks (every rule exactly once). */
+/**
+ * Edits a review team: named roles, one model each, and which rules each role checks (every rule exactly once), plus
+ * whether every reviewer also checks bugs.
+ */
 export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, onCancel }: Props) {
 	const [team, setTeam] = useState<ReviewTeam>(initial)
 	const [saving, setSaving] = useState(false)
@@ -276,6 +279,22 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 					))}
 				</tbody>
 			</table>
+
+			<label className="check small">
+				<input
+					type="checkbox"
+					checked={team.everyoneChecksBugs === true}
+					onChange={(e) => setTeam({ ...team, everyoneChecksBugs: e.target.checked })}
+				/>
+				<span>
+					Every reviewer also checks bugs
+					<span className="muted block">
+						Besides its own rules, each reviewer looks for bugs in the code files it gets, and the same bug found twice is merged. Different
+						models notice different bugs, so this catches more than one reviewer alone. It uses more tokens: each reviewer thinks and writes
+						more, and some get code files they would otherwise skip.
+					</span>
+				</span>
+			</label>
 
 			{missing.length > 0 && (
 				<p className="small error-text">Every rule needs a reviewer. Unassigned: {missing.map((r) => RULE_LABEL[r]).join(', ')}.</p>

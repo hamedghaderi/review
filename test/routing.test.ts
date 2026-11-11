@@ -6,7 +6,15 @@ import type { ProviderRequest } from '../src/main/ai/provider.ts'
 import type { RelatedResult } from '../src/main/ai/related.ts'
 import { startRun, type RunnerOptions, type TeamRunMember } from '../src/main/ai/runner.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
-import type { AiRun, ChangedFile, Comparison, FileStatus, ReviewRule } from '../src/shared/types.ts'
+import {
+	runMembers,
+	type AiRun,
+	type ChangedFile,
+	type Comparison,
+	type FileStatus,
+	type ReviewRule,
+	type ReviewTeam,
+} from '../src/shared/types.ts'
 
 function source(path: string, status: FileStatus = 'modified', lines = 1): FileSource {
 	const file: ChangedFile = {
@@ -267,4 +275,100 @@ test('double-check in a team: a member whose review failed is not asked; with on
 	assert.equal(same.length, 1)
 	assert.notEqual(same[0], 'defects', 'the same model, but not the member that raised it')
 	assert.equal(run2.findings[0].verification?.memberId, same[0])
+})
+
+/** The team above with "everyone checks bugs" on; Defects and Callers both report the same bug in Button.tsx. */
+function bugTeam(seen: Seen, fail: Set<string> = new Set()): Array<TeamRunMember> {
+	const saved: ReviewTeam = {
+		id: 't',
+		name: 'Team',
+		everyoneChecksBugs: true,
+		members: TEAM.map((m) => ({ id: m.id, role: m.role, connectionId: `c-${m.id}`, modelId: `${m.id}-model`, rules: m.rules })),
+	}
+	return runMembers(saved).map((m) => ({
+		id: m.id,
+		role: m.role,
+		rules: m.rules,
+		provenance: { connectionId: m.connectionId, connectionLabel: 'Gateway', endpoint: 'http://x' },
+		provider: createFakeProvider({
+			model: m.modelId,
+			limits: { contextWindow: TEAM.find((x) => x.id === m.id)!.window, maxOutputTokens: 2000 },
+			script: (req) => {
+				seen.set(m.id, [...(seen.get(m.id) ?? []), req])
+				if (fail.has(m.id)) return new ProviderError('server', 'server error (500)')
+				const e = req.batch.excerpts.find((ex) => ex.file.newPath === 'src/ui/Button.tsx')
+				const findings =
+					e && (m.id === 'defects' || m.id === 'callers')
+						? [
+								{
+									excerpt_id: e.id,
+									file_path: 'src/ui/Button.tsx',
+									side: 'new' as const,
+									start_line: 1,
+									end_line: 1,
+									category: 'bug' as const,
+									signature: null,
+									test_pattern: null,
+									severity: 'should_fix' as const,
+									title: 'Button submits the form twice',
+									body: 'Clicking once can send the order twice.',
+									reasoning: 'The handler is attached on every render.',
+									disproof: null,
+									background: null,
+									evidence: e.lines[0].text,
+								},
+							]
+						: []
+				return { findings, evaluation: emptyEvaluation().filter((x) => m.rules.includes(x.rule)), unexplained_files: [], limitations: [] }
+			},
+		}),
+	}))
+}
+
+test('everyone checks bugs: only members that lack "bug" get it, and turning it off changes nothing', () => {
+	const members = TEAM.map((m) => ({ id: m.id, role: m.role, connectionId: 'c', modelId: 'm', rules: m.rules }))
+	assert.equal(runMembers({ id: 't', name: 'T', members }), members)
+	const on = runMembers({ id: 't', name: 'T', members, everyoneChecksBugs: true })
+	assert.deepEqual(
+		on.map((m) => m.rules.filter((r) => r === 'bug').length),
+		[1, 1, 1, 1],
+	)
+	assert.equal(on[0], members[0], 'the member that already owns it is unchanged')
+	assert.deepEqual(on[1].rules, ['bug', 'security'])
+})
+
+test('everyone checks bugs: each member answers "bug" on its own requests, and a bug two members find is listed once', async () => {
+	const seen: Seen = new Map()
+	const run = await startRun(input(), options(bugTeam(seen)), () => {}).done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	const bug = run.evaluation!.filter((e) => e.rule === 'bug')
+	assert.deepEqual(bug.map((e) => e.checkedBy).sort(), ['callers', 'defects', 'security', 'tests'])
+	for (const e of bug) assert.equal(e.requests, run.team!.members.find((m) => m.id === e.checkedBy)!.requestsTotal, e.checkedBy!)
+	// Every other rule still has one owner.
+	const others = run.evaluation!.filter((e) => e.rule !== 'bug').map((e) => e.rule)
+	assert.equal(others.length, new Set(others).size)
+	// "bug" applies to configuration too, so the tests member now reads it.
+	assert.ok(filesOf(seen.get('tests')).includes('config/app.yml'))
+	const found = run.findings.filter((f) => f.title === 'Button submits the form twice')
+	assert.equal(found.length, 1)
+	assert.deepEqual([found[0].memberId, ...(found[0].alsoBy ?? [])].sort(), ['callers', 'defects'])
+	assert.ok(run.rejected.some((r) => /Same problem as "Button submits the form twice", also reported by/.test(r.reason)))
+})
+
+test('everyone checks bugs: retrying "bug" asks only the member that missed it', async () => {
+	const first = await startRun(input(), options(bugTeam(new Map(), new Set(['security']))), () => {}).done
+	assert.equal(first.status, 'partial')
+	const again: Seen = new Map()
+	const security = bugTeam(again).find((m) => m.id === 'security')!
+	const run = await startRun(
+		input({ run: first, rules: ['bug'], providers: new Map([['security', security.provider]]) }),
+		{ ...options([security]), provider: security.provider, team: undefined },
+		() => {},
+	).done
+	assert.deepEqual([...again.keys()], ['security'])
+	assert.equal(again.get('security')!.length, first.team!.members.find((m) => m.id === 'security')!.requestsTotal)
+	const total = (id: string) => run.team!.members.find((m) => m.id === id)!.requestsTotal
+	for (const e of run.evaluation!.filter((x) => x.rule === 'bug')) assert.equal(e.answered!.length, total(e.checkedBy!), e.checkedBy!)
+	// Its own rule was not asked again, so it is still missing.
+	assert.equal(run.evaluation!.find((e) => e.rule === 'security')!.answered!.length, 0)
 })

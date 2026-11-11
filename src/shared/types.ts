@@ -921,6 +921,17 @@ export interface ReviewTeam {
 	id: string
 	name: string
 	members: Array<TeamMember>
+	// Every member also checks "bug" on top of its own rules, and repeats are merged. Absent on teams saved before it: off.
+	everyoneChecksBugs?: boolean
+}
+
+/**
+ * The members as a run uses them: with everyoneChecksBugs, each member that does not own "bug" checks it too, so
+ * correctness gets several models' reading instead of one. Every other rule keeps its single owner.
+ */
+export function runMembers(team: ReviewTeam): Array<TeamMember> {
+	if (!team.everyoneChecksBugs) return team.members
+	return team.members.map((m) => (m.rules.includes('bug') ? m : { ...m, rules: ['bug', ...m.rules] }))
 }
 
 /** A team as shown in settings, with why a member can't run right now. */
