@@ -73,6 +73,7 @@ How Review is put together: the AI review pipeline, the code layout and how revi
 
 - **Enforced in code** (`src/main/ai/findings.ts`), not only asked for:
   - Every one of the 16 rules must be reported, with near misses, or the answer is treated as invalid. That's how "0 findings" is told apart from "not checked", and the Findings panel shows it under **Checked**.
+  - A finding's quoted evidence must be in the lines it cites, ignoring indentation and lines that only mark an omission (`...`). When the quote is within 10 lines of the cited range instead, the finding is moved to the quoted lines and says so; further away, it is rejected.
   - A blocking finding without a disproof (the check that would prove it wrong) is lowered to should fix.
   - Residue is always a nit (else suggestion, else should fix, depending on the levels turned on), must be new, needs a signature, and is rejected if it names the author. A misleading name gets the same level and must also be new. A test-value finding needs its pattern.
   - A finding at a level that is turned off moves to a close level that is on (blocking → should fix, nit ↔ suggestion), or is rejected with the reason.

@@ -187,19 +187,31 @@ export function validateFinding(
 		const n = lineNumbers[i]
 		if (n !== null) supplied.set(n, l.text)
 	})
-	const cited: Array<string> = []
 	for (let n = f.start_line; n <= f.end_line; n++) {
-		const text = supplied.get(n)
-		if (text === undefined) return `Line ${n} (${side}) is not part of excerpt ${excerpt.id}`
-		cited.push(text)
+		if (!supplied.has(n)) return `Line ${n} (${side}) is not part of excerpt ${excerpt.id}`
 	}
 	const anchorable = side === 'old' ? excerpt.anchorable.old : excerpt.anchorable.new
-	let touchesChange = false
-	for (let n = f.start_line; n <= f.end_line && !touchesChange; n++) touchesChange = anchorable.has(n)
-	if (!touchesChange) return `Lines ${f.start_line}-${f.end_line} (${side}) are not part of or next to a changed line`
+	const touchesChange = (from: number, to: number): boolean => {
+		for (let n = from; n <= to; n++) if (anchorable.has(n)) return true
+		return false
+	}
 	const evidence = f.evidence.trim()
 	if (!evidence) return 'Evidence is empty'
-	if (!evidenceMatches(evidence, cited)) return `Evidence is not found verbatim in ${side} lines ${f.start_line}-${f.end_line}`
+	let start = f.start_line
+	let end = f.end_line
+	let moved: string | null = null
+	const linesOf = (from: number, to: number): Array<string> => Array.from({ length: to - from + 1 }, (_, i) => supplied.get(from + i)!)
+	if (!evidenceMatches(evidence, linesOf(start, end))) {
+		// Models often cite a range a few lines off from the code they quote; the quote is the better witness.
+		const found = locateEvidence(evidence, supplied, start, end)
+		if (!found || !touchesChange(found.start, found.end))
+			return `Evidence is not found verbatim in ${side} lines ${f.start_line}-${f.end_line}`
+		moved = `Moved from lines ${start}-${end} to ${found.start}-${found.end}, where the quoted code is.`
+		start = found.start
+		end = found.end
+	}
+	if (!touchesChange(start, end)) return `Lines ${start}-${end} (${side}) are not part of or next to a changed line`
+	const cited = linesOf(start, end)
 	for (const key of ['title', 'body', 'reasoning'] as const) {
 		if (!f[key].trim()) return `Missing ${key}`
 	}
@@ -213,8 +225,8 @@ export function validateFinding(
 		oldPath: file.oldPath,
 		newPath: file.newPath,
 		side,
-		startLine: f.start_line,
-		endLine: f.end_line,
+		startLine: start,
+		endLine: end,
 		excerpt: cited
 			.slice(0, 6)
 			.map((t) => clip(t, 240))
@@ -235,7 +247,7 @@ export function validateFinding(
 		disproof: policy.severity === 'blocking' ? clip(f.disproof!.trim(), TEXT_LIMITS.disproof) : null,
 		background: f.background?.trim() ? clip(f.background.trim(), TEXT_LIMITS.background) : null,
 		evidence: clip(evidence, TEXT_LIMITS.evidence),
-		adjusted: policy.adjusted,
+		adjusted: [moved, policy.adjusted].filter(Boolean).join(' ') || null,
 		repeatOf: null,
 	}
 }
@@ -379,14 +391,51 @@ function squash(s: string): string {
 	return s.replace(/\s+/g, ' ').trim()
 }
 
-/** Evidence must appear in the cited lines, ignoring whitespace differences (models often re-indent). */
+// A line that only marks code left out of a quote ("...", "…", "// ...").
+const ELISION = /^(?:(?:\/\/|#|--|\*)\s*)?(?:\.\.\.|…)$/
+
+/**
+ * Evidence must appear in the cited lines, ignoring whitespace differences (models often re-indent) and lines that
+ * only mark an omission between the quoted lines.
+ */
 export function evidenceMatches(evidence: string, cited: Array<string>): boolean {
 	const source = squash(cited.join('\n'))
-	return evidence
+	const lines = evidence
 		.split('\n')
 		.map(squash)
-		.filter(Boolean)
-		.every((line) => source.includes(line))
+		.filter((line) => line && !ELISION.test(line))
+	return lines.length > 0 && lines.every((line) => source.includes(line))
+}
+
+export const EVIDENCE_NEARBY = 10 // how many lines from the cited range the quoted code may sit and still be found
+
+/**
+ * The lines the evidence really quotes when the cited range misses them: the shortest window of consecutive supplied
+ * lines that holds it, at most EVIDENCE_NEARBY lines from the cited range, closest first. Null when there is none.
+ */
+export function locateEvidence(
+	evidence: string,
+	supplied: ReadonlyMap<number, string>,
+	start: number,
+	end: number,
+): { start: number; end: number } | null {
+	const quoted = evidence.split('\n').filter((l) => squash(l) && !ELISION.test(squash(l))).length
+	const longest = Math.max(end - start + 1, quoted) + 2
+	let best: { start: number; end: number; distance: number } | null = null
+	for (let from = Math.max(1, start - EVIDENCE_NEARBY); from <= end + EVIDENCE_NEARBY; from++) {
+		const window: Array<string> = []
+		for (let to = from; to <= end + EVIDENCE_NEARBY && to - from < longest; to++) {
+			const text = supplied.get(to)
+			if (text === undefined) break
+			window.push(text)
+			if (!evidenceMatches(evidence, window)) continue
+			const distance = Math.max(0, start - from) + Math.max(0, to - end)
+			if (!best || distance < best.distance || (distance === best.distance && to - from < best.end - best.start))
+				best = { start: from, end: to, distance }
+			break
+		}
+	}
+	return best && { start: best.start, end: best.end }
 }
 
 export function findingKey(f: Pick<Finding, 'anchor' | 'title'>): string {
