@@ -34,6 +34,7 @@ import {
 	findingKey,
 	InvalidOutputError,
 	isDuplicate,
+	reachLowered,
 	sameProblem,
 	validateBatchOutput,
 	withKnownMentions,
@@ -845,6 +846,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				const result = await verifyOne(item.f, item.w, item.checker)
 				if (controller.signal.aborted || !open()) return
 				item.f.verification = result
+				const lowered = reachLowered(item.f, result, levels)
+				if (lowered) {
+					item.f.severity = lowered.severity
+					item.f.adjusted = [item.f.adjusted, lowered.adjusted].filter(Boolean).join(' ')
+				}
 				if (result.error) progress.failed++
 				else progress.done++
 				emit()

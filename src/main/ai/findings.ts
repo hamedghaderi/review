@@ -6,6 +6,8 @@ import {
 	type Comparison,
 	type Finding,
 	type FindingCategory,
+	type FindingReach,
+	type FindingVerification,
 	type NearMiss,
 	type OutdatedDoc,
 	type RaisedBefore,
@@ -25,6 +27,7 @@ const TEXT_LIMITS = {
 	body: 6000,
 	reasoning: 600,
 	disproof: 2000,
+	reach: 400,
 	background: 1200,
 	evidence: 4000,
 	limitation: 1000,
@@ -249,7 +252,10 @@ export function validateFinding(
 		title: clip(f.title.trim(), TEXT_LIMITS.title),
 		body: clip(f.body.trim(), TEXT_LIMITS.body),
 		reasoning: clip(f.reasoning.trim(), TEXT_LIMITS.reasoning),
-		disproof: policy.severity === 'blocking' ? clip(f.disproof!.trim(), TEXT_LIMITS.disproof) : null,
+		// Kept on a finding lowered for its reach: whoever raises it back still has the check.
+		disproof:
+			policy.severity === 'blocking' || (policy.reach && f.disproof?.trim()) ? clip(f.disproof!.trim(), TEXT_LIMITS.disproof) : null,
+		reach: policy.reach,
 		background: f.background?.trim() ? clip(f.background.trim(), TEXT_LIMITS.background) : null,
 		evidence: clip(evidence, TEXT_LIMITS.evidence),
 		adjusted: [moved, policy.adjusted].filter(Boolean).join(' ') || null,
@@ -281,7 +287,7 @@ const FALLBACK: Partial<Record<FindingLevel, Array<FindingLevel>>> = {
 function checkPolicy(
 	f: ModelFinding,
 	levels: ReadonlyArray<FindingLevel>,
-): { severity: Finding['severity']; adjusted: string | null } | string {
+): { severity: Finding['severity']; adjusted: string | null; reach?: FindingReach | null } | string {
 	if (f.category === 'test-value' && !f.test_pattern) return 'Test finding without a test_pattern'
 	if (f.category === 'residue') {
 		if (f.signature === null || !Number.isInteger(f.signature) || f.signature < 1 || f.signature > 6)
@@ -307,9 +313,23 @@ function checkPolicy(
 	}
 	let severity: FindingLevel = f.severity
 	let adjusted: string | null = null
+	const reach: FindingReach | null =
+		f.severity === 'blocking' && f.reach?.note.trim()
+			? { path: f.reach.path, note: clip(f.reach.note.trim(), TEXT_LIMITS.reach), losesData: f.reach.loses_data }
+			: null
+	// Reach only moves a finding to should fix, never out of the review: with should fix turned off, it stays blocking.
+	// With blocking turned off, the finding moves down for that reason below.
+	const capReach = levels.includes('blocking') && levels.includes('should_fix')
 	if (severity === 'blocking' && !f.disproof?.trim()) {
 		severity = 'should_fix'
 		adjusted = 'Lowered to should fix: a blocking finding needs a check that would prove it false, and none was given.'
+	} else if (severity === 'blocking' && !reach && capReach) {
+		severity = 'should_fix'
+		adjusted =
+			'Lowered to should fix: a blocking finding needs to say who it reaches (the case this change is for, or a path its callers commonly use), and it did not.'
+	} else if (severity === 'blocking' && reach && !reachBlocks(f.category, reach) && capReach) {
+		severity = 'should_fix'
+		adjusted = `Lowered to should fix: it needs a rare path or another case (${reach.note.replace(/\.$/, '')}), not the case this change is for or a path its callers commonly use.`
 	}
 	if (!levels.includes(severity)) {
 		const to = FALLBACK[severity]?.find((l) => levels.includes(l))
@@ -317,7 +337,35 @@ function checkPolicy(
 		adjusted = `${adjusted ? `${adjusted} ` : ''}Moved from ${LEVEL_NAME[severity]} to ${LEVEL_NAME[to]}: ${LEVEL_NAME[severity]} is turned off in settings.`
 		severity = to
 	}
-	return { severity, adjusted }
+	return { severity, adjusted, reach }
+}
+
+/** Whether a problem with this reach may block: the change's own case or a common path, or any path for security or data loss. */
+export function reachBlocks(category: FindingCategory | undefined, reach: FindingReach): boolean {
+	return reach.path !== 'rare-path' || category === 'security' || reach.losesData
+}
+
+/**
+ * What the double-check does to a blocking finding whose reach it could not confirm: should fix, with the reason, when
+ * should fix is turned on. Never for security or data loss, a finding it showed to be wrong (that says more), or a
+ * check that failed. Returns null when the level stays.
+ */
+export function reachLowered(
+	f: Finding,
+	v: FindingVerification,
+	levels: ReadonlyArray<FindingLevel>,
+): { severity: FindingLevel; adjusted: string } | null {
+	if (f.severity !== 'blocking' || v.error || v.verdict === 'wrong' || !v.reach || v.reach.verdict === 'confirmed') return null
+	if (f.category === 'security' || f.reach?.losesData || !levels.includes('should_fix')) return null
+	const why =
+		v.reach.verdict === 'rare'
+			? 'the double-check found it only happens on a rare path or another case'
+			: 'the double-check could not confirm it hits the case this change is for or a path its callers commonly use'
+	const note = v.reach.note.trim().replace(/\.$/, '')
+	return {
+		severity: 'should_fix',
+		adjusted: `Lowered to should fix: ${why}${note ? ` (${clip(note, TEXT_LIMITS.reach)})` : ''}.`,
+	}
 }
 
 const SEVERITY_RANK: Record<string, number> = {

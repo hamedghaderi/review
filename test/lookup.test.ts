@@ -612,6 +612,7 @@ test('runner: references in a finding to lines its request never had are flagged
 						body: 'src/cart.js:4 multiplies by taxRate, and src/checkout.js:4 passes none. src/checkout.js:7 is fine. See src/checkout.js:40 and src/payments.js:12.',
 						reasoning: 'Read src/checkout.js and src/legacy/old.js.',
 						disproof: 'Pass a taxRate in src/checkout.js:4.',
+						reach: { path: 'common-path', note: 'Checkout calls it on every order.', loses_data: false },
 						background: null,
 						evidence: 'return sum * (1 + taxRate)',
 					},
