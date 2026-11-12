@@ -59,6 +59,7 @@ import {
 	emptyLookups,
 	LOOKUPS_BY_RISK,
 	LOOKUP_RESERVE,
+	mcpServers,
 	TOOL_DEFINITIONS,
 	type ExternalTools,
 	type LookupBudget,
@@ -695,7 +696,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				checkTruncation(batch, response.usage?.inputTokens ?? null, w)
 				const value = validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads)
 				const seen = seenInBatch(batch, tools?.log.seen ?? [])
-				value.findings = value.findings.map((f) => withUnread(withKnownMentions(f, background.people), unreadRefs(findingTexts(f), seen)))
+				// What MCP tools returned can't be told apart from the rest of the answer, so every finding of the request carries it.
+				const servers = mcpServers(tools?.log.external ?? [])
+				value.findings = value.findings.map((f) => {
+					const checked = withUnread(withKnownMentions(f, background.people), unreadRefs(findingTexts(f), seen))
+					return servers.length ? { ...checked, external: servers } : checked
+				})
 				return { ok: true, value }
 			} catch (error) {
 				const e = asProviderError(error)
@@ -1012,7 +1018,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				if (v.finding) {
 					const seen = new Seen().lines(tools?.log.seen ?? [])
 					seen.excerpt(excerpt)
-					const f = withUnread(withSupport({ ...markRepeat(v.finding), memberId: w.id }), unreadRefs(findingTexts(v.finding), seen))
+					const servers = mcpServers(tools?.log.external ?? [])
+					const f = withUnread(
+						withSupport({ ...markRepeat(v.finding), memberId: w.id, ...(servers.length ? { external: servers } : {}) }),
+						unreadRefs(findingTexts(v.finding), seen),
+					)
 					const dup = run.findings.find((e) => isDuplicate(e, f) || (e.memberId !== f.memberId && sameProblem(e, f)))
 					if (dup) {
 						if (w.id && dup.memberId !== w.id) dup.alsoBy = [...new Set([...(dup.alsoBy ?? []), w.id])]

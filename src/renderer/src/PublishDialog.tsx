@@ -224,14 +224,17 @@ export function PublishDialog({
 		await load(true)
 	}
 
-	// What looks private in what is about to go out (issue #159): shown, maskable, and posted only once you say so.
+	// What looks private in what is about to go out (issue #159): shown, maskable, and posted only once you say so. Keys
+	// always need that; home paths and what MCP tools returned only on a public repository (or one of unknown visibility).
+	const strict = plan?.pr.private !== true
 	const outgoing = [
-		...toPublish.map((i) => ({ id: i.commentId, label: i.label, leaks: findLeaks(i.body) })),
-		{ id: '', label: 'Summary', leaks: findLeaks(summary) },
-	].filter((x) => x.leaks.length)
-	const leakKey = outgoing.map((x) => `${x.id}:${x.leaks.map((l) => `${l.start}-${l.end}`).join(',')}`).join('|')
+		...toPublish.map((i) => ({ id: i.commentId, label: i.label, leaks: findLeaks(i.body), mcp: i.external ?? [] })),
+		{ id: '', label: 'Summary', leaks: findLeaks(summary), mcp: [] as Array<string> },
+	].filter((x) => x.leaks.length || x.mcp.length)
+	const gating = outgoing.filter((x) => x.leaks.some((l) => strict || l.kind === 'credential') || (strict && x.mcp.length))
+	const leakKey = gating.map((x) => `${x.id}:${x.leaks.map((l) => `${l.start}-${l.end}`).join(',')}:${x.mcp.join(',')}`).join('|')
 	const [checkedLeaks, setCheckedLeaks] = useState('')
-	const leaksOk = !outgoing.length || checkedLeaks === leakKey
+	const leaksOk = !gating.length || checkedLeaks === leakKey
 	const mask = async (id: string): Promise<void> => {
 		if (!id) return setSummary(maskLeaks(summary))
 		if (!onMaskComment) return
@@ -469,13 +472,25 @@ export function PublishDialog({
 								{outgoing.length > 0 && (
 									<div className="leak-check small">
 										<p className="warn-text">
-											<b>Check before posting.</b> This looks private, and once it's on GitHub it stays there even after the code changes:
+											<b>Check before posting.</b> This may be private, and once it's on GitHub it stays there even after the code changes
+											{plan.pr.private === true
+												? '. The repository is private, so only keys and tokens need your OK'
+												: plan.pr.private === false
+													? '. The repository is public: anyone can read it'
+													: ". Review couldn't tell whether the repository is public, so it's treated as public"}
+											:
 										</p>
 										<ul>
 											{outgoing.map((x) => (
 												<li key={x.id || 'summary'}>
-													<span className="mono">{x.label}</span>: {describeLeaks(x.leaks)}{' '}
-													{(x.id ? !!onMaskComment : true) && (
+													<span className="mono">{x.label}</span>:{' '}
+													{[
+														x.leaks.length ? describeLeaks(x.leaks) : null,
+														x.mcp.length ? `its finding read ${x.mcp.join(', ')} through MCP, so it may quote something from there` : null,
+													]
+														.filter(Boolean)
+														.join('; ')}{' '}
+													{x.leaks.length > 0 && (x.id ? !!onMaskComment : true) && (
 														<button className="link" onClick={() => void mask(x.id)} disabled={!!running}>
 															Mask
 														</button>
@@ -483,10 +498,12 @@ export function PublishDialog({
 												</li>
 											))}
 										</ul>
-										<label className="check">
-											<input type="checkbox" checked={leaksOk} onChange={(e) => setCheckedLeaks(e.target.checked ? leakKey : '')} />
-											<span>I checked these: post them as they are</span>
-										</label>
+										{gating.length > 0 && (
+											<label className="check">
+												<input type="checkbox" checked={leaksOk} onChange={(e) => setCheckedLeaks(e.target.checked ? leakKey : '')} />
+												<span>I checked these: post them as they are</span>
+											</label>
+										)}
 									</div>
 								)}
 								{!!stillReviewing?.length && (

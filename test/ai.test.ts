@@ -3252,3 +3252,19 @@ test('late members: done once every member the run did not wait for has stopped 
 	assert.equal(lateUnread({ runId: 'r0', messages: [], omitted: [], findingIds: [] }, done), 0, 'written for another run: "stale" says so')
 	assert.equal(lateUnread({ runId: 'r1', messages: [], omitted: [] }, done), 0, 'older conclusions did not record what they read')
 })
+
+test('a finding from a request that called MCP tools records which servers, since it may quote what they returned', async () => {
+	const s = sources()
+	const tools = (external: Array<string>) => () => ({
+		definitions: [],
+		call: async () => ({ text: '', error: false }),
+		exhausted: () => false,
+		log: { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external, seen: [] },
+	})
+	const used = await runWith(() => out([finding()]), {}, s, {
+		tools: tools(['linear: search_issues', 'linear: get_issue', 'slack: read_thread']),
+	}).handle.done
+	assert.deepEqual(used.findings[0].external, ['linear', 'slack'])
+	const none = await runWith(() => out([finding()]), {}, s, { tools: tools([]) }).handle.done
+	assert.equal(none.findings[0].external, undefined)
+})

@@ -9,8 +9,12 @@ import type { Finding } from './types.ts'
  * is still the model's word.
  */
 export function screenFinding(
-	f: Pick<Finding, 'title' | 'evidence' | 'anchor' | 'body' | 'disproof' | 'background' | 'problem' | 'consequence' | 'suggestion'>,
+	f: Pick<
+		Finding,
+		'title' | 'evidence' | 'anchor' | 'body' | 'disproof' | 'background' | 'problem' | 'consequence' | 'suggestion' | 'external'
+	>,
 	repo: string | null,
+	isPublic?: boolean | null, // see publicRepo; left out where the repository's visibility doesn't matter
 ): Array<string> {
 	const raw = [f.title, f.body ?? [f.problem, f.consequence, f.suggestion].filter(Boolean).join('\n'), f.disproof, f.background]
 		.filter(Boolean)
@@ -44,8 +48,16 @@ export function screenFinding(
 	const leaks = findLeaks(raw)
 	if (leaks.some((l) => l.kind === 'credential')) out.push('what looks like a key or token')
 	if (leaks.some((l) => l.kind === 'path')) out.push('a path on someone’s computer')
+	// What an MCP tool returned (a ticket, a chat thread) may be private; anyone can read a public repository.
+	if (isPublic !== undefined && isPublic !== false && f.external?.length)
+		out.push(`what it read through MCP (${f.external.join(', ')}) on a ${isPublic ? 'public' : 'possibly public'} repository`)
 	if (!aboutTheCode(f, raw)) out.push('nothing that names the code it cites')
 	return out
+}
+
+/** Whether a review's repository is public: null when the snapshot didn't record it (treated as public). */
+export function publicRepo(pr: { private?: boolean | null } | null | undefined): boolean | null {
+	return pr?.private == null ? null : !pr.private
 }
 
 const KEYWORDS = new Set(

@@ -278,6 +278,11 @@ export function addLookups(total: AiLookups, log: LookupLog): void {
 	}
 }
 
+/** The MCP servers in a request's log of tool calls ("server: tool"), each once. */
+export function mcpServers(external: Array<string>): Array<string> {
+	return [...new Set(external.map((e) => e.split(': ')[0].trim()).filter(Boolean))]
+}
+
 export function emptyLookups(): AiLookups {
 	return { requests: 0, calls: 0, chars: 0, refused: 0, paths: [], searches: [], unavailable: null }
 }
