@@ -22,6 +22,7 @@ interface Props {
 	blocking: BlockingSummary | null // where the AI review's blocking findings stand; null without AI findings
 	onPending(pending: PendingReview | null): void // what GitHub said about your pending review, each time it is read
 	canDraft: boolean // a model for questions is chosen, so the summary can be drafted with AI
+	stillReviewing?: Array<string> // roles of team members the run didn't wait for that are still reviewing
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -54,6 +55,7 @@ export function PublishDialog({
 	blocking,
 	onPending,
 	canDraft,
+	stillReviewing,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -442,6 +444,12 @@ export function PublishDialog({
 										<a href={submitted} target="_blank" rel="noreferrer">
 											View on GitHub ↗
 										</a>
+									</p>
+								)}
+								{!!stillReviewing?.length && (
+									<p className="small warn-text">
+										{stillReviewing.join(' and ')} {stillReviewing.length === 1 ? 'is' : 'are'} still reviewing this change. Anything{' '}
+										{stillReviewing.length === 1 ? 'it finds' : 'they find'} after you submit won't be part of this review.
 									</p>
 								)}
 								{blocking && (blocking.added > 0 || blocking.open > 0) && (

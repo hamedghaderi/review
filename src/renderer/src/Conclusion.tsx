@@ -12,6 +12,7 @@ interface Props {
 	disabled: string | null // why it can't be written now (no model for questions, no finished run…)
 	askDisabled: string | null // why nothing can be asked now (no model for questions…)
 	stale: boolean // a newer run finished after this conclusion was written
+	late: number // findings a member the run didn't wait for raised after this conclusion was written
 	modelPicker: ReactNode
 	paths: ReadonlySet<string> // the changed files' paths, which open from the text
 	onOpenPath(path: string): void
@@ -32,6 +33,7 @@ export function Conclusion({
 	disabled,
 	askDisabled,
 	stale,
+	late,
 	modelPicker,
 	paths,
 	onOpenPath,
@@ -94,11 +96,16 @@ export function Conclusion({
 						</p>
 					) : first ? (
 						<>
-							{stale && (
+							{stale ? (
 								<p className="small conclusion-note">
 									A newer review run has finished since this was written. Write it again to include its findings.
 								</p>
-							)}
+							) : late > 0 ? (
+								<p className="small conclusion-note">
+									{late} finding{late === 1 ? '' : 's'} arrived after this was written, from a reviewer the run didn't wait for. Write it
+									again to include {late === 1 ? 'it' : 'them'}.
+								</p>
+							) : null}
 							{first.error ? (
 								<p className="error-text selectable">{first.text}</p>
 							) : (

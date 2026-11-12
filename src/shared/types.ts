@@ -648,6 +648,7 @@ export interface ChangeConclusion {
 	runId: string // the finished run whose findings it read
 	messages: Array<CodeMessage> // the conclusion first (Markdown), then your questions and the answers
 	omitted: Array<string> // files whose diff was too big to send with the conclusion; the AI could look them up
+	findingIds?: Array<string> // the run's findings when it was written, so later ones (from a member not waited for) show as unread
 }
 
 /** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */

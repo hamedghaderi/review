@@ -1,5 +1,6 @@
 import type {
 	AiRun,
+	ChangeConclusion,
 	CommentDraft,
 	Finding,
 	FindingCategory,
@@ -410,4 +411,17 @@ export function unreadSummary(run: AiRun): { findings: number; byMember: Map<str
 		if (f.verification?.unread?.length) checks++
 	}
 	return { findings, byMember, checks }
+}
+
+/** Whether a run's members it didn't wait for were still reviewing in `before` and are all done in `after`. */
+export function lateMembersDone(before: AiRun | undefined, after: AiRun): boolean {
+	const reviewing = (r: AiRun | undefined) => !!r?.team?.members.some((m) => m.late && m.status === 'running')
+	return after.status !== 'running' && reviewing(before) && !reviewing(after)
+}
+
+/** The run's late findings (see Finding.late) the conclusion didn't read; 0 when it was written for another run. */
+export function lateUnread(conclusion: ChangeConclusion | null, run: AiRun | null): number {
+	if (!conclusion?.findingIds || !run || conclusion.runId !== run.id) return 0
+	const read = new Set(conclusion.findingIds)
+	return run.findings.filter((f) => f.late && !f.mergedInto && !f.heldBack && !read.has(f.id)).length
 }
