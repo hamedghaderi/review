@@ -230,3 +230,28 @@ test('people: who opened the pull request and wrote its issues and comments, low
 	})
 	assert.deepEqual([...b.people].sort(), ['opener', 'pr-author', 'reporter'])
 })
+
+test('bots: named as bots whatever their role, never settle a thread, and are not people a finding can mention', () => {
+	const b = buildBackground({
+		description: null,
+		issues: [],
+		discussion: discussion({
+			threads: [
+				thread('a.ts', false, [
+					comment('Possible null dereference here.', { author: 'coderabbitai', association: 'NONE', bot: true }),
+					// An app installed by the organization can show a member's role; it still doesn't speak for the repository.
+					comment('Resolved in abc123.', { author: 'helper-app', association: 'MEMBER', bot: true }),
+				]),
+			],
+			conversation: [comment('Walkthrough: 3 files changed.', { author: 'greptile-apps', bot: true }), comment('LGTM', { author: 'Lead' })],
+		}),
+		pr: { login: 'author', association: 'MEMBER' },
+	})
+	const text = b.sections[0].text
+	assert.ok(text.includes('@coderabbitai [bot]: Possible null dereference here.'))
+	assert.ok(text.includes('@helper-app [bot]: Resolved in abc123.'))
+	assert.ok(text.includes('Thread T1 on a.ts:4 (open) [no maintainer answer]:'), 'a bot answer settles nothing')
+	assert.equal(b.threads.get('T1')?.settled, false)
+	assert.ok(text.includes('@greptile-apps [bot] (2026-10-01): Walkthrough'))
+	assert.deepEqual([...b.people].sort(), ['author', 'lead'], 'mentioning a bot can make it answer')
+})

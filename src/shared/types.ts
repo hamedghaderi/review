@@ -792,6 +792,7 @@ export interface DiscussionComment {
 	id: string
 	author: string | null // null: deleted account
 	association: string | null // OWNER, MEMBER, CONTRIBUTOR, NONE…
+	bot?: boolean // written by an app or bot account (an AI review bot, Dependabot…); absent: a person, or read before this was
 	body: string
 	bodyTruncated: boolean
 	createdAt: string | null
@@ -802,6 +803,7 @@ export interface DiscussionComment {
 export interface DiscussionReview {
 	id: string
 	author: string | null
+	bot?: boolean // see DiscussionComment
 	association?: string | null // OWNER, MEMBER, CONTRIBUTOR, NONE…; absent on discussions read before it was
 	state: string // passed through as GitHub reports it
 	body: string

@@ -186,12 +186,22 @@ export function ThreadState({ t }: { t: DiscussionThread }) {
 	)
 }
 
+/** Marks an app or bot account (an AI review bot, Dependabot…): what it says is a machine's claim, not a person's. */
+function BotTag({ bot }: { bot?: boolean }) {
+	return bot ? (
+		<span className="gh-pill" title="An app or bot account, such as an AI review bot">
+			bot
+		</span>
+	) : null
+}
+
 /** One GitHub comment inside an inline card: author, time, text. Third-party text: plain text only. */
 export function InlineReply({ c }: { c: DiscussionComment }) {
 	return (
 		<div className="ic-reply">
 			<div className="ic-head small">
 				<b className="ic-who gh">{c.author ?? 'unknown user'}</b>
+				<BotTag bot={c.bot} />
 				{c.pending && <span className="ic-state">Pending · only you</span>}
 				{c.createdAt && (
 					<span className="muted" title={new Date(c.createdAt).toLocaleString()}>
@@ -235,6 +245,7 @@ function CommentView({ c }: { c: DiscussionComment }) {
 		<div className="gh-comment">
 			<div className="gh-comment-head small">
 				<b>{c.author ?? 'unknown user'}</b>
+				<BotTag bot={c.bot} />
 				{c.association && c.association !== 'NONE' && <span className="muted">{c.association.toLowerCase()}</span>}
 				{c.pending && <span className="gh-pill">Pending · only you</span>}
 				{c.createdAt && <span className="muted">{new Date(c.createdAt).toLocaleString()}</span>}
@@ -424,6 +435,7 @@ export function ThreadCard({
 					{open ? '▾' : '▸'}
 				</button>
 				<b className="ic-who gh">{root?.author ?? 'unknown user'}</b>
+				<BotTag bot={root?.bot} />
 				<ThreadState t={t} />
 				{asked && <AsksYou />}
 				{from === 0 && <span className="ic-state accent">New since your review</span>}
@@ -701,6 +713,7 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 							<div key={r.id} className="gh-thread">
 								<div className="gh-comment-head small">
 									<b>{r.author ?? 'unknown user'}</b>
+									<BotTag bot={r.bot} />
 									<span className={`gh-pill ${r.state === 'APPROVED' ? 'resolved' : r.state === 'CHANGES_REQUESTED' ? 'open' : ''}`}>
 										{r.state.toLowerCase().replace(/_/g, ' ')}
 									</span>

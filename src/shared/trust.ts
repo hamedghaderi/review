@@ -10,8 +10,12 @@ export function hasWriteRole(association: string | null | undefined): boolean {
 	return !!association && WRITE_ROLES.has(association.toUpperCase())
 }
 
-/** How a comment's author is named to the AI: the PR author, someone with write access, or an outsider. */
-export function roleOf(author: string | null, association: string | null | undefined, prAuthor: string | null): string {
+/**
+ * How a comment's author is named to the AI: a bot (an app such as an AI review bot, whatever its role), the PR author,
+ * someone with write access, or an outsider. A bot never speaks for the repository.
+ */
+export function roleOf(author: string | null, association: string | null | undefined, prAuthor: string | null, bot = false): string {
+	if (bot) return 'bot'
 	if (author && prAuthor && author.toLowerCase() === prAuthor.toLowerCase()) return 'PR author'
 	return hasWriteRole(association) ? 'write access' : 'no write access'
 }

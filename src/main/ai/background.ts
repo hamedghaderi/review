@@ -125,11 +125,13 @@ function conversationText(
 	const threads = d.threads.filter((t) => t.comments.some(visible))
 	const open = threads.filter((t) => t.resolved !== true)
 	const labels = new Map<string, EarlierThread>()
-	const maintainer = (author: string | null, association: string | null | undefined) => roleOf(author, association, pr) === 'write access'
+	// A bot (an AI review bot, say) never speaks for the repository, so it can't settle a thread, whatever its role.
+	const maintainer = (author: string | null, association: string | null | undefined, bot?: boolean) =>
+		roleOf(author, association, pr, bot) === 'write access'
 	// Who resolved a thread is reported without a role; it counts when that login wrote as a maintainer somewhere here.
 	const maintainers = new Set(
 		[...d.threads.flatMap((t) => t.comments), ...d.conversation, ...d.reviews]
-			.filter((c) => c.author && maintainer(c.author, c.association))
+			.filter((c) => c.author && maintainer(c.author, c.association, c.bot))
 			.map((c) => c.author!.toLowerCase()),
 	)
 	const blocks = [...open, ...threads.filter((t) => t.resolved === true)].map((t, i) => {
@@ -137,7 +139,7 @@ function conversationText(
 		const shown = t.comments.filter(visible)
 		const settled =
 			!automatic &&
-			(shown.slice(1).some((c) => maintainer(c.author, c.association)) ||
+			(shown.slice(1).some((c) => maintainer(c.author, c.association, c.bot)) ||
 				(t.resolved === true && !!t.resolvedBy && maintainers.has(t.resolvedBy.toLowerCase())))
 		labels.set(label, { id: t.id, url: t.url, path: t.path, settled })
 		const where = `${t.path}${t.originalLine ? `:${t.originalLine}` : ''}`
@@ -146,7 +148,7 @@ function conversationText(
 			.join(', ')
 		return [
 			`Thread ${label} on ${where}${state ? ` (${state})` : ''} [${settled ? 'a maintainer answered' : 'no maintainer answer'}]:`,
-			...shown.map((c) => line(c.author, roleOf(c.author, c.association, pr), c.body)),
+			...shown.map((c) => line(c.author, roleOf(c.author, c.association, pr, c.bot), c.body)),
 		].join('\n')
 	})
 	const notes = [
@@ -154,11 +156,11 @@ function conversationText(
 			.filter((r) => r.body.trim())
 			.map((r) => ({
 				at: r.submittedAt,
-				text: line(r.author, roleOf(r.author, r.association, pr), `[review: ${r.state.toLowerCase()}] ${r.body}`, r.submittedAt),
+				text: line(r.author, roleOf(r.author, r.association, pr, r.bot), `[review: ${r.state.toLowerCase()}] ${r.body}`, r.submittedAt),
 			})),
 		...d.conversation
 			.filter(visible)
-			.map((c) => ({ at: c.createdAt, text: line(c.author, roleOf(c.author, c.association, pr), c.body, c.createdAt) })),
+			.map((c) => ({ at: c.createdAt, text: line(c.author, roleOf(c.author, c.association, pr, c.bot), c.body, c.createdAt) })),
 	]
 		.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
 		.map((x) => x.text)
@@ -297,13 +299,16 @@ export function buildBackground(o: {
 	}
 }
 
-/** Who took part: the pull request's author and everyone who wrote an issue or comment sent with it. */
+/**
+ * Who took part: the pull request's author and everyone who wrote an issue or comment sent with it. Bots are left out:
+ * mentioning one can make it answer (an AI review bot replies to its name).
+ */
 function participants(prLogin: string | null, issues: Array<LinkedIssue>, d: Discussion | null): Set<string> {
 	const logins = [
 		prLogin,
 		...issues.flatMap((i) => [i.author ?? null, ...i.comments.map((c) => c.author)]),
 		...(d && d.status !== 'unavailable'
-			? [...d.threads.flatMap((t) => t.comments), ...d.conversation, ...d.reviews].map((c) => c.author)
+			? [...d.threads.flatMap((t) => t.comments), ...d.conversation, ...d.reviews].filter((c) => !c.bot).map((c) => c.author)
 			: []),
 	]
 	return new Set(logins.filter((l): l is string => !!l).map((l) => l.toLowerCase()))

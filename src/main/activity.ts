@@ -74,17 +74,17 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
           path line startLine originalLine originalStartLine diffSide subjectType
           comments(first: ${COMMENTS_PER_THREAD}) {
             totalCount
-            nodes { id body author { login } authorAssociation createdAt url state diffHunk originalCommit { oid } }
+            nodes { id body author { login __typename } authorAssociation createdAt url state diffHunk originalCommit { oid } }
           }
         }
       }
       reviews(last: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login } authorAssociation state body submittedAt url commit { oid } }
+        nodes { id author { login __typename } authorAssociation state body submittedAt url commit { oid } }
       }
       comments(first: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login } authorAssociation body createdAt url }
+        nodes { id author { login __typename } authorAssociation body createdAt url }
       }
     }
   }
@@ -93,7 +93,7 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
 interface GqlComment {
 	id: string
 	body: string
-	author: { login: string } | null
+	author: { login: string; __typename?: string } | null // __typename "Bot" for apps
 	authorAssociation?: string | null
 	createdAt: string | null
 	url: string | null
@@ -130,7 +130,7 @@ export interface GqlActivity {
 				totalCount: number
 				nodes: Array<{
 					id: string
-					author: { login: string } | null
+					author: { login: string; __typename?: string } | null
 					authorAssociation?: string | null
 					state: string
 					body: string
@@ -149,6 +149,7 @@ function gqlComment(c: GqlComment): DiscussionComment {
 		id: c.id,
 		author: c.author?.login ?? null,
 		association: c.authorAssociation ?? null,
+		...(c.author?.__typename === 'Bot' ? { bot: true } : {}),
 		...body(c.body),
 		createdAt: c.createdAt,
 		url: safeUrl(c.url),
@@ -210,6 +211,7 @@ export function fromGraphql(
 				id: r.id,
 				author: r.author?.login ?? null,
 				association: r.authorAssociation ?? null,
+				...(r.author?.__typename === 'Bot' ? { bot: true } : {}),
 				state: r.state,
 				...body(r.body),
 				submittedAt: r.submittedAt,
@@ -252,7 +254,7 @@ export interface RestReviewComment {
 	subject_type?: string
 	diff_hunk: string | null
 	original_commit_id: string | null
-	user: { login: string } | null
+	user: { login: string; type?: string } | null // type "Bot" for apps
 	author_association: string | null
 	body: string
 	created_at: string | null
@@ -261,7 +263,7 @@ export interface RestReviewComment {
 
 export interface RestReview {
 	node_id: string
-	user: { login: string } | null
+	user: { login: string; type?: string } | null // type "Bot" for apps
 	author_association?: string | null
 	state: string
 	body: string | null
@@ -272,7 +274,7 @@ export interface RestReview {
 
 export interface RestIssueComment {
 	node_id: string
-	user: { login: string } | null
+	user: { login: string; type?: string } | null // type "Bot" for apps
 	author_association: string | null
 	body: string | null
 	created_at: string | null
@@ -295,7 +297,7 @@ export function fromRest(
 	}
 	const restComment = (c: {
 		node_id: string
-		user: { login: string } | null
+		user: { login: string; type?: string } | null
 		author_association: string | null
 		body: string | null
 		created_at: string | null
@@ -304,6 +306,7 @@ export function fromRest(
 		id: c.node_id,
 		author: c.user?.login ?? null,
 		association: c.author_association,
+		...(c.user?.type === 'Bot' ? { bot: true } : {}),
 		...body(c.body),
 		createdAt: c.created_at,
 		url: safeUrl(c.html_url),
@@ -340,6 +343,7 @@ export function fromRest(
 			id: r.node_id,
 			author: r.user?.login ?? null,
 			association: r.author_association ?? null,
+			...(r.user?.type === 'Bot' ? { bot: true } : {}),
 			state: r.state,
 			...body(r.body),
 			submittedAt: r.submitted_at,
