@@ -3,12 +3,24 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { AutoReviewer, autoVerdict, type AutoReviewDeps } from '../src/main/autoReview.ts'
+import { AutoReviewer, autoVerdict, othersConcerns, type AutoReviewDeps } from '../src/main/autoReview.ts'
 import { AppFail } from '../src/main/git.ts'
 import type { RepoEvent } from '../src/main/inboxWatch.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import type { HeadChecks } from '../src/shared/ci.ts'
-import type { AiRun, AutoReviewRecord, Comparison, Finding, PublishPlan, Review, ReviewEvent } from '../src/shared/types.ts'
+import type {
+	AiRun,
+	AutoReviewRecord,
+	Comparison,
+	Discussion,
+	DiscussionComment,
+	DiscussionReview,
+	DiscussionThread,
+	Finding,
+	PublishPlan,
+	Review,
+	ReviewEvent,
+} from '../src/shared/types.ts'
 
 const anchor = {
 	repoId: 'r',
@@ -506,4 +518,123 @@ test('verdict: an incremental run says which commits it covered and how many fil
 	} as unknown as AiRun
 	const v = autoVerdict(r, review(), [r], 0, who, green)
 	assert.match(v.body, /commits since abcdef1.*2 files and their findings carry over/s)
+})
+
+const said = (author: string, body: string, o: Partial<DiscussionComment> = {}): DiscussionComment => ({
+	id: `${author}:${body}`,
+	author,
+	association: 'MEMBER',
+	body,
+	bodyTruncated: false,
+	createdAt: '2026-11-01T10:00:00Z',
+	url: null,
+	pending: false,
+	...o,
+})
+const thread = (id: string, comments: Array<DiscussionComment>, o: Partial<DiscussionThread> = {}): DiscussionThread => ({
+	id,
+	path: 'a.ts',
+	subject: 'line',
+	side: 'new',
+	resolved: false,
+	resolvedBy: null,
+	outdated: false,
+	placed: null,
+	unplaced: null,
+	fileKey: 'a.ts',
+	originalLine: 3,
+	diffHunk: null,
+	comments,
+	commentsOmitted: 0,
+	url: `https://github.com/octo/app/pull/7#${id}`,
+	...o,
+})
+const reviewBy = (author: string, state: string, at: string, o: Partial<DiscussionReview> = {}): DiscussionReview => ({
+	id: `${author}:${at}`,
+	author,
+	association: 'MEMBER',
+	state,
+	body: '',
+	bodyTruncated: false,
+	submittedAt: at,
+	url: null,
+	...o,
+})
+const discussionOf = (o: Partial<Discussion>): Discussion => ({
+	status: 'complete',
+	reason: null,
+	fetchedAt: '',
+	prHead: 'h1',
+	threads: [],
+	reviews: [],
+	conversation: [],
+	omitted: { threads: 0, comments: 0, reviews: 0, conversation: 0 },
+	...o,
+})
+
+test("others' concerns: write access only; a standing change request, an unanswered thread, a bot comment not disproved", () => {
+	const d = discussionOf({
+		reviews: [
+			reviewBy('alice', 'CHANGES_REQUESTED', '2026-11-01'),
+			reviewBy('dave', 'CHANGES_REQUESTED', '2026-11-01'),
+			reviewBy('dave', 'APPROVED', '2026-11-02'), // replaced by an approval
+			reviewBy('erin', 'CHANGES_REQUESTED', '2026-11-01', { association: 'NONE' }), // no write access
+			reviewBy('ci-bot', 'CHANGES_REQUESTED', '2026-11-01', { bot: true }),
+			reviewBy('me', 'CHANGES_REQUESTED', '2026-11-01'), // the viewer
+		],
+		threads: [
+			thread('T1', [said('carol', 'Why is this async?')]),
+			thread('T2', [said('carol', 'Missing a test?'), said('bob', 'Added in the next commit.')]), // the author answered
+			thread('T3', [said('frank', 'Typo?', { association: 'NONE' })]), // an outsider
+			thread('T4', [said('carol', 'Old.')], { resolved: true }),
+			thread('T5', [said('carol', 'Older.')], { outdated: true }),
+			thread('T6', [said('coderabbitai', 'Null dereference here.', { bot: true, association: 'NONE' })]),
+			thread('T7', [said('coderabbitai', 'Unused import.', { bot: true, association: 'NONE' })]),
+		],
+	})
+	const check = (threadId: string, verdict: 'holds' | 'wrong') => ({
+		threadId,
+		bot: 'coderabbitai',
+		verdict,
+		reason: 'r',
+		checked: [],
+		model: 'm',
+		memberId: null,
+	})
+	const o = othersConcerns(d, { viewer: 'me', author: 'bob', botChecks: [check('T6', 'holds'), check('T7', 'wrong')] })
+	assert.deepEqual(
+		o.changes.map((c) => c.login),
+		['alice'],
+	)
+	assert.deepEqual(
+		o.threads.map((t) => t.url?.split('#')[1]),
+		['T1'],
+	)
+	assert.deepEqual(o.bots, [{ bot: 'coderabbitai', path: 'a.ts', url: 'https://github.com/octo/app/pull/7#T6' }])
+})
+
+test("an automatic review doesn't approve over others' open concerns, or when they can't be read; it names people without pinging them", async () => {
+	const bodies: Array<string> = []
+	const submit: AutoReviewDeps['submit'] = async (_r, _id, ev, body) => {
+		bodies.push(body)
+		return { id: 'rv', url: 'u', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }
+	}
+	const changes = discussionOf({ reviews: [reviewBy('alice', 'CHANGES_REQUESTED', '2026-11-01T09:00:00Z')] })
+	const held = await setup({ discussion: async () => changes, submit }, [])
+	held.auto.take([event()])
+	await held.auto.idle()
+	assert.equal(held.records[0].outcome, 'commented')
+	assert.match(bodies[0], /Not an approval while others' concerns are open: alice requested changes \(2026-11-01\)\./)
+	assert.doesNotMatch(bodies[0], /@alice/)
+
+	const unreadable = await setup({ discussion: async () => discussionOf({ status: 'unavailable' }), submit }, [])
+	unreadable.auto.take([event()])
+	await unreadable.auto.idle()
+	assert.equal(unreadable.records[0].outcome, 'commented', 'unknown is not approved')
+	assert.match(bodies[1], /The other reviewers' threads could not be read, so this is not an approval\./)
+
+	const clear = await setup({ discussion: async () => discussionOf({}) }, [])
+	clear.auto.take([event()])
+	await clear.auto.idle()
+	assert.equal(clear.records[0].outcome, 'approved')
 })

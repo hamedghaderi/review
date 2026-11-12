@@ -1,7 +1,11 @@
 import { findingRoots, findingState } from '../shared/findings.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
 import { watchKey } from '../shared/inbox.ts'
+import { hasWriteRole } from '../shared/trust.ts'
 import type {
+	BotThreadCheck,
+	Discussion,
+	DiscussionReview,
 	AiRun,
 	AutoReviewRecord,
 	Comparison,
@@ -36,7 +40,9 @@ const paused = (label: string, why: string): string => `Automatic review of ${la
  * caller can wait for checks that haven't finished. `pr` is the pull request as GitHub reports it just before submitting
  * (left out while waiting for CI). An approval only covers the commit reviewed (`head` null: it couldn't be read), and
  * GitHub keeps an approval on new commits unless the repository dismisses stale ones. With auto-merge on or a place in
- * the merge queue, an approval could merge the pull request without a person, so it is never given automatically.
+ * the merge queue, an approval could merge the pull request without a person, so it is never given automatically. With
+ * other reviewers' concerns still open (see othersConcerns; null: the discussion couldn't be read), it isn't either: an
+ * approval in your name next to a colleague's unanswered change request reads as overruling them unread.
  */
 export function autoVerdict(
 	run: AiRun,
@@ -45,7 +51,7 @@ export function autoVerdict(
 	posted: number,
 	who: { reviewer: string; viewer: string | null },
 	ci: HeadChecks | null,
-	pr?: { head: string | null; autoMerge: PrAutoMerge | null },
+	pr?: { head: string | null; autoMerge: PrAutoMerge | null; others?: OthersConcerns | null },
 ): { event: ReviewEvent; body: string; ciStopped: 'failed' | 'pending' | 'unreadable' | null } {
 	const roots = findingRoots(runs)
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
@@ -64,7 +70,13 @@ export function autoVerdict(
 	const ciStopped = !findingsAllow ? null : !ci ? 'unreadable' : ci.failed.length ? 'failed' : ci.pending.length ? 'pending' : null
 	const moved = !!pr && pr.head !== run.headSha
 	const merges = pr?.autoMerge ?? null
-	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped && !moved && !merges ? 'APPROVE' : 'COMMENT'
+	const others = pr && pr.others !== undefined ? pr.others : undefined
+	const held = others === null || !!(others && (others.changes.length || others.threads.length || others.bots.length))
+	const event: ReviewEvent = blocking.length
+		? 'REQUEST_CHANGES'
+		: findingsAllow && !ciStopped && !moved && !merges && !held
+			? 'APPROVE'
+			: 'COMMENT'
 	const lines = [
 		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
@@ -107,10 +119,66 @@ export function autoVerdict(
 			parts.push(
 				`${merges === 'merge-queue' ? 'It is in the merge queue' : 'Auto-merge is on'}, so an approval could merge it without a person checking first. This is not an approval${who.viewer ? `; ${who.viewer} can approve it` : ''}.`,
 			)
+		else if (findingsAllow && held) parts.push(othersLine(others ?? null))
 		if (findingsAllow) parts.unshift('It found no blocking, should-fix or question findings in the changed files.')
 		lines.push(parts.join(' '))
 	}
 	return { event, body: lines.join('\n\n'), ciStopped }
+}
+
+/**
+ * What others raised on the pull request that still stands, by people with write access only (an outsider's comment
+ * can't hold an approval back, or anyone could steer an automatic review): a change request they haven't replaced, a
+ * thread they started that is open, current and unanswered by the pull request's author, and a bot's comment the
+ * double-check could not disprove (see BotThreadCheck). Never the viewer's or the author's own, never a bot's role.
+ */
+export interface OthersConcerns {
+	changes: Array<{ login: string; at: string | null; url: string | null }>
+	threads: Array<{ login: string; path: string; url: string | null }>
+	bots: Array<{ bot: string; path: string; url: string | null }>
+}
+
+export function othersConcerns(
+	d: Discussion,
+	o: { viewer: string | null; author: string | null; botChecks: ReadonlyArray<BotThreadCheck> },
+): OthersConcerns {
+	const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+	const counts = (login: string | null, association: string | null | undefined, bot?: boolean): login is string =>
+		!!login && !bot && hasWriteRole(association) && !same(login, o.viewer) && !same(login, o.author)
+	// A standing change request: someone's newest approve, request-changes or dismissal, as GitHub keeps them.
+	const standing = new Map<string, DiscussionReview>()
+	for (const r of [...d.reviews].sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? '')))
+		if (r.author && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)) standing.set(r.author.toLowerCase(), r)
+	const changes = [...standing.values()]
+		.filter((r) => r.state === 'CHANGES_REQUESTED' && counts(r.author, r.association, r.bot))
+		.map((r) => ({ login: r.author!, at: r.submittedAt, url: r.url }))
+	const live = d.threads.filter((t) => t.resolved !== true && !t.outdated)
+	const threads = live
+		.filter((t) => {
+			const [root, ...replies] = t.comments
+			return !!root && counts(root.author, root.association, root.bot) && !replies.some((c) => same(c.author, o.author))
+		})
+		.map((t) => ({ login: t.comments[0].author!, path: t.path, url: t.url }))
+	const bots = live.flatMap((t) => {
+		const check = o.botChecks.find((c) => c.threadId === t.id)
+		return check && check.verdict === 'holds' && !check.error ? [{ bot: check.bot ?? 'a bot', path: t.path, url: t.url }] : []
+	})
+	return { changes, threads, bots }
+}
+
+/** Why it isn't an approval, naming people without @ so the review doesn't notify them. */
+function othersLine(o: OthersConcerns | null): string {
+	if (!o) return "The other reviewers' threads could not be read, so this is not an approval."
+	const parts = [
+		...o.changes.map((c) => `${c.login} requested changes${c.at ? ` (${c.at.slice(0, 10)})` : ''}`),
+		o.threads.length
+			? `${plural(o.threads.length, 'thread')} from ${[...new Set(o.threads.map((t) => t.login))].join(', ')} ${o.threads.length === 1 ? 'is' : 'are'} unanswered`
+			: null,
+		o.bots.length
+			? `${plural(o.bots.length, 'bot comment')} (${o.bots.map((b) => `${b.bot} on ${b.path}`).join(', ')}) could not be disproved`
+			: null,
+	].filter(Boolean)
+	return `Not an approval while others' concerns are open: ${parts.join('; ')}.`
 }
 
 export interface AutoReviewDeps {
@@ -135,6 +203,8 @@ export interface AutoReviewDeps {
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
 	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview>
+	/** The pull request's threads and reviews, as GitHub reports them now. */
+	discussion?(repoId: string, reviewId: string): Promise<Discussion>
 	/** CI for the snapshot's head commit, as GitHub reports it now. */
 	checks(repoId: string, reviewId: string): Promise<HeadChecks>
 	/** The automatic review added comments to a stored review, so a window showing it can load them. */
@@ -327,11 +397,22 @@ export class AutoReviewer {
 				ci = await readCi()
 				verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci)
 			}
-			// The author may have pushed, or turned on auto-merge, during the run or the wait: read both right before submitting.
-			const pr = await this.d.plan(e.repoId, c.id).then(
-				(p) => ({ head: p.pr.headSha, autoMerge: p.pr.autoMerge }),
-				() => ({ head: null, autoMerge: null }),
-			)
+			// The author may have pushed, or turned on auto-merge, and others may have commented, during the run or the wait:
+			// read it all right before submitting.
+			const [state, discussion] = await Promise.all([
+				this.d.plan(e.repoId, c.id).then(
+					(p) => ({ head: p.pr.headSha, autoMerge: p.pr.autoMerge }),
+					() => ({ head: null, autoMerge: null }),
+				),
+				this.d.discussion ? this.d.discussion(e.repoId, c.id).catch(() => null) : Promise.resolve(undefined),
+			])
+			const others =
+				discussion === undefined
+					? undefined
+					: discussion && discussion.status !== 'unavailable'
+						? othersConcerns(discussion, { viewer: this.d.viewer(), author: stored.pr?.author ?? null, botChecks: final.botChecks ?? [] })
+						: null
+			const pr = { ...state, others }
 			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, pr)
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
