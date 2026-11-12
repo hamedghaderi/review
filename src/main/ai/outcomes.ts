@@ -14,7 +14,9 @@ import type {
 	OutcomeRow,
 	OutcomeSummary,
 	Review,
+	Severity,
 } from '../../shared/types.ts'
+import { FINDING_LEVELS } from '../../shared/types.ts'
 import type { RepoState } from '../store.ts'
 
 export const MIN_DECIDED = 10
@@ -160,6 +162,12 @@ function decided(p: Problem, roots: Map<string, Map<string, string>>, byId: Map<
 	return newest?.status === 'dismissed' ? { dismissed: newest.reason ?? 'unspecified' } : 'undecided'
 }
 
+// Most severe first, like the findings list; levels from before FINDING_LEVELS (high, medium, low) go last.
+const levelOrder = (l: Severity): number => {
+	const i = (FINDING_LEVELS as ReadonlyArray<string>).indexOf(l)
+	return i === -1 ? FINDING_LEVELS.length : i
+}
+
 function emptyCounts(): OutcomeCounts {
 	return {
 		raised: 0,
@@ -199,6 +207,7 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 		setups: new Map<string, OutcomeRow>(),
 		rules: new Map<string, OutcomeRow & { group: OutcomeGroup }>(),
 		groups: new Map<string, OutcomeRow & { group: OutcomeGroup }>(),
+		levels: new Map<string, OutcomeRow & { level: Severity }>(),
 	}
 	const row = <R extends OutcomeRow>(map: Map<string, R>, r: Omit<R, 'counts' | 'cost'>): R => {
 		let out = map.get(r.key)
@@ -288,6 +297,8 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 			const category = lead.finding.category
 			add(row(rows.rules, { key: category ?? 'uncategorised', label: category ?? 'uncategorised', detail: null, group }).counts)
 			add(row(rows.groups, { key: group, label: group, detail: null, group }).counts)
+			const level = lead.finding.severity
+			add(row(rows.levels, { key: level, label: level, detail: null, level }).counts)
 			const a = p.after
 			if (a?.result.commit && (a.result.state === 'reverted' || a.result.state === 'changed'))
 				afterMerge.push({
@@ -312,6 +323,7 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 		setups: sorted(rows.setups),
 		rules: sorted(rows.rules),
 		groups: sorted(rows.groups),
+		levels: [...rows.levels.values()].sort((a, b) => levelOrder(a.level) - levelOrder(b.level)),
 		repos: repoList.sort((a, b) => a.label.localeCompare(b.label)),
 		promptVersions: [...versions.entries()].sort((a, b) => b[1].localeCompare(a[1])).map(([v]) => v),
 		allModels: [...allModels.values()].sort((a, b) => a.label.localeCompare(b.label)),
