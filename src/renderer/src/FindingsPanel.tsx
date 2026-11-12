@@ -41,7 +41,7 @@ import type {
 	StoredRule,
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
-import { screenFinding } from '../../shared/screen.ts'
+import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
@@ -451,7 +451,7 @@ export function FindingsPanel({
 								sameModel={checkedBySameModel(run, f)}
 								discussed={discussedAt(threads, f.anchor).filter((t) => t.id !== f.raisedBefore?.threadId)}
 								earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
-								screened={screenFinding(f, review?.pr?.repo ?? null)}
+								screened={screenFinding(f, review?.pr?.repo ?? null, review?.pr ? publicRepo(review.pr) : undefined)}
 								selected={f.id === selectedFindingId}
 								focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
 								onOpen={() => onOpen(f)}

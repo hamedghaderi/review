@@ -121,7 +121,7 @@ import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
 import { autoAddFindings, autoMark, findingRoots } from '../shared/findings.ts'
-import { screenFinding } from '../shared/screen.ts'
+import { publicRepo, screenFinding } from '../shared/screen.ts'
 import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
@@ -674,7 +674,7 @@ export class ReviewService {
 				runs,
 				findingRoots(runs),
 				levels,
-				(f) => !!f.carried || screenFinding(f, r.pr?.repo ?? null).length > 0,
+				(f) => !!f.carried || screenFinding(f, r.pr?.repo ?? null, publicRepo(r.pr)).length > 0,
 				// The model that raised it: in a team, its member's.
 				(f) => autoMark(run.team?.members.find((m) => m.id === f.memberId)?.model ?? run.model),
 			)
@@ -915,6 +915,7 @@ export class ReviewService {
 				body: d.body.slice(0, 8000),
 				author: d.author,
 				authorAssociation: d.authorAssociation ?? null,
+				private: d.repoPrivate ?? null,
 			},
 		})
 		const notes = [

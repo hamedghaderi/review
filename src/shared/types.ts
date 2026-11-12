@@ -115,6 +115,7 @@ export interface PrSnapshot {
 	body?: string // the author's description, given to the AI reviewer as background (not evidence)
 	author?: string | null // GitHub login of who opened it; absent on snapshots stored before it was recorded
 	authorAssociation?: string | null // their role on the repository (OWNER, MEMBER, COLLABORATOR, NONE…); absent: unknown
+	private?: boolean | null // whether the repository is private; absent or null: unknown, treated as public when it matters
 }
 
 export type SearchSlot = 'list' | 'palette'
@@ -206,6 +207,7 @@ export interface PrDetail extends PrSummary {
 	repo: string
 	body: string
 	authorAssociation?: string | null // the author's role on the repository, as GitHub reports it (OWNER, MEMBER, NONE…)
+	repoPrivate?: boolean | null // whether the base repository is private; null: GitHub didn't say
 	commits: number | null
 	changedFiles: number | null
 	additions: number | null
@@ -721,6 +723,7 @@ export interface PublishItem {
 	label: string // "src/a.ts:12–14"
 	body: string
 	status: 'new' | 'changed' | 'published'
+	external?: Array<string> // MCP servers the finding it came from read (see Finding.external)
 	placement: PublishPlacement
 	url: string | null // on GitHub, when published
 }
@@ -730,7 +733,15 @@ export type PrAutoMerge = 'auto-merge' | 'merge-queue'
 
 export interface PublishPlan {
 	// `autoMerge` null: neither is on, or GitHub could not be read (then `headSha` is null too).
-	pr: { repo: string; number: number; url: string; headSha: string | null; state: PrState; autoMerge: PrAutoMerge | null }
+	pr: {
+		repo: string
+		number: number
+		url: string
+		headSha: string | null
+		state: PrState
+		autoMerge: PrAutoMerge | null
+		private: boolean | null // the repository's visibility as the snapshot recorded it; null: unknown
+	}
 	snapshotHead: string
 	headMoved: boolean // the PR has newer commits than this snapshot
 	// `other`: started outside this app. `comments`: how many it holds, all still visible only to you.
@@ -1112,6 +1123,7 @@ export interface Finding {
 	heldBack?: string | null // over a review limit: kept so decisions and comment links stay valid, but not listed as open
 	memberId?: string | null // the team member that raised it (team runs)
 	late?: boolean // raised by a member the run did not wait for, after the run had finished
+	external?: Array<string> // MCP servers the request that raised it called: it may quote what they returned
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it

@@ -63,7 +63,15 @@ export class Publisher {
 			}
 		}
 		const items: Array<PublishItem> = []
-		for (const c of r.comments) items.push(await this.item(r, c))
+		// A comment from a finding that read MCP tools may quote what they returned (issue #159): say which.
+		const findings = new Map(
+			(this.store.read().repos[repoId]?.aiRuns?.[reviewId] ?? []).flatMap((run) => run.findings.map((f) => [f.id, f] as const)),
+		)
+		for (const c of r.comments) {
+			const item = await this.item(r, c)
+			const external = c.findingId ? findings.get(c.findingId)?.external : undefined
+			items.push(external?.length ? { ...item, external } : item)
+		}
 		return {
 			pr: {
 				repo: pr.repo,
@@ -72,6 +80,7 @@ export class Publisher {
 				headSha: state?.headSha ?? null,
 				state: pr.state,
 				autoMerge: state?.autoMerge ?? null,
+				private: pr.private ?? null,
 			},
 			snapshotHead: r.headSha,
 			headMoved: !!state && state.headSha !== r.headSha,

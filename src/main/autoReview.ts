@@ -1,5 +1,5 @@
 import { findingRoots, findingState } from '../shared/findings.ts'
-import { screenFinding } from '../shared/screen.ts'
+import { publicRepo, screenFinding } from '../shared/screen.ts'
 import { watchKey } from '../shared/inbox.ts'
 import type {
 	AiRun,
@@ -53,7 +53,9 @@ export function autoVerdict(
 	const live = run.findings.filter((f) => !f.mergedInto && state(f) !== 'dismissed')
 	const doubted = (f: Finding): boolean => f.verification?.verdict === 'wrong' && !f.verification.error
 	const repo = review.pr?.repo ?? null
-	const screened = new Set(live.filter((f) => state(f) === 'open' && !f.heldBack && screenFinding(f, repo).length).map((f) => f.id))
+	const screened = new Set(
+		live.filter((f) => state(f) === 'open' && !f.heldBack && screenFinding(f, repo, publicRepo(review.pr)).length).map((f) => f.id),
+	)
 	const blocking = live.filter((f) => f.severity === 'blocking' && !f.heldBack && !doubted(f) && !screened.has(f.id))
 	const concerns = live.filter((f) => CONCERNS.includes(f.severity))
 	const unposted = concerns.filter((f) => state(f) === 'open' && !screened.has(f.id)).length

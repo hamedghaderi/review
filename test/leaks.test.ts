@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { describeLeaks, findLeaks, maskLeaks } from '../src/shared/leaks.ts'
-import { screenFinding } from '../src/shared/screen.ts'
+import { publicRepo, screenFinding } from '../src/shared/screen.ts'
 import type { Finding } from '../src/shared/types.ts'
 
 // Random strings in the shape of real ones; none of them is a real credential.
@@ -61,4 +61,21 @@ test('a finding quoting a key or a home path is held back from automatic reviews
 		'a path on someone’s computer',
 	])
 	assert.deepEqual(screenFinding(f('client.ts no longer checks the token before use.'), 'acme/web'), [])
+})
+
+test('a finding that read MCP tools is held back on a public repository, or one whose visibility is unknown', () => {
+	const f = {
+		title: 'Refunds skip the audit in client.ts',
+		body: 'client.ts no longer writes the audit row that ticket ENG-42 asks for.',
+		evidence: 'refund(order)',
+		anchor: { side: 'new', newPath: 'src/client.ts', oldPath: 'src/client.ts', fileKey: 'src/client.ts' },
+		external: ['linear'],
+	} as unknown as Finding
+	assert.deepEqual(screenFinding(f, 'acme/web', true), ['what it read through MCP (linear) on a public repository'])
+	assert.deepEqual(screenFinding(f, 'acme/web', null), ['what it read through MCP (linear) on a possibly public repository'])
+	assert.deepEqual(screenFinding(f, 'acme/web', false), [], 'a private repository: only its own team reads it')
+	assert.deepEqual(screenFinding(f, 'acme/web'), [], 'where visibility does not matter')
+	assert.equal(publicRepo({ private: true }), false)
+	assert.equal(publicRepo({ private: false }), true)
+	assert.equal(publicRepo({}), null, 'not recorded: unknown')
 })

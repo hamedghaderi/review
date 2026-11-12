@@ -1807,7 +1807,7 @@ interface RestRef {
 	ref: string
 	sha: string
 	user: { login: string } | null
-	repo: { full_name: string } | null
+	repo: { full_name: string; private?: boolean } | null
 }
 
 interface RestPull {
@@ -1855,6 +1855,7 @@ export function fromRestPull(p: RestPull, viewer: string | null): PrDetail {
 		repo: baseRepo,
 		body: p.body ?? '',
 		authorAssociation: p.author_association ?? null,
+		repoPrivate: p.base.repo?.private ?? null,
 		commits: p.commits ?? null,
 		changedFiles: p.changed_files ?? null,
 		additions: p.additions ?? null,
