@@ -4,6 +4,8 @@ import { maskLeaks } from '../../shared/leaks.ts'
 import { ago } from './branches.ts'
 import type {
 	AiRun,
+	AutoReviewRecord,
+	AutoRound,
 	BaseDrift,
 	AiSettingsView,
 	AiStartScope,
@@ -747,6 +749,21 @@ export function App() {
 		if (session && comparison?.pr) loadDiscussion(session.repo.id, comparison.id)
 		else setDiscussion(null)
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// What automatic review did on this pull request (its follow-up rounds, issue #166), read again when the window is back.
+	const [autoRecord, setAutoRecord] = useState<AutoReviewRecord | null>(null)
+	useEffect(() => {
+		const pr = comparison?.pr
+		setAutoRecord(null)
+		if (!pr) return
+		const load = (): void =>
+			void window.review.autoReviewRecord(pr.repo, pr.number).then((r) => {
+				if (r.ok) setAutoRecord(r.value)
+			})
+		load()
+		window.addEventListener('focus', load)
+		return () => window.removeEventListener('focus', load)
+	}, [comparison?.pr?.repo, comparison?.pr?.number]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// What landed on the base branch since the pull request branched off (issue #165), read once per snapshot opened.
 	const [drift, setDrift] = useState<{ reviewId: string; value: BaseDrift } | null>(null)
@@ -2008,6 +2025,7 @@ export function App() {
 							{view === 'review' && comparison && drift?.reviewId === comparison.id && (
 								<DriftBanner drift={drift.value} open={driftOpen} onToggle={() => setDriftOpen((x) => !x)} />
 							)}
+							{view === 'review' && comparison?.pr && autoRecord?.rounds ? <FollowUpBanner record={autoRecord} /> : null}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
 									<span>
@@ -2691,6 +2709,47 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
 					))}
 					{more > 0 && <li className="muted">and {more} more</li>}
 				</ul>
+			)}
+		</div>
+	)
+}
+
+const ROUND_WORD: Partial<Record<AutoReviewRecord['outcome'], string>> = {
+	approved: 'approved',
+	'changes-requested': 'requested changes',
+	commented: 'commented',
+	quiet: 'nothing new, so nothing posted',
+	failed: 'failed',
+	skipped: 'skipped',
+}
+
+/** "commented with 2 comments · $0.04", for one round of automatic review. */
+function roundLine(r: AutoRound): string {
+	const posted = r.posted ? ` with ${r.posted} comment${r.posted === 1 ? '' : 's'}` : ''
+	return `${ROUND_WORD[r.outcome] ?? r.outcome}${posted}${r.usd ? ` · $${r.usd.toFixed(2)}` : ''}`
+}
+
+/**
+ * Automatic review following a pull request's new commits (issue #166): which round it is on, how the last went and
+ * what each cost, or that it stopped after its limit.
+ */
+function FollowUpBanner({ record: r }: { record: AutoReviewRecord }) {
+	const last = r.history?.at(-1)
+	const history = (r.history ?? [])
+		.map((h, i) => `${i === 0 ? 'Review' : `Round ${i}`} (${h.head.slice(0, 7)}): ${roundLine(h)}`)
+		.join('\n')
+	return (
+		<div className="banner" role="status" title={history}>
+			{r.stopped ? (
+				<span>
+					<strong>Automatic review stopped following this pull request</strong> after {r.rounds} round{r.rounds === 1 ? '' : 's'} of new
+					commits. New commits are yours to review; ask for a review again to start over.
+				</span>
+			) : (
+				<span>
+					Automatic review is following new commits here: round {r.rounds} of {r.followLimit ?? 3}
+					{last ? `. Last: ${roundLine(last)}` : ''}.
+				</span>
 			)}
 		</div>
 	)

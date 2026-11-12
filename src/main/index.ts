@@ -35,6 +35,7 @@ import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
 import { AppFail, setAppCloneRoots, setManagedClones } from './git.ts'
+import { watchKey } from '../shared/inbox.ts'
 import { ghCli } from './ghcli.ts'
 import { GitHubService } from './github.ts'
 import { AutoReviewer } from './autoReview.ts'
@@ -399,6 +400,12 @@ function registerIpc(): void {
 
 	handle(IPC.prDiscussion, (repoId: unknown, reviewId: unknown) => service.prDiscussion(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
+	// What automatic review did on a pull request, for the review's banner (its follow-up rounds, issue #166).
+	handle(IPC.autoReviewRecord, async (repo: unknown, number: unknown) => {
+		const n = Number(number)
+		if (!Number.isInteger(n) || n < 1) throw new AppFail('invalid-input', 'Invalid pull request number.')
+		return store.read().autoReviews?.[watchKey({ repo: str(repo, 'repository'), number: n })] ?? null
+	})
 	handle(IPC.prDescription, (repoId: unknown, reviewId: unknown) =>
 		service.prDescription(str(repoId, 'repository'), comparisonId(reviewId)),
 	)

@@ -237,6 +237,11 @@ const OUTCOME: Record<ReviewEvent, AutoReviewRecord['outcome']> = {
 }
 
 const SUBMITTED: ReadonlyArray<AutoReviewRecord['outcome']> = Object.values(OUTCOME)
+// Outcomes that reviewed the commits (and cost a run): what a follow-up round is.
+const REVIEWED: ReadonlyArray<AutoReviewRecord['outcome']> = [...SUBMITTED, 'quiet', 'failed']
+// Follow-ups per request (issue #166): enough for a few rounds of fixes, more while something risky is still open.
+export const FOLLOW_UPS = 3
+export const FOLLOW_UPS_RISKY = 5
 
 /**
  * Reviews new review requests with AI and submits the result on GitHub as you, when automatic review is turned on.
@@ -286,10 +291,13 @@ export class AutoReviewer {
 		}
 	}
 
-	/** Whether new commits on this pull request are for the automatic review: it submitted one, or it followed one up. */
+	/**
+	 * Whether new commits on this pull request are for the automatic review: it submitted one, or it followed one up,
+	 * and it hasn't used up its follow-ups (see followLimit).
+	 */
 	private followsUp(key: string): boolean {
 		const r = this.d.store.read().autoReviews?.[key]
-		return !!r && (SUBMITTED.includes(r.outcome) || r.commits === true)
+		return !!r && !r.stopped && (SUBMITTED.includes(r.outcome) || r.commits === true)
 	}
 
 	private enqueue(e: RepoEvent): void {
@@ -323,23 +331,44 @@ export class AutoReviewer {
 		let reviewId: string | null = null
 		let head = e.pr.head ?? ''
 		let posted = 0
-		const record = async (outcome: AutoReviewRecord['outcome'], message: string, url: string | null = null): Promise<void> => {
+		const record = async (
+			outcome: AutoReviewRecord['outcome'],
+			message: string,
+			url: string | null = null,
+			round: { posted?: number; usd?: number | null; limit?: number; stop?: boolean } = {},
+		): Promise<void> => {
 			const paused = outcome === 'paused'
 			const before = this.d.store.read().autoReviews?.[key]
+			const at = new Date().toISOString()
+			// Rounds count the follow-ups that reviewed something; a new request starts the count and the history over.
+			const counted = commits && REVIEWED.includes(outcome)
+			const rounds = commits ? (before?.rounds ?? 0) + (counted ? 1 : 0) : 0
+			// Any round that reviewed counts toward the limit, a failed one too; the caller words the stop when it knows more.
+			const limit = round.limit ?? (commits ? before?.followLimit : undefined) ?? FOLLOW_UPS
+			const stop = !!round.stop || (counted && rounds >= limit)
+			if (stop && !round.stop) message += ` Stopped following ${label} after ${plural(rounds, 'round')} of new commits.`
+			const history = paused
+				? (before?.history ?? [])
+				: [...(commits ? (before?.history ?? []) : []), { head, at, outcome, posted: round.posted ?? 0, usd: round.usd ?? null }].slice(-10)
 			// A paused review has not reviewed this head, so it keeps none; it remembers the request to take it again.
 			const r: AutoReviewRecord = {
 				head: paused ? '' : head,
-				at: new Date().toISOString(),
+				at,
 				reviewId,
 				outcome,
 				message,
 				url,
 				...(paused ? { waiting: { repoId: e.repoId, pr: e.pr } } : {}),
 				...(commits ? { commits: true } : {}),
+				...(rounds ? { rounds } : {}),
+				...(commits ? { followLimit: limit } : {}),
+				...(stop ? { stopped: true } : {}),
+				...(history.length ? { history } : {}),
 			}
 			await this.d.store.update((s) => void ((s.autoReviews ??= {})[key] = r))
-			// Told once: taking it again while the budget is still reached says nothing new.
-			if (!(paused && before?.outcome === 'paused')) this.d.finished(e, r)
+			// Told once: taking it again while the budget is still reached says nothing new. A quiet round says nothing either,
+			// unless it is the last one.
+			if (!(paused && before?.outcome === 'paused') && !(outcome === 'quiet' && !stop)) this.d.finished(e, r)
 		}
 		try {
 			if (!(await this.turn())) return
@@ -446,6 +475,33 @@ export class AutoReviewer {
 				this.d.reviewChanged(e.repoId, c.id)
 				return record('prepared', `Prepared ${label}: ${preparedLine(prepared)}. Open it to check and submit.`)
 			}
+			// A follow-up round (issue #166): the last one allowed says it stops; one with nothing new posts nothing.
+			const usd = final.cost?.usd ?? null
+			let round: { posted: number; usd: number | null; limit?: number; stop?: boolean } = { posted, usd }
+			let stopLine = ''
+			if (commits) {
+				const before = this.d.store.read().autoReviews?.[key]
+				const n = (before?.rounds ?? 0) + 1
+				const riskOf = (k: string) => (final.coverage?.files ?? []).find((f) => f.fileKey === k)?.risk?.level
+				const open = final.findings.filter(
+					(f) => f.severity === 'blocking' && !f.mergedInto && !f.heldBack && stored.findingDecisions?.[f.id]?.status !== 'dismissed',
+				)
+				const limit = open.some((f) => riskOf(f.anchor.fileKey) === 'high') ? FOLLOW_UPS_RISKY : FOLLOW_UPS
+				const stop = n >= limit
+				round = { ...round, limit, ...(stop ? { stop: true } : {}) }
+				if (stop)
+					stopLine = ` Stopped following ${label} after ${plural(n, 'round')} of new commits${open.length ? `: ${plural(open.length, 'blocking finding')} still open` : ''}. Review new commits yourself, or ask for a review again to start over.`
+				// Nothing new and the same verdict: the earlier review still says it. An approval is given again, so it covers
+				// the new head where approvals on older commits are dismissed.
+				const last = [...(before?.history ?? [])].reverse().find((h) => SUBMITTED.includes(h.outcome))?.outcome
+				if (!posted && last && last === OUTCOME[verdict.event] && verdict.event !== 'APPROVE')
+					return record(
+						'quiet',
+						`Nothing new on ${label} (round ${n}); the earlier review still stands, so nothing was posted.${stopLine}`,
+						null,
+						round,
+					)
+			}
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
 				verdict.event === 'APPROVE'
@@ -453,7 +509,7 @@ export class AutoReviewer {
 					: verdict.event === 'REQUEST_CHANGES'
 						? `Requested changes with ${plural(posted, 'comment')}`
 						: `Commented${posted ? ` with ${plural(posted, 'comment')}` : ''}`
-			await record(OUTCOME[verdict.event], `${said} on ${label}, automatically.`, done.url)
+			await record(OUTCOME[verdict.event], `${said} on ${label}, automatically.${stopLine}`, done.url, round)
 		} catch (err) {
 			const why = err instanceof Error ? err.message : String(err)
 			const sent = posted
