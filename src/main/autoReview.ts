@@ -7,6 +7,7 @@ import type {
 	Comparison,
 	Finding,
 	FindingLevel,
+	PrAutoMerge,
 	PublishOutcome,
 	PublishPlan,
 	PublishedReview,
@@ -32,9 +33,10 @@ const paused = (label: string, why: string): string => `Automatic review of ${la
  * it couldn't be read); otherwise comment. Dismissed findings never count. A finding whose text a person should read
  * first (see screenFinding) is never posted; it rules out an approval but doesn't request changes, since its text may
  * be what someone steered the AI into writing. `ciStopped` says when CI alone stood in the way of an approval, so the
- * caller can wait for checks that haven't finished. `prHead` is the pull request's head as GitHub reports it just before
- * submitting (null: it couldn't be read; left out while waiting for CI): an approval only covers the commit reviewed,
- * and GitHub keeps an approval on new commits unless the repository dismisses stale ones.
+ * caller can wait for checks that haven't finished. `pr` is the pull request as GitHub reports it just before submitting
+ * (left out while waiting for CI). An approval only covers the commit reviewed (`head` null: it couldn't be read), and
+ * GitHub keeps an approval on new commits unless the repository dismisses stale ones. With auto-merge on or a place in
+ * the merge queue, an approval could merge the pull request without a person, so it is never given automatically.
  */
 export function autoVerdict(
 	run: AiRun,
@@ -43,7 +45,7 @@ export function autoVerdict(
 	posted: number,
 	who: { reviewer: string; viewer: string | null },
 	ci: HeadChecks | null,
-	prHead?: string | null,
+	pr?: { head: string | null; autoMerge: PrAutoMerge | null },
 ): { event: ReviewEvent; body: string; ciStopped: 'failed' | 'pending' | 'unreadable' | null } {
 	const roots = findingRoots(runs)
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
@@ -58,8 +60,9 @@ export function autoVerdict(
 	const complete = run.status === 'completed'
 	const findingsAllow = !blocking.length && !concerns.length && !screened.size && !posted && complete
 	const ciStopped = !findingsAllow ? null : !ci ? 'unreadable' : ci.failed.length ? 'failed' : ci.pending.length ? 'pending' : null
-	const moved = prHead !== undefined && prHead !== run.headSha
-	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped && !moved ? 'APPROVE' : 'COMMENT'
+	const moved = !!pr && pr.head !== run.headSha
+	const merges = pr?.autoMerge ?? null
+	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped && !moved && !merges ? 'APPROVE' : 'COMMENT'
 	const lines = [
 		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
@@ -94,9 +97,13 @@ export function autoVerdict(
 		else if (ciStopped === 'unreadable') parts.push('CI for this commit could not be read, so this is not an approval.')
 		else if (findingsAllow && moved)
 			parts.push(
-				prHead
-					? `It reviewed ${run.headSha.slice(0, 7)}, and newer commits (up to ${prHead.slice(0, 7)}) were pushed since, so this is not an approval.`
+				pr!.head
+					? `It reviewed ${run.headSha.slice(0, 7)}, and newer commits (up to ${pr!.head.slice(0, 7)}) were pushed since, so this is not an approval.`
 					: `The pull request's latest commit could not be read before submitting, so this is not an approval of ${run.headSha.slice(0, 7)}.`,
+			)
+		else if (findingsAllow && merges)
+			parts.push(
+				`${merges === 'merge-queue' ? 'It is in the merge queue' : 'Auto-merge is on'}, so an approval could merge it without a person checking first. This is not an approval${who.viewer ? `; ${who.viewer} can approve it` : ''}.`,
 			)
 		if (findingsAllow) parts.unshift('It found no blocking, should-fix or question findings in the changed files.')
 		lines.push(parts.join(' '))
@@ -318,12 +325,12 @@ export class AutoReviewer {
 				ci = await readCi()
 				verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci)
 			}
-			// The author may have pushed during the run or the wait. Read the head last, right before submitting.
-			const prHead = await this.d.plan(e.repoId, c.id).then(
-				(p) => p.pr.headSha,
-				() => null,
+			// The author may have pushed, or turned on auto-merge, during the run or the wait: read both right before submitting.
+			const pr = await this.d.plan(e.repoId, c.id).then(
+				(p) => ({ head: p.pr.headSha, autoMerge: p.pr.autoMerge }),
+				() => ({ head: null, autoMerge: null }),
 			)
-			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, prHead)
+			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, pr)
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
 				verdict.event === 'APPROVE'

@@ -100,7 +100,7 @@ const event = (over: Partial<RepoEvent['pr']> = {}, kind: RepoEvent['kind'] = 'r
 
 const plan = (over: Partial<PublishPlan> = {}): PublishPlan =>
 	({
-		pr: { repo: 'Octo/App', number: 7, url: 'u', headSha: 'h1', state: 'open' },
+		pr: { repo: 'Octo/App', number: 7, url: 'u', headSha: 'h1', state: 'open', autoMerge: null },
 		pending: { kind: 'none' },
 		blocked: null,
 		...over,
@@ -326,8 +326,33 @@ test('new commits pushed during the run, or a head that cannot be read, get a co
 
 	// Findings that request changes still do: they are about the commit they name.
 	const r = run([finding('f1', { severity: 'blocking' })])
-	assert.equal(autoVerdict(r, review(), [r], 1, who, green, 'h2').event, 'REQUEST_CHANGES')
-	assert.equal(autoVerdict(run([]), review(), [run([])], 0, who, green, 'h1').event, 'APPROVE', 'the same head is approved')
+	assert.equal(autoVerdict(r, review(), [r], 1, who, green, { head: 'h2', autoMerge: null }).event, 'REQUEST_CHANGES')
+	const same = autoVerdict(run([]), review(), [run([])], 0, who, green, { head: 'h1', autoMerge: null })
+	assert.equal(same.event, 'APPROVE', 'the same head is approved')
+})
+
+test('auto-merge or a place in the merge queue gets a comment instead of an approval, since approving could merge it', async () => {
+	const bodies: Array<string> = []
+	const submit: AutoReviewDeps['submit'] = async (_r, _id, ev, body) => {
+		bodies.push(body)
+		return { id: 'rv', url: 'u', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }
+	}
+	const merging = await setup({ plan: async () => plan({ pr: { ...plan().pr, autoMerge: 'auto-merge' } }), submit }, [])
+	merging.auto.take([event()])
+	await merging.auto.idle()
+	assert.equal(merging.records[0].outcome, 'commented')
+	assert.match(
+		bodies[0],
+		/Auto-merge is on, so an approval could merge it without a person checking first\. This is not an approval; me can approve it\./,
+	)
+
+	const clean = run([])
+	const queued = autoVerdict(clean, review(), [clean], 0, who, green, { head: 'h1', autoMerge: 'merge-queue' })
+	assert.equal(queued.event, 'COMMENT')
+	assert.match(queued.body, /It is in the merge queue/)
+	// Blocking findings still request changes: that never merges anything.
+	const b = run([finding('f1', { severity: 'blocking' })])
+	assert.equal(autoVerdict(b, review(), [b], 1, who, green, { head: 'h1', autoMerge: 'auto-merge' }).event, 'REQUEST_CHANGES')
 })
 
 test('CI that is still running when the wait ends, or that failed, gets a comment instead of an approval', async () => {
