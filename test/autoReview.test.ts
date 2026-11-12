@@ -663,3 +663,77 @@ test('Prepare mode: the findings stay in the app and the verdict waits in the re
 	assert.equal(p.records[0].outcome, 'prepared')
 	assert.equal(p.records[0].message, 'Prepared Octo/App#7: would request changes, with 1 comment. Open it to check and submit.')
 })
+
+/** A pull request automatic review already followed up `rounds` times, last with `outcome`. */
+async function followedUp(
+	rounds: number,
+	outcome: AutoReviewRecord['outcome'],
+	over: Partial<AutoReviewDeps> = {},
+	findings?: Array<Finding>,
+) {
+	const s = await setup({ commits: () => true, ...over }, findings)
+	const open = s.auto['d'].open
+	s.auto['d'].open = async (...a) => ({ ...(await open(...a)), headSha: 'h2' })
+	const history = Array.from({ length: rounds + 1 }, (_, i) => ({ head: `h0${i}`, at: 't', outcome, posted: 1, usd: 0.01 }))
+	await s.store.update((d) => {
+		d.autoReviews = {
+			'octo/app#7': {
+				head: 'h1',
+				at: 't',
+				reviewId: 'b..h1',
+				outcome,
+				message: '',
+				url: 'u',
+				commits: rounds > 0 || undefined,
+				rounds: rounds || undefined,
+				history,
+			},
+		}
+	})
+	return s
+}
+
+test('a follow-up with nothing new and the same verdict posts nothing and says nothing; an approval is given again', async () => {
+	const red = async () => ciWith({ failed: [{ name: 'unit', at: 't' }] })
+	const quiet = await followedUp(1, 'commented', { checks: red }, [])
+	quiet.auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await quiet.auto.idle()
+	assert.ok(!quiet.calls.some((c) => c.startsWith('submit')), quiet.calls.join(', '))
+	assert.deepEqual(quiet.records, [], 'no notification for a quiet round')
+	const r = quiet.store.read().autoReviews!['octo/app#7']
+	assert.deepEqual([r.outcome, r.rounds, r.history?.length], ['quiet', 2, 3])
+	assert.match(r.message, /^Nothing new on Octo\/App#7 \(round 2\); the earlier review still stands, so nothing was posted\.$/)
+
+	const approved = await followedUp(1, 'approved', {}, [])
+	approved.auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await approved.auto.idle()
+	assert.deepEqual(approved.calls.slice(-1), ['submit APPROVE'], 'kept current where approvals on older commits are dismissed')
+})
+
+test('follow-ups stop after the limit, say so, and leave later commits alone until a new request starts over', async () => {
+	const s = await followedUp(2, 'changes-requested')
+	s.auto.take([event({ head: 'h2', reviewed: true }, 'updated')])
+	await settle()
+	await s.auto.idle()
+	assert.deepEqual(s.calls.slice(-1), ['submit REQUEST_CHANGES'], 'a new blocking finding always posts')
+	const r = s.store.read().autoReviews!['octo/app#7']
+	assert.deepEqual([r.rounds, r.followLimit, r.stopped], [3, 3, true])
+	assert.match(
+		s.records[0].message,
+		/Stopped following Octo\/App#7 after 3 rounds of new commits: 1 blocking finding still open\. Review new commits yourself, or ask for a review again to start over\.$/,
+	)
+
+	const before = s.calls.length
+	s.auto.take([event({ head: 'h3', reviewed: true }, 'updated')])
+	await settle()
+	await s.auto.idle()
+	assert.equal(s.calls.length, before, 'stopped: new commits are not reviewed')
+
+	s.auto['d'].open = async () => ({ id: 'b..h1', headSha: 'h4' }) as Comparison
+	s.auto.take([event({ head: 'h4' }, 're-requested')])
+	await s.auto.idle()
+	const fresh = s.store.read().autoReviews!['octo/app#7']
+	assert.deepEqual([fresh.rounds, fresh.stopped, fresh.history?.length], [undefined, undefined, 1], 'a new request starts over')
+})

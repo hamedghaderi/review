@@ -366,12 +366,26 @@ export interface AutoReviewRecord {
 	head: string // the head commit it was started for
 	at: string
 	reviewId: string | null // the snapshot it reviewed, when one was opened
-	outcome: 'approved' | 'changes-requested' | 'commented' | 'prepared' | 'skipped' | 'failed' | 'paused' // prepared: for you to submit
+	// prepared: for you to submit; quiet: a follow-up that found nothing new and would not change the verdict, posted nothing
+	outcome: 'approved' | 'changes-requested' | 'commented' | 'prepared' | 'quiet' | 'skipped' | 'failed' | 'paused'
 	message: string // what happened, in words, as the notification said
 	url: string | null // the submitted review on GitHub
 	// paused: a budget was reached before it started; it is started again once the budget allows. Not reviewed yet.
 	waiting?: { repoId: string; pr: WatchedPr } | null
 	commits?: boolean // it was for new commits after an automatic review, so later ones are followed up too
+	rounds?: number // follow-up rounds reviewed since the request it started from (issue #166); a new request starts over
+	followLimit?: number // the rounds allowed: 3, or 5 while a blocking finding stays open on a high-risk file
+	stopped?: boolean // the limit was reached: new commits are no longer reviewed automatically
+	history?: Array<AutoRound> // the request's review and its follow-ups, oldest first, at most 10
+}
+
+/** One automatic review of a pull request's head: what it did, how many comments it posted and what it cost. */
+export interface AutoRound {
+	head: string
+	at: string
+	outcome: AutoReviewRecord['outcome']
+	posted: number
+	usd: number | null
 }
 
 export interface GitHubMapping {
@@ -1958,6 +1972,7 @@ export const IPC = {
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
 	baseDrift: 'gh:base-drift',
+	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
 	prDescriptionPreview: 'gh:description-preview',
@@ -2154,6 +2169,7 @@ export interface ReviewApi {
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
 	baseDrift(repoId: string, reviewId: string): Promise<Result<BaseDrift>>
+	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>
 	/** The open PR review's description as GitHub has it now. */
