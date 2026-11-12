@@ -1074,6 +1074,8 @@ export function App() {
 	}, [loaded])
 	useEffect(() => setConclusionOpen(false), [loaded?.review.id])
 	const lastFinished = [...aiRuns].reverse().find((r) => r.status === 'completed' || r.status === 'partial') ?? null
+	// The newest finished run's checks of the bot threads, shown on each thread.
+	const botChecks = useMemo(() => new Map((lastFinished?.botChecks ?? []).map((c) => [c.threadId, c])), [lastFinished])
 	const concludeDisabled =
 		askDisabled ??
 		(activeRun
@@ -2203,6 +2205,7 @@ export function App() {
 														highlight={selectedFinding && selectedFinding.anchor.fileKey === file.key ? selectedFinding.anchor : null}
 														threads={fileThreads}
 														mine={current?.value?.mine ?? null}
+														botChecks={botChecks}
 														published={published}
 														questions={fileQuestions}
 														asking={asking}
@@ -2341,6 +2344,7 @@ export function App() {
 													onRefresh={() => session && comparison && loadDiscussion(session.repo.id, comparison.id)}
 													onOpen={openThread}
 													onConnect={() => openSettings('github')}
+													botChecks={botChecks}
 												/>
 											) : rightTab === 'comments' || rightTab === 'github' ? (
 												<CommentsPanel

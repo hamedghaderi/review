@@ -7,7 +7,9 @@ import {
 	type CarriedRun,
 	type RecheckedFile,
 	type Comparison,
+	type BotThreadCheck,
 	type Discussion,
+	type DiscussionThread,
 	type FileCoverage,
 	type Finding,
 	type FindingLevel,
@@ -43,7 +45,7 @@ import type { RelatedResult } from './related.ts'
 import { classifyRisk } from './risk.ts'
 import { routeFiles, unroutedReason } from './routing.ts'
 import { buildEvidence, supportFor, uncoveredCi, type EvidenceIndex } from './evidence.ts'
-import { buildVerifyRequest, MAX_VERIFIED, parseVerification } from './verify.ts'
+import { buildBotClaimRequest, buildVerifyRequest, MAX_BOT_CHECKS, MAX_VERIFIED, parseVerification } from './verify.ts'
 import { buildNearMissRequest, parseNearMissCheck, pickNearMisses, type NearMissCandidate } from './nearMiss.ts'
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
@@ -227,6 +229,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const pr = input.comparison.pr ? { login: input.comparison.pr.author ?? null, association: input.comparison.pr.authorAssociation } : null
 	const automatic = input.automatic === true
 	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null, pr, automatic })
+	let discussion: Discussion | null = null // the PR's threads, once read, for checking the ones bots started
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups, options.style ?? null)
 		: options.team
@@ -315,6 +318,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				try {
 					const b = await input.loadBackground(controller.signal)
 					for (const n of b.notes) notice(n)
+					discussion = b.discussion
 					background = buildBackground({
 						description,
 						context: input.context ?? null,
@@ -475,6 +479,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			await checkNearMisses()
 			await mergeDuplicates()
 			await verifyBlocking()
+			await checkBotThreads()
 			const pkg = pkgs[0]
 			return finish(pkg)
 		} catch (error) {
@@ -823,6 +828,115 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 		}
 		await Promise.all(Array.from({ length: Math.min(options.concurrency, queue.length) }, next))
+	}
+
+	/**
+	 * Checks the open threads AI review bots started, newest first, against the code: each bot comment is a claim, tried
+	 * like a finding. Part of the double-check setting and counted in its progress. The verdicts go on the run, to show on
+	 * the threads; they never become findings. Runs last, so a member that reviewed is free.
+	 */
+	async function checkBotThreads(): Promise<void> {
+		if (!verify || overBudget || controller.signal.aborted || run.status !== 'running' || !discussion) return
+		const keys = new Set(input.comparison.files.map((f) => f.key))
+		const open = discussion.threads
+			.filter((t) => t.comments[0]?.bot && t.resolved !== true && !t.outdated && t.placed && keys.has(t.placed.fileKey))
+			.sort((a, b) => (b.comments[0].createdAt ?? '').localeCompare(a.comments[0].createdAt ?? ''))
+		const usable = workers.filter((w) => !w.stopped && w.member?.status !== 'failed')
+		if (!open.length || !usable.length) return
+		const picked = open.slice(0, MAX_BOT_CHECKS)
+		if (open.length > picked.length)
+			notice(
+				`${open.length - picked.length} open bot thread${open.length - picked.length === 1 ? ' was' : 's were'} not checked: at most ${MAX_BOT_CHECKS} are checked per run, newest first.`,
+			)
+		// Spread over the members, largest window first: each check reads a file the member may not have had.
+		usable.sort((a, b) => b.provider.limits.contextWindow - a.provider.limits.contextWindow)
+		const queue = picked.map((t, i) => ({ t, w: usable[i % usable.length] }))
+		const checks = (run.botChecks ??= [])
+		const progress = (run.verification ??= { total: 0, done: 0, failed: 0 })
+		progress.total += queue.length
+		emit()
+		const next = async (): Promise<void> => {
+			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
+				const check = await checkBotThread(item.t, item.w)
+				if (controller.signal.aborted || run.status !== 'running') return
+				checks.push(check)
+				if (check.error) progress.failed++
+				else progress.done++
+				emit()
+			}
+		}
+		await Promise.all(Array.from({ length: Math.min(options.concurrency, queue.length) }, next))
+	}
+
+	/** The excerpt of the change under a thread's lines, from whichever member's requests had it, with its file's facts. */
+	function excerptUnder(t: DiscussionThread): { excerpt: ContextExcerpt; facts: Array<ContextFact> } | null {
+		const p = t.placed!
+		for (const w of workers)
+			for (const b of w.pkg?.batches ?? [])
+				for (const e of b.excerpts) {
+					if (e.file.key !== p.fileKey) continue
+					const r = t.side === 'old' ? e.old : e.new
+					const end = p.endLine ?? p.startLine
+					if (p.startLine === null || (r && end !== null && r.start <= end && p.startLine <= r.end))
+						return { excerpt: e, facts: b.facts.filter((x) => x.fileKeys?.includes(p.fileKey)) }
+				}
+		return null
+	}
+
+	async function checkBotThread(t: DiscussionThread, w: Worker): Promise<BotThreadCheck> {
+		const bot = t.comments[0]?.author ?? null
+		const failed = (why: string): BotThreadCheck => ({
+			threadId: t.id,
+			bot,
+			verdict: 'unsure',
+			reason: `Not checked: ${why}`,
+			checked: [],
+			model: w.provider.model,
+			memberId: w.id,
+			error: true,
+		})
+		const under = excerptUnder(t)
+		for (let attempt = 0; ; attempt++) {
+			const draft = buildBotClaimRequest(t, under?.excerpt.text ?? null, under?.facts ?? [], undefined)
+			const l = w.provider.limits
+			// The bot's claim is checked like a blocking finding: the full lookup budget, never more than the window has left.
+			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
+			const tools =
+				lookups && input.tools && room >= 2000
+					? input.tools(
+							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
+							external !== null,
+						)
+					: undefined
+			try {
+				const response = await w.provider.review(
+					buildBotClaimRequest(t, under?.excerpt.text ?? null, under?.facts ?? [], tools),
+					controller.signal,
+				)
+				addUsage(response.usage, w)
+				const v = parseVerification(response.output)
+				const seen = new Seen().lines(tools?.log.seen ?? [])
+				if (under) seen.excerpt(under.excerpt)
+				const unread = unreadRefs([v.reason, ...v.checked], seen)
+				return {
+					threadId: t.id,
+					bot,
+					verdict: v.verdict,
+					reason: v.reason,
+					checked: v.checked,
+					model: w.provider.model,
+					memberId: w.id,
+					...(unread.length ? { unread } : {}),
+				}
+			} catch (error) {
+				const e = asProviderError(error)
+				if (controller.signal.aborted || e.kind === 'cancelled') return failed('cancelled')
+				if (!e.retryAfter(attempt, options.maxAttempts)) return failed(e.message)
+				await sleep(options.backoffMs(attempt, e), controller.signal)
+			} finally {
+				if (tools && run.coverage.lookups && !controller.signal.aborted) addLookups(run.coverage.lookups, tools.log)
+			}
+		}
 	}
 
 	async function checkNearMiss(

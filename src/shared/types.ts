@@ -1156,6 +1156,23 @@ export interface FindingReproducer {
 }
 
 /** The double-check of a finding (blocking ones after the run, any one on demand): a separate request asked to prove it wrong. */
+/**
+ * An open review thread an AI review bot started, checked against the code like a finding (the bot's comment is the
+ * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
+ * finding of the run.
+ */
+export interface BotThreadCheck {
+	threadId: string
+	bot: string | null // the bot's login
+	verdict: 'holds' | 'wrong' | 'unsure'
+	reason: string
+	checked: Array<string>
+	model: string
+	memberId: string | null
+	error?: boolean // the check failed; `reason` says why
+	unread?: Array<string> // file references in its reason to lines it never read
+}
+
 export interface FindingVerification {
 	verdict: 'holds' | 'wrong' | 'unsure'
 	reason: string
@@ -1602,6 +1619,7 @@ export interface AiRun {
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
 	earlier?: EarlierLimitations | null // what an earlier run could not settle, given to this run to settle first
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings
+	botChecks?: Array<BotThreadCheck> // open threads AI review bots started, checked against the code (with double-check on)
 	merged?: { groups: number; findings: number } | null // findings folded under another as the same problem
 	retrying?: Array<ReviewRule> | null // the rules a running retry asks about; the run's other rules are not being checked
 	auto?: boolean // started by automatic review: its findings are added and published by the main process, not the window
