@@ -724,8 +724,12 @@ export interface PublishItem {
 	url: string | null // on GitHub, when published
 }
 
+/** What merges a pull request without a person: GitHub's auto-merge, or a place in the merge queue. */
+export type PrAutoMerge = 'auto-merge' | 'merge-queue'
+
 export interface PublishPlan {
-	pr: { repo: string; number: number; url: string; headSha: string | null; state: PrState }
+	// `autoMerge` null: neither is on, or GitHub could not be read (then `headSha` is null too).
+	pr: { repo: string; number: number; url: string; headSha: string | null; state: PrState; autoMerge: PrAutoMerge | null }
 	snapshotHead: string
 	headMoved: boolean // the PR has newer commits than this snapshot
 	// `other`: started outside this app. `comments`: how many it holds, all still visible only to you.

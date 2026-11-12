@@ -65,7 +65,14 @@ export class Publisher {
 		const items: Array<PublishItem> = []
 		for (const c of r.comments) items.push(await this.item(r, c))
 		return {
-			pr: { repo: pr.repo, number: pr.number, url: state?.url ?? pr.url, headSha: state?.headSha ?? null, state: pr.state },
+			pr: {
+				repo: pr.repo,
+				number: pr.number,
+				url: state?.url ?? pr.url,
+				headSha: state?.headSha ?? null,
+				state: pr.state,
+				autoMerge: state?.autoMerge ?? null,
+			},
 			snapshotHead: r.headSha,
 			headMoved: !!state && state.headSha !== r.headSha,
 			pending: pending

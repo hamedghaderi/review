@@ -8,6 +8,7 @@ import type {
 	GitHubStatus,
 	MentionUser,
 	NotificationPrefs,
+	PrAutoMerge,
 	PrDescription,
 	PrDetail,
 	PrGraph,
@@ -1038,6 +1039,7 @@ export class GitHubService {
 			prId: pr.id,
 			url: pr.url,
 			headSha: pr.headRefOid,
+			autoMerge: pr.isInMergeQueue ? 'merge-queue' : pr.autoMergeRequest ? 'auto-merge' : null,
 			pending: pending && {
 				id: pending.id,
 				url: pending.url,
@@ -1352,6 +1354,7 @@ export interface ReviewState {
 	prId: string
 	url: string
 	headSha: string
+	autoMerge: PrAutoMerge | null // an approval could merge it without a person
 	pending: {
 		id: string
 		url: string
@@ -1368,6 +1371,8 @@ interface GqlReviewState {
 			id: string
 			url: string
 			headRefOid: string
+			isInMergeQueue: boolean
+			autoMergeRequest: { enabledAt: string | null } | null
 			reviews: {
 				nodes: Array<{
 					id: string
@@ -1390,7 +1395,7 @@ const REVIEW_STATE_QUERY = `query($owner: String!, $name: String!, $number: Int!
   rateLimit { remaining limit resetAt }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      id url headRefOid
+      id url headRefOid isInMergeQueue autoMergeRequest { enabledAt }
       reviews(states: [PENDING], first: 10) {
         nodes { id url viewerDidAuthor commit { oid } comments(first: 100) { nodes { id url body path line originalLine } } }
       }
