@@ -2,6 +2,7 @@ import type { PrDetail, Takeover, TakeoverOriginal } from '../shared/types.ts'
 import type { Activity } from './activity.ts'
 import { issueRefs } from './ai/background.ts'
 import type { ContextFact } from './ai/context.ts'
+import type { PrCommit } from './github.ts'
 
 /** At most this many pull requests the description only mentions are compared by commits. */
 const MAX_MENTIONED = 3
@@ -40,7 +41,7 @@ export function takeoverRefs(body: string, repo: string, self: number): { words:
 export interface TakeoverDeps {
 	detail(number: number): Promise<PrDetail>
 	isIssue(number: number): Promise<boolean> // an issue, not a pull request; false when it can't be told
-	activity(number: number): Promise<Activity>
+	activity?(number: number): Promise<Activity> // left out when only who the original is matters, not its threads
 	shared(original: PrDetail): Promise<number | null> // see sharedCommits; null: couldn't be compared
 }
 
@@ -93,6 +94,7 @@ async function readOriginal(
 		baseSha: d.baseSha,
 		headSha: d.headSha,
 	}
+	if (!deps.activity) return { ...base, threads: [], threadsLeft: 0, partial: null }
 	try {
 		const a = await deps.activity(d.number)
 		const threads = a.threads
@@ -160,4 +162,31 @@ export function takeoverFact(
 /** The line in the original's head on GitHub. */
 export function originalLineUrl(o: { repo: string; headSha: string }, path: string, line: number): string {
 	return `https://github.com/${o.repo}/blob/${o.headSha}/${path.split('/').map(encodeURIComponent).join('/')}#L${line}`
+}
+
+/**
+ * Authors of the original's commits whom this pull request doesn't credit (issue #168): GitHub logins only, as GitHub
+ * linked them to the commits, never a guess from a name. Someone is credited when they author a commit here, or a
+ * Co-authored-by trailer here names an email they used on the original's commits, or their GitHub noreply address.
+ * Bots are left out. In the order they first appear in the original.
+ */
+export function uncreditedAuthors(original: ReadonlyArray<PrCommit>, ours: ReadonlyArray<PrCommit>): Array<string> {
+	const lower = (s: string) => s.toLowerCase()
+	const authors = new Set(ours.flatMap((c) => (c.login ? [lower(c.login)] : [])))
+	const trailers = new Set(
+		ours.flatMap((c) => [...c.message.matchAll(/^\s*co-authored-by:[^<\n]*<([^>\n]+)>/gim)].map((m) => lower(m[1].trim()))),
+	)
+	const noreply = (login: string) =>
+		[...trailers].some((e) =>
+			new RegExp(`^(\\d+\\+)?${login.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}@users\\.noreply\\.github\\.com$`).test(e),
+		)
+	const out: Array<string> = []
+	for (const c of original) {
+		if (!c.login || c.bot || out.some((x) => lower(x) === lower(c.login!))) continue
+		const login = lower(c.login)
+		const emails = original.filter((x) => x.login && lower(x.login) === login && x.email).map((x) => lower(x.email!))
+		if (authors.has(login) || emails.some((e) => trailers.has(e)) || noreply(login)) continue
+		out.push(c.login)
+	}
+	return out
 }

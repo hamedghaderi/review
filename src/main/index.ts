@@ -400,6 +400,7 @@ function registerIpc(): void {
 
 	handle(IPC.prDiscussion, (repoId: unknown, reviewId: unknown) => service.prDiscussion(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.takeoverInfo, (repoId: unknown, reviewId: unknown) => service.takeoverInfo(str(repoId, 'repository'), comparisonId(reviewId)))
 	// What automatic review did on a pull request, for the review's banner (its follow-up rounds, issue #166).
 	handle(IPC.autoReviewRecord, async (repo: unknown, number: unknown) => {
 		const n = Number(number)

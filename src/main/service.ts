@@ -11,6 +11,7 @@ import type {
 	OutcomeFilter,
 	OutcomeSummary,
 	Takeover,
+	TakeoverInfo,
 	BranchPr,
 	ChangeConclusion,
 	ChangeExplanation,
@@ -103,7 +104,7 @@ import {
 	shortRef,
 	type ComparisonData,
 } from './git.ts'
-import { findTakeover, takeoverFact } from './takeover.ts'
+import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
@@ -350,6 +351,61 @@ export class ReviewService {
 	}
 
 	/**
+	 * The pull request this review's pull request takes over (see findTakeover), read from GitHub; `threads` also reads
+	 * the review threads still open there. Null when it takes none over.
+	 */
+	private async findTakeoverOf(repoId: string, reviewId: string, threads: boolean, signal?: AbortSignal): Promise<Takeover | null> {
+		const data = this.comparisons.get(reviewId)
+		const pr = data?.comparison.pr
+		const gh = this.github
+		if (!pr || !gh) return null
+		return findTakeover(
+			{ repo: pr.repo, number: pr.number, body: pr.body ?? '' },
+			{
+				detail: (n) => gh.detail(pr.repo, n, signal),
+				isIssue: (n) => gh.isIssue(pr.repo, n, signal),
+				...(threads ? { activity: (n: number) => gh.activity(pr.repo, n, signal) } : {}),
+				// The original's commits are fetched by id, like the pull request's own; nothing is checked out.
+				shared: async (d) => {
+					const repo = this.repo(repoId)
+					await ensureCommits(repo.root, fetchRemote(repo, [d.repo]), [d.baseSha, d.headSha], signal)
+					return sharedCommits(
+						repo.root,
+						{ base: d.baseSha, head: d.headSha },
+						{ base: data.comparison.baseSha, head: data.comparison.headSha },
+					)
+				},
+			},
+		)
+	}
+
+	/**
+	 * For the PR info: the pull request this one takes over, and who wrote the original's commits without credit here
+	 * (issue #168). Shown in the app only, never posted. Reading the commits failing leaves `uncredited` null.
+	 */
+	async takeoverInfo(repoId: string, reviewId: string): Promise<TakeoverInfo | null> {
+		this.repo(repoId)
+		const pr = this.comparisons.get(reviewId)?.comparison.pr
+		const t = await this.findTakeoverOf(repoId, reviewId, false)
+		if (!t || !pr) return null
+		if (t.status === 'unreadable')
+			return {
+				number: t.number,
+				url: `https://github.com/${t.repo}/pull/${t.number}`,
+				title: null,
+				how: t.how,
+				unreadable: t.reason,
+				uncredited: null,
+			}
+		const o = t.original
+		const gh = this.requireGitHub()
+		const uncredited = await Promise.all([gh.prCommits(o.repo, o.number), gh.prCommits(pr.repo, pr.number)])
+			.then(([theirs, ours]) => uncreditedAuthors(theirs, ours))
+			.catch(() => null)
+		return { number: o.number, url: o.url, title: o.title, how: o.how, unreadable: null, uncredited }
+	}
+
+	/**
 	 * What landed on the pull request's base branch since it branched off (see BaseDrift): the branch's head is read from
 	 * GitHub now and fetched, then the clone's history between says what changed. Never fatal: a failure says why.
 	 */
@@ -474,24 +530,7 @@ export class ReviewService {
 		const gh = this.github
 		if (!pr || !gh) return { issues: [], discussion: null, takeover: null, takeoverFact: null, takeoverFiles: [], notes: [] }
 		const notes: Array<string> = []
-		const takeover = findTakeover(
-			{ repo: pr.repo, number: pr.number, body: pr.body ?? '' },
-			{
-				detail: (n) => gh.detail(pr.repo, n, signal),
-				isIssue: (n) => gh.isIssue(pr.repo, n, signal),
-				activity: (n) => gh.activity(pr.repo, n, signal),
-				// The original's commits are fetched by id, like the pull request's own; nothing is checked out.
-				shared: async (d) => {
-					const repo = this.repo(repoId)
-					await ensureCommits(repo.root, fetchRemote(repo, [d.repo]), [d.baseSha, d.headSha], signal)
-					return sharedCommits(
-						repo.root,
-						{ base: d.baseSha, head: d.headSha },
-						{ base: data!.comparison.baseSha, head: data!.comparison.headSha },
-					)
-				},
-			},
-		).catch((e) => {
+		const takeover = this.findTakeoverOf(repoId, reviewId, true, signal).catch((e) => {
 			if (signal.aborted) throw e
 			notes.push(`Whether this pull request takes over another could not be checked: ${errorOf(e).message}`)
 			return null

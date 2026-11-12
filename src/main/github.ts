@@ -1188,6 +1188,28 @@ fragment LinkedIssue on Issue {
 		return out
 	}
 
+	/**
+	 * A pull request's commits as GitHub lists them (at most 250, oldest first): each author's GitHub login when GitHub
+	 * linked one (null otherwise, never guessed from a name), the email in the commit, and the message. Read-only.
+	 */
+	async prCommits(repo: string, number: number, signal?: AbortSignal): Promise<Array<PrCommit>> {
+		checkRepo(repo)
+		const out: Array<PrCommit> = []
+		for (let page = 1; page <= 3; page++) {
+			const batch = await this.get<Array<RestPrCommit>>(`/repos/${repo}/pulls/${number}/commits?per_page=100&page=${page}`, signal)
+			for (const c of batch)
+				out.push({
+					sha: c.sha,
+					login: c.author?.login ?? null,
+					bot: c.author?.type === 'Bot',
+					email: c.commit.author?.email ?? null,
+					message: c.commit.message ?? '',
+				})
+			if (batch.length < 100) break
+		}
+		return out
+	}
+
 	/** Whether `number` in `repo` is an issue rather than a pull request. Read-only; throws when it can't be read. */
 	async isIssue(repo: string, number: number, signal?: AbortSignal): Promise<boolean> {
 		checkRepo(repo)
@@ -1353,6 +1375,21 @@ interface GqlLinkedIssue {
 		totalCount: number
 		nodes: Array<{ author: { login: string } | null; authorAssociation?: string | null; body: string | null; createdAt: string | null }>
 	}
+}
+
+/** One commit of a pull request, for telling whose work it carries. */
+export interface PrCommit {
+	sha: string
+	login: string | null // the author's GitHub account, as GitHub linked it from the commit's email; null: none
+	bot: boolean
+	email: string | null
+	message: string
+}
+
+interface RestPrCommit {
+	sha: string
+	author?: { login: string; type?: string } | null
+	commit: { author?: { email?: string | null } | null; message?: string | null }
 }
 
 interface RestIssueDetail {
