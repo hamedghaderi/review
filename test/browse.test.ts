@@ -1208,3 +1208,18 @@ test('repository tabs: opening adds a tab once, closing keeps the repository kno
 	assert.equal(store.read().lastRepoId, null)
 	assert.equal(await svc.restoreLast(), null)
 })
+
+test('automatic review that was on before Prepare existed keeps submitting as you; otherwise it prepares', async () => {
+	const cases: Array<[object, boolean]> = [
+		[{ version: 1, autoReview: true }, true],
+		[{ version: 1, autoReview: false }, false],
+		[{ version: 1, autoReview: true, autoReviewSubmit: false }, false],
+	]
+	for (const [saved, submit] of cases) {
+		const dir = tmp()
+		writeFileSync(join(dir, 'github-settings.json'), JSON.stringify(saved))
+		const gh = new GitHubService(memoryTokens(), { base: 'http://127.0.0.1:9', dir })
+		await gh.load()
+		assert.equal(gh.status().autoReviewSubmit, submit, JSON.stringify(saved))
+	}
+})

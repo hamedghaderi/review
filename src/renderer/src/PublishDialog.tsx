@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
-import type { AppError, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
+import type { AppError, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 
@@ -25,6 +25,8 @@ interface Props {
 	canDraft: boolean // a model for questions is chosen, so the summary can be drafted with AI
 	stillReviewing?: Array<string> // roles of team members the run didn't wait for that are still reviewing
 	onMaskComment?(commentId: string): Promise<void> // masks what looks private in a comment (see maskLeaks) and saves it
+	prepared?: PreparedReview | null // an automatic review left for you: its verdict and summary start the dialog
+	onSubmitted?(): void
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -59,6 +61,8 @@ export function PublishDialog({
 	canDraft,
 	stillReviewing,
 	onMaskComment,
+	prepared,
+	onSubmitted,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -68,8 +72,9 @@ export function PublishDialog({
 	const [running, setRunning] = useState<string | null>(null)
 	const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null) // while adding comments
 	// Blocking findings you added to the review are changes you are asking for, so that is the suggestion.
-	const [event, setEvent] = useState<ReviewEvent>(blocking?.added ? 'REQUEST_CHANGES' : 'COMMENT')
-	const [summary, setSummaryState] = useState(() => unsentSummaries.get(reviewId) ?? '')
+	// A prepared automatic review starts with its verdict and summary (an approval is re-checked: see headMoved).
+	const [event, setEvent] = useState<ReviewEvent>(prepared?.event ?? (blocking?.added ? 'REQUEST_CHANGES' : 'COMMENT'))
+	const [summary, setSummaryState] = useState(() => unsentSummaries.get(reviewId) ?? prepared?.body ?? '')
 	// Kept while the dialog is closed (e.g. to add a GIPHY key in Settings), until the review is submitted.
 	const setSummary = (text: string): void => {
 		if (text) unsentSummaries.set(reviewId, text)
@@ -219,6 +224,7 @@ export function PublishDialog({
 		setConfirmSubmit(false)
 		if (!r.ok) return setError(r.error)
 		setSubmitted(r.value.url)
+		onSubmitted?.()
 		setSummary('')
 		setDrafted(false)
 		await load(true)

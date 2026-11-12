@@ -92,6 +92,7 @@ export class GitHubService {
 	private notifyMemory: NotificationPrefs = { enabled: true }
 	private autoReviewMemory = false
 	private autoReviewCommitsMemory = false
+	private autoReviewSubmitMemory = false
 	private notifyProblem: string | null = null
 
 	constructor(store: TokenStore, options: { fetch?: Fetch; base?: string; cli?: CliTokenSource; dir?: string } = {}) {
@@ -106,6 +107,7 @@ export class GitHubService {
 			soundOff: false,
 			autoReview: false,
 			autoReviewCommits: false,
+			autoReviewSubmit: false,
 		})
 		this.prefs = options.dir
 			? new JsonStore(join(options.dir, 'github-settings.json'), empty, (raw) => {
@@ -115,6 +117,7 @@ export class GitHubService {
 						soundOff?: unknown
 						autoReview?: unknown
 						autoReviewCommits?: unknown
+						autoReviewSubmit?: unknown
 					} | null
 					return {
 						...empty(),
@@ -123,6 +126,8 @@ export class GitHubService {
 						soundOff: r?.soundOff === true || r?.notifications?.sound === false,
 						autoReview: r?.autoReview === true,
 						autoReviewCommits: r?.autoReviewCommits === true,
+						// Saved before Prepare existed: automatic review that was on kept submitting, as it did.
+						autoReviewSubmit: r?.autoReviewSubmit === undefined ? r?.autoReview === true : r.autoReviewSubmit === true,
 					}
 				})
 			: null
@@ -198,6 +203,20 @@ export class GitHubService {
 		this.emit()
 	}
 
+	/**
+	 * Whether automatic review submits on GitHub as you, or only prepares the review (findings as comments in the app, the
+	 * verdict and summary ready) for you to submit. Prepare unless chosen; on before Prepare existed: submit.
+	 */
+	get autoReviewSubmit(): boolean {
+		return this.prefs ? this.prefs.read().autoReviewSubmit : this.autoReviewSubmitMemory
+	}
+
+	async setAutoReviewSubmit(submit: boolean): Promise<void> {
+		if (this.prefs) await this.prefs.update((d) => void (d.autoReviewSubmit = submit))
+		else this.autoReviewSubmitMemory = submit
+		this.emit()
+	}
+
 	/** With automatic review on, new commits on a pull request it reviewed are reviewed too. Off unless turned on. */
 	get autoReviewCommits(): boolean {
 		return this.prefs ? this.prefs.read().autoReviewCommits : this.autoReviewCommitsMemory
@@ -244,6 +263,7 @@ export class GitHubService {
 			notificationProblem: this.notifyProblem,
 			autoReview: this.autoReview,
 			autoReviewCommits: this.autoReviewCommits,
+			autoReviewSubmit: this.autoReviewSubmit,
 		}
 	}
 
@@ -1604,6 +1624,7 @@ interface GitHubPrefs {
 	soundOff: boolean // "Play a sound" was off, from before sounds became an app setting; read once, by soundsWereOff
 	autoReview: boolean
 	autoReviewCommits: boolean
+	autoReviewSubmit: boolean // false: prepare the review for you to submit
 }
 
 const GRAPH_TTL_MS = 2 * 60_000

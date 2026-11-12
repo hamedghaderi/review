@@ -1,6 +1,7 @@
 import type {
 	AiRun,
 	ChangeConclusion,
+	PreparedReview,
 	CommentDraft,
 	Finding,
 	FindingCategory,
@@ -174,8 +175,9 @@ export function levelLine(f: Pick<Finding, 'severity' | 'category' | 'signature'
  * review, but comments are mostly read on their own (the Files tab, a thread, a notification), where they would
  * otherwise look typed by the person they're posted as. Plain text, so it reads the same on GitHub and in the app.
  */
-export const autoMark = (model: string): string => `🤖 Written by AI (${model}) and posted automatically.`
-export const AUTO_MARK = /^🤖 Written by AI \(.+\) and posted automatically\.$/u
+export const autoMark = (model: string, prepared = false): string =>
+	prepared ? `🤖 Written by AI (${model}).` : `🤖 Written by AI (${model}) and posted automatically.`
+export const AUTO_MARK = /^🤖 Written by AI \(.+\)( and posted automatically)?\.$/u
 
 /**
  * The comment text for an accepted finding: a level label line, `mark` (see autoMark) when an automatic review posts
@@ -424,4 +426,14 @@ export function lateUnread(conclusion: ChangeConclusion | null, run: AiRun | nul
 	if (!conclusion?.findingIds || !run || conclusion.runId !== run.id) return 0
 	const read = new Set(conclusion.findingIds)
 	return run.findings.filter((f) => f.late && !f.mergedInto && !f.heldBack && !read.has(f.id)).length
+}
+
+/** "ready to approve", "would request changes, with 2 comments": a prepared automatic review in a few words. */
+export function preparedLine(p: Pick<PreparedReview, 'event' | 'comments'>): string {
+	const withComments = p.comments ? `, with ${p.comments} comment${p.comments === 1 ? '' : 's'}` : ''
+	return p.event === 'APPROVE'
+		? 'ready to approve'
+		: p.event === 'REQUEST_CHANGES'
+			? `would request changes${withComments}`
+			: `would comment${withComments}`
 }

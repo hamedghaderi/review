@@ -294,8 +294,10 @@ export function Settings(props: {
 					<AutoReview
 						on={github.autoReview}
 						commits={github.autoReviewCommits}
+						submit={github.autoReviewSubmit}
 						onSet={(enabled) => act(window.review.githubSetAutoReview(enabled))}
 						onSetCommits={(enabled) => act(window.review.githubSetAutoReviewCommits(enabled))}
+						onSetSubmit={(submit) => act(window.review.githubSetAutoReviewSubmit(submit))}
 					/>
 				</div>
 			)

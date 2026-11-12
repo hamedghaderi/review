@@ -200,15 +200,20 @@ export function GitHubRepoChoice({ mapping, onChoose }: { mapping: GitHubMapping
 export function AutoReview({
 	on,
 	commits,
+	submit,
 	onSet,
 	onSetCommits,
+	onSetSubmit,
 }: {
 	on: boolean
 	commits: boolean
+	submit: boolean // false: prepare the review for you to submit
 	onSet(enabled: boolean): Promise<void>
 	onSetCommits(enabled: boolean): Promise<void>
+	onSetSubmit(submit: boolean): Promise<void>
 }) {
-	const [confirming, setConfirming] = useState(false)
+	// Only submitting acts as you on GitHub, so only that asks first: turning it on to submit, or switching to submit.
+	const [confirming, setConfirming] = useState<null | 'on' | 'submit'>(null)
 	const confirm = useRef<HTMLButtonElement>(null)
 	useEffect(() => {
 		if (confirming) confirm.current?.focus()
@@ -220,33 +225,60 @@ export function AutoReview({
 					type="checkbox"
 					checked={on}
 					onChange={(e) => {
-						if (e.target.checked) setConfirming(true)
-						else void onSet(false)
+						if (!e.target.checked) void onSet(false)
+						else if (submit) setConfirming('on')
+						else void onSet(true)
 					}}
 				/>
 				<span>
 					<strong>Review requests automatically with AI</strong>
 					<span className="muted block">
 						When someone requests your review in a repository you have opened here, the AI reviews the pull request with the model or team
-						chosen for AI reviews, and submits the review on GitHub as you. Findings at the levels set to be added as comments are posted.
-						It approves when every file was reviewed, it found no blocking, should-fix or question findings and CI passed (it waits up to 20
-						minutes for checks to finish), requests changes for a blocking finding, and otherwise comments. You get a notification each
-						time. Needs a token that can publish reviews.
+						chosen for AI reviews. It decides what to submit: it approves when every file was reviewed, it found no blocking, should-fix or
+						question findings and CI passed (it waits up to 20 minutes for checks to finish), requests changes for a blocking finding, and
+						otherwise comments. You get a notification each time. Needs a token that can read the pull request.
 					</span>
 				</span>
 			</label>
+			<div className="radio-group" role="radiogroup" aria-label="What automatic review does with the review">
+				<label className="check">
+					<input type="radio" name="auto-review-mode" checked={!submit} onChange={() => void onSetSubmit(false)} />
+					<span>
+						Prepare it for me to submit
+						<span className="muted block">
+							Findings at the levels set to be added become comments in the app, and the verdict and summary wait in the review. Nothing is
+							posted until you open it, check it and submit.
+						</span>
+					</span>
+				</label>
+				<label className="check">
+					<input
+						type="radio"
+						name="auto-review-mode"
+						checked={submit}
+						onChange={() => (on ? setConfirming('submit') : void onSetSubmit(true))}
+					/>
+					<span>
+						Submit it on GitHub as me
+						<span className="muted block">
+							The comments and the review are posted under your account right away. Needs a token that can publish reviews.
+						</span>
+					</span>
+				</label>
+			</div>
 			<label className="check">
-				<input type="checkbox" checked={commits} disabled={!on} onChange={(e) => void onSetCommits(e.target.checked)} />
+				<input type="checkbox" checked={commits} disabled={!on || !submit} onChange={(e) => void onSetCommits(e.target.checked)} />
 				<span>
 					Also review new commits
 					<span className="muted block">
 						When a pull request it reviewed gets new commits, it reviews only the files whose changes differ since then, once nothing has
 						been pushed for 5 minutes. It submits a new review with the new findings; the earlier ones are not posted again. When every file
-						changed, or the model, team or finding levels did, it skips the commits and tells you.
+						changed, or the model, team or finding levels did, it skips the commits and tells you. Only when it submits as you: a prepared
+						review waits for you, and you review new commits yourself.
 					</span>
 				</span>
 			</label>
-			{confirming && !on && (
+			{confirming && (confirming === 'submit' || !on) && (
 				<div className="auto-review-warn" role="alertdialog" aria-labelledby="auto-review-warn-title">
 					<p id="auto-review-warn-title">
 						<strong>Before you turn this on: the app will act as you on GitHub.</strong>
@@ -260,10 +292,14 @@ export function AutoReview({
 						<li>The AI can be wrong, and people will read the review as yours.</li>
 					</ul>
 					<div className="form-actions">
-						<button ref={confirm} className="btn small danger" onClick={() => void onSet(true).then(() => setConfirming(false))}>
-							Turn on automatic review
+						<button
+							ref={confirm}
+							className="btn small danger"
+							onClick={() => void (confirming === 'on' ? onSet(true) : onSetSubmit(true)).then(() => setConfirming(null))}
+						>
+							{confirming === 'on' ? 'Turn on automatic review' : 'Submit as me'}
 						</button>
-						<button className="btn small" onClick={() => setConfirming(false)}>
+						<button className="btn small" onClick={() => setConfirming(null)}>
 							Cancel
 						</button>
 					</div>

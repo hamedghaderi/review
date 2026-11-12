@@ -659,7 +659,13 @@ export class ReviewService {
 	 * are kept through the window's saves until it has seen them, so a review open on screen can't drop them. Carried
 	 * findings are left out: the earlier review already posted them, or left them for a person on purpose.
 	 */
-	async addAutoFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>> {
+	async addAutoFindings(
+		repoId: string,
+		reviewId: string,
+		runId: string,
+		levels: ReadonlyArray<FindingLevel>,
+		prepared = false,
+	): Promise<Array<string>> {
 		let ids: Array<string> = []
 		await this.store.update((d) => {
 			const repo = d.repos[repoId]
@@ -676,7 +682,7 @@ export class ReviewService {
 				levels,
 				(f) => !!f.carried || screenFinding(f, r.pr?.repo ?? null, publicRepo(r.pr)).length > 0,
 				// The model that raised it: in a team, its member's.
-				(f) => autoMark(run.team?.members.find((m) => m.id === f.memberId)?.model ?? run.model),
+				(f) => autoMark(run.team?.members.find((m) => m.id === f.memberId)?.model ?? run.model, prepared),
 			)
 			if (!res.added) return
 			r.comments = res.review.comments

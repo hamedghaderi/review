@@ -38,6 +38,7 @@ const api: ReviewApi = {
 	githubTestNotification: () => ipcRenderer.invoke(IPC.githubTestNotification),
 	githubSetAutoReview: (enabled) => ipcRenderer.invoke(IPC.githubSetAutoReview, enabled),
 	githubSetAutoReviewCommits: (enabled) => ipcRenderer.invoke(IPC.githubSetAutoReviewCommits, enabled),
+	githubSetAutoReviewSubmit: (submit) => ipcRenderer.invoke(IPC.githubSetAutoReviewSubmit, submit),
 	markPrSeen: (repoId, n) => ipcRenderer.invoke(IPC.markPrSeen, repoId, n),
 	openKnownRepo: (repoId) => ipcRenderer.invoke(IPC.openKnownRepo, repoId),
 	closeRepoTab: (repoId) => ipcRenderer.invoke(IPC.closeRepoTab, repoId),

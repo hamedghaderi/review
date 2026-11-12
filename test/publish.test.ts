@@ -369,7 +369,7 @@ test('publishing creates one pending review on the snapshot commit, adds threads
 })
 
 test('edits update the pending comment; comments deleted on GitHub become publishable again; submit makes it public', async () => {
-	const { mock, id, pub, setComments } = await setup({}, [comment('c1', 'first')])
+	const { mock, store, id, pub, setComments } = await setup({}, [comment('c1', 'first')])
 	try {
 		await pub.publish('/r', id, 'c1', 'skip')
 		await setComments([comment('c1', 'first, edited')])
@@ -383,8 +383,11 @@ test('edits update the pending comment; comments deleted on GitHub become publis
 		await pub.publish('/r', id, 'c1', 'skip')
 		assert.equal(mock.reviews[0].comments.length, 1)
 
+		const prepared = { event: 'REQUEST_CHANGES' as const, body: 'b', head: 'h', at: 't', runId: 'r', reviewer: 'm', comments: 1 }
+		await store.update((d) => void (d.repos['/r'].reviews[id].prepared = prepared))
 		const s = await pub.submit('/r', id, 'REQUEST_CHANGES', 'Please fix')
 		assert.equal(s.state, 'submitted')
+		assert.equal(store.read().repos['/r'].reviews[id].prepared, null, 'a prepared review is done once you submit')
 		assert.equal(mock.reviews[0].state, 'CHANGES_REQUESTED')
 		assert.equal(mock.reviews[0].body, 'Please fix')
 		const plan = await pub.plan('/r', id)

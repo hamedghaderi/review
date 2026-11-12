@@ -17,6 +17,7 @@ import type {
 	DiscussionReview,
 	DiscussionThread,
 	Finding,
+	PreparedReview,
 	PublishPlan,
 	Review,
 	ReviewEvent,
@@ -637,4 +638,28 @@ test("an automatic review doesn't approve over others' open concerns, or when th
 	clear.auto.take([event()])
 	await clear.auto.idle()
 	assert.equal(clear.records[0].outcome, 'approved')
+})
+
+test('Prepare mode: the findings stay in the app and the verdict waits in the review; nothing goes to GitHub, even with a pending review', async () => {
+	const prepared: Array<PreparedReview> = []
+	const added: Array<boolean | undefined> = []
+	const p = await setup({
+		submits: () => false,
+		prepare: async (_r, _id, x) => void prepared.push(x),
+		plan: async () => plan({ pending: { kind: 'other', url: 'p', commit: 'h1', usable: true, comments: 2 } }),
+	})
+	const addFindings = p.auto['d'].addFindings
+	p.auto['d'].addFindings = (...a) => {
+		added.push(a[4])
+		return addFindings(...a)
+	}
+	p.auto.take([event()])
+	await p.auto.idle()
+	assert.ok(!p.calls.some((c) => c.startsWith('publish') || c.startsWith('submit')), p.calls.join(', '))
+	assert.deepEqual(added, [true], 'its comments say "written by AI", not "posted automatically"')
+	assert.equal(prepared.length, 1)
+	assert.deepEqual([prepared[0].event, prepared[0].comments, prepared[0].head], ['REQUEST_CHANGES', 1, 'h1'])
+	assert.match(prepared[0].body, /^🤖 This review was written by AI \(model-x, in the Review app\) and submitted by me\./)
+	assert.equal(p.records[0].outcome, 'prepared')
+	assert.equal(p.records[0].message, 'Prepared Octo/App#7: would request changes, with 1 comment. Open it to check and submit.')
 })
