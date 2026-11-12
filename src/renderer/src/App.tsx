@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread } from '../../shared/findings.ts'
+import { maskLeaks } from '../../shared/leaks.ts'
 import type {
 	AiRun,
 	AiSettingsView,
@@ -2444,6 +2445,15 @@ export function App() {
 						beforePublish={persist}
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 						stillReviewing={stillReviewing}
+						onMaskComment={async (id) => {
+							const r = reviewRef.current
+							if (!r) return
+							const at = new Date().toISOString()
+							const next = { ...r, comments: r.comments.map((c) => (c.id === id ? { ...c, body: maskLeaks(c.body), updatedAt: at } : c)) }
+							reviewRef.current = next
+							change(() => next)
+							await persist()
+						}}
 						onPending={setPendingReview}
 						canDraft={!!aiSettings?.questionModel}
 					/>

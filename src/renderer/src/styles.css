@@ -5895,3 +5895,14 @@ textarea.style-edit {
 	border-radius: 6px;
 	background: var(--hover);
 }
+/* What looks private in what is about to be posted (issue #159). */
+.leak-check {
+	margin: 8px 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--warn-bg);
+}
+.leak-check ul {
+	margin: 4px 0 6px;
+	padding-left: 18px;
+}
