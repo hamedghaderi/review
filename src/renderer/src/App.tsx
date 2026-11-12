@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { blockingSummary, findingRoots, lateMembersDone, lateUnread } from '../../shared/findings.ts'
+import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
+import { ago } from './branches.ts'
 import type {
 	AiRun,
 	AiSettingsView,
@@ -333,15 +334,20 @@ export function App() {
 				if (!current || current.id !== stored.id || current.repoId !== stored.repoId) return
 				const have = new Set(current.comments.map((c) => c.id))
 				const add = stored.comments.filter((c) => !have.has(c.id))
-				if (!add.length) return
+				// A review the automatic review prepared for you (Prepare mode) comes with it, for the banner.
+				const prepared = stored.prepared ?? null
+				const fresh = !!prepared && prepared.at !== current.prepared?.at
+				if (!add.length && !fresh) return
 				const findingDecisions = { ...current.findingDecisions }
 				for (const c of add) if (c.findingId) delete findingDecisions[c.findingId]
-				const next = { ...current, comments: [...current.comments, ...add], findingDecisions }
+				const next = { ...current, comments: [...current.comments, ...add], findingDecisions, prepared }
 				reviewRef.current = next
 				change(() => next)
-				setNotice(
-					`The automatic review added ${add.length} comment${add.length === 1 ? '' : 's'} and is posting ${add.length === 1 ? 'it' : 'them'} to GitHub.`,
-				)
+				if (fresh) setNotice(`The automatic review prepared this review: ${preparedLine(prepared!)}. Nothing is on GitHub yet.`)
+				else if (!prepared)
+					setNotice(
+						`The automatic review added ${add.length} comment${add.length === 1 ? '' : 's'} and is posting ${add.length === 1 ? 'it' : 'them'} to GitHub.`,
+					)
 			}),
 		[change],
 	)
@@ -1973,6 +1979,18 @@ export function App() {
 										</button>
 									</div>
 								)}
+							{view === 'review' && comparison?.pr && !publishOpen && review?.prepared && (
+								<div className="banner" role="status">
+									<span>
+										<strong>Automatic review prepared</strong> by {review.prepared.reviewer} {ago(review.prepared.at)}:{' '}
+										{preparedLine(review.prepared)}. Nothing is on GitHub until you submit it.
+									</span>
+									<span className="spacer" />
+									<button className="btn small primary" onClick={() => setPublishOpen(true)}>
+										Check and submit…
+									</button>
+								</div>
+							)}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
 									<span>
@@ -2445,6 +2463,14 @@ export function App() {
 						beforePublish={persist}
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 						stillReviewing={stillReviewing}
+						prepared={review?.prepared ?? null}
+						onSubmitted={() => {
+							const r = reviewRef.current
+							if (!r?.prepared) return
+							const next = { ...r, prepared: null }
+							reviewRef.current = next
+							change(() => next)
+						}}
 						onMaskComment={async (id) => {
 							const r = reviewRef.current
 							if (!r) return

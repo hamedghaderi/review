@@ -232,6 +232,10 @@ function registerIpc(): void {
 		await github.setAutoReviewCommits(bool(enabled, 'automatic review of new commits'))
 		return github.status()
 	})
+	handle(IPC.githubSetAutoReviewSubmit, async (submit: unknown) => {
+		await github.setAutoReviewSubmit(bool(submit, 'automatic review submit setting'))
+		return github.status()
+	})
 	handle(IPC.githubTestNotification, async () => {
 		await present(
 			new Notification({
@@ -789,7 +793,7 @@ app.whenReady().then(async () => {
 	autoReviewer = new AutoReviewer({
 		store,
 		enabled: () => github.autoReview,
-		commits: () => github.autoReviewCommits,
+		commits: () => github.autoReviewCommits && github.autoReviewSubmit, // a prepared review is not followed up
 		viewer: () => github.status().login,
 		reviewer: () => {
 			const v = connections.view()
@@ -821,7 +825,13 @@ app.whenReady().then(async () => {
 			const over = budgetCheck([...new Set(ids)].map((id) => ({ id, label: labels.find((c) => c.id === id)?.label ?? id }))).over
 			return over.length ? over.join(' ') : null
 		},
-		addFindings: (repoId, reviewId, runId, levels) => service.addAutoFindings(repoId, reviewId, runId, levels),
+		addFindings: (repoId, reviewId, runId, levels, prepared) => service.addAutoFindings(repoId, reviewId, runId, levels, prepared),
+		submits: () => github.autoReviewSubmit,
+		prepare: (repoId, reviewId, prepared) =>
+			store.update((d) => {
+				const r = d.repos[repoId]?.reviews[reviewId]
+				if (r) r.prepared = prepared
+			}),
 		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
 		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
 		submit: (repoId, reviewId, event, body) => service.submitReview(repoId, reviewId, event, body),

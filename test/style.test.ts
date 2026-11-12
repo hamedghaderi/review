@@ -435,3 +435,9 @@ test('fromFinding recognises the label line at every level and topic findingComm
 			assert.equal(withoutAdded(body), finding('f').body, `label not stripped: ${body.split('\n')[0]}`)
 		}
 })
+
+test('a prepared automatic review’s AI line is one of the parts the app adds too', () => {
+	const f = finding('f1')
+	assert.equal(withoutAdded(findingCommentBody(f, autoMark('m', true))), f.body)
+	assert.equal(autoMark('m', true), '🤖 Written by AI (m).')
+})

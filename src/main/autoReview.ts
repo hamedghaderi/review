@@ -1,9 +1,10 @@
-import { findingRoots, findingState } from '../shared/findings.ts'
+import { findingRoots, findingState, preparedLine } from '../shared/findings.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
 import { watchKey } from '../shared/inbox.ts'
 import { hasWriteRole } from '../shared/trust.ts'
 import type {
 	BotThreadCheck,
+	PreparedReview,
 	Discussion,
 	DiscussionReview,
 	AiRun,
@@ -49,7 +50,7 @@ export function autoVerdict(
 	review: Review,
 	runs: Array<AiRun>,
 	posted: number,
-	who: { reviewer: string; viewer: string | null },
+	who: { reviewer: string; viewer: string | null; prepared?: boolean }, // prepared: you submit it (Prepare mode)
 	ci: HeadChecks | null,
 	pr?: { head: string | null; autoMerge: PrAutoMerge | null; others?: OthersConcerns | null },
 ): { event: ReviewEvent; body: string; ciStopped: 'failed' | 'pending' | 'unreadable' | null } {
@@ -78,7 +79,9 @@ export function autoVerdict(
 			? 'APPROVE'
 			: 'COMMENT'
 	const lines = [
-		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
+		who.prepared
+			? `🤖 This review was written by AI (${who.reviewer}, in the Review app)${who.viewer ? ` and submitted by ${who.viewer}` : ''}.`
+			: `🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
 	if (run.carriedFrom) {
 		const carried = run.coverage.files.filter((f) => f.state === 'carried').length
@@ -199,7 +202,17 @@ export interface AutoReviewDeps {
 	startIncremental(reviewId: string, choice: ReviewerChoice, label: string): Promise<AiRun | { refused: string }>
 	/** The daily or monthly budget the next run would go over, in words; null when none is reached or none is set. */
 	budgetReached?(): string | null
-	addFindings(repoId: string, reviewId: string, runId: string, levels: ReadonlyArray<FindingLevel>): Promise<Array<string>>
+	addFindings(
+		repoId: string,
+		reviewId: string,
+		runId: string,
+		levels: ReadonlyArray<FindingLevel>,
+		prepared?: boolean, // for you to post: their AI line doesn't say "posted automatically"
+	): Promise<Array<string>>
+	/** Submits as you (false: prepares the review for you to submit; see PreparedReview). Absent: submits. */
+	submits?(): boolean
+	/** Keeps a prepared review on the stored review, for the banner that offers it. */
+	prepare?(repoId: string, reviewId: string, prepared: PreparedReview): Promise<void>
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
 	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview>
@@ -342,7 +355,9 @@ export class AutoReviewer {
 			const plan = await this.d.plan(e.repoId, c.id)
 			if (plan.blocked) return record('skipped', `Not reviewed automatically: ${plan.blocked.message}`)
 			if (plan.pr.state !== 'open') return record('skipped', `Not reviewed automatically: ${label} is ${plan.pr.state}.`)
-			if (plan.pending.kind !== 'none')
+			// Preparing writes nothing on GitHub, so a pending review of yours is no reason to stop.
+			const submitting = this.d.submits?.() ?? true
+			if (plan.pending.kind !== 'none' && submitting)
 				return record(
 					'skipped',
 					`Not reviewed automatically: you have a pending review on ${label} on GitHub, and submitting would send your comments too.`,
@@ -376,15 +391,18 @@ export class AutoReviewer {
 			}
 			if (!this.d.enabled())
 				return record('skipped', `Automatic review was turned off before posting. The findings for ${label} are in the app.`)
-			const ids = await this.d.addFindings(e.repoId, c.id, final.id, this.d.levels())
+			const ids = await this.d.addFindings(e.repoId, c.id, final.id, this.d.levels(), !submitting)
 			if (ids.length) this.d.reviewChanged(e.repoId, c.id)
-			for (const id of ids) {
-				const out = await this.d.publish(e.repoId, c.id, id, 'file')
-				if (out.status === 'published' || out.status === 'updated') posted++
-			}
+			// Prepared, the comments wait in the app for you; they count as posted for the verdict, since you'll post them.
+			if (!submitting) posted = ids.length
+			else
+				for (const id of ids) {
+					const out = await this.d.publish(e.repoId, c.id, id, 'file')
+					if (out.status === 'published' || out.status === 'updated') posted++
+				}
 			const stored = this.d.store.read().repos[e.repoId]?.reviews[c.id]
 			if (!stored) throw new AppFail('not-found', 'The review was removed while it was being posted.')
-			const who = { reviewer, viewer: this.d.viewer() }
+			const who = { reviewer, viewer: this.d.viewer(), prepared: !submitting }
 			const readCi = () => this.d.checks(e.repoId, c.id).catch(() => null)
 			let ci = await readCi()
 			let verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci)
@@ -414,6 +432,20 @@ export class AutoReviewer {
 						: null
 			const pr = { ...state, others }
 			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, pr)
+			if (!submitting) {
+				const prepared: PreparedReview = {
+					event: verdict.event,
+					body: verdict.body,
+					head: final.headSha,
+					at: new Date().toISOString(),
+					runId: final.id,
+					reviewer,
+					comments: ids.length,
+				}
+				await this.d.prepare?.(e.repoId, c.id, prepared)
+				this.d.reviewChanged(e.repoId, c.id)
+				return record('prepared', `Prepared ${label}: ${preparedLine(prepared)}. Open it to check and submit.`)
+			}
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
 				verdict.event === 'APPROVE'

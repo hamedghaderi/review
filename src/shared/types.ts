@@ -244,6 +244,7 @@ export interface GitHubStatus {
 	notificationProblem: string | null // the last notification could not be shown (e.g. blocked in System Settings)
 	autoReview: boolean // review new requests with AI and submit the result on GitHub as you; off by default
 	autoReviewCommits: boolean // with autoReview: also review new commits on pull requests it reviewed, incrementally; off by default
+	autoReviewSubmit: boolean // with autoReview: submit as you; false (the default) prepares the review for you to submit
 }
 
 /** Desktop notifications for review requests in repositories opened in the app. Their sounds are in SoundPrefs. */
@@ -347,11 +348,25 @@ export interface LinkOpen {
 }
 
 /** What an automatic review of one pull request head did. */
+/**
+ * What an automatic review in Prepare mode left for you (issue #163): its findings are comments in the app, and this is
+ * the verdict and summary it would have submitted. Nothing is on GitHub until you open the publish dialog and submit.
+ */
+export interface PreparedReview {
+	event: ReviewEvent
+	body: string
+	head: string // the commit it reviewed: a newer head makes this out of date, and never an approval of it
+	at: string
+	runId: string
+	reviewer: string // the model or team, as named in the summary
+	comments: number // findings it added as comments, waiting to be published
+}
+
 export interface AutoReviewRecord {
 	head: string // the head commit it was started for
 	at: string
 	reviewId: string | null // the snapshot it reviewed, when one was opened
-	outcome: 'approved' | 'changes-requested' | 'commented' | 'skipped' | 'failed' | 'paused'
+	outcome: 'approved' | 'changes-requested' | 'commented' | 'prepared' | 'skipped' | 'failed' | 'paused' // prepared: for you to submit
 	message: string // what happened, in words, as the notification said
 	url: string | null // the submitted review on GitHub
 	// paused: a budget was reached before it started; it is started again once the budget allows. Not reviewed yet.
@@ -614,6 +629,7 @@ export interface Review {
 	questions?: Array<CodeQuestion> // questions you asked the AI about selected code; written by the main process only
 	explanation?: ChangeExplanation // what the AI says this change is for; written by the main process only
 	conclusion?: ChangeConclusion // the AI's conclusion on the whole change, and your conversation about it; main process only
+	prepared?: PreparedReview | null // an automatic review left for you to submit (Prepare mode); cleared when you submit
 	commitChecks?: Record<string, CommitCheck> // by commit SHA: the AI's reading of its diff against its message; main process only
 }
 
@@ -1891,6 +1907,7 @@ export const IPC = {
 	githubTestNotification: 'gh:notification-test',
 	githubSetAutoReview: 'gh:auto-review',
 	githubSetAutoReviewCommits: 'gh:auto-review-commits',
+	githubSetAutoReviewSubmit: 'gh:auto-review-submit',
 	markPrSeen: 'gh:seen',
 	openKnownRepo: 'repo:open-known',
 	closeRepoTab: 'repo:close-tab',
@@ -2055,6 +2072,7 @@ export interface ReviewApi {
 	githubSetAutoReview(enabled: boolean): Promise<Result<GitHubStatus>>
 	/** With automatic review on: also reviews new commits on pull requests it reviewed, only the files whose diff changed. */
 	githubSetAutoReviewCommits(enabled: boolean): Promise<Result<GitHubStatus>>
+	githubSetAutoReviewSubmit(submit: boolean): Promise<Result<GitHubStatus>>
 	/** Every pull request waiting for your review, in every repository, as the background check last saw them. */
 	homeInbox(): Promise<Result<HomeInbox>>
 	/** Checks GitHub now, then returns the start page's pull requests. */

@@ -195,6 +195,11 @@ export class Publisher {
 				if (i >= 0) p.reviews[i] = result
 				else p.reviews.push(result)
 			})
+			// A review an automatic review prepared is done once you submit one.
+			await this.store.update((d) => {
+				const stored = d.repos[repoId]?.reviews[reviewId]
+				if (stored?.prepared) stored.prepared = null
+			})
 			return result
 		})
 	}
