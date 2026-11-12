@@ -54,7 +54,7 @@ export interface LookupLog {
 /** Lines of one file a request had in front of it. */
 export interface SeenLines {
 	path: string
-	version: 'head' | 'base'
+	version: 'head' | 'base' | 'tip'
 	start: number
 	end: number
 }
@@ -90,7 +90,12 @@ export const TOOL_DEFINITIONS: Array<ToolDefinition> = [
 			type: 'object',
 			properties: {
 				path: { type: 'string', description: 'Path from the repository root, e.g. "src/app/cart.ts".' },
-				version: { type: 'string', enum: ['head', 'base'], description: '"head" for the version with the change, "base" for before it.' },
+				version: {
+					type: 'string',
+					enum: ['head', 'base', 'tip'],
+					description:
+						'"head" for the version with the change, "base" for before it, "tip" for the base branch as it is now (only when the facts include "Since this pull request branched").',
+				},
 				start_line: { type: ['integer', 'null'], description: 'First line to read (1-based), or null for the start of the file.' },
 				end_line: {
 					type: ['integer', 'null'],
@@ -131,7 +136,7 @@ export const TOOL_DEFINITIONS: Array<ToolDefinition> = [
 ]
 
 export function createReviewTools(
-	repo: { root: string; baseSha: string; headSha: string },
+	repo: { root: string; baseSha: string; headSha: string; tipSha?: string | null }, // tipSha: the base branch now (issue #165)
 	budget: LookupBudget,
 	external: ExternalTools | null = null,
 ): ReviewTools {
@@ -151,9 +156,14 @@ export function createReviewTools(
 			case 'read_file': {
 				const path = cleanPath(a.path)
 				if (path === null || !path) return refuse('"path" must be a file path from the repository root, without ".." parts.')
-				const sha = a.version === 'base' ? repo.baseSha : repo.headSha
+				const version = a.version === 'base' ? 'base' : a.version === 'tip' ? 'tip' : 'head'
+				if (version === 'tip' && !repo.tipSha)
+					return refuse(
+						'There is no base branch tip for this review: the base branch has not moved, or it could not be read. Read "head" or "base".',
+					)
+				const sha = version === 'base' ? repo.baseSha : version === 'tip' ? repo.tipSha! : repo.headSha
 				const r = await readAt(repo.root, sha, path, FILE_LIMIT, signal)
-				if (!r) return refuse(`No file "${path}" at the ${a.version === 'base' ? 'base' : 'head'} commit.`)
+				if (!r) return refuse(`No file "${path}" at the ${version === 'tip' ? 'base branch tip' : `${version} commit`}.`)
 				if (r.truncated) return refuse(`"${path}" is larger than ${FILE_LIMIT / 1024 / 1024} MB and cannot be read.`)
 				if (r.buf.subarray(0, 8000).includes(0)) return refuse(`"${path}" is a binary file.`)
 				seen(log.paths, path)
@@ -169,7 +179,7 @@ export function createReviewTools(
 					.join('\n')
 				const more = to < lines.length ? `\n(lines ${to + 1}-${lines.length} not shown)` : ''
 				return {
-					text: `${path} (${a.version === 'base' ? 'base' : 'head'}), lines ${from}-${to} of ${lines.length}:\n${body}${more}`,
+					text: `${path} (${version}), lines ${from}-${to} of ${lines.length}:\n${body}${more}`,
 					error: false,
 				}
 			}
@@ -243,18 +253,18 @@ export function createReviewTools(
  */
 export function shownLines(name: 'read_file' | 'search_code', text: string): Array<SeenLines> {
 	const out: Array<SeenLines> = []
-	const add = (path: string, version: 'head' | 'base', n: number): void => {
+	const add = (path: string, version: SeenLines['version'], n: number): void => {
 		const last = out[out.length - 1]
 		if (last && last.path === path && last.version === version && last.end === n - 1) last.end = n
 		else out.push({ path, version, start: n, end: n })
 	}
 	const lines = text.split('\n')
 	if (name === 'read_file') {
-		const head = /^(.+) \((head|base)\), lines \d+-\d+ of \d+:$/.exec(lines[0] ?? '')
+		const head = /^(.+) \((head|base|tip)\), lines \d+-\d+ of \d+:$/.exec(lines[0] ?? '')
 		if (!head) return out
 		for (const l of lines.slice(1)) {
 			const m = /^\s*(\d+) \| /.exec(l)
-			if (m) add(head[1], head[2] as 'head' | 'base', Number(m[1]))
+			if (m) add(head[1], head[2] as SeenLines['version'], Number(m[1]))
 		}
 	} else
 		for (const l of lines.slice(1)) {

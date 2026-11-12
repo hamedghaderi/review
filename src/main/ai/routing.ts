@@ -22,6 +22,7 @@ const APPLIES: Record<string, (kind: FileKind, risk: FileRisk | undefined) => bo
 	'misleading-name': (k) => k === 'code',
 	'test-value': (k) => k === 'test',
 	residue: (k) => k === 'code' || k === 'test' || k === 'docs',
+	drift: (k) => k === 'code' || k === 'other',
 }
 
 export function routeFiles(

@@ -130,7 +130,7 @@ import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
-import type { FileSource } from './ai/context.ts'
+import type { ContextFact, FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
 const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
@@ -195,6 +195,7 @@ export function defaultBrowserState(): BrowserState {
 export class ReviewService {
 	private repos = new Map<string, RepoInfo>()
 	private comparisons = new Map<string, ComparisonData>()
+	private driftTips = new Map<string, string>() // by review: the base branch head a run read, for the lookups' "tip" version
 	// Commits opened on their own (parent..sha), most recent last; only the diff reads use them.
 	private commitViews = new Map<string, ComparisonData>()
 	private commitMappers = new Map<string, Mapper>() // "commit view id>head sha" → its line map, which caches what it reads
@@ -304,6 +305,42 @@ export class ReviewService {
 				conversation: [],
 				omitted: empty,
 			}
+		}
+	}
+
+	/**
+	 * For a pull request run: the base-branch commits since it branched off that touch its files, then those touching
+	 * `used` (files of code the change uses, from the related code), as the "Since this pull request branched" fact rule
+	 * "drift" works from. Remembers the base branch's head for the lookups' "tip" version. Null when nothing moved.
+	 */
+	private async driftFact(repoId: string, reviewId: string, used: Array<string>, signal?: AbortSignal): Promise<ContextFact | null> {
+		const d = await this.baseDrift(repoId, reviewId, signal)
+		if (d.error || !d.tip || !d.behind) return null
+		this.driftTips.set(reviewId, d.tip)
+		const data = this.comparisons.get(reviewId)!
+		const changed = new Set(data.comparison.files.flatMap((f) => [f.oldPath, f.newPath]).filter((p): p is string => !!p))
+		const others = [...new Set(used)].filter((p) => !changed.has(p)).slice(0, MAX_DRIFT_PATHS)
+		const u = others.length ? await commitsSince(this.repo(repoId).root, d.mergeBase, d.tip, others, MAX_DRIFT_COMMITS, signal) : null
+		const usedCommits = (u?.commits ?? []).filter((c) => !d.commits.some((x) => x.sha === c.sha))
+		if (!d.commits.length && !usedCommits.length) return null
+		const line = (c: BaseDrift['commits'][number]): string =>
+			`- ${c.sha.slice(0, 7)} ${c.subject} (${c.author}, ${c.at.slice(0, 10)}): ${c.files.join(', ')}`
+		const text = [
+			...(d.commits.length
+				? [
+						`Commits that touch files this pull request changes (${d.touching}${d.touching > d.commits.length ? `, newest ${d.commits.length} listed` : ''}):`,
+						...d.commits.map(line),
+					]
+				: []),
+			...(usedCommits.length
+				? ['Commits that touch code this pull request uses, in files it does not change:', ...usedCommits.map(line)]
+				: []),
+		].join('\n')
+		return {
+			kind: 'drift',
+			title: `Since this pull request branched (${d.baseRef} moved from ${d.mergeBase.slice(0, 7)} to ${d.tip.slice(0, 7)}: ${d.behind} commit${d.behind === 1 ? '' : 's'})`,
+			text,
+			fileKeys: null,
 		}
 	}
 
@@ -1751,7 +1788,17 @@ export class ReviewService {
 				earlierLimitations: () => this.earlierLimitations(repoId, data.comparison),
 				findingBaseline: (pinned) => this.findingBaseline(reviewId, pinned),
 				tools: (budget, external) =>
-					createReviewTools({ root: data.root, baseSha: data.comparison.baseSha, headSha: data.comparison.headSha }, budget, external),
+					createReviewTools(
+						{
+							root: data.root,
+							baseSha: data.comparison.baseSha,
+							headSha: data.comparison.headSha,
+							tipSha: this.driftTips.get(reviewId) ?? null,
+						},
+						budget,
+						external,
+					),
+				loadDrift: data.comparison.pr ? (used, signal) => this.driftFact(repoId, reviewId, used, signal) : undefined,
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
 				commits: () => commitMessages(data.root, data.comparison.baseSha, data.comparison.headSha),

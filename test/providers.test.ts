@@ -809,7 +809,7 @@ test('batches are sized to the model context window; too-small windows fail expl
 	const { store, access, comparison } = await reviewSetup(400)
 	const sizes: Array<number> = []
 	const small = createFakeProvider({
-		limits: { contextWindow: 12_288, maxOutputTokens: 2048 },
+		limits: { contextWindow: 14_336, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
 		script: (req) => {
 			sizes.push(req.input.length)
 			return EMPTY_OUTPUT
@@ -849,7 +849,7 @@ test('a response whose reported input tokens show silent truncation is not count
 test('a model that becomes unavailable stops the run without retrying and without switching providers', async () => {
 	const { store, access, comparison } = await reviewSetup(400)
 	const gone = createFakeProvider({
-		limits: { contextWindow: 12_288, maxOutputTokens: 2048 },
+		limits: { contextWindow: 14_336, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
 		script: () => new ProviderError('model-unavailable', 'Model "x" is not available'),
 	})
 	const run = await runWithProvider(store, access, comparison, gone)
@@ -977,7 +977,7 @@ test('review teams: saved with settings, validated, selected, run through the co
 		/Security: model "nope" is not offered by Gateway B/,
 	)
 	await connections.saveTeam({ ...team, members: [team.members[0]] })
-	assert.ok(connections.view().teams[0].issues.some((i) => /No member checks 15 rules/.test(i.message)))
+	assert.ok(connections.view().teams[0].issues.some((i) => /No member checks 16 rules/.test(i.message)))
 	await connections.saveTeam(team)
 	assert.deepEqual(
 		connections.view().teams[0].issues.map((i) => i.message),

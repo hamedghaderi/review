@@ -333,8 +333,9 @@ const SEVERITY_RANK: Record<string, number> = {
 	low: 6,
 }
 
-type Budget = 'defect' | 'performance' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue'
+type Budget = 'defect' | 'performance' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue' | 'drift'
 export function budgetOf(c: FindingCategory | undefined): Budget {
+	if (c === 'drift') return 'drift'
 	if (c === 'file-split' || c === 'over-engineered') return 'structure'
 	if (c === 'test-value') return 'tests'
 	if (c === 'misleading-name') return 'naming'
@@ -351,6 +352,7 @@ export const BUDGETS = {
 	naming: { perFile: 2, total: 3 },
 	tests: { perFile: 2, total: 4 },
 	residue: { perFile: 2, total: 4 },
+	drift: { perFile: 2, total: 3 },
 } as const
 
 /**
@@ -390,6 +392,7 @@ const BUDGET_LABEL: Record<Budget, string> = {
 	naming: 'misleading-name findings',
 	tests: 'test findings',
 	residue: 'residue findings',
+	drift: 'base-branch findings',
 }
 
 function squash(s: string): string {

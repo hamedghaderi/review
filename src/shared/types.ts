@@ -919,6 +919,7 @@ export type FindingCategory =
 	| 'misleading-name'
 	| 'test-value'
 	| 'residue'
+	| 'drift' // since reviewer-2026-11-12.1: the change no longer fits what landed on the base branch (issue #165)
 
 /** How a changed test fails to protect what it claims to (rule "test-value"). */
 export const TEST_PATTERNS = [
@@ -952,6 +953,7 @@ export const REVIEW_RULES = [
 	'residue-4',
 	'residue-5',
 	'residue-6',
+	'drift',
 ] as const
 export type ReviewRule = (typeof REVIEW_RULES)[number]
 /** Rules as stored in runs: runs before reviewer-2026-10-02.2 also checked residue signature 7 (now part of test-value). */
@@ -1008,7 +1010,7 @@ export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules
 	{
 		id: 'callers',
 		role: 'Callers & structure',
-		rules: ['breaking-change', 'file-split', 'over-engineered', 'convention', 'misleading-name'],
+		rules: ['breaking-change', 'file-split', 'over-engineered', 'convention', 'misleading-name', 'drift'],
 	},
 	{
 		id: 'tests',
@@ -1380,7 +1382,7 @@ export interface AiRunCoverage {
 	inputChars: number
 	// Code outside the change sent as read-only reference (definitions and uses); absent on older runs.
 	related?: { symbols: number; sent: number; chars: number; omitted: number; notes: Array<string> } | null
-	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier'; text: string }> // what the app computed or read for the reviewer; absent on older runs
+	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift'; text: string }> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
 }
 

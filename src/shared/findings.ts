@@ -129,6 +129,7 @@ export const CATEGORY_LABEL: Record<FindingCategory, string> = {
 	'misleading-name': 'Misleading name',
 	'test-value': 'Test value',
 	residue: 'Residue',
+	drift: 'Base branch moved',
 }
 
 export const TEST_PATTERN_LABEL: Record<TestPattern, string> = {

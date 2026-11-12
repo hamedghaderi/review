@@ -120,6 +120,11 @@ export interface RunInput {
 	loadSources: () => Promise<Array<FileSource>>
 	/** Definitions and uses of the change's names elsewhere in the repository (skipped when the limits turn it off). */
 	loadRelated?: (sources: Array<FileSource>, signal: AbortSignal) => Promise<RelatedResult>
+	/**
+	 * Pull request runs: the commits on the base branch since it branched off that touch its files, or `used` (files of
+	 * code the change uses, from the related code), as a fact for rule "drift" (issue #165). Null when there are none.
+	 */
+	loadDrift?: (used: Array<string>, signal: AbortSignal) => Promise<ContextFact | null>
 	/** Linked issues and the conversation so far, for pull requests; the description is always included without it. */
 	loadBackground?: (signal: AbortSignal) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }>
 	/** Notes and text files you gave the reviewer for this review. */
@@ -416,7 +421,17 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 			const told = decisionFacts(input.decisions ?? [], sources)
 			const leads = earlierFacts(input.earlier ?? null, sources)
+			let drift: ContextFact | null = null
+			if (input.loadDrift && workers.some((w) => w.rules.includes('drift'))) {
+				try {
+					drift = await input.loadDrift([...new Set((related?.snippets ?? []).map((x) => x.path))], controller.signal)
+				} catch (e) {
+					if (controller.signal.aborted) return finish(null)
+					notice(`What landed on the base branch could not be read: ${e instanceof Error ? e.message : String(e)}`)
+				}
+			}
 			const allFacts = [
+				...(drift ? [drift] : []),
 				...(facts?.facts ?? []),
 				...importFacts(related?.importers ?? []),
 				...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
@@ -467,6 +482,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				},
 				facts: [
 					...(background.summary ? [{ kind: 'background' as const, text: background.summary }] : []),
+					...(drift ? [{ kind: 'drift' as const, text: drift.title }] : []),
 					...(facts?.summary ?? []),
 					...(related?.importers.length ? [{ kind: 'structure' as const, text: importSummary(related.importers) }] : []),
 					...(told.length
