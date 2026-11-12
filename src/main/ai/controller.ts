@@ -1200,6 +1200,7 @@ export class AiController {
 			context: access.reviewContext?.() ?? null,
 			issues: extra?.issues ?? [],
 			discussion: extra?.discussion ?? null,
+			takeover: extra?.takeover ?? null,
 		})
 		const commits = (await access.commits?.().catch(() => [])) ?? []
 		const patches = new Map<string, PatchResult | null>()

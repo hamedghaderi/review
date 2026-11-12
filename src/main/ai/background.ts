@@ -1,4 +1,12 @@
-import { CONTEXT_LIMITS, type Discussion, type DiscussionComment, type DiscussionThread, type ReviewContext } from '../../shared/types.ts'
+import {
+	CONTEXT_LIMITS,
+	type Discussion,
+	type DiscussionComment,
+	type DiscussionThread,
+	type ReviewContext,
+	type Takeover,
+	type TakeoverOriginal,
+} from '../../shared/types.ts'
 import { hasWriteRole, roleOf } from '../../shared/trust.ts'
 import type { LinkedIssue } from '../github.ts'
 
@@ -9,7 +17,7 @@ import type { LinkedIssue } from '../github.ts'
  * conversation, and anything cut says so.
  */
 export interface Background {
-	sections: Array<{ tag: 'DESCRIPTION' | 'NOTES' | 'ISSUES' | 'CONVERSATION'; title: string; text: string }>
+	sections: Array<{ tag: 'DESCRIPTION' | 'NOTES' | 'ISSUES' | 'TAKEOVER' | 'CONVERSATION'; title: string; text: string }>
 	chars: number
 	summary: string | null // for the run's coverage, e.g. "description; issue #12 (closes, 4 comments); conversation: 3 threads (1 open), 2 comments"
 	threads: Map<string, EarlierThread> // the conversation's review threads by the label they were sent under ("T1"), for findings that cite one
@@ -33,6 +41,8 @@ export const DESCRIPTION_MAX = 8000
 export const ISSUES_MAX = 10_000
 export const ISSUE_BODY_MAX = 3000
 export const CONVERSATION_MAX = 8000
+export const TAKEOVER_MAX = 8000 // the pull request this one takes over: its description and open threads together
+export const TAKEOVER_BODY_MAX = 3000
 export const NOTES_MAX = CONTEXT_LIMITS.sent // your notes and files together
 const COMMENT_MAX = 600
 
@@ -104,6 +114,54 @@ function issueText(issue: LinkedIssue, budget: number, pr: string | null): strin
 }
 
 const visible = (c: DiscussionComment): boolean => !c.pending && !!c.body.trim()
+
+/**
+ * The pull request this one takes over: what it was for, then the review threads still open there (labelled O1, O2…),
+ * each with its replies, until the budget runs out. Roles are on that pull request: [PR author] is whoever opened it.
+ * When it couldn't be read, says so, so the reviewer doesn't take the change for a fresh start.
+ */
+function takeoverText(t: Takeover): { text: string; summary: string } {
+	if (t.status === 'unreadable')
+		return {
+			text: `The description says this pull request takes over #${t.number}, but #${t.number} could not be read (${t.reason}). Its description and review threads are unknown: do not assume it had none.`,
+			summary: `takes over #${t.number} (could not be read)`,
+		}
+	const o = t.original
+	const head = `${o.repo}#${o.number} [${o.state}${o.how === 'words' ? ', named as taken over in the description' : `, mentioned in the description${o.shared ? `; ${o.shared} of this pull request's commits are its commits` : ''}`}]: ${o.title} (opened by ${o.author ? `@${o.author}` : 'deleted user'} [${roleOf(o.author, o.association, null)}])`
+	const body = clipText(o.body, TAKEOVER_BODY_MAX) || '(no description)'
+	const blocks = o.threads.map((th, i) =>
+		[
+			`Thread O${i + 1} on ${th.path}${th.line ? `:${th.line}` : ''}${th.resolved === null ? ' (resolved state unknown)' : ''}:`,
+			...th.comments.map((c) => line(c.author, roleOf(c.author, c.association, o.author, c.bot), c.body)),
+		].join('\n'),
+	)
+	const room = Math.max(0, TAKEOVER_MAX - head.length - body.length - 200)
+	const kept: Array<string> = []
+	let used = 0
+	for (const b of blocks) {
+		if (used + b.length + 1 > room) break
+		kept.push(b)
+		used += b.length + 1
+	}
+	const cut = blocks.length - kept.length
+	const notes = [
+		...(cut ? [`(${cut} more open thread${cut === 1 ? '' : 's'} not shown: over the size limit)`] : []),
+		...(o.threadsLeft
+			? [`(GitHub returned only part of its discussion; ${o.threadsLeft} thread${o.threadsLeft === 1 ? '' : 's'} not read.)`]
+			: []),
+		...(o.partial ? [`(${o.partial})`] : []),
+	]
+	return {
+		text: [
+			head,
+			body,
+			blocks.length ? 'Review threads still open there (not resolved, not outdated):' : 'No review threads are still open there.',
+			...kept,
+			...notes,
+		].join('\n'),
+		summary: `takes over #${o.number} (${o.threads.length} open thread${o.threads.length === 1 ? '' : 's'}${cut ? `, ${cut} cut for size` : ''})`,
+	}
+}
 
 /**
  * Open threads first (they are what is still being discussed), then the PR conversation and review summaries, newest
@@ -206,12 +264,22 @@ function contextText(c: ReviewContext): string {
  * author has none, then issues and comments. Such text can carry instructions, so a run that has any is not offered
  * MCP tools. A role that wasn't read counts as none.
  */
-function outsiders(pr: PrAuthor | null, issues: Array<LinkedIssue>, d: Discussion | null): Array<string> {
+function outsiders(
+	pr: PrAuthor | null,
+	issues: Array<LinkedIssue>,
+	d: Discussion | null,
+	original: TakeoverOriginal | null,
+): Array<string> {
 	const out: Array<string> = []
 	if (pr && !hasWriteRole(pr.association)) out.push(`the pull request by ${pr.login ? `@${pr.login}` : 'a deleted user'}`)
 	for (const i of issues)
 		if (!hasWriteRole(i.association) || i.comments.some((c) => c.body.trim() && !hasWriteRole(c.association)))
 			out.push(`issue #${i.number}`)
+	if (
+		original &&
+		(!hasWriteRole(original.association) || original.threads.some((t) => t.comments.some((c) => !hasWriteRole(c.association))))
+	)
+		out.push(`pull request #${original.number}, which this one takes over`)
 	if (d && d.status !== 'unavailable') {
 		const comments = [
 			...d.threads.flatMap((t) => t.comments.filter(visible)),
@@ -231,6 +299,7 @@ export function buildBackground(o: {
 	discussion: Discussion | null
 	pr?: PrAuthor | null // for pull requests: who opened it
 	automatic?: boolean // nobody reads the findings before they are posted
+	takeover?: Takeover | null // the pull request this one takes over
 }): Background {
 	const sections: Background['sections'] = []
 	const parts: Array<string> = []
@@ -274,6 +343,16 @@ export function buildBackground(o: {
 				`issue #${i.number} (${i.closes ? 'closes' : 'mentioned'}${i.commentsTotal ? `, ${i.commentsTotal} comment${i.commentsTotal === 1 ? '' : 's'}` : ''})`,
 			)
 	}
+	if (o.takeover) {
+		const t = takeoverText(o.takeover)
+		sections.push({
+			tag: 'TAKEOVER',
+			title:
+				'The pull request this one takes over (what it set out to do and the review threads still open there; written by people, not evidence about the code)',
+			text: t.text,
+		})
+		parts.push(t.summary)
+	}
 	const d = o.discussion
 	if (d && d.status !== 'unavailable') {
 		const c = conversationText(d, prLogin, o.automatic === true)
@@ -294,7 +373,7 @@ export function buildBackground(o: {
 		chars: sections.reduce((n, s) => n + s.title.length + s.text.length + 30, 0),
 		summary: parts.length ? parts.join('; ') : null,
 		threads,
-		outside: outsiders(o.pr ?? null, o.issues, o.discussion),
+		outside: outsiders(o.pr ?? null, o.issues, o.discussion, o.takeover?.status === 'read' ? o.takeover.original : null),
 		people: participants(prLogin, o.issues, o.discussion),
 	}
 }

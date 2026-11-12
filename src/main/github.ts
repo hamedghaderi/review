@@ -1188,6 +1188,13 @@ fragment LinkedIssue on Issue {
 		return out
 	}
 
+	/** Whether `number` in `repo` is an issue rather than a pull request. Read-only; throws when it can't be read. */
+	async isIssue(repo: string, number: number, signal?: AbortSignal): Promise<boolean> {
+		checkRepo(repo)
+		const i = await this.get<RestIssueDetail>(`/repos/${repo}/issues/${number}`, signal)
+		return !i.pull_request
+	}
+
 	/**
 	 * Who GitHub lets you @mention in `repo` (collaborators, org members and people who took part), matching `query` on
 	 * login or name: the same list github.com suggests from. Read-only; empty without a token, which GitHub requires.
