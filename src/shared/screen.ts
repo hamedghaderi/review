@@ -1,3 +1,4 @@
+import { findLeaks } from './leaks.ts'
 import type { Finding } from './types.ts'
 
 /**
@@ -39,6 +40,10 @@ export function screenFinding(
 		)
 	)
 		out.push('text about the AI’s own instructions')
+	// Quoted code counts here: a key in a code block is posted all the same.
+	const leaks = findLeaks(raw)
+	if (leaks.some((l) => l.kind === 'credential')) out.push('what looks like a key or token')
+	if (leaks.some((l) => l.kind === 'path')) out.push('a path on someone’s computer')
 	if (!aboutTheCode(f, raw)) out.push('nothing that names the code it cites')
 	return out
 }

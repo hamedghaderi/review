@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
 import type { AppError, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
@@ -23,6 +24,7 @@ interface Props {
 	onPending(pending: PendingReview | null): void // what GitHub said about your pending review, each time it is read
 	canDraft: boolean // a model for questions is chosen, so the summary can be drafted with AI
 	stillReviewing?: Array<string> // roles of team members the run didn't wait for that are still reviewing
+	onMaskComment?(commentId: string): Promise<void> // masks what looks private in a comment (see maskLeaks) and saves it
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -56,6 +58,7 @@ export function PublishDialog({
 	onPending,
 	canDraft,
 	stillReviewing,
+	onMaskComment,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -219,6 +222,23 @@ export function PublishDialog({
 		setSummary('')
 		setDrafted(false)
 		await load(true)
+	}
+
+	// What looks private in what is about to go out (issue #159): shown, maskable, and posted only once you say so.
+	const outgoing = [
+		...toPublish.map((i) => ({ id: i.commentId, label: i.label, leaks: findLeaks(i.body) })),
+		{ id: '', label: 'Summary', leaks: findLeaks(summary) },
+	].filter((x) => x.leaks.length)
+	const leakKey = outgoing.map((x) => `${x.id}:${x.leaks.map((l) => `${l.start}-${l.end}`).join(',')}`).join('|')
+	const [checkedLeaks, setCheckedLeaks] = useState('')
+	const leaksOk = !outgoing.length || checkedLeaks === leakKey
+	const mask = async (id: string): Promise<void> => {
+		if (!id) return setSummary(maskLeaks(summary))
+		if (!onMaskComment) return
+		setRunning('Masking…')
+		await onMaskComment(id)
+		await load(true)
+		setRunning(null)
 	}
 
 	const pendingOurs = plan?.pending.kind !== 'none' && plan?.pending.usable
@@ -446,6 +466,29 @@ export function PublishDialog({
 										</a>
 									</p>
 								)}
+								{outgoing.length > 0 && (
+									<div className="leak-check small">
+										<p className="warn-text">
+											<b>Check before posting.</b> This looks private, and once it's on GitHub it stays there even after the code changes:
+										</p>
+										<ul>
+											{outgoing.map((x) => (
+												<li key={x.id || 'summary'}>
+													<span className="mono">{x.label}</span>: {describeLeaks(x.leaks)}{' '}
+													{(x.id ? !!onMaskComment : true) && (
+														<button className="link" onClick={() => void mask(x.id)} disabled={!!running}>
+															Mask
+														</button>
+													)}
+												</li>
+											))}
+										</ul>
+										<label className="check">
+											<input type="checkbox" checked={leaksOk} onChange={(e) => setCheckedLeaks(e.target.checked ? leakKey : '')} />
+											<span>I checked these: post them as they are</span>
+										</label>
+									</div>
+								)}
 								{!!stillReviewing?.length && (
 									<p className="small warn-text">
 										{stillReviewing.join(' and ')} {stillReviewing.length === 1 ? 'is' : 'are'} still reviewing this change. Anything{' '}
@@ -585,18 +628,25 @@ export function PublishDialog({
 							<>
 								<button
 									className={`btn ${addFirst ? '' : 'primary'}`}
-									disabled={!canSubmit}
+									disabled={!canSubmit || !leaksOk}
 									onClick={() => void askToSubmit()}
 									title={
-										plan.pending.kind === 'none' && event !== 'APPROVE' && !summary.trim()
-											? 'Write a summary, or add comments first'
-											: 'Submit your pending review'
+										!leaksOk
+											? 'Mask what looks private above, or tick that you checked it'
+											: plan.pending.kind === 'none' && event !== 'APPROVE' && !summary.trim()
+												? 'Write a summary, or add comments first'
+												: 'Submit your pending review'
 									}
 								>
 									Submit review…
 								</button>
 								{addFirst && (
-									<button className="btn primary" disabled={!!running || !!plan.blocked} onClick={() => void publish()}>
+									<button
+										className="btn primary"
+										disabled={!!running || !!plan.blocked || !leaksOk}
+										onClick={() => void publish()}
+										title={leaksOk ? undefined : 'Mask what looks private above, or tick that you checked it'}
+									>
 										{addLabel}
 									</button>
 								)}

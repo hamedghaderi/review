@@ -9,6 +9,7 @@ import type {
 	RaisedBefore,
 	RaisedOutcome,
 } from '../../shared/types.ts'
+import { describeLeaks, findLeaks } from '../../shared/leaks.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
@@ -373,6 +374,9 @@ export function ThreadReplyBox({
 	)
 	const send = async (resolve: boolean): Promise<void> => {
 		if (busy || (!text.trim() && !resolve)) return
+		// A reply is posted right away, and drafted ones quote code: say what looks private before it goes.
+		const leaks = findLeaks(text)
+		if (leaks.length && !window.confirm(`This reply has ${describeLeaks(leaks)}. Post it on GitHub anyway?`)) return
 		setBusy(true)
 		setError(null)
 		const problem = await onReply(t.id, text.trim(), resolve)
