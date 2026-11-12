@@ -347,3 +347,24 @@ export function descriptor(kind: ProviderKind): ProviderDescriptor {
 	if (!d) throw new Error(`Unknown provider ${kind}`)
 	return d
 }
+
+const MAKER_OF_PROVIDER: Partial<Record<string, string>> = {
+	anthropic: 'anthropic',
+	'claude-code': 'anthropic',
+	openai: 'openai',
+	codex: 'openai',
+	gemini: 'google',
+}
+
+/**
+ * Who trained a model, from its name or else the provider serving it: Claude through Claude Code, the API or a gateway
+ * is one maker. Models from one maker tend to share blind spots, so a double-check prefers another maker's. A name no
+ * maker matches, on a gateway or custom endpoint, counts as its own.
+ */
+export function modelMaker(provider: string, model: string): string {
+	const m = model.toLowerCase()
+	if (/claude|opus|sonnet|haiku|fable/.test(m)) return 'anthropic'
+	if (/gpt|codex|(^|\/)o\d/.test(m)) return 'openai'
+	if (/gemini|gemma/.test(m)) return 'google'
+	return MAKER_OF_PROVIDER[provider] ?? m
+}

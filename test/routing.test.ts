@@ -5,6 +5,7 @@ import { createFakeProvider, emptyEvaluation } from '../src/main/ai/fake.ts'
 import type { ProviderRequest } from '../src/main/ai/provider.ts'
 import type { RelatedResult } from '../src/main/ai/related.ts'
 import { startRun, type RunnerOptions, type TeamRunMember } from '../src/main/ai/runner.ts'
+import { modelMaker } from '../src/main/ai/catalog.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
 import {
 	runMembers,
@@ -261,6 +262,32 @@ test('double-check in a team: another member on a different model checks the fin
 	assert.equal(f.verification?.model, 'model-c')
 	assert.equal(f.verification?.verdict, 'holds')
 	assert.ok(run.team!.members.find((m) => m.id === 'callers')!.usage!.inputTokens > 0)
+})
+
+test('double-check in a team: another maker’s model checks before a larger one from the same maker', async () => {
+	const checkedBy: Array<string> = []
+	// Defects runs Fable; Callers and Tests run other Claude models with the largest windows, Security runs GPT.
+	const models = {
+		defects: 'claude-fable-5-2-high',
+		security: 'gpt-6-astra-high',
+		callers: 'claude-opus-5-5-high',
+		tests: 'claude-sonnet-5-5',
+	}
+	const run = await startRun(input(), options(crossTeam(models, checkedBy)), () => {}).done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.deepEqual(checkedBy, ['security'])
+	assert.equal(run.findings[0].verification?.model, 'gpt-6-astra-high')
+})
+
+test('model makers: a model is its maker’s whatever serves it; unknown names count as their own', () => {
+	assert.equal(modelMaker('claude-code', 'claude-fable-5-2-high'), 'anthropic')
+	assert.equal(modelMaker('openrouter', 'anthropic/claude-opus-5-5'), 'anthropic')
+	assert.equal(modelMaker('codex', 'gpt-6-astra-high'), 'openai')
+	assert.equal(modelMaker('openrouter', 'openai/o4-mini'), 'openai')
+	assert.equal(modelMaker('custom', 'gemini-3.8-pro'), 'google')
+	assert.equal(modelMaker('anthropic', 'some-new-name'), 'anthropic', 'the provider decides when the name does not')
+	assert.equal(modelMaker('custom', 'Qwen3-Coder'), 'qwen3-coder')
+	assert.notEqual(modelMaker('custom', 'qwen3-coder'), modelMaker('custom', 'deepseek-v4'))
 })
 
 test('double-check in a team: a member whose review failed is not asked; with one model for all, another member still checks', async () => {
