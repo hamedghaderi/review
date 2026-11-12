@@ -5906,3 +5906,17 @@ textarea.style-edit {
 	margin: 4px 0 6px;
 	padding-left: 18px;
 }
+/* What landed on the base branch since the pull request branched off (issue #165). */
+.drift-banner {
+	flex-direction: column;
+	align-items: stretch;
+}
+.drift-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.drift-list {
+	margin: 6px 0 0;
+	padding-left: 18px;
+}

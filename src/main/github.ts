@@ -614,6 +614,13 @@ export class GitHubService {
 		return list.map((p) => fromRestPull(p, this.login))
 	}
 
+	/** The commit a branch points at now, as GitHub reports it. */
+	async branchHead(repo: string, branch: string, signal?: AbortSignal): Promise<string> {
+		checkRepo(repo)
+		const b = await this.get<{ commit: { sha: string } }>(`/repos/${repo}/branches/${encodeURIComponent(branch)}`, signal)
+		return b.commit.sha
+	}
+
 	async detail(repo: string, number: number, signal?: AbortSignal): Promise<PrDetail> {
 		checkRepo(repo)
 		if (!Number.isInteger(number) || number < 1) throw new AppFail('invalid-input', 'Invalid pull request number.')

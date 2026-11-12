@@ -607,6 +607,68 @@ export async function aheadBehind(root: string, base: string, head: string): Pro
 	return r.code === 0 && m ? { behind: Number(m[1]), ahead: Number(m[2]) } : null
 }
 
+/**
+ * What landed on a branch between two of its commits (`from` an ancestor of `to`), as the branch saw it: first parent
+ * only, so a merged pull request is one entry (its merge or squash commit). `behind`: all of them; `commits`: the newest
+ * `limit` that touch any of `paths`, with the files they touch, and `touching` how many do. No rename detection, which
+ * would download file contents in a partial clone. Null when the history between isn't in this clone.
+ */
+export async function commitsSince(
+	root: string,
+	from: string,
+	to: string,
+	paths: Array<string>,
+	limit: number,
+	signal?: AbortSignal,
+): Promise<{ behind: number; touching: number; commits: Array<BaseCommit> } | null> {
+	if (!isSha(from) || !isSha(to)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const range = `${from}..${to}`
+	const count = async (args: Array<string>): Promise<number | null> => {
+		const r = await git(root, ['rev-list', '--first-parent', '--count', range, ...args], 4096, { signal, timeoutMs: 30_000 })
+		return r.code === 0 ? Number(r.stdout.toString('utf8').trim()) : null
+	}
+	const behind = await count([])
+	if (behind === null) return null
+	if (!behind || !paths.length) return { behind, touching: 0, commits: [] }
+	const touching = (await count(['--', ...paths])) ?? 0
+	const r = await git(
+		root,
+		[
+			'log',
+			'--first-parent',
+			'--diff-merges=first-parent',
+			'--no-renames',
+			'--name-only',
+			`--max-count=${limit}`,
+			'--format=%x1e%H%x1f%s%x1f%an%x1f%cI',
+			range,
+			'--',
+			...paths,
+		],
+		8 * 1024 * 1024,
+		{ signal, timeoutMs: 30_000 },
+	)
+	if (r.code !== 0) return null
+	const commits = r.stdout
+		.toString('utf8')
+		.split('\x1e')
+		.filter((x) => x.trim())
+		.map((rec) => {
+			const [head, ...rest] = rec.split('\n')
+			const [sha, subject, author, at] = head.split('\x1f')
+			return { sha, subject, author, at, files: rest.map((l) => l.trim()).filter(Boolean) }
+		})
+	return { behind, touching, commits }
+}
+
+export interface BaseCommit {
+	sha: string
+	subject: string
+	author: string
+	at: string
+	files: Array<string> // which of the paths it touches
+}
+
 const DIFF_FLAGS = ['-r', '-M', '--no-ext-diff', '--no-textconv', '--no-relative', '--no-color']
 
 async function buildComparison(root: string, s: Omit<Comparison, 'id' | 'files'>): Promise<ComparisonData> {

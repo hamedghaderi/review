@@ -20,6 +20,7 @@ import type {
 	BrowserState,
 	CompareTarget,
 	Comparison,
+	BaseDrift,
 	Discussion,
 	FileLinesResult,
 	FindingLevel,
@@ -71,6 +72,7 @@ import type { CommitCheckInput } from './ai/commitCheck.ts'
 import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
 import {
 	aheadBehind,
+	commitsSince,
 	AppFail,
 	cloneGitHub,
 	compareBranches,
@@ -134,6 +136,8 @@ const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
 const PATCH_FORCE_LIMIT = 16 * 1024 * 1024
 const CHANGED_LINES_LIMIT = 10_000
 const FILE_LINES_LIMIT = 8 * 1024 * 1024
+const MAX_DRIFT_PATHS = 500 // the pull request's files given to git log; a bigger PR is checked on its first ones
+const MAX_DRIFT_COMMITS = 20 // base-branch commits listed
 const PR_ATTEMPTS = 3
 const MAX_EARLIER_LIMITATIONS = 12
 const MAX_COMMIT_BODY = 4000
@@ -300,6 +304,43 @@ export class ReviewService {
 				conversation: [],
 				omitted: empty,
 			}
+		}
+	}
+
+	/**
+	 * What landed on the pull request's base branch since it branched off (see BaseDrift): the branch's head is read from
+	 * GitHub now and fetched, then the clone's history between says what changed. Never fatal: a failure says why.
+	 */
+	async baseDrift(repoId: string, reviewId: string, signal?: AbortSignal): Promise<BaseDrift> {
+		const repo = this.repo(repoId)
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		const data = this.comparisons.get(reviewId)
+		if (!stored?.pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
+		const pr = stored.pr
+		const from = data.comparison.baseSha
+		const out: BaseDrift = {
+			baseRef: pr.baseRef,
+			tip: null,
+			mergeBase: from,
+			behind: null,
+			touching: 0,
+			commits: [],
+			url: `https://github.com/${pr.repo}`,
+			error: null,
+		}
+		try {
+			const tip = await this.requireGitHub().branchHead(pr.repo, pr.baseRef, signal)
+			out.tip = tip
+			await ensureCommits(repo.root, fetchRemote(repo, [pr.repo]), [tip], signal)
+			const paths = [...new Set(data.comparison.files.flatMap((f) => [f.oldPath, f.newPath]).filter((p): p is string => !!p))]
+			const r = await commitsSince(repo.root, from, tip, paths.slice(0, MAX_DRIFT_PATHS), MAX_DRIFT_COMMITS, signal)
+			if (!r) {
+				out.error = `The history between ${from.slice(0, 7)} and ${pr.baseRef} (${tip.slice(0, 7)}) isn't in this clone, so Review can't tell what changed on ${pr.baseRef}.`
+				return out
+			}
+			return { ...out, ...r }
+		} catch (e) {
+			return { ...out, error: errorOf(e).message }
 		}
 	}
 
