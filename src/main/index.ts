@@ -93,6 +93,7 @@ import {
 
 let win: BrowserWindow | null = null
 const runStatus = new Map<string, AiRun['status']>() // runs seen running, so their end can play a sound
+const lateMembers = new Map<string, Array<string>>() // finished runs whose members they didn't wait for are still reviewing
 let service: ReviewService
 let store: ReviewStore
 let ai: AiController
@@ -749,6 +750,12 @@ app.whenReady().then(async () => {
 			else runStatus.delete(run.id)
 			// Automatic reviews say so when they are submitted; a run you cancelled needs no sound.
 			if (before === 'running' && run.status !== 'running' && run.status !== 'cancelled' && !run.auto) runFinished(run)
+			const late =
+				run.status === 'running' ? [] : (run.team?.members ?? []).filter((m) => m.late && m.status === 'running').map((m) => m.role)
+			const wasLate = lateMembers.get(run.id)
+			if (late.length) lateMembers.set(run.id, late)
+			else lateMembers.delete(run.id)
+			if (wasLate?.length && !late.length && !run.auto) lateFinished(run, wasLate)
 			// Your edits to its findings come after a run, so this is when there may be enough new ones to update your style.
 			if (before === 'running' && run.status === 'completed') void service.refreshReviewStyle(connections.view().questionModel)
 		},
@@ -1051,9 +1058,28 @@ function releaseRun(reviewId: string, conclusion: 'ready' | 'failed' | null): vo
 	notifyRun(h.run, conclusion)
 }
 
-function notifyRun(run: AiRun, conclusion: 'ready' | 'failed' | null): void {
+/** "app#12", or the branch, for a run's notification. */
+function runName(run: AiRun): string {
 	const r = store.read().repos[run.repoId]?.reviews[run.reviewId]
-	const name = r?.pr ? `${r.pr.repo.split('/')[1]}#${r.pr.number}` : (r?.headRef ?? 'your branch')
+	return r?.pr ? `${r.pr.repo.split('/')[1]}#${r.pr.number}` : (r?.headRef ?? 'your branch')
+}
+
+/** The members a finished run didn't wait for are done: what they added, unless they were stopped. */
+function lateFinished(run: AiRun, roles: Array<string>): void {
+	const members = (run.team?.members ?? []).filter((m) => roles.includes(m.role))
+	if (members.every((m) => m.status === 'cancelled')) return
+	const n = run.findings.filter((f) => f.late && !f.mergedInto && !f.heldBack).length
+	const who = roles.join(' and ')
+	const body = members.every((m) => m.status === 'failed')
+		? `${who} failed: ${members.find((m) => m.error)?.error ?? 'no answer'}`
+		: n
+			? `${who} added ${n} finding${n === 1 ? '' : 's'}`
+			: `${who} found nothing more`
+	aiDone('runFinished', `${who} finished: ${runName(run)}`, body)
+}
+
+function notifyRun(run: AiRun, conclusion: 'ready' | 'failed' | null): void {
+	const name = runName(run)
 	if (run.status === 'failed') return aiDone('runFinished', `AI review failed: ${name}`, run.errors[0] ?? 'The run stopped with an error.')
 	const n = run.findings.filter((f) => !f.mergedInto && !f.heldBack).length
 	const found = n ? `${n} finding${n === 1 ? '' : 's'}` : 'No findings'

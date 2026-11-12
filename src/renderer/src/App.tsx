@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { blockingSummary, findingRoots } from '../../shared/findings.ts'
+import { blockingSummary, findingRoots, lateMembersDone, lateUnread } from '../../shared/findings.ts'
 import type {
 	AiRun,
 	AiSettingsView,
@@ -306,14 +306,20 @@ export function App() {
 				// When a run finishes, its findings at the chosen levels go into the code as comments. An automatic review's
 				// run is the main process's to add and publish; its comments arrive through onReviewChanged.
 				const finished = runs[i]?.status === 'running' && (run.status === 'completed' || run.status === 'partial')
-				if (!finished || run.auto || !autoAddRef.current.length) return
+				// The members the run didn't wait for are done: their findings go in the same way, and only theirs, so a comment
+				// you deleted since the run finished doesn't come back.
+				const lateIn = !finished && lateMembersDone(runs[i], run)
+				if ((!finished && !lateIn) || run.auto || !autoAddRef.current.length) return
 				const current = reviewRef.current
 				if (!current || current.id !== run.reviewId) return
-				const { review: withDrafts, added } = ops.autoAddFindings(current, run, next, findingRoots(next), autoAddRef.current)
+				const from = lateIn ? { ...run, findings: run.findings.filter((f) => f.late) } : run
+				const { review: withDrafts, added } = ops.autoAddFindings(current, from, next, findingRoots(next), autoAddRef.current)
 				if (!added) return
 				reviewRef.current = withDrafts
 				change(() => withDrafts)
-				setNotice(`Added ${added} finding${added === 1 ? '' : 's'} to the code as comments. Nothing is posted until you publish.`)
+				setNotice(
+					`Added ${added} ${lateIn ? 'late ' : ''}finding${added === 1 ? '' : 's'} to the code as comments. Nothing is posted until you publish.`,
+				)
 			}),
 		[change],
 	)
@@ -1074,6 +1080,9 @@ export function App() {
 	}, [loaded])
 	useEffect(() => setConclusionOpen(false), [loaded?.review.id])
 	const lastFinished = [...aiRuns].reverse().find((r) => r.status === 'completed' || r.status === 'partial') ?? null
+	// Members the newest finished run didn't wait for: who is still reviewing, and the findings they added since the conclusion.
+	const stillReviewing = (lastFinished?.team?.members ?? []).filter((m) => m.late && m.status === 'running').map((m) => m.role)
+	const unreadLate = lateUnread(conclusion, lastFinished)
 	// The newest finished run's checks of the bot threads, shown on each thread.
 	const botChecks = useMemo(() => new Map((lastFinished?.botChecks ?? []).map((c) => [c.threadId, c])), [lastFinished])
 	const concludeDisabled =
@@ -2183,6 +2192,7 @@ export function App() {
 														disabled={concludeDisabled}
 														askDisabled={askDisabled}
 														stale={!!conclusion && !!lastFinished && conclusion.runId !== lastFinished.id}
+														late={unreadLate}
 														modelPicker={askModelPicker}
 														paths={changedPaths}
 														onOpenPath={openPath}
@@ -2433,6 +2443,7 @@ export function App() {
 						}}
 						beforePublish={persist}
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
+						stillReviewing={stillReviewing}
 						onPending={setPendingReview}
 						canDraft={!!aiSettings?.questionModel}
 					/>

@@ -15,7 +15,7 @@ import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { aiScope, reviewUpdate } from '../src/main/validate.ts'
-import { findingCommentBody, findingRoots, findingState } from '../src/shared/findings.ts'
+import { findingCommentBody, findingRoots, findingState, lateMembersDone, lateUnread } from '../src/shared/findings.ts'
 import {
 	DEFAULT_TEAM_ROLES,
 	REVIEW_RULES,
@@ -3031,6 +3031,11 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	assert.match(asked[0].input, /# Write your conclusion$/)
 	assert.equal(c.runId, run.id)
 	assert.deepEqual(
+		c.findingIds,
+		run.findings.map((f) => f.id),
+		'what it read, so later late findings show as unread',
+	)
+	assert.deepEqual(
 		c.messages.map((m) => m.text),
 		['## What it does\nAdds instead of subtracting in `src/app.ts:3`.'],
 	)
@@ -3222,4 +3227,28 @@ test('bot threads: with double-check on, each open bot thread in the change is c
 	assert.equal(capped.botChecks!.length, 6)
 	assert.equal(capped.botChecks![0].threadId, 'b7', 'newest first')
 	assert.ok(capped.notices!.some((n) => n.startsWith('2 open bot threads were not checked: at most 6 are checked per run')))
+})
+
+test('late members: done once every member the run did not wait for has stopped running; the conclusion counts the late findings it did not read', () => {
+	const member = (late: boolean, status: 'running' | 'completed' | 'cancelled') => ({ late, status }) as never
+	const run = (status: AiRun['status'], members: Array<never>, findings: Array<Partial<Finding>> = []) =>
+		({ id: 'r1', status, team: { members }, findings }) as unknown as AiRun
+	const before = run('completed', [member(false, 'completed'), member(true, 'running')])
+	assert.equal(lateMembersDone(before, run('completed', [member(false, 'completed'), member(true, 'completed')])), true)
+	assert.equal(lateMembersDone(before, before), false, 'still reviewing')
+	assert.equal(
+		lateMembersDone(run('running', [member(true, 'running')]), run('running', [member(true, 'completed')])),
+		false,
+		'the run itself is still going',
+	)
+	assert.equal(lateMembersDone(undefined, run('completed', [])), false)
+
+	const done = run(
+		'completed',
+		[],
+		[{ id: 'a' }, { id: 'b', late: true }, { id: 'c', late: true, mergedInto: 'a' }, { id: 'd', late: true }],
+	)
+	assert.equal(lateUnread({ runId: 'r1', messages: [], omitted: [], findingIds: ['a', 'd'] }, done), 1, 'b only: c is folded, d was read')
+	assert.equal(lateUnread({ runId: 'r0', messages: [], omitted: [], findingIds: [] }, done), 0, 'written for another run: "stale" says so')
+	assert.equal(lateUnread({ runId: 'r1', messages: [], omitted: [] }, done), 0, 'older conclusions did not record what they read')
 })

@@ -1153,7 +1153,7 @@ export class AiController {
 				}
 			}
 			if (text === null) {
-				const conclusion: ChangeConclusion = { runId: run.id, messages: [answer], omitted }
+				const conclusion: ChangeConclusion = { runId: run.id, messages: [answer], omitted, findingIds: run.findings.map((f) => f.id) }
 				await this.store.update((d) => {
 					const r = d.repos[repoId]?.reviews[reviewId]
 					if (r) r.conclusion = conclusion
