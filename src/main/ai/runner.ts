@@ -92,6 +92,7 @@ export interface TeamRunMember {
 	rules: Array<ReviewRule>
 	persona?: PersonaId | null
 	provenance: { connectionId: string; connectionLabel: string; endpoint: string }
+	noWait?: boolean // the run finishes without it; its findings join when it is done (never on automatic runs)
 }
 
 /** Tokens one image is reserved, scaled to at most 1568px on its longest side (Anthropic counts up to ~3,300; OpenAI less). */
@@ -108,6 +109,7 @@ interface Worker {
 	imagesRejected?: boolean // the model refused a request with images; its later requests go without them
 	pkg?: ContextPackage // this reviewer's own requests, once built
 	retryBatches?: Array<number> // a retry's requests to send: the ones that missed exactly this worker's rules
+	late?: boolean // the run does not wait for it (see TeamRunMember.noWait)
 }
 
 export interface RunInput {
@@ -151,8 +153,10 @@ export interface RunInput {
 
 export interface RunHandle {
 	run: AiRun
-	cancel: () => void
-	done: Promise<AiRun>
+	/** Cancels a running run; once it has finished, stops a member it did not wait for, saying why (default: cancelled). */
+	cancel: (why?: string) => void
+	done: Promise<AiRun> // the run as finished: every member it waits for is done
+	settled: Promise<AiRun> // and every member it did not wait for too (the same as `done` when there are none)
 }
 
 /**
@@ -240,6 +244,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					rules: REVIEW_RULES.filter((r) => m.rules.includes(r)),
 					instructions: instructionsFor(m.rules, m.role, levels, lookups, m.persona ?? null, options.style ?? null),
 					stopped: false,
+					late: m.noWait === true,
 					member: {
 						id: m.id,
 						role: m.role,
@@ -249,6 +254,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						model: m.provider.model,
 						rules: REVIEW_RULES.filter((r) => m.rules.includes(r)),
 						...(m.persona ? { persona: m.persona } : {}),
+						...(m.noWait ? { late: true } : {}),
 						status: 'running',
 						requestsDone: 0,
 						requestsFailed: 0,
@@ -268,6 +274,13 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						stopped: false,
 					},
 				]
+	// Not waiting for a member needs another to wait for, and nobody to read it: an automatic review posts what it has.
+	if (automatic || workers.every((w) => w.late))
+		for (const w of workers)
+			if (w.late) {
+				w.late = false
+				if (w.member) delete w.member.late
+			}
 	if (options.team && !retry) {
 		run.team = { id: options.team.id, name: options.team.name, members: workers.map((w) => w.member!) }
 		run.providerLabel = options.team.name
@@ -296,6 +309,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		toolChars = lookups ? JSON.stringify(TOOL_DEFINITIONS).length + (external ? JSON.stringify(external.definitions).length : 0) : 0
 	}
 	let settled = false
+	// Once the run has finished without the members it does not wait for: they still review, and their answers still count.
+	let lateOpen = false
+	const lateErrors = new Set<string>() // their failed requests, which never make the run partial
+	const open = (): boolean => run.status === 'running' || lateOpen
+	let settle: (r: AiRun) => void = () => {}
+	const settledLate = new Promise<AiRun>((resolve) => (settle = resolve))
 	// A retry is measured from what the run had already cost.
 	const costBefore = run.cost?.usd ?? 0
 	let overBudget: string | null = null
@@ -303,7 +322,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const emit = (): void => {
 		if (!settled) onUpdate(structuredClone(run))
 	}
-	const cancel = (): void => {
+	const cancel = (why = 'cancelled'): void => {
+		// Before the run has finished, cancelling cancels it all; after, only the members it did not wait for are left.
+		if (lateOpen && run.status !== 'running') {
+			// The run stays as it finished; only the members it did not wait for stop.
+			for (const w of workers) if (w.late && w.member?.status === 'running') notice(`${w.role}: stopped before it finished (${why}).`)
+			controller.abort()
+			return
+		}
 		if (run.status !== 'running') return
 		// A cancelled retry leaves the run as it was, plus whatever answers had already arrived.
 		if (!retry) run.status = 'cancelled'
@@ -475,13 +501,19 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					for (const r of w.rules) evaluationOf(r, w).why.push('None of the changed files is a kind this rule applies to.')
 			}
 			emit()
-			await Promise.all(workers.map((w) => runBatches(w.pkg!, w)))
+			// Every member starts now; the run waits only for the ones it waits for.
+			const late = workers.filter((w) => w.late)
+			const lateDone = Promise.all(late.map((w) => runBatches(w.pkg!, w)))
+			await Promise.all(workers.filter((w) => !w.late).map((w) => runBatches(w.pkg!, w)))
+			lateOpen = late.some((w) => w.member?.status === 'running')
 			await checkNearMisses()
 			await mergeDuplicates()
 			await verifyBlocking()
 			await checkBotThreads()
 			const pkg = pkgs[0]
-			return finish(pkg)
+			const first = finish(pkg)
+			if (lateOpen) void lateDone.then(() => finishLate(pkg))
+			return first
 		} catch (error) {
 			const message = redactSecrets(error instanceof Error ? error.message : String(error))
 			run.errors.push(retry ? `${retryLabel(retry.rules)}${message}` : message)
@@ -566,7 +598,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				const batch = queue.shift()
 				if (!batch) return
 				const outcome = await runBatch(batch, w)
-				if (controller.signal.aborted || run.status !== 'running') return // late result of a cancelled run
+				if (controller.signal.aborted || !open()) return // late result of a cancelled run
 				const prefix = w.role ? `${w.role}: ` : ''
 				if (retry) {
 					if (outcome.ok) merge(outcome.value, w, batch.index)
@@ -584,6 +616,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						w.member.error = outcome.error.message
 					}
 					run.errors.push(`${prefix}Request ${batch.index + 1}: ${outcome.error.message}`)
+					if (w.late) lateErrors.add(run.errors[run.errors.length - 1])
 					setBatchFiles(batch.fileKeys, batch.index, 'failed', `${prefix}${outcome.error.message}`, w)
 					if (outcome.error instanceof ProviderError && outcome.error.fatal) w.stopped = true
 				}
@@ -603,7 +636,9 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	/** Adds one response to the run. Each member owns its rules, so the same problem from two members is merged, not repeated. */
 	function merge(value: ReturnType<typeof validateBatchOutput>, w: Worker, batchIndex: number): void {
 		const fresh: Array<Finding> = []
-		for (const f of value.findings.map((x) => withSupport({ ...markRepeat(x), memberId: w.id }))) {
+		// Arriving after the run finished: marked, so a reader who already went through the list can find them.
+		const late = lateOpen && w.late ? { late: true } : {}
+		for (const f of value.findings.map((x) => withSupport({ ...markRepeat(x), memberId: w.id, ...late }))) {
 			// Two members quoting the same source on overlapping lines found one problem. One reviewer reporting two findings
 			// there means two problems (it is told to report each once), so its own findings only merge on the same title.
 			const dup = [...run.findings, ...fresh].find((e) => isDuplicate(e, f) || (w.id !== null && e.memberId !== w.id && sameProblem(e, f)))
@@ -767,7 +802,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 * Runs after every review request is answered, so the run is still 'running' meanwhile.
 	 */
 	async function verifyBlocking(): Promise<void> {
-		if (!verify || overBudget || controller.signal.aborted || run.status !== 'running') return
+		if (!verify || overBudget || controller.signal.aborted || !open()) return
 		const todo = run.findings
 			.filter((f) => f.severity === 'blocking' && !f.heldBack && !f.mergedInto && !f.verification)
 			.flatMap((f) => {
@@ -786,7 +821,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const next = async (): Promise<void> => {
 			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const result = await verifyOne(item.f, item.w, item.checker)
-				if (controller.signal.aborted || run.status !== 'running') return
+				if (controller.signal.aborted || !open()) return
 				item.f.verification = result
 				if (result.error) progress.failed++
 				else progress.done++
@@ -803,7 +838,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	 * double-check setting, and counted in the same progress.
 	 */
 	async function checkNearMisses(): Promise<void> {
-		if (!verify || overBudget || controller.signal.aborted || run.status !== 'running') return
+		if (!verify || overBudget || controller.signal.aborted || !open()) return
 		const riskOf = (k: string) => run.coverage.files.find((f) => f.fileKey === k)?.risk?.level
 		const queue = pickNearMisses(run.evaluation ?? [], riskOf).flatMap((c) => {
 			const raiser = workers.find((x) => x.id === c.raiserId)
@@ -820,7 +855,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const next = async (): Promise<void> => {
 			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const check = await checkNearMiss(item.c, item.excerpt, item.facts, item.checker)
-				if (controller.signal.aborted || run.status !== 'running') return
+				if (controller.signal.aborted || !open()) return
 				item.c.miss.check = check
 				if (check.error) progress.failed++
 				else progress.done++
@@ -1171,8 +1206,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	function finish(pkg: ContextPackage | null): AiRun {
 		if (retry) return finishRetry(pkg)
 		const cancelled = run.status === 'cancelled'
-		for (const w of workers) if (w.member?.status === 'running') w.member.status = cancelled ? 'cancelled' : 'failed'
+		if (cancelled) lateOpen = false
+		for (const w of workers)
+			if (w.member?.status === 'running' && !(lateOpen && w.late)) w.member.status = cancelled ? 'cancelled' : 'failed'
 		for (const f of run.coverage.files) {
+			if (f.state === 'pending' && awaitsLate(f.fileKey)) continue // a member the run does not wait for is still on it
 			if (f.state === 'pending' && overBudget && !cancelled) {
 				// Some of its requests were answered before the budget ran out.
 				f.state = Object.values(fileResults[f.fileKey] ?? {}).includes('reviewed') ? 'partial' : 'skipped'
@@ -1187,13 +1225,66 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			run.coverage.files.push(...input.carried.files.filter((f) => !run.coverage.files.some((x) => x.fileKey === f.fileKey)))
 			run.findings.push(...input.carried.findings.map((f) => ({ ...f, runId: run.id })))
 		}
-		if (!cancelled) run.status = overallStatus(run.coverage.files, pkg, run.errors)
+		if (!cancelled) run.status = settledStatus(pkg)
 		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		run.finishedAt = now()
+		settled = !lateOpen
+		onUpdate(structuredClone(run))
+		if (settled) settle(structuredClone(run))
+		return structuredClone(run)
+	}
+
+	/** Whether a member the run does not wait for still has a request carrying this file. */
+	function awaitsLate(key: string): boolean {
+		return (
+			lateOpen &&
+			workers.some(
+				(w) =>
+					w.late &&
+					w.member?.status === 'running' &&
+					w.pkg?.batches.some((b) => b.fileKeys.includes(key) && !fileResults[key]?.[`${b.index}:${w.id}`]),
+			)
+		)
+	}
+
+	/** The run's status from the files it waited for; what a member it did not wait for left undone never counts against it. */
+	function settledStatus(pkg: ContextPackage | null): AiRun['status'] {
+		const files = run.coverage.files.filter((f) => !(f.state === 'pending' && awaitsLate(f.fileKey)))
+		return overallStatus(
+			files,
+			pkg,
+			run.errors.filter((e) => !lateErrors.has(e)),
+		)
+	}
+
+	/**
+	 * Once the members the run did not wait for are done: their blocking findings and near misses are double-checked like
+	 * the rest (grouping is not run again: it could fold findings someone already acted on), their files settle, and the
+	 * run keeps the status it finished with, unless they completed what it lacked.
+	 */
+	async function finishLate(pkg: ContextPackage | null): Promise<void> {
+		try {
+			await checkNearMisses()
+			await verifyBlocking()
+		} catch (e) {
+			notice(`The late findings could not be double-checked: ${e instanceof Error ? e.message : String(e)}`)
+		}
+		const stopped = controller.signal.aborted
+		lateOpen = false
+		for (const f of run.coverage.files)
+			if (f.state === 'pending') {
+				f.state = stopped ? 'cancelled' : 'failed'
+				f.reason = stopped ? 'Stopped before this file was reviewed' : (f.reason ?? 'Not reviewed')
+			}
+		const status = settledStatus(pkg)
+		// Late answers can complete a run that finished partial; a late failure never makes it worse.
+		if (run.status === 'partial' && status === 'completed') run.status = status
+		traceHistory()
+		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
 		settled = true
 		onUpdate(structuredClone(run))
-		return structuredClone(run)
+		settle(structuredClone(run))
 	}
 
 	/** A run that reviewed nothing says nothing about what was fixed. */
@@ -1237,7 +1328,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	}
 
 	emit()
-	return { run: structuredClone(run), cancel, done }
+	// A run that fails or is cancelled before it finishes settles with it.
+	void done.then(
+		(r) => !lateOpen && settle(r),
+		() => settle(structuredClone(run)),
+	)
+	return { run: structuredClone(run), cancel, done, settled: settledLate }
 }
 
 /** A team run from before members got their own requests: one shared set, so supplied excerpts name no member. */

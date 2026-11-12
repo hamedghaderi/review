@@ -921,6 +921,7 @@ export interface TeamMember {
 	modelId: string
 	rules: Array<ReviewRule>
 	persona?: PersonaId | null // a lens on its rules (personas.ts); absent on members saved before personas
+	noWait?: boolean // "Don't wait for this reviewer": a run finishes without it, and its findings join when it is done
 }
 
 export interface ReviewTeam {
@@ -982,6 +983,7 @@ export interface RunMember {
 	model: string
 	rules: Array<ReviewRule>
 	persona?: PersonaId | null // absent on runs before personas
+	late?: boolean // the run did not wait for it: it may still be reviewing after the run finished
 	status: 'running' | 'completed' | 'failed' | 'cancelled'
 	requestsDone: number
 	requestsFailed: number
@@ -1108,6 +1110,7 @@ export interface Finding {
 	alsoAt?: Array<{ findingId: string; path: string; line: number | null; title: string }> // findings folded under this one
 	heldBack?: string | null // over a review limit: kept so decisions and comment links stay valid, but not listed as open
 	memberId?: string | null // the team member that raised it (team runs)
+	late?: boolean // raised by a member the run did not wait for, after the run had finished
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it

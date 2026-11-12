@@ -524,6 +524,14 @@ function TeamStatus({ run }: { run: AiRun }) {
 						<span className={`member-dot ${m.status}`} aria-hidden />
 					)}
 					<b>{m.role}</b>
+					{m.late && (
+						<span
+							className="muted nowrap"
+							title="The run didn't wait for this reviewer: its findings join the run when it is done, marked as late."
+						>
+							{m.status === 'running' && run.status !== 'running' ? 'still reviewing' : 'not waited for'}
+						</span>
+					)}
 					<span className="muted mono ellipsis">{m.model}</span>
 					<span className="spacer" />
 					<span className="muted nowrap">
@@ -1574,6 +1582,12 @@ function FindingCard(p: CardProps) {
 						{team && f.fromNearMiss.memberId
 							? ` of ${team.members.find((m) => m.id === f.fromNearMiss!.memberId)?.role ?? 'another reviewer'}`
 							: ''}
+					</span>
+				)}
+				{f.late && (
+					<span title="Raised by a reviewer the run didn't wait for, after the run had finished. The conclusion and anything added before then didn't include it.">
+						{' '}
+						· arrived after the run finished
 					</span>
 				)}
 				{f.repeatOf ? ' · also reported by an earlier run' : ''}

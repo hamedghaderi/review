@@ -569,6 +569,7 @@ export function reviewTeam(v: unknown): ReviewTeam {
 				modelId: modelId(x.modelId),
 				rules: [...new Set(rules)],
 				...(x.persona == null ? {} : { persona: oneOf(x.persona, PERSONA_IDS, 'persona') }),
+				...(x.noWait != null && bool(x.noWait, 'wait setting') ? { noWait: true } : {}),
 			}
 		}),
 		...(o.everyoneChecksBugs === undefined ? {} : { everyoneChecksBugs: bool(o.everyoneChecksBugs, 'everyone checks bugs setting') }),

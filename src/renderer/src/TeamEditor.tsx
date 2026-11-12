@@ -233,6 +233,13 @@ export function TeamEditor({ settings, team: initial, isNew, onSave, onRemove, o
 							</select>
 							{m.persona && <span className="muted ellipsis">Inspired by {personaOf(m.persona)?.inspiredBy}</span>}
 						</label>
+						<label
+							className="check small"
+							title="The run finishes when the other reviewers are done, with its notification and conclusion. This reviewer keeps going, and its findings join the run marked as late. Automatic reviews still wait for every reviewer."
+						>
+							<input type="checkbox" checked={m.noWait === true} onChange={(e) => set(m.id, { noWait: e.target.checked || undefined })} />
+							<span>Don't wait for this reviewer</span>
+						</label>
 						<div className="member-rules small">
 							{m.rules.length === 0 ? (
 								<span className="warn-text">No rules yet. Assign some below, or remove this reviewer.</span>

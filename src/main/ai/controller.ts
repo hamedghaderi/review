@@ -139,6 +139,9 @@ export class AiController {
 	// `background`: an automatic review's label ("owner/name#12"); opening other reviews does not cancel it.
 	private active: { handle: RunHandle; repoId: string; reviewId: string; connectionIds: Array<string>; background: string | null } | null =
 		null
+	// A finished run whose members it did not wait for are still reviewing. It doesn't hold the next run back: starting one
+	// stops them, since a new run is usually on newer commits.
+	private lingering: { handle: RunHandle; reviewId: string; connectionIds: Array<string> } | null = null
 	private teams: TeamSource | null = null
 	private levels: (() => Array<FindingLevel>) | null = null
 	private usage: UsageLog | null = null
@@ -356,6 +359,7 @@ export class AiController {
 				role: string
 				rules: ReviewTeam['members'][number]['rules']
 				persona: PersonaId | null
+				noWait?: boolean
 				config: RunConfig
 			}>
 		} | null = null
@@ -389,6 +393,7 @@ export class AiController {
 							role: m.role,
 							rules: m.rules,
 							persona: m.persona ?? null,
+							noWait: m.noWait === true,
 							config: await this.configFor({ connectionId: m.connectionId, modelId: m.modelId }, 'review', access.comparison.repoId),
 						})
 					} catch (e) {
@@ -431,6 +436,7 @@ export class AiController {
 								role: m.role,
 								rules: m.rules,
 								persona: m.persona,
+								noWait: m.noWait,
 								provider: m.config.provider,
 								provenance: { connectionId: m.config.connectionId, connectionLabel: m.config.connectionLabel, endpoint: m.config.endpoint },
 							})),
@@ -1417,6 +1423,7 @@ export class AiController {
 						console.warn('The earlier snapshot could not be compared:', e)
 						return null
 					})
+		this.lingering?.handle.cancel('a new run started')
 		const handle = startRun(
 			{
 				...input,
@@ -1442,6 +1449,16 @@ export class AiController {
 		this.starting = false
 		void handle.done.finally(() => {
 			if (this.active?.handle === handle) this.active = null
+		})
+		// Members the run did not wait for keep its tools (MCP servers) until they are done too.
+		void handle.done.then(
+			(r) => {
+				if (r.team?.members.some((m) => m.late && m.status === 'running')) this.lingering = { handle, reviewId, connectionIds }
+			},
+			() => {},
+		)
+		void handle.settled.finally(() => {
+			if (this.lingering?.handle === handle) this.lingering = null
 			void external?.close()
 		})
 		if (background) handle.run.auto = true
@@ -1452,11 +1469,15 @@ export class AiController {
 	/** Cancels the active run if it uses this connection (disconnected, endpoint changed or key replaced). */
 	cancelForConnection(connectionId: string): void {
 		if (this.active?.connectionIds.includes(connectionId)) this.active.handle.cancel()
+		if (this.lingering?.connectionIds.includes(connectionId)) this.lingering.handle.cancel('its connection changed')
 	}
 
+	/** Cancels the run, or, once it has finished, stops the members it did not wait for. */
 	cancel(runId: string): boolean {
-		if (!this.active || this.active.handle.run.id !== runId) return false
-		this.active.handle.cancel()
+		const h =
+			this.active?.handle.run.id === runId ? this.active.handle : this.lingering?.handle.run.id === runId ? this.lingering.handle : null
+		if (!h) return false
+		h.cancel()
 		return true
 	}
 
@@ -1466,13 +1487,14 @@ export class AiController {
 	 */
 	cancelUnless(reviewId: string | null): void {
 		if (this.active && !this.active.background && this.active.reviewId !== reviewId) this.active.handle.cancel()
+		if (this.lingering && this.lingering.reviewId !== reviewId) this.lingering.handle.cancel('another review was opened')
 	}
 
 	async flush(): Promise<void> {
-		const a = this.active
-		if (!a) return
-		a.handle.cancel()
-		await a.handle.done.catch(() => {})
+		const handles = [this.active?.handle, this.lingering?.handle].filter((h): h is RunHandle => !!h)
+		if (!handles.length) return
+		for (const h of handles) h.cancel('Review is quitting')
+		await Promise.all(handles.map((h) => h.settled.catch(() => {})))
 		await this.store.flush()
 	}
 
