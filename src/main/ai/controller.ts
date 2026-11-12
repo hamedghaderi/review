@@ -1112,9 +1112,11 @@ export class AiController {
 			let omitted = earlier?.omitted ?? []
 			try {
 				const { background, commits, patches } = await this.wholeChange(access)
+				// Read first: it also gives the lookups the base branch's head ("tip").
+				const drift = access.loadDrift ? await access.loadDrift([], AbortSignal.timeout(60_000)).catch(() => null) : null
 				const tools = config.limits.lookups !== false && access.tools ? access.tools(CONCLUSION_LOOKUPS) : undefined
 				const l = config.provider.limits
-				const instructions = conclusionInstructions(!!tools)
+				const instructions = conclusionInstructions(!!tools, !!drift)
 				const room =
 					capacityChars(l.contextWindow, outputBudget(l), instructions.length + (tools ? JSON.stringify(TOOL_DEFINITIONS).length : 0)) -
 					(tools ? CONCLUSION_LOOKUPS.maxChars : 0)
@@ -1131,6 +1133,7 @@ export class AiController {
 					explanation: stored?.explanation ?? null,
 					history,
 					question: text,
+					drift,
 				})
 				if (text === null) omitted = built.omitted
 				const response = await config.provider.review(built.request, AbortSignal.timeout(300_000))
