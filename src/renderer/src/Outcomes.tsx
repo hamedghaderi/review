@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { costCaveat, formatCost } from '../../shared/cost.ts'
-import { CATEGORY_LABEL } from '../../shared/findings.ts'
+import { CATEGORY_LABEL, LEVEL_META } from '../../shared/findings.ts'
 import { decidedCount, OUTCOME_GROUP_LABEL } from '../../shared/outcomes.ts'
 import type {
 	AfterMergeItem,
@@ -108,7 +108,19 @@ function AfterMergeList({ items }: { items: Array<AfterMergeItem> }) {
 	)
 }
 
-function Table({ title, label, rows, min }: { title: string; label: string; rows: Array<OutcomeRow>; min: number }) {
+function Table({
+	title,
+	label,
+	rows,
+	min,
+	notWorth = false,
+}: {
+	title: string
+	label: string
+	rows: Array<OutcomeRow>
+	min: number
+	notWorth?: boolean // a column of its own for "not worth fixing": a level set too high shows up there
+}) {
 	if (!rows.length) return null
 	const withCost = rows.some((r) => r.cost)
 	return (
@@ -128,6 +140,11 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 						<th className="num" title="Dismissed as wrong: the finding was incorrect">
 							Wrong
 						</th>
+						{notWorth && (
+							<th className="num" title="Dismissed as not worth fixing: real, but not worth the change">
+								Not worth fixing
+							</th>
+						)}
 						<th className="num" title="Neither accepted nor dismissed. Not counted in the rates.">
 							Undecided
 						</th>
@@ -186,6 +203,11 @@ function Table({ title, label, rows, min }: { title: string; label: string; rows
 								<td className="num">
 									<Rate n={c.dismissed.wrong} c={c} min={min} />
 								</td>
+								{notWorth && (
+									<td className="num">
+										<Rate n={c.dismissed['not-worth-it']} c={c} min={min} />
+									</td>
+								)}
 								<td className="num">{c.undecided + c.auto}</td>
 								<td className="num">{c.fixed}</td>
 								<td className="num">
@@ -255,6 +277,7 @@ export function Outcomes() {
 			label: CATEGORY_LABEL[r.key as FindingCategory] ?? 'Uncategorised',
 			detail: r.key === 'uncategorised' ? 'runs before rules were recorded' : OUTCOME_GROUP_LABEL[r.group],
 		}))
+	const levelRows = (xs: OutcomeSummary['levels']) => xs.map((l) => ({ ...l, label: LEVEL_META[l.level]?.label ?? l.level }))
 	return (
 		<div className="home outcomes">
 			<div className="home-head">
@@ -351,6 +374,7 @@ export function Outcomes() {
 					<Table title="By setup" label="Single model or team" rows={s.setups} min={min} />
 					<Table title="Defects and design" label="Kind" rows={groupRows(s.groups)} min={min} />
 					<Table title="By rule" label="Rule" rows={ruleRows(s.rules)} min={min} />
+					<Table title="By level" label="Level" rows={levelRows(s.levels)} min={min} notWorth />
 					<AfterMergeList items={s.afterMerge} />
 					{s.cost === null && <p className="muted small">Cost can’t be split by kind of finding, so it isn’t shown with that filter.</p>}
 				</>

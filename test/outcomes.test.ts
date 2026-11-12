@@ -218,6 +218,32 @@ test('outcomes: double-checks, failing tests and automatic reviews are counted a
 	assert.equal(s.total.accepted, 0)
 })
 
+test('outcomes: by level, a problem counts at the level its lead finding was shown at, most severe first', () => {
+	const runs = [
+		run('run1', [
+			finding('f1', { severity: 'nit' }),
+			finding('f2', { severity: 'blocking' }),
+			finding('f3', { severity: 'blocking' }),
+			finding('f4', { severity: 'high' }),
+		]),
+		// A re-run raising f2 again at another level is still the one problem, at its first level.
+		run('run2', [finding('f2b', { severity: 'should_fix', repeatOf: 'f2' })], { startedAt: '2026-10-21T10:00:00Z' }),
+	]
+	const rev = review('rev1', {
+		findingDecisions: { f2: dismissed(null), f3: { status: 'dismissed', decidedAt: '2026-10-21T00:00:00Z', reason: 'not-worth-it' } },
+	})
+	const s = summarizeOutcomes([repo([rev], { rev1: runs })], ALL, NOW)
+	assert.deepEqual(
+		s.levels.map((l) => [l.level, l.counts.raised]),
+		[
+			['blocking', 2],
+			['nit', 1],
+			['high', 1],
+		],
+	)
+	assert.equal(s.levels[0].counts.dismissed['not-worth-it'], 1)
+})
+
 test('outcomes: filters by period, prompt version, group and model; a group filter leaves cost out', () => {
 	const runs = [
 		run('old', [finding('f1')], { startedAt: '2026-08-01T00:00:00Z', promptVersion: 'v1' }),

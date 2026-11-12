@@ -1607,6 +1607,7 @@ export interface OutcomeSummary {
 	setups: Array<OutcomeRow> // single-model runs by model, team runs by team
 	rules: Array<OutcomeRow & { group: OutcomeGroup }>
 	groups: Array<OutcomeRow & { group: OutcomeGroup }>
+	levels: Array<OutcomeRow & { level: Severity }> // the level the problem was shown at, most severe first
 	repos: Array<{ id: string; label: string }> // every repository with runs, for the filter
 	promptVersions: Array<string> // newest first
 	allModels: Array<{ key: string; label: string; detail: string | null }> // for the filter, whatever else is filtered
