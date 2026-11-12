@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
 	Anchor,
+	BotThreadCheck,
 	ChangedFile,
 	CodeQuestion,
 	CommentDraft,
@@ -60,6 +61,7 @@ interface Props {
 	onReply?: ReplyFn // reply to / resolve a GitHub thread (PR reviews)
 	onDraftReply?: DraftFn // an AI draft of your reply in a GitHub thread
 	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
+	botChecks?: ReadonlyMap<string, BotThreadCheck> // the newest run's checks of bot threads, by thread id
 	onLookup(r: SymbolRequest): void // ⌘/Ctrl-click on a name
 	placeRef: React.RefObject<(() => number) | null> // reads the scroll position, for back and forward
 }
@@ -323,7 +325,15 @@ export function DiffView(p: Props) {
 	const renderItem = (it: Item): React.ReactNode => {
 		if (it.kind === 'thread')
 			return (
-				<ThreadCard key={it.t.id} thread={it.t} onReply={p.onReply} onDraft={p.onDraftReply} modelPicker={p.askModelPicker} mine={p.mine} />
+				<ThreadCard
+					key={it.t.id}
+					thread={it.t}
+					onReply={p.onReply}
+					onDraft={p.onDraftReply}
+					modelPicker={p.askModelPicker}
+					mine={p.mine}
+					check={p.botChecks?.get(it.t.id)}
+				/>
 			)
 		if (it.kind === 'question') {
 			const q = it.q

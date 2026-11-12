@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import type {
+	BotThreadCheck,
 	ChangedFile,
 	Discussion,
 	DiscussionComment,
@@ -193,6 +194,43 @@ function BotTag({ bot }: { bot?: boolean }) {
 			bot
 		</span>
 	) : null
+}
+
+// The double-check's words: it only tries to prove a claim wrong, and failing to is not proof that it is right.
+const BOT_VERDICT = { holds: 'not disproved', wrong: 'likely wrong', unsure: 'not settled' } as const
+const BOT_VERDICT_HINT = {
+	holds: "Review tried to prove the bot's comment wrong and traced the problem in the code instead. That is not proof that it is right.",
+	wrong: "Review read the code and found that the bot's comment does not hold.",
+	unsure: 'Review could not settle it from the code it read, or the comment makes no claim about the code to check.',
+} as const
+
+/** Review's check of the claim in a bot's comment (with double-check on): a badge for the thread's header. */
+export function BotCheckBadge({ check }: { check: BotThreadCheck }) {
+	return check.error ? (
+		<span className="verdict unsure" title={check.reason}>
+			not checked
+		</span>
+	) : (
+		<span className={`verdict ${check.verdict}`} title={BOT_VERDICT_HINT[check.verdict]}>
+			{BOT_VERDICT[check.verdict]}
+		</span>
+	)
+}
+
+/** The check's reason, under the bot's comment. */
+function BotCheckNote({ check }: { check: BotThreadCheck }) {
+	return (
+		<div className="bot-check small">
+			<BotCheckBadge check={check} /> <span className="muted">Review checked this against the code ({check.model}):</span>{' '}
+			<span className="selectable">{check.reason}</span>
+			{!!check.unread?.length && (
+				<span className="muted" title="The check names lines it never read, so treat those parts as guesses.">
+					{' '}
+					(cites lines it didn't read: {check.unread.join(', ')})
+				</span>
+			)}
+		</div>
+	)
 }
 
 /** One GitHub comment inside an inline card: author, time, text. Third-party text: plain text only. */
@@ -417,12 +455,14 @@ export function ThreadCard({
 	onDraft,
 	modelPicker,
 	mine,
+	check,
 }: {
 	thread: DiscussionThread
 	onReply?: ReplyFn
 	onDraft?: DraftFn
 	modelPicker?: ReactNode
 	mine?: MyLastReview | null
+	check?: BotThreadCheck // the newest run's check of the bot comment that started it
 }) {
 	const from = firstNew(t.comments, mine)
 	const asked = asksYou(t, mine?.viewer ?? null)
@@ -436,6 +476,7 @@ export function ThreadCard({
 				</button>
 				<b className="ic-who gh">{root?.author ?? 'unknown user'}</b>
 				<BotTag bot={root?.bot} />
+				{check && <BotCheckBadge check={check} />}
 				<ThreadState t={t} />
 				{asked && <AsksYou />}
 				{from === 0 && <span className="ic-state accent">New since your review</span>}
@@ -470,6 +511,7 @@ export function ThreadCard({
 							{root.bodyTruncated && <span className="muted"> …(truncated)</span>}
 						</div>
 					)}
+					{check && <BotCheckNote check={check} />}
 					{replies.map((c, i) => (
 						<div key={c.id}>
 							{i + 1 === from && <NewSinceDivider />}
@@ -532,10 +574,11 @@ interface PanelProps {
 	onRefresh(): void
 	onOpen(t: DiscussionThread): void
 	onConnect(): void
+	botChecks?: ReadonlyMap<string, BotThreadCheck> // the newest run's checks of bot threads, by thread id
 }
 
 /** Everything already said on the PR: threads by file (open first), review summaries and the conversation. */
-export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOpen, onConnect }: PanelProps) {
+export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOpen, onConnect, botChecks }: PanelProps) {
 	const order = new Map(files.map((f, i) => [f.key, i]))
 	const rank = (t: DiscussionThread): number => (t.resolved === true ? 2 : t.resolved === null ? 1 : 0)
 	const threads = [...(d?.threads ?? [])].sort(
@@ -685,6 +728,7 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 											</span>
 										)}
 										<StatusPills t={t} />
+										{botChecks?.get(t.id) && <BotCheckBadge check={botChecks.get(t.id)!} />}
 										{!t.placed && t.fileKey && <span className="gh-pill">Listed with the file</span>}
 									</div>
 									<div className="ci-body">

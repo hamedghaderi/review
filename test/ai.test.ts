@@ -23,6 +23,7 @@ import {
 	type ChangedFile,
 	type Comparison,
 	type Discussion,
+	type DiscussionComment,
 	type DiscussionThread,
 	type Finding,
 	type Hunk,
@@ -3103,4 +3104,96 @@ test('onlyKnownMentions: leaves code, emails and known people alone', () => {
 	assert.equal(onlyKnownMentions('Keep `@stranger` and\n```\n@Override\n```', people), 'Keep `@stranger` and\n```\n@Override\n```')
 	assert.equal(onlyKnownMentions('(@stranger)', people), '(`@stranger`)')
 	assert.equal(onlyKnownMentions('@stranger-two.', new Set()), '`@stranger-two`.')
+})
+
+test('bot threads: with double-check on, each open bot thread in the change is checked against the code; people, resolved and outdated threads are not', async () => {
+	const s = sources()
+	const c = (author: string, body: string, bot: boolean, createdAt: string) => ({
+		id: `${author}-${createdAt}`,
+		author,
+		association: 'NONE',
+		...(bot ? { bot: true } : {}),
+		body,
+		bodyTruncated: false,
+		createdAt,
+		url: null,
+		pending: false,
+	})
+	const t = (id: string, over: Partial<DiscussionThread>, comments: Array<DiscussionComment>): DiscussionThread => ({
+		id,
+		path: 'src/app.ts',
+		subject: 'line',
+		side: 'new',
+		resolved: false,
+		resolvedBy: null,
+		outdated: false,
+		placed: { fileKey: 'src/app.ts', startLine: 2, endLine: 2 },
+		unplaced: null,
+		fileKey: 'src/app.ts',
+		originalLine: 2,
+		diffHunk: null,
+		comments,
+		commentsOmitted: 0,
+		url: null,
+		...over,
+	})
+	const discussion: Discussion = {
+		status: 'complete',
+		reason: null,
+		fetchedAt: '',
+		prHead: HEAD,
+		threads: [
+			t('bot-open', {}, [
+				c('coderabbitai', 'add() now subtracts, so every total is wrong.', true, '2026-11-02'),
+				c('alice', 'Fixed in the next commit.', false, '2026-11-03'),
+			]),
+			t('bot-old', {}, [c('copilot-pull-request-reviewer', 'Consider a clearer name.', true, '2026-11-01')]),
+			t('bot-resolved', { resolved: true }, [c('coderabbitai', 'Resolved one.', true, '2026-11-04')]),
+			t('bot-outdated', { outdated: true }, [c('coderabbitai', 'Outdated one.', true, '2026-11-04')]),
+			t('bot-unplaced', { placed: null, unplaced: 'Not on a line of this change.' }, [c('coderabbitai', 'Elsewhere.', true, '2026-11-04')]),
+			t('person', {}, [c('bob', 'Why subtract?', false, '2026-11-05')]),
+		],
+		reviews: [],
+		conversation: [],
+		omitted: { threads: 0, comments: 0, reviews: 0, conversation: 0 },
+	}
+	const asked: Array<{ instructions: string; input: string }> = []
+	const script: FakeScript = (req) => {
+		if (req.schema?.name !== 'finding_verification') return out([])
+		asked.push({ instructions: req.instructions, input: req.input })
+		return req.input.includes('add() now subtracts')
+			? { verdict: 'holds', reason: 'add() returns a - b at src/app.ts:2.', level: 'blocking', checked: ['src/app.ts:1-3'] }
+			: { verdict: 'unsure', reason: 'It is a naming preference, not a claim about the code.', level: null, checked: [] }
+	}
+	const on = runWith(script, { limits: { ...LIMITS, verify: true } }, s, {
+		loadBackground: async () => ({ issues: [], discussion, notes: [] }),
+	})
+	const run = await on.handle.done
+	assert.deepEqual(
+		run.botChecks!.map((x) => [x.threadId, x.bot, x.verdict]),
+		[
+			['bot-open', 'coderabbitai', 'holds'],
+			['bot-old', 'copilot-pull-request-reviewer', 'unsure'],
+		],
+		'newest first; resolved, outdated, unplaced and people’s threads are left alone',
+	)
+	assert.match(asked[0].instructions, /^An automated code review bot \(@coderabbitai\) left the comment below/)
+	assert.match(asked[0].input, /# Replies on the thread \(data\)\n- @alice: Fixed in the next commit\./)
+	assert.match(asked[0].input, /# The change around the comment \(repository data\)/, 'the code under the thread is sent')
+	assert.deepEqual(run.findings, [], 'a bot comment never becomes a finding')
+	assert.deepEqual(run.verification, { total: 2, done: 2, failed: 0 }, 'counted with the double-checks')
+
+	const off = runWith(script, {}, s, { loadBackground: async () => ({ issues: [], discussion, notes: [] }) })
+	assert.equal((await off.handle.done).botChecks, undefined, 'only with double-check on')
+
+	const many = {
+		...discussion,
+		threads: Array.from({ length: 8 }, (_, i) => t(`b${i}`, {}, [c('coderabbitai', `claim ${i}`, true, `2026-11-1${i}`)])),
+	}
+	const capped = await runWith(script, { limits: { ...LIMITS, verify: true } }, s, {
+		loadBackground: async () => ({ issues: [], discussion: many, notes: [] }),
+	}).handle.done
+	assert.equal(capped.botChecks!.length, 6)
+	assert.equal(capped.botChecks![0].threadId, 'b7', 'newest first')
+	assert.ok(capped.notices!.some((n) => n.startsWith('2 open bot threads were not checked: at most 6 are checked per run')))
 })
