@@ -894,12 +894,13 @@ function adoptNewRules(saved: ReviewTeam): ReviewTeam {
 		}),
 	}
 }
-// Added in reviewer-2026-10-01.6, -10-02.2, -10-13.1 and -10-15.1.
+// Added in reviewer-2026-10-01.6, -10-02.2, -10-13.1, -10-15.1 and -11-12.1.
 const LATER_RULES: Array<{ rule: ReviewRule; near: Array<ReviewRule> }> = [
 	{ rule: 'convention', near: ['breaking-change', 'file-split'] },
 	{ rule: 'test-value', near: ['breaking-change', 'file-split'] },
 	{ rule: 'misleading-name', near: ['breaking-change', 'file-split'] },
 	{ rule: 'performance', near: ['bug', 'error-handling'] },
+	{ rule: 'drift', near: ['breaking-change', 'file-split'] },
 ]
 
 export function migrateSettings(raw: unknown): SettingsFile {

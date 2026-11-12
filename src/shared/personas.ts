@@ -88,11 +88,12 @@ Missing tests, test style and test length are not findings.`,
 		name: 'API steward',
 		inspiredBy: "Hyrum's Law: every observable behavior will be depended on",
 		summary: 'Callers, contracts and the way the codebase already does things.',
-		rules: ['breaking-change', 'convention'],
-		brief: `Look hardest at "breaking-change" and "convention", the way someone who knows every observable behavior will be depended on would:
+		rules: ['breaking-change', 'convention', 'drift'],
+		brief: `Look hardest at "breaking-change", "convention" and "drift", the way someone who knows every observable behavior will be depended on would:
 - For each changed signature, return value, error, default, ordering, stored format or event, find its callers in the related code and check each still gets what it relied on.
 - Removed or renamed names that are still used are breaking changes; name the caller's file and line.
-- Where the codebase has an established way to do what the change does, check the change follows it, with two examples, as the rule says.`,
+- Where the codebase has an established way to do what the change does, check the change follows it, with two examples, as the rule says.
+- Where the base branch moved since the change branched, check each name the change relies on still exists there, and does the same.`,
 	},
 ] as const satisfies ReadonlyArray<ReviewPersona>
 

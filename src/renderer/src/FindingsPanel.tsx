@@ -110,6 +110,7 @@ export const RULE_LABEL: Record<StoredRule, string> = {
 	convention: 'Differs from how the codebase does it (e.g. untranslated text)',
 	'misleading-name': 'Names that say something the code does not do',
 	'test-value': 'Tests that cannot catch the bug they are for',
+	drift: 'No longer fits what landed on the base branch',
 	'residue-1': RESIDUE_LABEL[1],
 	'residue-2': RESIDUE_LABEL[2],
 	'residue-3': RESIDUE_LABEL[3],
@@ -932,6 +933,7 @@ const FACT_LABEL = {
 	structure: 'Imports',
 	decisions: 'Your earlier decisions',
 	earlier: 'Earlier run',
+	drift: 'Base branch',
 } as const
 
 /** Requests that must report on a rule: the owning member's share of a team run, or every request of a single-model run. */
@@ -1006,7 +1008,7 @@ function NearMissVerdict({ check, run }: { check: NearMissCheck; run: AiRun }) {
 }
 
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
-	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change'] },
+	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change', 'drift'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
 	{ title: 'Conventions', rules: ['convention', 'misleading-name'] },
 	{ title: 'Tests', rules: ['test-value'] },

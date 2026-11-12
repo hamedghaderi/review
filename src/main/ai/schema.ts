@@ -24,6 +24,7 @@ export const modelFindingSchema = z.object({
 			'misleading-name',
 			'test-value',
 			'residue',
+			'drift',
 		])
 		.describe('The one rule this finding falls under.'),
 	signature: z.int().nullable().default(null).describe('For category "residue": the signature number 1-6. Otherwise null.'),

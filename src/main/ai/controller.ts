@@ -50,7 +50,7 @@ import type { PersonaId } from '../../shared/personas.ts'
 import { AppFail } from '../git.ts'
 import type { ReviewStore } from '../store.ts'
 import type { RunConfig } from './connections.ts'
-import type { FileSource } from './context.ts'
+import type { ContextFact, FileSource } from './context.ts'
 import type { RelatedResult } from './related.ts'
 import type { FactsResult } from './facts.ts'
 import type { ExternalTools, LookupBudget, ReviewTools, SeenLines } from './lookup.ts'
@@ -105,6 +105,8 @@ export interface ComparisonAccess {
 	loadPatch(fileKey: string): Promise<PatchResult>
 	loadFileLines(fileKey: string): Promise<FileLinesResult>
 	findRelated?(sources: Array<FileSource>, signal: AbortSignal): Promise<RelatedResult>
+	/** What landed on the base branch since the PR branched that touches its files or `used` (see RunInput.loadDrift). */
+	loadDrift?(used: Array<string>, signal: AbortSignal): Promise<ContextFact | null>
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
 	/** Linked issues and the PR conversation; absent for branch reviews. */
 	loadBackground?: RunInput['loadBackground']
@@ -1432,6 +1434,7 @@ export class AiController {
 				comparison,
 				loadSources: () => loadSources(access, keys),
 				loadRelated: access.findRelated?.bind(access),
+				loadDrift: access.loadDrift?.bind(access),
 				loadFacts: access.loadFacts?.bind(access),
 				loadBackground: access.loadBackground?.bind(access),
 				context: access.reviewContext?.() ?? null,
