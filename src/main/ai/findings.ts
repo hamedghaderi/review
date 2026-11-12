@@ -44,6 +44,7 @@ export interface ValidatedBatch {
 	evaluation: Array<{ rule: ReviewRule; nearMisses: Array<NearMiss>; why: string }>
 	unexplained: Array<{ fileKey: string; why: string }>
 	outdatedDocs: Array<OutdatedDoc>
+	dropped: Array<{ path: string; line: number; what: string }> // checked against the original's files by the runner
 }
 
 export class InvalidOutputError extends Error {}
@@ -138,7 +139,11 @@ export function validateBatchOutput(
 		.filter((d) => isProjectDocPath(d.doc_path) && d.why.trim())
 		.slice(0, 10)
 		.map((d) => ({ path: d.doc_path, line: d.line, why: clip(d.why.trim(), TEXT_LIMITS.note) }))
-	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs }
+	const dropped = (parsed.data.dropped_behaviour ?? [])
+		.filter((d) => d.what.trim() && d.original_path.trim() && Number.isInteger(d.original_line) && d.original_line > 0)
+		.slice(0, 10)
+		.map((d) => ({ path: d.original_path.trim(), line: d.original_line, what: clip(d.what.trim(), TEXT_LIMITS.note) }))
+	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs, dropped }
 }
 
 /**
@@ -152,7 +157,15 @@ function raisedBefore(f: ModelFinding, threads: ReadonlyMap<string, EarlierThrea
 	if (!t) return null
 	const why = b.why_again.trim()
 	if (!why) return `Raises thread ${t.path} again without saying what is new since it`
-	return { threadId: t.id, url: t.url, path: t.path, outcome: b.outcome, whyAgain: clip(why, TEXT_LIMITS.whyAgain), settled: t.settled }
+	return {
+		threadId: t.id,
+		url: t.url,
+		path: t.path,
+		outcome: b.outcome,
+		whyAgain: clip(why, TEXT_LIMITS.whyAgain),
+		settled: t.settled,
+		...(t.original ? { original: t.original } : {}),
+	}
 }
 
 function reject(f: unknown, reason: string): RejectedFinding {

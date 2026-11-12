@@ -146,7 +146,7 @@ export function RaisedBeforeNote({ r, thread }: { r: RaisedBefore; thread: Discu
 	const by = thread?.comments[0]?.author
 	return (
 		<div className={`discussed-note raised-note small ${r.outcome}`}>
-			<b>Raised before on GitHub:</b>{' '}
+			<b>{r.original ? `Raised on #${r.original}, which this pull request takes over:` : 'Raised before on GitHub:'}</b>{' '}
 			{url ? (
 				<a href={url} target="_blank" rel="noreferrer" title="Open the thread on GitHub">
 					{by ? `${by}’s thread` : 'a thread'}

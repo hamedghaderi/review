@@ -98,11 +98,12 @@ import {
 	readPatchBetween,
 	readRepo,
 	resolveBranchTarget,
+	changesOf,
 	sharedCommits,
 	shortRef,
 	type ComparisonData,
 } from './git.ts'
-import { findTakeover } from './takeover.ts'
+import { findTakeover, takeoverFact } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
@@ -199,6 +200,7 @@ export class ReviewService {
 	private repos = new Map<string, RepoInfo>()
 	private comparisons = new Map<string, ComparisonData>()
 	private driftTips = new Map<string, string>() // by review: the base branch head a run read, for the lookups' "tip" version
+	private takeoverHeads = new Map<string, string>() // by review: the head of the pull request it takes over, for version "original"
 	// Commits opened on their own (parent..sha), most recent last; only the diff reads use them.
 	private commitViews = new Map<string, ComparisonData>()
 	private commitMappers = new Map<string, Mapper>() // "commit view id>head sha" → its line map, which caches what it reads
@@ -459,11 +461,18 @@ export class ReviewService {
 		repoId: string,
 		reviewId: string,
 		signal: AbortSignal,
-	): Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; takeover: Takeover | null; notes: Array<string> }> {
+	): Promise<{
+		issues: Array<LinkedIssue>
+		discussion: Discussion | null
+		takeover: Takeover | null
+		takeoverFact: ContextFact | null
+		takeoverFiles: Array<string> // what the original changed, for checking where a dropped behaviour was
+		notes: Array<string>
+	}> {
 		const data = this.comparisons.get(reviewId)
 		const pr = data?.comparison.pr
 		const gh = this.github
-		if (!pr || !gh) return { issues: [], discussion: null, takeover: null, notes: [] }
+		if (!pr || !gh) return { issues: [], discussion: null, takeover: null, takeoverFact: null, takeoverFiles: [], notes: [] }
 		const notes: Array<string> = []
 		const takeover = findTakeover(
 			{ repo: pr.repo, number: pr.number, body: pr.body ?? '' },
@@ -504,7 +513,22 @@ export class ReviewService {
 			)
 		else if (original?.original.partial)
 			notes.push(`#${original.original.number}, which this pull request takes over: ${original.original.partial}`)
-		return { issues, discussion, takeover: original, notes }
+		this.takeoverHeads.delete(reviewId)
+		let changed: ContextFact | null = null
+		let files: Array<string> = []
+		if (original?.status === 'read') {
+			const o = original.original
+			const changes = await changesOf(data!.root, o.baseSha, o.headSha)
+			if (!changes)
+				notes.push(`What #${o.number} changed couldn't be read from Git, so the reviewer can't tell what this pull request drops from it.`)
+			else {
+				const here = new Set(data!.comparison.files.flatMap((f) => [f.oldPath, f.newPath]).filter((p): p is string => !!p))
+				changed = takeoverFact(o, changes, here)
+				files = changes.map((c) => c.path)
+				this.takeoverHeads.set(reviewId, o.headSha)
+			}
+		}
+		return { issues, discussion, takeover: original, takeoverFact: changed, takeoverFiles: files, notes }
 	}
 
 	attachAi(ai: AiController): void {
@@ -1828,6 +1852,7 @@ export class ReviewService {
 							baseSha: data.comparison.baseSha,
 							headSha: data.comparison.headSha,
 							tipSha: this.driftTips.get(reviewId) ?? null,
+							originalSha: this.takeoverHeads.get(reviewId) ?? null,
 						},
 						budget,
 						external,

@@ -6,9 +6,11 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { buildBackground, TAKEOVER_MAX } from '../src/main/ai/background.ts'
 import type { Activity, RawThread } from '../src/main/activity.ts'
-import { sharedCommits } from '../src/main/git.ts'
-import { findTakeover, takeoverRefs, type TakeoverDeps } from '../src/main/takeover.ts'
-import type { DiscussionComment, PrDetail, Takeover } from '../src/shared/types.ts'
+import { createReviewTools, shownLines } from '../src/main/ai/lookup.ts'
+import { changesOf, sharedCommits } from '../src/main/git.ts'
+import { findTakeover, originalLineUrl, takeoverFact, takeoverRefs, type TakeoverDeps } from '../src/main/takeover.ts'
+import { findingCommentBody } from '../src/shared/findings.ts'
+import type { DiscussionComment, Finding, PrDetail, Takeover, TakeoverOriginal } from '../src/shared/types.ts'
 
 test('takeover references: words name the original; every other number in this repository is only mentioned', () => {
 	const body = [
@@ -209,4 +211,88 @@ test('shared commits: the same commit and a rebased copy of one both count; a di
 	const other = commit('g.ts', 'g\n', 'Something else')
 	assert.equal(await sharedCommits(dir, { base, head: originalHead }, { base, head: other }), 0)
 	assert.equal(await sharedCommits(dir, { base, head: 'f'.repeat(40) }, { base, head }), null, 'not in this clone')
+})
+
+test('what the original changed: its files say which this one also changes, patches of the others first, cut to fit; lookups read its head', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-takeover-changes-'))
+	const git = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=Ann', '-c', 'user.email=a@a', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	git('init', '-q', '-b', 'main')
+	writeFileSync(join(dir, 'cart.ts'), 'export const total = 1\n')
+	writeFileSync(join(dir, 'gone.ts'), 'old\n')
+	git('add', '-A')
+	git('commit', '-qm', 'base')
+	const base = git('rev-parse', 'HEAD')
+	git('checkout', '-qb', 'original')
+	writeFileSync(join(dir, 'cart.ts'), 'export const total = 1\nexport const refunds = 2\n')
+	writeFileSync(join(dir, 'refund.ts'), 'export function refund() {}\n')
+	git('rm', '-q', 'gone.ts')
+	git('add', '-A')
+	git('commit', '-qm', 'Refunds')
+	const head = git('rev-parse', 'HEAD')
+
+	const changes = await changesOf(dir, base, head)
+	assert.deepEqual(
+		changes?.map((c) => [c.path, c.added, c.removed]),
+		[
+			['cart.ts', 1, 0],
+			['gone.ts', 0, 1],
+			['refund.ts', 1, 0],
+		],
+	)
+	assert.equal(await changesOf(dir, base, 'f'.repeat(40)), null)
+
+	const original = { number: 5 } as TakeoverOriginal
+	const fact = takeoverFact(original, changes!, new Set(['cart.ts']))!
+	assert.equal(fact.kind, 'takeover')
+	assert.match(fact.title, /^What #5 changed/)
+	assert.match(
+		fact.text,
+		/^#5 changed 3 files:\n- gone\.ts \(\+0 -1\) \[not changed here\]\n- refund\.ts \(\+1 -0\) \[not changed here\]\n- cart\.ts \(\+1 -0\) \[also changed here\]/,
+	)
+	assert.ok(fact.text.indexOf('+export function refund') < fact.text.indexOf('+export const refunds'), 'files left alone first')
+	const small = takeoverFact(original, changes!, new Set(['cart.ts']), 400)!
+	assert.match(small.text, /patches not shown: over the size limit; read them with version "original"/)
+	assert.equal(takeoverFact(original, [], new Set()), null)
+
+	const budget = { maxCalls: 5, maxChars: 10_000 }
+	const read = { path: 'refund.ts', version: 'original', start_line: null, end_line: null }
+	const r = await createReviewTools({ root: dir, baseSha: base, headSha: base, originalSha: head }, budget).call(
+		'read_file',
+		read,
+		new AbortController().signal,
+	)
+	assert.match(r.text, /^refund\.ts \(original\), lines 1-1 of 1:\n1 \| export function refund\(\) \{\}/)
+	assert.deepEqual(shownLines('read_file', r.text), [{ path: 'refund.ts', version: 'original', start: 1, end: 1 }])
+	const none = await createReviewTools({ root: dir, baseSha: base, headSha: base }, budget).call(
+		'read_file',
+		read,
+		new AbortController().signal,
+	)
+	assert.match(none.text, /takes over no other one that could be read/)
+	assert.equal(originalLineUrl({ repo: 'o/r', headSha: head }, 'src/a b.ts', 4), `https://github.com/o/r/blob/${head}/src/a%20b.ts#L4`)
+})
+
+test('a comment following up a thread on the original says where that thread is', () => {
+	const f = {
+		severity: 'should_fix',
+		category: 'bug',
+		title: 't',
+		body: 'Refunds still add.',
+		raisedBefore: {
+			threadId: 'x',
+			url: 'https://github.com/o/r/pull/5#r1',
+			path: 'a.ts',
+			outcome: 'unanswered',
+			whyAgain: 'w',
+			original: 5,
+		},
+	} as unknown as Finding
+	assert.match(
+		findingCommentBody(f),
+		/Follows up on \[a thread on #5\]\(https:\/\/github\.com\/o\/r\/pull\/5#r1\), which this pull request takes over\./,
+	)
 })

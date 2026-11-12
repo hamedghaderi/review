@@ -192,7 +192,12 @@ export function findingCommentBody(f: Finding, mark: string | null = null): stri
 			'\n',
 		)
 	const parts = [levelLine(f), ...(mark ? [mark] : []), f.body]
-	if (f.raisedBefore?.url) parts.push(`Follows up on [an earlier thread](${f.raisedBefore.url}).`)
+	if (f.raisedBefore?.url)
+		parts.push(
+			f.raisedBefore.original
+				? `Follows up on [a thread on #${f.raisedBefore.original}](${f.raisedBefore.url}), which this pull request takes over.`
+				: `Follows up on [an earlier thread](${f.raisedBefore.url}).`,
+		)
 	if (f.alsoAt?.length)
 		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
 	if (f.disproof) parts.push(`**How to check this is wrong:** ${f.disproof}`)

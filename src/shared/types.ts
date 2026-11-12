@@ -873,12 +873,15 @@ export interface TakeoverOriginal {
 	association: string | null
 	how: 'words' | 'commits' // what showed it is a takeover
 	shared: number | null // this pull request's commits that are the original's (same commit or same patch); null: not compared
+	baseSha: string
+	headSha: string // what read_file version "original" reads, and what a dropped behaviour links to
 	threads: Array<TakeoverThread> // review threads still open there: not resolved, not outdated
 	threadsLeft: number // open threads not read (GitHub returned only part of the discussion)
 	partial: string | null // why its discussion is missing or incomplete; the description was still read
 }
 
 export interface TakeoverThread {
+	id: string // the GitHub thread id
 	path: string
 	line: number | null // on the original's own diff
 	url: string | null
@@ -1242,6 +1245,7 @@ export interface RaisedBefore {
 	outcome: RaisedOutcome
 	whyAgain: string
 	settled?: boolean // someone with write access other than the PR author answered or resolved it (false on automatic reviews)
+	original?: number // the thread is on this pull request, which the reviewed one takes over (issue #168)
 }
 
 /** A message a CI tool attached to lines of the head commit (lint, type check, test failure), as GitHub reports it. */
@@ -1444,8 +1448,19 @@ export interface AiRunCoverage {
 	inputChars: number
 	// Code outside the change sent as read-only reference (definitions and uses); absent on older runs.
 	related?: { symbols: number; sent: number; chars: number; omitted: number; notes: Array<string> } | null
-	facts?: Array<{ kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift'; text: string }> // what the app computed or read for the reviewer; absent on older runs
+	facts?: Array<{
+		kind: 'background' | 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
+		text: string
+	}> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
+}
+
+/** Something the pull request a takeover replaces did, at a place in that pull request's head, that the takeover no longer does. */
+export interface DroppedBehaviour {
+	path: string // in the original's head
+	line: number
+	what: string
+	url: string // the line on GitHub, at the original's head
 }
 
 export interface OutdatedDoc {
@@ -1729,6 +1744,8 @@ export interface AiRun {
 	levels?: Array<FindingLevel> // levels the reviewer was allowed to use; absent on older runs (the first three)
 	unexplained?: Array<{ fileKey: string; why: string }> // changed files the reviewer could not connect to the change's purpose
 	outdatedDocs?: Array<OutdatedDoc> // project docs (.review/*.md) the change makes wrong without updating them
+	takeover?: { repo: string; number: number; url: string; headSha: string } | null // the pull request this one takes over, when it was read
+	dropped?: Array<DroppedBehaviour> // what that pull request did that this one no longer does (issue #168); never a finding
 	ciUncovered?: Array<CiAnnotation> // CI failures and warnings on added lines that no finding is near
 	earlier?: EarlierLimitations | null // what an earlier run could not settle, given to this run to settle first
 	verification?: { total: number; done: number; failed: number } | null // double-checks of blocking findings

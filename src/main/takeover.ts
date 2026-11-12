@@ -1,6 +1,7 @@
 import type { PrDetail, Takeover, TakeoverOriginal } from '../shared/types.ts'
 import type { Activity } from './activity.ts'
 import { issueRefs } from './ai/background.ts'
+import type { ContextFact } from './ai/context.ts'
 
 /** At most this many pull requests the description only mentions are compared by commits. */
 const MAX_MENTIONED = 3
@@ -89,12 +90,15 @@ async function readOriginal(
 		association: d.authorAssociation ?? null,
 		how,
 		shared,
+		baseSha: d.baseSha,
+		headSha: d.headSha,
 	}
 	try {
 		const a = await deps.activity(d.number)
 		const threads = a.threads
 			.filter((t) => !t.outdated && t.resolved !== true && t.comments.some((c) => !c.pending && c.body.trim()))
 			.map((t) => ({
+				id: t.id,
 				path: t.path,
 				line: t.originalLine ?? t.line,
 				url: t.url,
@@ -108,3 +112,52 @@ async function readOriginal(
 }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+export const TAKEOVER_CHANGES_MAX = 6000 // the original's changes, sent with every request
+
+/**
+ * What the original changed, for the reviewer to find behaviour this pull request drops: its files, saying which ones
+ * this pull request also changes, then their patches, the files this one leaves alone first (whatever the original did
+ * there is gone unless it moved), each cut to an even share of the budget. Its code can be read with version "original".
+ */
+export function takeoverFact(
+	o: TakeoverOriginal,
+	changes: Array<{ path: string; added: number; removed: number; patch: string }>,
+	changedHere: ReadonlySet<string>,
+	budget = TAKEOVER_CHANGES_MAX,
+): ContextFact | null {
+	if (!changes.length) return null
+	const ordered = [...changes].sort((a, b) => Number(changedHere.has(a.path)) - Number(changedHere.has(b.path)))
+	const list = ordered.map(
+		(c) => `- ${c.path} (+${c.added} -${c.removed}) [${changedHere.has(c.path) ? 'also changed here' : 'not changed here'}]`,
+	)
+	let room = Math.max(0, budget - list.join('\n').length - 200)
+	const patches: Array<string> = []
+	ordered.forEach((c, i) => {
+		const share = Math.floor(room / (ordered.length - i))
+		const text = c.patch.length > share ? `${c.patch.slice(0, Math.max(0, share - 40))}\n… [rest of this file's patch cut]` : c.patch
+		if (share < 120) return
+		patches.push(text.trimEnd())
+		room -= text.length
+	})
+	const left = ordered.length - patches.length
+	return {
+		kind: 'takeover',
+		title: `What #${o.number} changed (the pull request this one takes over; its head is version "original")`,
+		text: [
+			`#${o.number} changed ${changes.length} file${changes.length === 1 ? '' : 's'}:`,
+			...list,
+			'Its patches, the files this pull request does not change first:',
+			...patches,
+			...(left
+				? [`(${left} more file${left === 1 ? '' : 's'}' patches not shown: over the size limit; read them with version "original")`]
+				: []),
+		].join('\n'),
+		fileKeys: null,
+	}
+}
+
+/** The line in the original's head on GitHub. */
+export function originalLineUrl(o: { repo: string; headSha: string }, path: string, line: number): string {
+	return `https://github.com/${o.repo}/blob/${o.headSha}/${path.split('/').map(encodeURIComponent).join('/')}#L${line}`
+}

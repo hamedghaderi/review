@@ -73,7 +73,9 @@ export const modelFindingSchema = z.object({
 	evidence: z.string().describe('Verbatim source text copied from the cited lines, without line numbers or diff markers.'),
 	raised_before: z
 		.object({
-			thread_id: z.string().describe('The conversation thread that raised the same problem, e.g. "T2".'),
+			thread_id: z
+				.string()
+				.describe('The thread that raised the same problem: "T2" on this pull request, "O1" on the pull request it takes over.'),
 			outcome: z
 				.enum(RAISED_OUTCOMES)
 				.describe(
@@ -119,6 +121,18 @@ export const reviewOutputSchema = z.object({
 		.default([])
 		.describe(
 			'Project docs (.review/*.md, or the notes for AI agents sent as project context) that this change makes wrong without updating them. Empty if none.',
+		),
+	dropped_behaviour: z
+		.array(
+			z.object({
+				original_path: z.string().describe('The file in the pull request this one takes over, as its change list names it.'),
+				original_line: z.int().describe('The line in that pull request\'s head (version "original") that did it.'),
+				what: z.string().describe('One sentence: what that pull request did there that this change no longer does.'),
+			}),
+		)
+		.default([])
+		.describe(
+			'Only with the fact "What #N changed": behaviour the pull request this one takes over set out to deliver that this change drops. Empty if none.',
 		),
 })
 

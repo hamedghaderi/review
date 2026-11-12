@@ -986,7 +986,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-12.3')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-12.4')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -2817,6 +2817,127 @@ test('background: linked issues and the PR conversation reach the reviewer fence
 		{ kind: 'background', text: 'description; issue #12 (closes, 1 comment); conversation: 0 threads, 1 comment' },
 	)
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('a resolved thread or a reply saying "fixed" is not evidence'))
+})
+
+test('takeover: the reviewer is told how to use the original, follows up its open threads, and dropped behaviour must be in its files', async () => {
+	const s = sources()
+	s.comp.pr = {
+		repo: 'o/r',
+		number: 7,
+		title: 't',
+		url: 'u',
+		state: 'open',
+		baseRef: 'main',
+		headLabel: 'o:f',
+		baseSha: BASE,
+		headSha: HEAD,
+		body: 'Takes over #5',
+	}
+	const head = 'c'.repeat(40)
+	const original = {
+		repo: 'o/r',
+		number: 5,
+		url: 'https://github.com/o/r/pull/5',
+		title: 'Refunds',
+		state: 'closed',
+		body: 'Subtract refunds.',
+		author: 'alice',
+		association: 'MEMBER',
+		how: 'words' as const,
+		shared: 1,
+		baseSha: BASE,
+		headSha: head,
+		threads: [
+			{
+				id: 'PRRT_1',
+				path: 'src/app.ts',
+				line: 3,
+				url: 'https://github.com/o/r/pull/5#r1',
+				resolved: false,
+				comments: [
+					{
+						id: 'c1',
+						author: 'lead',
+						association: 'MEMBER',
+						body: 'This adds where it should subtract.',
+						bodyTruncated: false,
+						createdAt: null,
+						url: null,
+						pending: false,
+					},
+				],
+			},
+		],
+		threadsLeft: 0,
+		partial: null,
+	}
+	const fact = {
+		kind: 'takeover' as const,
+		title: 'What #5 changed (the pull request this one takes over; its head is version "original")',
+		text: '#5 changed 1 file:\n- src/refund.ts (+3 -0) [not changed here]',
+		fileKeys: null,
+	}
+	let instructions = ''
+	let input = ''
+	const { handle } = runWith(
+		(req) => {
+			instructions = req.instructions
+			input = req.input
+			return {
+				...out([finding({ raised_before: { thread_id: 'O1', outcome: 'unanswered', why_again: 'This change carries it over.' } })]),
+				dropped_behaviour: [
+					{ original_path: 'src/refund.ts', original_line: 2, what: 'Refunds were subtracted from the total.' },
+					{ original_path: 'src/elsewhere.ts', original_line: 1, what: 'Not a file #5 changed.' },
+				],
+			}
+		},
+		{},
+		s,
+		{
+			loadBackground: async () => ({
+				issues: [],
+				discussion: null,
+				takeover: { status: 'read', original },
+				takeoverFact: fact,
+				takeoverFiles: ['src/refund.ts'],
+				notes: [],
+			}),
+		},
+	)
+	const run = await handle.done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.match(instructions, /# The pull request this one takes over\n/)
+	assert.ok(input.includes('<<<TAKEOVER\no/r#5 [closed, named as taken over in the description]: Refunds'))
+	assert.ok(input.includes('Thread O1 on src/app.ts:3:'))
+	assert.ok(input.includes('What #5 changed'))
+	assert.deepEqual(run.findings[0].raisedBefore, {
+		threadId: 'PRRT_1',
+		url: 'https://github.com/o/r/pull/5#r1',
+		path: 'src/app.ts',
+		outcome: 'unanswered',
+		whyAgain: 'This change carries it over.',
+		settled: false,
+		original: 5,
+	})
+	assert.deepEqual(run.takeover, { repo: 'o/r', number: 5, url: 'https://github.com/o/r/pull/5', headSha: head })
+	assert.deepEqual(run.dropped, [
+		{
+			path: 'src/refund.ts',
+			line: 2,
+			what: 'Refunds were subtracted from the total.',
+			url: `https://github.com/o/r/blob/${head}/src/refund.ts#L2`,
+		},
+	])
+	assert.ok(run.coverage.facts?.some((f) => f.kind === 'takeover'))
+
+	// A review that takes nothing over pays nothing for it.
+	let plain = ''
+	await runWith((req) => {
+		plain = req.instructions
+		return out([])
+	}).handle.done
+	assert.ok(!plain.includes('# The pull request this one takes over'))
+	assert.ok(!REVIEWER_INSTRUCTIONS.includes('dropped_behaviour'))
 })
 
 test('background: when GitHub cannot be read, the run goes on with the description and says so', async () => {
