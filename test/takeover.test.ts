@@ -8,7 +8,8 @@ import { buildBackground, TAKEOVER_MAX } from '../src/main/ai/background.ts'
 import type { Activity, RawThread } from '../src/main/activity.ts'
 import { createReviewTools, shownLines } from '../src/main/ai/lookup.ts'
 import { changesOf, sharedCommits } from '../src/main/git.ts'
-import { findTakeover, originalLineUrl, takeoverFact, takeoverRefs, type TakeoverDeps } from '../src/main/takeover.ts'
+import type { PrCommit } from '../src/main/github.ts'
+import { findTakeover, originalLineUrl, takeoverFact, takeoverRefs, uncreditedAuthors, type TakeoverDeps } from '../src/main/takeover.ts'
 import { findingCommentBody } from '../src/shared/findings.ts'
 import type { DiscussionComment, Finding, PrDetail, Takeover, TakeoverOriginal } from '../src/shared/types.ts'
 
@@ -295,4 +296,29 @@ test('a comment following up a thread on the original says where that thread is'
 		findingCommentBody(f),
 		/Follows up on \[a thread on #5\]\(https:\/\/github\.com\/o\/r\/pull\/5#r1\), which this pull request takes over\./,
 	)
+})
+
+test('credit: original authors are credited by a commit here, a Co-authored-by email or their noreply address; logins only, bots left out', () => {
+	const c = (login: string | null, email: string | null, message = 'm', bot = false): PrCommit => ({ sha: 's', login, email, message, bot })
+	const original = [
+		c('alice', 'alice@work.example'),
+		c('bob', 'bob@home.example'),
+		c('carol', 'carol@x.example'),
+		c('Dave', 'dave@x.example'),
+		c(null, 'nobody@x.example'), // no GitHub account linked: never guessed
+		c('renovate', 'bot@x.example', 'm', true),
+		c('Erin', 'erin@x.example'),
+		c('alice', 'alice@other.example'),
+	]
+	const ours = [
+		c('bob', 'bob@new.example', 'Finish refunds'),
+		c(
+			'frank',
+			'f@x.example',
+			'Port the cart\n\nCo-authored-by: Alice A <ALICE@other.example>\nCo-authored-by: Carol <12345+carol@users.noreply.github.com>',
+		),
+		c('frank', 'f@x.example', 'co-authored-by: Dave <dave@users.noreply.github.com>'),
+	]
+	assert.deepEqual(uncreditedAuthors(original, ours), ['Erin'])
+	assert.deepEqual(uncreditedAuthors(original, []), ['alice', 'bob', 'carol', 'Dave', 'Erin'])
 })

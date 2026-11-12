@@ -889,6 +889,16 @@ export interface TakeoverThread {
 	comments: Array<DiscussionComment>
 }
 
+/** The pull request a takeover replaces, for the PR info (issue #168). Never posted. */
+export interface TakeoverInfo {
+	number: number
+	url: string
+	title: string | null // null when it couldn't be read
+	how: 'words' | 'commits'
+	unreadable: string | null // why it couldn't be read
+	uncredited: Array<string> | null // GitHub logins of the original's commit authors not credited here; null: not checked
+}
+
 export type Takeover =
 	{ status: 'read'; original: TakeoverOriginal } | { status: 'unreadable'; repo: string; number: number; how: 'words'; reason: string }
 
@@ -2038,6 +2048,7 @@ export const IPC = {
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
 	baseDrift: 'gh:base-drift',
+	takeoverInfo: 'gh:takeover-info',
 	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
@@ -2235,6 +2246,8 @@ export interface ReviewApi {
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
 	baseDrift(repoId: string, reviewId: string): Promise<Result<BaseDrift>>
+	/** The pull request this one takes over and whose work it doesn't credit (issue #168); null: it takes none over. */
+	takeoverInfo(repoId: string, reviewId: string): Promise<Result<TakeoverInfo | null>>
 	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>

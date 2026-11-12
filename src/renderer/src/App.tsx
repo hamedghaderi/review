@@ -7,6 +7,7 @@ import type {
 	AutoReviewRecord,
 	AutoRound,
 	BaseDrift,
+	TakeoverInfo,
 	AiSettingsView,
 	AiStartScope,
 	IncrementalOffer,
@@ -775,6 +776,17 @@ export function App() {
 		const id = comparison.id
 		void window.review.baseDrift(session.repo.id, id).then((r) => {
 			if (r.ok && comparisonIdRef.current === id) setDrift({ reviewId: id, value: r.value })
+		})
+	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// The pull request this one takes over, and whose work on it isn't credited here (issue #168), once per snapshot.
+	const [takeover, setTakeover] = useState<{ reviewId: string; value: TakeoverInfo } | null>(null)
+	useEffect(() => {
+		setTakeover(null)
+		if (!session || !comparison?.pr) return
+		const id = comparison.id
+		void window.review.takeoverInfo(session.repo.id, id).then((r) => {
+			if (r.ok && r.value && comparisonIdRef.current === id) setTakeover({ reviewId: id, value: r.value })
 		})
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2025,6 +2037,7 @@ export function App() {
 							{view === 'review' && comparison && drift?.reviewId === comparison.id && (
 								<DriftBanner drift={drift.value} open={driftOpen} onToggle={() => setDriftOpen((x) => !x)} />
 							)}
+							{view === 'review' && comparison && takeover?.reviewId === comparison.id && <TakeoverBanner info={takeover.value} />}
 							{view === 'review' && comparison?.pr && autoRecord?.rounds ? <FollowUpBanner record={autoRecord} /> : null}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
@@ -2710,6 +2723,35 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
 					{more > 0 && <li className="muted">and {more} more</li>}
 				</ul>
 			)}
+		</div>
+	)
+}
+
+/**
+ * "Takes over #12: Refunds", and the original's commit authors this pull request doesn't credit, as GitHub reports their
+ * logins (no @, so nothing reads as a mention). A fact for you, never posted.
+ */
+function TakeoverBanner({ info: t }: { info: TakeoverInfo }) {
+	return (
+		<div className="banner" role="status">
+			<span>
+				Takes over{' '}
+				<a href={t.url} target="_blank" rel="noreferrer">
+					#{t.number}
+				</a>
+				{t.title ? `: ${t.title}` : ''}
+				{t.how === 'commits' ? (
+					<span className="muted"> (mentioned in the description, and it carries that pull request's commits)</span>
+				) : null}
+				{t.unreadable ? <span className="muted">. It couldn’t be read: {t.unreadable}</span> : '.'}
+				{t.uncredited?.length ? (
+					<>
+						{' '}
+						<strong>Original authors not credited: {t.uncredited.join(', ')}.</strong>{' '}
+						<span className="muted">Neither a commit here nor a Co-authored-by line names them.</span>
+					</>
+				) : null}
+			</span>
 		</div>
 	)
 }
