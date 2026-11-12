@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-12.1'
+export const PROMPT_VERSION = 'reviewer-2026-11-12.2'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -139,7 +139,7 @@ export const DEFAULT_LEVELS: Array<FindingLevel> = ['blocking', 'should_fix', 'q
 
 const LEVEL_RULES: Record<FindingLevel, string> = {
 	blocking:
-		'"blocking": you can name a check that would prove the concern false. Put it in "disproof": the smallest concrete check (preferably a test the author can run) that tests the same result, in the same place, that the body\'s first sentence describes. If you cannot name one, it is not blocking. Never invent a check.',
+		'"blocking": needs both. (1) Reach: it breaks the case this change is for (judged from the description, the issues it closes or mentions, and the diff) or a path its callers commonly use. Set "reach" to "pr-case" or "common-path" and name that case or caller in "note"; with no description, also say there what you took the change to be for. (2) A check that would prove the concern false, in "disproof": the smallest concrete check (preferably a test the author can run) that tests the same result, in the same place, that the body\'s first sentence describes. Never invent a check. A problem that needs a rare path or another case is "should_fix" at most ("nit" for a small cost or extra compatibility), and its body says in one sentence why it does not block. Except: a security problem, or one that loses, corrupts or leaks data, blocks on any path ("rare-path", the condition in "note", "loses_data" true for data).',
 	should_fix: '"should_fix": a real problem you cannot or need not settle with a check.',
 	question:
 		'"question": the problem exists only if one fact holds that the supplied code does not show and only the author knows (for example whether a component can be removed from the page, or whether a value can be empty). Say what you assumed and what goes wrong if it holds, then end with that one question. Only for a fact outside the supplied code: never to avoid deciding what the supplied code shows. Also use it for a specific problem you suspect on changed lines but could not finish tracing, because the code that decides it is outside the repository or your lookups ran out: name the changed line, what goes wrong if the suspicion holds and what you could not read, then ask the one question that settles it ("Should the order\'s payment record be cancelled here too?").',
@@ -162,7 +162,7 @@ export function severitySection(levels: ReadonlyArray<FindingLevel>): string {
 	return [
 		'# Severity',
 		`Use only these levels: ${on.map((l) => `"${l}"`).join(', ')}.${off.length ? ` The others (${off.map((l) => `"${l}"`).join(', ')}) are turned off: do not use them, and do not report a finding that only fits one of them.` : ''}`,
-		...on.map((l) => `- ${LEVEL_RULES[l]}${l === 'blocking' ? '' : ' "disproof" is null.'}`),
+		...on.map((l) => `- ${LEVEL_RULES[l]}${l === 'blocking' ? '' : ' "disproof" and "reach" are null.'}`),
 		residue
 			? `Residue and "misleading-name" are always "${residue}".`
 			: 'Residue and "misleading-name" findings are turned off: report them only as near misses.',

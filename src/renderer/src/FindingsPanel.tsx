@@ -37,6 +37,8 @@ import type {
 	Review,
 	ReviewRule,
 	RuleEvaluation,
+	Reach,
+	ReachVerdict,
 	Severity,
 	StoredRule,
 } from '../../shared/types.ts'
@@ -1510,6 +1512,12 @@ function Verification({ v, by, sameModel, level }: { v: FindingVerification; by:
 					It <RefText text={unreadText(v.unread)} />.
 				</span>
 			) : null}
+			{!v.error && v.reach ? (
+				<>
+					{' '}
+					<b>Reach {REACH_VERDICT_WORD[v.reach.verdict]}:</b> <RefText text={v.reach.note} />
+				</>
+			) : null}
 			{!v.error && v.level && v.verdict !== 'wrong' && v.level !== level ? ` Suggested level: ${LEVEL_META[v.level].label}.` : ''}
 			{v.checked.length ? <span className="muted"> Read: {v.checked.join(', ')}.</span> : null}
 			{v.earlier?.length ? (
@@ -1520,6 +1528,14 @@ function Verification({ v, by, sameModel, level }: { v: FindingVerification; by:
 		</div>
 	)
 }
+
+const REACH_LABEL: Record<Reach, string> = {
+	'pr-case': 'the case this change is for',
+	'common-path': 'a path its callers commonly use',
+	'rare-path': 'a rare path or another case',
+}
+
+const REACH_VERDICT_WORD: Record<ReachVerdict, string> = { confirmed: 'confirmed', rare: 'rare', unsure: 'not confirmed' }
 
 function FindingCard(p: CardProps) {
 	const { finding: f, state, fixture, team, discussed, selected, onOpen, onAccept, onDismiss, onRestore } = p
@@ -1624,6 +1640,12 @@ function FindingCard(p: CardProps) {
 					{f.disproof && (
 						<p className="small">
 							<b>Would prove it wrong:</b> <RefText text={f.disproof} />
+						</p>
+					)}
+					{f.reach && (
+						<p className="small">
+							<b>Reaches:</b> {REACH_LABEL[f.reach.path]}
+							{f.reach.losesData ? ', and loses or leaks data' : ''}. <RefText text={f.reach.note} />
 						</p>
 					)}
 					{f.background && (

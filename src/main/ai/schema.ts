@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { FINDING_LEVELS, RAISED_OUTCOMES, REVIEW_RULES, TEST_PATTERNS } from '../../shared/types.ts'
+import { FINDING_LEVELS, RAISED_OUTCOMES, REACH_VERDICTS, REACHES, REVIEW_RULES, TEST_PATTERNS } from '../../shared/types.ts'
 
 // Runtime validation schema. Length, content and budget limits are enforced afterwards in findings.ts.
 // `default` is stripped from the wire schema (strict modes reject it); it only lets validation accept answers without the field.
@@ -46,6 +46,23 @@ export const modelFindingSchema = z.object({
 		.nullable()
 		.default(null)
 		.describe('For severity "blocking": the smallest concrete check that would prove this concern false. Otherwise null.'),
+	reach: z
+		.object({
+			path: z
+				.enum(REACHES)
+				.describe(
+					'"pr-case": it breaks what this change is for. "common-path": a path its callers commonly use. "rare-path": a rare path or another case.',
+				),
+			note: z
+				.string()
+				.describe(
+					'One sentence: the case or caller it breaks, or for "rare-path" the condition it needs. Say what you took the purpose of the change to be when the description does not state it.',
+				),
+			loses_data: z.boolean().describe('True when the problem loses, corrupts or leaks data.'),
+		})
+		.nullable()
+		.default(null)
+		.describe('For severity "blocking": who the problem reaches. Otherwise null.'),
 	background: z
 		.string()
 		.nullable()
@@ -236,6 +253,18 @@ export const verifySchema = z.object({
 	reason: z.string().describe('One to three sentences naming the files and lines that decide it.'),
 	level: z.enum(FINDING_LEVELS).nullable().describe('The level you would give the finding now, or null if it is wrong.'),
 	checked: z.array(z.string()).describe('Files and line ranges read to decide, like "src/cart.ts:12-30".'),
+	reach: z
+		.object({
+			verdict: z
+				.enum(REACH_VERDICTS)
+				.describe(
+					'"confirmed": you traced that it hits the case the change is for, or a path its callers commonly use. "rare": it only happens on a rare path or another case. "unsure": the code read does not settle it.',
+				),
+			note: z.string().describe('One sentence naming the case, the caller or the condition, with file and line.'),
+		})
+		.nullable()
+		.default(null)
+		.describe('Only when the instructions ask about reach. Otherwise null.'),
 })
 export type ModelVerification = z.infer<typeof verifySchema>
 export const VERIFY_SCHEMA_NAME = 'finding_verification'

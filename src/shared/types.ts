@@ -881,6 +881,21 @@ export interface PublishOutcome {
 // high / medium / low on older runs.
 export type Severity = FindingLevel | 'high' | 'medium' | 'low'
 
+/**
+ * Who a blocking finding's problem reaches. Blocking needs the change's own case or a path callers commonly use; a
+ * rare path or another case is should fix at most, unless it is a security problem or loses, corrupts or leaks data.
+ */
+export const REACHES = ['pr-case', 'common-path', 'rare-path'] as const
+export type Reach = (typeof REACHES)[number]
+export interface FindingReach {
+	path: Reach
+	note: string // the case or caller it breaks, or the condition a rare path needs; the assumed purpose when none was stated
+	losesData: boolean
+}
+/** What the double-check made of a blocking finding's reach; anything but "confirmed" lowers it to should fix. */
+export const REACH_VERDICTS = ['confirmed', 'rare', 'unsure'] as const
+export type ReachVerdict = (typeof REACH_VERDICTS)[number]
+
 /** The levels a reviewer can give a finding, most severe first. Which ones a run uses is a setting. */
 export const FINDING_LEVELS = ['blocking', 'should_fix', 'question', 'suggestion', 'nit', 'fyi', 'pre_existing'] as const
 export type FindingLevel = (typeof FINDING_LEVELS)[number]
@@ -1153,6 +1168,7 @@ export interface Finding {
 	body?: string // result first, then explanation, evidence and one action
 	reasoning?: string // one sentence: why it was flagged
 	disproof?: string | null // blocking only: the smallest check that would prove it false
+	reach?: FindingReach | null // blocking as raised (since reviewer-2026-11-12.2): who the problem reaches
 	background?: string | null // context needed to follow it, when the hunk alone is not enough
 	adjusted?: string | null // what the app changed, e.g. blocking lowered for lack of a disproof
 	support?: Array<FindingSupport> // evidence the app found after the review (CI messages on these lines, tests); absent on older runs
@@ -1241,6 +1257,7 @@ export interface FindingVerification {
 	verdict: 'holds' | 'wrong' | 'unsure'
 	reason: string
 	level: FindingLevel | null // the level the check would give it now
+	reach?: { verdict: ReachVerdict; note: string } | null // blocking findings: whether the check could confirm the reach
 	checked: Array<string> // what it read, e.g. "src/cart.ts:12-30"
 	model: string
 	memberId?: string | null // team runs: the member that checked it, another one than raised it when the team has one

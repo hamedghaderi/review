@@ -125,7 +125,7 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 export function defaultScript(request: ProviderRequest): ReviewOutput | ModelAnswer | ModelVerification | ModelGroups {
 	if (request.schema?.name === MERGE_SCHEMA_NAME) return { groups: [] }
 	if (request.schema?.name === VERIFY_SCHEMA_NAME)
-		return { verdict: 'unsure', reason: 'Fixture: the finding was not checked.', level: null, checked: [] }
+		return { verdict: 'unsure', reason: 'Fixture: the finding was not checked.', level: null, checked: [], reach: null }
 	if (request.schema?.name === ANSWER_SCHEMA_NAME)
 		return { answer: 'Fixture answer. It does not read the question or the code.', verdict: 'unsure', level: null }
 	if (request.schema?.name === COMMIT_CHECK_SCHEMA_NAME) {
@@ -157,6 +157,7 @@ export function defaultScript(request: ProviderRequest): ReviewOutput | ModelAns
 			body: 'Deterministic fixture output. It marks the first changed line of each excerpt and makes no claim about the code. Dismiss it, or add it to the review to test the comment workflow.',
 			reasoning: 'Fixture: marks the first changed line.',
 			disproof: null,
+			reach: null,
 			background: null,
 			evidence: line.text.trim(),
 			raised_before: null,

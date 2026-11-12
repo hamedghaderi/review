@@ -135,6 +135,7 @@ function finding(over: Partial<ModelFinding> = {}): ModelFinding {
 		body: 'Balances can come out wrong: add() now adds where callers expect it to subtract. Restore the subtraction or rename the function.',
 		reasoning: 'The operator changed from - to + on a changed line.',
 		disproof: 'Call add(5, 3) and check it still returns 2.',
+		reach: { path: 'pr-case', note: 'Every balance this change computes goes through add().', loses_data: false },
 		background: null,
 		evidence: 'return a + b',
 		raised_before: null,
@@ -985,7 +986,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-12.1')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-12.2')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -2407,7 +2408,7 @@ test('double-check: each blocking finding gets a request that tries to prove it 
 	assert.equal(by('Addition replaces subtraction').verification?.level, null)
 	assert.equal(by('The token is no longer checked').verification?.verdict, 'holds')
 	assert.equal(by('Comment above no longer matches the code').verification, undefined)
-	assert.equal(by('Addition replaces subtraction').severity, 'blocking', 'the double-check never changes a finding')
+	assert.equal(by('Addition replaces subtraction').severity, 'blocking', 'a likely-wrong verdict leaves the level alone')
 
 	const ops = await import('../src/renderer/src/reviewOps.ts')
 	const added = ops.autoAddFindings(emptyReview(), run, [run], findingRoots([run]), ['blocking', 'should_fix'])
@@ -2415,6 +2416,113 @@ test('double-check: each blocking finding gets a request that tries to prove it 
 		'Comment above no longer matches the code',
 		'The token is no longer checked',
 	])
+})
+
+test('double-check: a blocking finding whose reach it cannot confirm becomes should fix and says why; security keeps blocking', async () => {
+	const s = sources()
+	const checks: Array<{ instructions: string; input: string }> = []
+	const provider = createFakeProvider({
+		script: (req) => {
+			if (req.schema?.name === 'finding_verification') {
+				checks.push({ instructions: req.instructions, input: req.input })
+				return {
+					verdict: 'holds',
+					reason: 'add() returns a + b at src/app.ts line 3.',
+					level: 'blocking',
+					checked: ['src/app.ts:1-8'],
+					reach: req.input.includes('Title: Confirmed reach')
+						? { verdict: 'confirmed', note: 'Checkout calls add() on every order, src/app.ts line 7.' }
+						: { verdict: 'unsure', note: 'No caller of add() was found in the code read.' },
+				}
+			}
+			return out([
+				finding(),
+				finding({ title: 'Confirmed reach', start_line: 3, end_line: 3 }),
+				finding({
+					excerpt_id: 'E2',
+					file_path: 'src/gone.ts',
+					side: 'old',
+					start_line: 2,
+					end_line: 2,
+					category: 'security',
+					title: 'The token is no longer checked',
+					evidence: 'check(token)',
+				}),
+			])
+		},
+	})
+	const run = await startRun(
+		{ reviewId: s.comp.id, comparison: s.comp, scope: { kind: 'all' }, loadSources: async () => s.srcs, previousFindings: [] },
+		options(provider, { limits: { ...LIMITS, verify: true } }),
+		() => {},
+	).done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.match(checks[0].instructions, /# Reach\n/)
+	assert.match(checks[0].input, /Reach: the case this change is for\. Every balance this change computes goes through add\(\)\./)
+	const by = (t: string) => run.findings.find((f) => f.title === t)!
+	const lowered = by('Addition replaces subtraction')
+	assert.equal(lowered.severity, 'should_fix')
+	assert.match(
+		lowered.adjusted!,
+		/^Lowered to should fix: the double-check could not confirm .* \(No caller of add\(\) was found in the code read\)\.$/,
+	)
+	assert.equal(lowered.disproof, 'Call add(5, 3) and check it still returns 2.', 'kept, for whoever raises it back')
+	assert.equal(by('Confirmed reach').severity, 'blocking')
+	assert.equal(by('The token is no longer checked').severity, 'blocking', 'security blocks on any path')
+	assert.equal(by('The token is no longer checked').verification?.reach?.verdict, 'unsure')
+})
+
+test("reach: blocking needs the change's own case or a common path; a rare path is should fix unless it is security or loses data", async () => {
+	const { comp, srcs } = sources()
+	const batch = buildContext(comp, srcs, LIMITS).batches[0]
+	const rare = { path: 'rare-path' as const, note: 'Only when the list is empty and the cache is cold.', loses_data: false }
+	const validate = (levels?: Array<'blocking' | 'nit'>) =>
+		validateBatchOutput(
+			out([
+				finding({ title: 'Own case' }),
+				finding({ title: 'Rare path', reach: rare }),
+				finding({ title: 'Rare but security', category: 'security', reach: rare }),
+				finding({ title: 'Rare but loses data', reach: { ...rare, loses_data: true } }),
+				finding({ title: 'No reach', reach: null }),
+			]),
+			batch,
+			comp,
+			'r',
+			undefined,
+			levels,
+		)
+	const r = validate()
+	const by = (t: string) => r.findings.find((f) => f.title === t)!
+	assert.deepEqual(
+		r.findings.map((f) => [f.title, f.severity]),
+		[
+			['Own case', 'blocking'],
+			['Rare path', 'should_fix'],
+			['Rare but security', 'blocking'],
+			['Rare but loses data', 'blocking'],
+			['No reach', 'should_fix'],
+		],
+	)
+	assert.equal(
+		by('Rare path').adjusted,
+		'Lowered to should fix: it needs a rare path or another case (Only when the list is empty and the cache is cold), not the case this change is for or a path its callers commonly use.',
+	)
+	assert.deepEqual(by('Rare path').reach, {
+		path: 'rare-path',
+		note: 'Only when the list is empty and the cache is cold.',
+		losesData: false,
+	})
+	assert.equal(by('Rare path').disproof, 'Call add(5, 3) and check it still returns 2.')
+	assert.match(by('No reach').adjusted!, /needs to say who it reaches/)
+	assert.equal(by('No reach').disproof, null)
+	assert.equal(by('Own case').adjusted, null)
+	// Reach changes the level, never whether it is reported: with should fix off, a rare path stays blocking.
+	assert.deepEqual(
+		validate(['blocking', 'nit']).findings.map((f) => f.severity),
+		['blocking', 'blocking', 'blocking', 'blocking', 'blocking'],
+	)
+	assert.equal(r.findings.find((f) => f.title === 'Own case')!.reach?.path, 'pr-case')
+	assert.ok(REVIEWER_INSTRUCTIONS.includes('"disproof" and "reach" are null.'))
 })
 
 test('double-check: a check that fails is recorded as not checked, and the review still completes', async () => {
