@@ -4,6 +4,7 @@ import { maskLeaks } from '../../shared/leaks.ts'
 import { ago } from './branches.ts'
 import type {
 	AiRun,
+	BaseDrift,
 	AiSettingsView,
 	AiStartScope,
 	IncrementalOffer,
@@ -745,6 +746,19 @@ export function App() {
 	useEffect(() => {
 		if (session && comparison?.pr) loadDiscussion(session.repo.id, comparison.id)
 		else setDiscussion(null)
+	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// What landed on the base branch since the pull request branched off (issue #165), read once per snapshot opened.
+	const [drift, setDrift] = useState<{ reviewId: string; value: BaseDrift } | null>(null)
+	const [driftOpen, setDriftOpen] = useState(false)
+	useEffect(() => {
+		setDrift(null)
+		setDriftOpen(false)
+		if (!session || !comparison?.pr) return
+		const id = comparison.id
+		void window.review.baseDrift(session.repo.id, id).then((r) => {
+			if (r.ok && comparisonIdRef.current === id) setDrift({ reviewId: id, value: r.value })
+		})
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// A read that failed (offline, GitHub down) is tried again when the connection returns or the window regains focus.
@@ -1991,6 +2005,9 @@ export function App() {
 									</button>
 								</div>
 							)}
+							{view === 'review' && comparison && drift?.reviewId === comparison.id && (
+								<DriftBanner drift={drift.value} open={driftOpen} onToggle={() => setDriftOpen((x) => !x)} />
+							)}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
 									<span>
@@ -2626,6 +2643,55 @@ function ErrorState({ error, onOpen, onRetry, openLabel }: { error: AppError; on
 					{openLabel ?? 'Open another repository'}
 				</button>
 			</div>
+		</div>
+	)
+}
+
+/**
+ * What landed on the base branch since the pull request branched off, when any of it touches the pull request's files
+ * (issue #165). Facts only: which commits, and which of its files they touch. Git conflicts only on the same lines, so
+ * these are where it can merge cleanly and still not fit.
+ */
+function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boolean; onToggle(): void }) {
+	if (d.error && d.tip)
+		return (
+			<div className="banner" role="status">
+				<span className="muted">{d.error}</span>
+			</div>
+		)
+	if (!d.touching || d.behind === null) return null
+	const more = d.touching - d.commits.length
+	return (
+		<div className="banner drift-banner" role="status">
+			<div className="drift-head">
+				<span>
+					<strong>{d.baseRef}</strong> has {d.behind} new commit{d.behind === 1 ? '' : 's'} since this pull request branched off;{' '}
+					<strong>
+						{d.touching} touch{d.touching === 1 ? 'es' : ''} its files
+					</strong>
+					. Git only conflicts on the same lines, so check that it still fits. CI on this pull request may not have run with them.
+				</span>
+				<span className="spacer" />
+				<button className="btn small" onClick={onToggle} aria-expanded={open}>
+					{open ? 'Hide' : 'Show'}
+				</button>
+			</div>
+			{open && (
+				<ul className="drift-list small">
+					{d.commits.map((c) => (
+						<li key={c.sha}>
+							<a className="mono" href={d.url ? `${d.url}/commit/${c.sha}` : undefined} target="_blank" rel="noreferrer">
+								{c.sha.slice(0, 7)}
+							</a>{' '}
+							{c.subject}{' '}
+							<span className="muted">
+								· {c.author}, {c.at.slice(0, 10)} · {c.files.join(', ')}
+							</span>
+						</li>
+					))}
+					{more > 0 && <li className="muted">and {more} more</li>}
+				</ul>
+			)}
 		</div>
 	)
 }

@@ -398,6 +398,7 @@ function registerIpc(): void {
 	handle(IPC.branchPr, (repoId: unknown, head: unknown) => service.branchPr(str(repoId, 'repository'), branchRef(head)))
 
 	handle(IPC.prDiscussion, (repoId: unknown, reviewId: unknown) => service.prDiscussion(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.prDescription, (repoId: unknown, reviewId: unknown) =>
 		service.prDescription(str(repoId, 'repository'), comparisonId(reviewId)),
 	)

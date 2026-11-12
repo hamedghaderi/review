@@ -773,6 +773,22 @@ export interface PublishPlan {
  * The pull request's existing review activity, read from GitHub and never written back. Comment bodies are
  * third-party text: shown as plain text, never used to change a finding.
  */
+/**
+ * What landed on a pull request's base branch since it branched off (issue #165): every commit since the branch point
+ * is counted, and the ones that touch a file the pull request changes are listed. Git conflicts only on the same lines,
+ * so these are the places where the PR can merge cleanly and still no longer fit.
+ */
+export interface BaseDrift {
+	baseRef: string
+	tip: string | null // the base branch's head now; null when it couldn't be read
+	mergeBase: string // where the pull request branched off (the comparison's base)
+	behind: number | null // commits on the base branch since then (first parent: a merged PR counts once)
+	touching: number // how many of them touch a file this pull request changes
+	commits: Array<{ sha: string; subject: string; author: string; at: string; files: Array<string> }> // the newest of those
+	url: string | null // the repository on GitHub, for commit links
+	error: string | null // why it couldn't be worked out (no token, history missing from the clone…)
+}
+
 export interface Discussion {
 	status: 'complete' | 'partial' | 'unavailable' // `unavailable`: the read failed, so earlier comments may exist that are not shown
 	reason: string | null
@@ -1939,6 +1955,7 @@ export const IPC = {
 	publishComment: 'publish:comment',
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
+	baseDrift: 'gh:base-drift',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
 	prDescriptionPreview: 'gh:description-preview',
@@ -2134,6 +2151,7 @@ export interface ReviewApi {
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<Result<PublishedReview>>
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>
+	baseDrift(repoId: string, reviewId: string): Promise<Result<BaseDrift>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>
 	/** The open PR review's description as GitHub has it now. */
