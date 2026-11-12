@@ -15,6 +15,7 @@ import {
 } from '../../shared/types.ts'
 import type { EarlierThread } from './background.ts'
 import type { ContextBatch, ContextExcerpt } from './context.ts'
+import { isProjectDocPath } from './facts.ts'
 import { DEFAULT_LEVELS, residueLevel } from './prompt.ts'
 import type { z } from 'zod'
 import { modelFindingSchema, reviewEnvelopeSchema, type ModelFinding } from './schema.ts'
@@ -131,7 +132,7 @@ export function validateBatchOutput(
 		.slice(0, 20)
 		.map((u) => ({ fileKey: byPath.get(u.file_path)!, why: clip(u.why.trim(), TEXT_LIMITS.note) }))
 	const outdatedDocs = parsed.data.outdated_docs
-		.filter((d) => /^\.review\/[^\0]+\.md$/.test(d.doc_path) && !d.doc_path.split('/').includes('..') && d.why.trim())
+		.filter((d) => isProjectDocPath(d.doc_path) && d.why.trim())
 		.slice(0, 10)
 		.map((d) => ({ path: d.doc_path, line: d.line, why: clip(d.why.trim(), TEXT_LIMITS.note) }))
 	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs }

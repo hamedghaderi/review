@@ -333,7 +333,76 @@ test('other .review docs are listed by title, and docs naming what the change re
 	assert.doesNotMatch(stale.text, /keepMe|other\.ts/, 'an edited file is not stale')
 })
 
-test('the reviewer can report project docs the change makes wrong; only .review docs are kept', () => {
+test('without a .review folder, the first agent file is sent and the others, rule folders and nested ones are listed', async () => {
+	const dir = tmp()
+	const git = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	git('init', '-q', '-b', 'main')
+	for (const d of ['.cursor/rules', 'packages/api/src', 'packages/web']) mkdirSync(join(dir, d), { recursive: true })
+	writeFileSync(join(dir, 'AGENTS.md'), '# Agents\nAll SQL goes through db/query.ts. Run `npm test` before committing.\n')
+	writeFileSync(join(dir, 'CLAUDE.md'), '# Claude\nSee AGENTS.md.\n')
+	writeFileSync(join(dir, '.cursor/rules/style.mdc'), '# Style rules\nUse tabs.\n')
+	writeFileSync(join(dir, 'packages/api/AGENTS.md'), '# API package\nHandlers return Result, never throw.\n')
+	writeFileSync(join(dir, 'packages/web/AGENTS.md'), '# Web package\nNot touched by the change.\n')
+	writeFileSync(join(dir, 'packages/api/src/user.ts'), 'export const a = 1\n')
+	git('add', '-A')
+	git('commit', '-qm', 'base')
+	const base = git('rev-parse', 'HEAD')
+	const sources = [{ file: { key: 'packages/api/src/user.ts', oldPath: 'packages/api/src/user.ts', newPath: 'packages/api/src/user.ts' } }]
+
+	const r = await loadFacts({ root: dir, baseSha: base, headSha: base, sources: sources as never, checks: null })
+	const [project] = r.facts
+	assert.match(
+		project.title,
+		/^Project context \(AGENTS\.md at the base commit \w{7}, written by the repository's maintainers for AI coding agents; there is no \.review\/ folder\)$/,
+	)
+	assert.match(project.text, /^These notes were written for AI agents that change this code\./, 'told to ignore instructions to agents')
+	assert.match(project.text, /All SQL goes through db\/query\.ts/)
+	assert.match(project.text, /- CLAUDE\.md: Claude/, 'a second root file is listed, not sent')
+	assert.match(project.text, /- \.cursor\/rules\/style\.mdc: Style rules/)
+	assert.match(project.text, /- packages\/api\/AGENTS\.md: API package/, 'the one next to the changed file is listed')
+	assert.doesNotMatch(
+		project.text,
+		/Handlers return Result|See AGENTS\.md|Web package/,
+		'listed files are not sent, and unrelated folders are not read',
+	)
+	assert.deepEqual(project.sent, ['AGENTS.md'])
+	assert.match(
+		r.summary[0].text,
+		/^AGENTS\.md \(\d+ characters\); 3 more docs listed from the base commit, as there is no \.review\/ folder\.$/,
+	)
+
+	// A .review/ folder wins: the agent files are not read at all.
+	mkdirSync(join(dir, '.review'))
+	writeFileSync(join(dir, PROJECT_CONTEXT_PATH), 'Input is stripped of HTML.\n')
+	git('add', '-A')
+	git('commit', '-qm', 'review docs')
+	const withReview = await loadFacts({
+		root: dir,
+		baseSha: git('rev-parse', 'HEAD'),
+		headSha: base,
+		sources: sources as never,
+		checks: null,
+	})
+	assert.doesNotMatch(withReview.facts[0].text, /AGENTS|SQL|agents/)
+	assert.deepEqual(withReview.facts[0].sent, [PROJECT_CONTEXT_PATH])
+
+	// A long agent file is cut, with advice that fits it.
+	writeFileSync(join(dir, 'AGENTS.md'), 'x'.repeat(9000))
+	git('rm', '-rq', '.review')
+	git('add', '-A')
+	git('commit', '-qm', 'long')
+	const long = await loadFacts({ root: dir, baseSha: git('rev-parse', 'HEAD'), headSha: base, sources: [], checks: null })
+	assert.match(
+		long.notes[0],
+		/^AGENTS\.md has 9,000 characters; only the first 6,000 were sent\. A \.review\/context\.md with the facts a reviewer needs is read instead of it\.$/,
+	)
+})
+
+test('the reviewer can report project docs the change makes wrong; only .review docs and agent files are kept', () => {
 	const batch = { index: 0, excerpts: [], references: [], facts: [], fileKeys: [], overview: '', chars: 0 }
 	const base = { findings: [], evaluation: emptyEvaluation(), unexplained_files: [], limitations: [] }
 	assert.deepEqual(validateBatchOutput(base, batch, {} as never, 'r').outdatedDocs, [], 'older answers without the field still validate')
@@ -344,6 +413,9 @@ test('the reviewer can report project docs the change makes wrong; only .review 
 				{ doc_path: '.review/auth.md', line: 2, why: 'guard.ts is deleted; permissions are now checked in middleware.ts.' },
 				{ doc_path: 'README.md', line: 1, why: 'not a project doc' },
 				{ doc_path: '.review/../x.md', line: null, why: 'escapes the folder' },
+				{ doc_path: 'packages/api/AGENTS.md', line: 4, why: 'Handlers now throw.' },
+				{ doc_path: '.cursor/rules/style.mdc', line: null, why: 'Spaces now.' },
+				{ doc_path: 'docs/AGENTS.txt', line: null, why: 'not an agent file' },
 			],
 		},
 		batch,
@@ -352,6 +424,8 @@ test('the reviewer can report project docs the change makes wrong; only .review 
 	)
 	assert.deepEqual(r.outdatedDocs, [
 		{ path: '.review/auth.md', line: 2, why: 'guard.ts is deleted; permissions are now checked in middleware.ts.' },
+		{ path: 'packages/api/AGENTS.md', line: 4, why: 'Handlers now throw.' },
+		{ path: '.cursor/rules/style.mdc', line: null, why: 'Spaces now.' },
 	])
 })
 

@@ -96,6 +96,7 @@ export interface ContextFact {
 	title: string
 	text: string
 	fileKeys: Array<string> | null
+	sent?: Array<string> // repository files whose text it carries, so a finding citing them cites what it read
 }
 
 export interface ContextBatch {

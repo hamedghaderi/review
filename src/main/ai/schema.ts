@@ -99,7 +99,9 @@ export const reviewOutputSchema = z.object({
 	outdated_docs: z
 		.array(z.object({ doc_path: z.string(), line: z.int().nullable().default(null), why: z.string() }))
 		.default([])
-		.describe('Project docs (.review/*.md) that this change makes wrong without updating them. Empty if none.'),
+		.describe(
+			'Project docs (.review/*.md, or the notes for AI agents sent as project context) that this change makes wrong without updating them. Empty if none.',
+		),
 })
 
 /** The answer with each finding left unchecked, so one malformed finding is rejected on its own instead of failing the rest. */
