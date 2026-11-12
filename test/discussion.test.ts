@@ -257,6 +257,91 @@ test('GraphQL and REST activity are normalised; links outside github.com and emp
 	assert.match(r.partial!, /without a GitHub token/)
 })
 
+test('bots are recognised from GitHub’s actor type (GraphQL) or user type (REST); people carry no flag', () => {
+	const comment = (id: string, author: { login: string; __typename?: string }) => ({
+		id,
+		body: 'b',
+		author,
+		authorAssociation: 'NONE',
+		createdAt: null,
+		url: null,
+		state: 'SUBMITTED',
+	})
+	const g = fromGraphql([
+		{
+			headRefOid: 'h',
+			baseRefOid: 'b',
+			reviewThreads: {
+				totalCount: 1,
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: 'T1',
+						isResolved: false,
+						isOutdated: false,
+						resolvedBy: null,
+						path: 'f.txt',
+						line: 3,
+						startLine: null,
+						originalLine: 3,
+						originalStartLine: null,
+						diffSide: 'RIGHT',
+						subjectType: 'LINE',
+						comments: {
+							totalCount: 2,
+							nodes: [comment('C1', { login: 'coderabbitai', __typename: 'Bot' }), comment('C2', { login: 'alice', __typename: 'User' })],
+						},
+					},
+				],
+			},
+			reviews: {
+				totalCount: 1,
+				nodes: [
+					{
+						id: 'R1',
+						author: { login: 'copilot-pull-request-reviewer', __typename: 'Bot' },
+						state: 'COMMENTED',
+						body: 'Reviewed 3 files.',
+						submittedAt: null,
+						url: null,
+					},
+				],
+			},
+			comments: { totalCount: 0, nodes: [] },
+		},
+	])
+	assert.deepEqual(
+		g.threads[0].comments.map((c) => [c.author, c.bot]),
+		[
+			['coderabbitai', true],
+			['alice', undefined],
+		],
+	)
+	assert.equal(g.reviews[0].bot, true)
+
+	const rest = fromRest(
+		{ headSha: 'h', baseSha: 'b' },
+		[],
+		false,
+		[],
+		[
+			{
+				node_id: 'I1',
+				user: { login: 'dependabot[bot]', type: 'Bot' },
+				author_association: 'NONE',
+				body: 'x',
+				created_at: null,
+				html_url: null,
+			},
+			{ node_id: 'I2', user: { login: 'bob', type: 'User' }, author_association: 'MEMBER', body: 'y', created_at: null, html_url: null },
+		],
+	)
+	assert.deepEqual(
+		rest.conversation.map((c) => c.bot),
+		[true, undefined],
+	)
+})
+
 test('"already discussed" matches placed threads on overlapping lines of the same side, file threads for file comments, never its own thread', () => {
 	const t = (o: Partial<DiscussionThread>): DiscussionThread => ({
 		id: 'T',
