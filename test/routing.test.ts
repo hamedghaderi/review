@@ -495,3 +495,149 @@ test('a near miss the check finds safe adds no finding; with double-checking off
 	assert.equal(none.length, 0)
 	assert.equal(off.findings.length, 0)
 })
+
+/** Defects and a Security member that answers only when `gate` opens; Security is not waited for unless `wait`. */
+function slowSecurity(gate: Promise<void>, verified: Array<string>, o: { fail?: boolean; wait?: boolean } = {}): Array<TeamRunMember> {
+	const provenance = { connectionId: 'c', connectionLabel: 'Gateway', endpoint: 'http://x' }
+	const answer = (rules: Array<ReviewRule>, findings: Array<unknown>) => ({
+		findings,
+		evaluation: emptyEvaluation().filter((x) => rules.includes(x.rule)),
+		unexplained_files: [],
+		limitations: [],
+	})
+	return [
+		{
+			id: 'defects',
+			role: 'Defects',
+			rules: ['bug', 'error-handling'],
+			provenance,
+			provider: createFakeProvider({
+				model: 'defects-model',
+				script: (req) => {
+					if (req.schema?.name === 'finding_verification') {
+						verified.push(req.input)
+						return { verdict: 'holds', reason: 'Traced through login.ts.', level: 'blocking', checked: ['src/auth/login.ts:1-5'] }
+					}
+					return answer(['bug', 'error-handling'], [])
+				},
+			}),
+		},
+		{
+			id: 'security',
+			role: 'Security',
+			rules: ['security'],
+			provenance,
+			...(o.wait ? {} : { noWait: true }),
+			provider: createFakeProvider({
+				model: 'security-model',
+				script: async (req) => {
+					await gate
+					if (o.fail) return new ProviderError('timeout', 'Security did not respond before the timeout')
+					const e = req.batch.excerpts.find((ex) => ex.file.newPath === 'src/auth/login.ts')!
+					return answer(
+						['security'],
+						[
+							{
+								excerpt_id: e.id,
+								file_path: 'src/auth/login.ts',
+								side: 'new',
+								start_line: 1,
+								end_line: 1,
+								category: 'security',
+								signature: null,
+								test_pattern: null,
+								severity: 'blocking',
+								title: 'Login accepts any password',
+								body: 'Anyone can sign in: the check is skipped.',
+								reasoning: 'The comparison was removed.',
+								disproof: 'Sign in with a wrong password and expect a rejection.',
+								background: null,
+								evidence: e.lines[0].text,
+							},
+						],
+					)
+				},
+			}),
+		},
+	]
+}
+
+const opened = (): { gate: Promise<void>; release: () => void } => {
+	let release!: () => void
+	const gate = new Promise<void>((r) => (release = r))
+	return { gate, release }
+}
+
+const login = (r: AiRun) => r.coverage.files.find((f) => f.fileKey === 'src/auth/login.ts')!.state
+
+test("a member the run doesn't wait for: the run finishes without it; its findings join later, marked late and double-checked", async () => {
+	const { gate, release } = opened()
+	const verified: Array<string> = []
+	const updates: Array<AiRun> = []
+	const h = startRun(input(), options(slowSecurity(gate, verified)), (r) => updates.push(r))
+	const first = await h.done
+	assert.equal(first.status, 'completed', 'what it waited for is all in')
+	const sec = first.team!.members.find((m) => m.id === 'security')!
+	assert.deepEqual([sec.status, sec.late], ['running', true])
+	assert.deepEqual(first.findings, [])
+	assert.equal(login(first), 'pending', 'Security still has it')
+
+	release()
+	const last = await h.settled
+	assert.equal(last.status, 'completed')
+	assert.equal(last.finishedAt, first.finishedAt, 'it finished when it finished')
+	assert.equal(last.team!.members.find((m) => m.id === 'security')!.status, 'completed')
+	const [f] = last.findings
+	assert.deepEqual([f.title, f.memberId, f.late], ['Login accepts any password', 'security', true])
+	assert.equal(f.verification?.memberId, 'defects', 'double-checked by a member that waited')
+	assert.equal(verified.length, 1)
+	assert.equal(login(last), 'reviewed')
+	assert.equal(updates.at(-1)!.findings.length, 1, 'the late findings were saved')
+})
+
+test('a late member that fails leaves the run as it finished; stopping it says so; automatic runs wait for everyone', async () => {
+	const failing = opened()
+	const h = startRun(input(), options(slowSecurity(failing.gate, [], { fail: true })), () => {})
+	assert.equal((await h.done).status, 'completed')
+	failing.release()
+	const failed = await h.settled
+	assert.equal(failed.status, 'completed', 'a late failure never makes the run partial')
+	assert.equal(failed.team!.members.find((m) => m.id === 'security')!.status, 'failed')
+	assert.ok(
+		failed.errors.some((e) => e.startsWith('Security: Request 1:')),
+		'but it is reported',
+	)
+
+	const stopping = opened()
+	const s = startRun(input(), options(slowSecurity(stopping.gate, [])), () => {})
+	await s.done
+	s.cancel('a new run started')
+	stopping.release() // a real provider gives up on the aborted request; this one is let go
+	const stopped = await s.settled
+	assert.equal(stopped.status, 'completed')
+	assert.equal(stopped.team!.members.find((m) => m.id === 'security')!.status, 'cancelled')
+	assert.ok(stopped.notices!.includes('Security: stopped before it finished (a new run started).'))
+	assert.equal(login(stopped), 'cancelled')
+
+	// Cancelled before it has finished, the whole run is cancelled, late member included.
+	const early = opened()
+	const e = startRun(input(), options(slowSecurity(early.gate, [])), () => {})
+	e.cancel()
+	early.release()
+	const cancelled = await e.settled
+	assert.equal(cancelled.status, 'cancelled')
+	assert.equal(cancelled.team!.members.find((m) => m.id === 'security')!.status, 'cancelled')
+
+	// Nobody reads an automatic review before it posts, so it waits for everyone.
+	const auto = opened()
+	const a = startRun({ ...input(), automatic: true }, options(slowSecurity(auto.gate, [])), () => {})
+	let finished = false
+	void a.done.then(() => (finished = true))
+	await new Promise((r) => setTimeout(r, 30))
+	assert.equal(finished, false, 'the automatic run is still waiting for Security')
+	auto.release()
+	const ar = await a.done
+	assert.equal(ar.findings.length, 1)
+	assert.equal(ar.findings[0].late, undefined)
+	assert.equal(ar.team!.members.find((m) => m.id === 'security')!.late, undefined)
+})
