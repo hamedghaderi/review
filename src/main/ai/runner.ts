@@ -22,6 +22,7 @@ import {
 	type PastDecision,
 	type EarlierLimitations,
 	type ReviewContext,
+	type Takeover,
 } from '../../shared/types.ts'
 import { addCost } from '../../shared/cost.ts'
 import type { PersonaId } from '../../shared/personas.ts'
@@ -127,7 +128,9 @@ export interface RunInput {
 	 */
 	loadDrift?: (used: Array<string>, signal: AbortSignal) => Promise<ContextFact | null>
 	/** Linked issues and the conversation so far, for pull requests; the description is always included without it. */
-	loadBackground?: (signal: AbortSignal) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }>
+	loadBackground?: (
+		signal: AbortSignal,
+	) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; takeover?: Takeover | null; notes: Array<string> }>
 	/** Notes and text files you gave the reviewer for this review. */
 	context?: ReviewContext | null
 	/** The images of that context, sent with every request to models that accept them. */
@@ -359,6 +362,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						discussion: b.discussion,
 						pr,
 						automatic,
+						takeover: b.takeover ?? null,
 					})
 				} catch (e) {
 					if (controller.signal.aborted) return finish(null)

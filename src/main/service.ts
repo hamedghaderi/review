@@ -10,6 +10,7 @@ import type {
 	IncrementalOffer,
 	OutcomeFilter,
 	OutcomeSummary,
+	Takeover,
 	BranchPr,
 	ChangeConclusion,
 	ChangeExplanation,
@@ -97,9 +98,11 @@ import {
 	readPatchBetween,
 	readRepo,
 	resolveBranchTarget,
+	sharedCommits,
 	shortRef,
 	type ComparisonData,
 } from './git.ts'
+import { findTakeover } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
@@ -449,28 +452,59 @@ export class ReviewService {
 
 	/**
 	 * What a PR review's reviewer is told besides the description: the issues the PR closes or its description mentions,
-	 * and the conversation so far. Either part failing becomes a note; the run goes on with what could be read.
+	 * the pull request it takes over, and the conversation so far. A part failing becomes a note; the run goes on with
+	 * what could be read.
 	 */
 	private async prBackground(
 		repoId: string,
 		reviewId: string,
 		signal: AbortSignal,
-	): Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; notes: Array<string> }> {
-		const pr = this.comparisons.get(reviewId)?.comparison.pr
+	): Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; takeover: Takeover | null; notes: Array<string> }> {
+		const data = this.comparisons.get(reviewId)
+		const pr = data?.comparison.pr
 		const gh = this.github
-		if (!pr || !gh) return { issues: [], discussion: null, notes: [] }
+		if (!pr || !gh) return { issues: [], discussion: null, takeover: null, notes: [] }
 		const notes: Array<string> = []
-		const [issues, discussion] = await Promise.all([
+		const takeover = findTakeover(
+			{ repo: pr.repo, number: pr.number, body: pr.body ?? '' },
+			{
+				detail: (n) => gh.detail(pr.repo, n, signal),
+				isIssue: (n) => gh.isIssue(pr.repo, n, signal),
+				activity: (n) => gh.activity(pr.repo, n, signal),
+				// The original's commits are fetched by id, like the pull request's own; nothing is checked out.
+				shared: async (d) => {
+					const repo = this.repo(repoId)
+					await ensureCommits(repo.root, fetchRemote(repo, [d.repo]), [d.baseSha, d.headSha], signal)
+					return sharedCommits(
+						repo.root,
+						{ base: d.baseSha, head: d.headSha },
+						{ base: data!.comparison.baseSha, head: data!.comparison.headSha },
+					)
+				},
+			},
+		).catch((e) => {
+			if (signal.aborted) throw e
+			notes.push(`Whether this pull request takes over another could not be checked: ${errorOf(e).message}`)
+			return null
+		})
+		const [issues, discussion, original] = await Promise.all([
 			gh.linkedIssues(pr.repo, pr.number, issueRefs(pr.body ?? '', pr.repo, pr.number), signal).catch((e) => {
 				if (signal.aborted) throw e
 				notes.push(`Linked issues could not be read from GitHub, so the reviewer did not see them: ${errorOf(e).message}`)
 				return []
 			}),
 			this.prDiscussion(repoId, reviewId),
+			takeover,
 		])
 		if (discussion.status === 'unavailable')
 			notes.push(`The PR conversation was not sent to the reviewer. ${discussion.reason ?? ''}`.trim())
-		return { issues, discussion, notes }
+		if (original?.status === 'unreadable')
+			notes.push(
+				`This pull request takes over #${original.number}, which could not be read, so the reviewer only knows it exists: ${original.reason}`,
+			)
+		else if (original?.original.partial)
+			notes.push(`#${original.original.number}, which this pull request takes over: ${original.original.partial}`)
+		return { issues, discussion, takeover: original, notes }
 	}
 
 	attachAi(ai: AiController): void {

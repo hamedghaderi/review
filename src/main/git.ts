@@ -243,6 +243,30 @@ export async function commitsUpTo(cwd: string, base: string, tip: string): Promi
 	return new Set(r.stdout.toString('utf8').split('\n').filter(isSha))
 }
 
+/**
+ * How many of a pull request's own commits (`pr.base`..`pr.head`, without merges) are another one's (`original`): the
+ * same commit, or one with the same patch (git's patch id, so a rebase or cherry-pick still counts). Null when either
+ * history can't be read here.
+ */
+export async function sharedCommits(
+	cwd: string,
+	original: { base: string; head: string },
+	pr: { base: string; head: string },
+): Promise<number | null> {
+	const [theirs, ours] = await Promise.all([commitsUpTo(cwd, original.base, original.head), commitsUpTo(cwd, pr.base, pr.head)])
+	if (!theirs || !ours) return null
+	const same = [...ours].filter((c) => theirs.has(c)).length
+	// "=" marks a commit on the pull request's side whose patch the original's side also has. Commits both sides share
+	// are left out of a symmetric difference, so they are counted above instead.
+	const r = await git(cwd, ['rev-list', '--cherry-mark', '--right-only', '--no-merges', `${original.head}...${pr.head}`], 32 * 1024 * 1024)
+	if (r.code !== 0) return null
+	const patched = r.stdout
+		.toString('utf8')
+		.split('\n')
+		.filter((l) => l.startsWith('=') && ours.has(l.slice(1))).length
+	return same + patched
+}
+
 /** A commit's message without its subject line, trimmed. */
 export async function commitBody(cwd: string, sha: string): Promise<string> {
 	if (!isSha(sha)) return ''

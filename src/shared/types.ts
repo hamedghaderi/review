@@ -858,6 +858,37 @@ export interface DiscussionComment {
 	pending: boolean // in the viewer's own unsubmitted review
 }
 
+/**
+ * The pull request this one takes over (#168): named with takeover words in the description ("replaces #12"), or
+ * mentioned there and with some of its commits in this one. Read for the reviewers as background, like linked issues.
+ */
+export interface TakeoverOriginal {
+	repo: string // "owner/name": always the pull request's own repository
+	number: number
+	url: string
+	title: string
+	state: string // open, draft, closed or merged
+	body: string
+	author: string | null
+	association: string | null
+	how: 'words' | 'commits' // what showed it is a takeover
+	shared: number | null // this pull request's commits that are the original's (same commit or same patch); null: not compared
+	threads: Array<TakeoverThread> // review threads still open there: not resolved, not outdated
+	threadsLeft: number // open threads not read (GitHub returned only part of the discussion)
+	partial: string | null // why its discussion is missing or incomplete; the description was still read
+}
+
+export interface TakeoverThread {
+	path: string
+	line: number | null // on the original's own diff
+	url: string | null
+	resolved: boolean | null // null: unknown (read without a token)
+	comments: Array<DiscussionComment>
+}
+
+export type Takeover =
+	{ status: 'read'; original: TakeoverOriginal } | { status: 'unreadable'; repo: string; number: number; how: 'words'; reason: string }
+
 export interface DiscussionReview {
 	id: string
 	author: string | null
