@@ -38,6 +38,7 @@ import {
 } from './findings.ts'
 import { buildBackground } from './background.ts'
 import { buildInput, DEFAULT_LEVELS, instructionsFor, withExternalTools, PROMPT_VERSION } from './prompt.ts'
+import { modelMaker } from './catalog.ts'
 import type { RelatedResult } from './related.ts'
 import { classifyRisk } from './risk.ts'
 import { routeFiles, unroutedReason } from './routing.ts'
@@ -757,7 +758,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 
 	/**
 	 * Double-checks the blocking findings not checked yet, in a request that tries to prove each one wrong. In a team the
-	 * check goes to another member, on a different model when there is one, so a model does not grade its own work.
+	 * check goes to another member, on another maker's model when there is one, so a model does not grade its own work.
 	 * Runs after every review request is answered, so the run is still 'running' meanwhile.
 	 */
 	async function verifyBlocking(): Promise<void> {
@@ -891,14 +892,19 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	}
 
 	/**
-	 * Who double-checks a finding `w` raised: another member that did not fail, on a different model if any (the largest
-	 * context window first, for room to look things up), else another member, else `w` itself (single model, retries).
+	 * Who double-checks a finding `w` raised: another member that did not fail, on another maker's model if any (Opus
+	 * checking Fable shares Fable's blind spots more than GPT does), else on a different model, else another member, else
+	 * `w` itself (single model, retries). Within each, the largest context window first, for room to look things up.
 	 */
 	function checkerFor(w: Worker): Worker {
 		const modelOf = (x: Worker): string => `${x.member?.connectionId ?? ''}\u0000${x.provider.model}`
+		const makerOf = (x: Worker): string => modelMaker(x.member?.provider ?? x.provider.id, x.provider.model)
 		const others = workers.filter((x) => x.id !== w.id && !x.stopped && x.member?.status !== 'failed')
 		const byWindow = (a: Worker, b: Worker): number => b.provider.limits.contextWindow - a.provider.limits.contextWindow
-		return others.filter((x) => modelOf(x) !== modelOf(w)).sort(byWindow)[0] ?? others.sort(byWindow)[0] ?? w
+		const first = (list: Array<Worker>): Worker | undefined => [...list].sort(byWindow)[0]
+		return (
+			first(others.filter((x) => makerOf(x) !== makerOf(w))) ?? first(others.filter((x) => modelOf(x) !== modelOf(w))) ?? first(others) ?? w
+		)
 	}
 
 	async function verifyOne(f: Finding, raiser: Worker, w: Worker): Promise<FindingVerification> {
