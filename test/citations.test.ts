@@ -32,11 +32,17 @@ test('a request saw its excerpts on both sides, the related code sent with it, a
 			},
 		],
 		references: [{ path: 'src/util.ts', start: 40, end: 60 }],
-		facts: [{ kind: 'project', title: '', text: '', fileKeys: null }],
+		facts: [{ kind: 'project', title: '', text: '', fileKeys: null, sent: ['.review/context.md'] }],
 	} as unknown as ContextBatch
 	const seen = seenInBatch(batch, [{ path: 'src/read.ts', version: 'base', start: 1, end: 5 }])
 	assert.deepEqual(unreadRefs(['old/name.ts:11 new/name.ts:13 src/util.ts:58 .review/context.md:120 src/read.ts:2 src/util.ts:90'], seen), [
 		'src/util.ts:90',
+	])
+	// Without a .review/ folder the agent file sent in its place is what was read; a listed one was not.
+	const agents = { ...batch, facts: [{ kind: 'project', title: '', text: '', fileKeys: null, sent: ['AGENTS.md'] }] } as ContextBatch
+	assert.deepEqual(unreadRefs(['AGENTS.md:40 CLAUDE.md:3 .review/context.md:1'], seenInBatch(agents, [])), [
+		'CLAUDE.md:3',
+		'.review/context.md:1',
 	])
 })
 

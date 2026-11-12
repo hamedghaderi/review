@@ -1,7 +1,6 @@
 import { fileRefs } from '../../shared/refs.ts'
 import type { Finding, FindingVerification } from '../../shared/types.ts'
 import type { ContextBatch, ContextExcerpt } from './context.ts'
-import { PROJECT_CONTEXT_PATH } from './facts.ts'
 import type { SeenLines } from './lookup.ts'
 
 /**
@@ -54,7 +53,7 @@ export function seenInBatch(batch: ContextBatch, lookups: Array<SeenLines>): See
 	const seen = new Seen().lines(lookups)
 	for (const e of batch.excerpts) seen.excerpt(e)
 	for (const r of batch.references) seen.add(r.path, r.start, r.end)
-	if (batch.facts.some((f) => f.kind === 'project')) seen.add(PROJECT_CONTEXT_PATH, 1, Number.MAX_SAFE_INTEGER)
+	for (const f of batch.facts) for (const path of f.sent ?? []) seen.add(path, 1, Number.MAX_SAFE_INTEGER)
 	return seen
 }
 
