@@ -47,6 +47,8 @@ export const DEFAULT_LIMITS: ReviewLimits = {
 }
 export const DEFAULT_LEVEL_SETTINGS: FindingLevelSettings = { enabled: DEFAULT_LEVELS, autoAdd: ['blocking', 'should_fix', 'question'] }
 const REQUEST_TIMEOUT_MS = 180_000
+// A CLI call is a whole agent session (it thinks, makes its lookups, then answers), not one model response.
+const CLI_REQUEST_TIMEOUT_MS = 15 * 60_000
 const TEST_TIMEOUT_MS = 20_000
 const FALLBACK_LIMITS: ModelLimits = { contextWindow: 32_768, maxOutputTokens: 8192 }
 
@@ -597,7 +599,8 @@ export class ConnectionService {
 		if (!view.models.some((m) => m.id === selection.modelId)) {
 			throw new AppFail('ai-unavailable', `Model "${selection.modelId}" is not offered by ${conn.label}. Choose another model.`)
 		}
-		const provider = await this.buildProvider(conn, selection.modelId, REQUEST_TIMEOUT_MS)
+		const timeoutMs = descriptor(conn.kind).cli ? CLI_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS
+		const provider = await this.buildProvider(conn, selection.modelId, timeoutMs)
 		return {
 			provider,
 			connectionId: conn.id,

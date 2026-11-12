@@ -88,15 +88,22 @@ const FATAL: ReadonlySet<ProviderErrorKind> = new Set(['auth', 'permission', 'ba
 export class ProviderError extends Error {
 	kind: ProviderErrorKind
 	retryAfterMs: number | null
+	maxAttempts: number | null // the most tries worth making after this error, first one included, when fewer than a run allows
 
-	constructor(kind: ProviderErrorKind, message: string, retryAfterMs: number | null = null) {
+	constructor(kind: ProviderErrorKind, message: string, retryAfterMs: number | null = null, maxAttempts: number | null = null) {
 		super(redactSecrets(message))
 		this.kind = kind
 		this.retryAfterMs = retryAfterMs
+		this.maxAttempts = maxAttempts
 	}
 
 	get retryable(): boolean {
 		return RETRYABLE.has(this.kind)
+	}
+
+	/** Whether another try is worth making after `attempt` (0 for the first) failed with this error. */
+	retryAfter(attempt: number, maxAttempts: number): boolean {
+		return this.retryable && attempt + 1 < Math.min(maxAttempts, this.maxAttempts ?? maxAttempts)
 	}
 
 	/** Errors that will fail every remaining batch the same way, so the run should stop scheduling. */

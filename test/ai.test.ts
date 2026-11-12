@@ -440,6 +440,25 @@ test('partial coverage: one batch fails after retries, the other succeeds', asyn
 	assert.ok(provider.calls >= 1 + 3, 'transient failures are retried up to maxAttempts')
 })
 
+test('an error that caps its own attempts is tried fewer times than the run allows', async () => {
+	// A CLI timeout allows two tries: a retry repeats the whole session under the same limit.
+	const capped = runWith(() => new ProviderError('timeout', 'Claude Code did not respond before the timeout', null, 2))
+	const c = await capped.handle.done
+	assert.equal(capped.provider.calls, 2)
+	assert.equal(c.status, 'failed')
+	assert.ok(c.errors.some((e) => e.includes('did not respond before the timeout')))
+
+	const plain = runWith(() => new ProviderError('timeout', 'OpenAI did not respond before the timeout'))
+	await plain.handle.done
+	assert.equal(plain.provider.calls, 3, 'other timeouts keep the run’s maxAttempts')
+
+	const e = new ProviderError('timeout', 'x', null, 2)
+	assert.equal(e.retryAfter(0, 5), true)
+	assert.equal(e.retryAfter(1, 5), false)
+	assert.equal(e.retryAfter(0, 1), false, 'the run’s own limit still applies when it is lower')
+	assert.equal(new ProviderError('auth', 'x').retryAfter(0, 5), false)
+})
+
 test('auth failures are not retried and stop the run; refusals are not retried; invalid output is asked again once', async () => {
 	const auth = runWith(() => new ProviderError('auth', 'OpenAI rejected the API key (401). Check OPENAI_API_KEY.'))
 	const a = await auth.handle.done

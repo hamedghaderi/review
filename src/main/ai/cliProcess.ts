@@ -44,7 +44,9 @@ export async function runCli(p: CliProgram, args: Array<string>, input: string, 
 		}
 		const timer = setTimeout(() => {
 			child.kill()
-			finish(() => reject(new ProviderError('timeout', `${p.label} did not respond before the timeout`)))
+			// One call is the CLI's whole session, lookups included, so a retry repeats all of it under the same limit and
+			// usually runs out again: one more try, not the run's usual four.
+			finish(() => reject(new ProviderError('timeout', `${p.label} did not respond before the timeout`, null, 2)))
 		}, p.timeoutMs)
 		signal.addEventListener('abort', abort, { once: true })
 		child.stdout.on('data', (b: Buffer) => out.push(b))
