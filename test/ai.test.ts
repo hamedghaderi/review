@@ -3061,6 +3061,24 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	assert.match(failed.messages[4].text, /^No answer: /)
 	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /No conclusion: /)
 	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.messages.length, 5, 'a failed rewrite keeps the conversation')
+
+	// The base branch moved: the conclusion also says whether the change is still worth merging (only in the app).
+	assert.doesNotMatch(asked[0].instructions, /Still worth merging/, 'not when nothing moved')
+	reply = { markdown: '## Still worth merging?\n**Still fits.**' }
+	const drift = {
+		kind: 'drift' as const,
+		title: 'Since this pull request branched (main moved from aaaaaaa to bbbbbbb: 4 commits)',
+		text: 'Commits that touch files this pull request changes (1):\n- 1a2b3c4 Rewrite add (Ann, 2026-11-03): src/app.ts',
+		fileKeys: null,
+	}
+	await controller.conclude({ ...access, loadDrift: async () => drift }, s.comp.id, null, SEL)
+	const moved = asked.at(-1)!
+	assert.match(
+		moved.instructions,
+		/## What the findings add up to[\s\S]*## Still worth merging\?\n[^\n]*Start with one of \*\*Still fits\*\*, \*\*Needs rework\*\* or \*\*Probably superseded\*\*[\s\S]*## Follow-ups/,
+	)
+	assert.match(moved.instructions, /Age alone is never a reason/)
+	assert.ok(moved.input.includes(`# ${drift.title}\n${drift.text}`))
 })
 
 test('conclusion: a second request for the same review is turned away while the first runs', async () => {

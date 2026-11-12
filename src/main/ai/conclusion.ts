@@ -1,5 +1,5 @@
 import type { AiRun, ChangeExplanation, CodeMessage, Finding, FindingDecision } from '../../shared/types.ts'
-import type { ContextBatch } from './context.ts'
+import type { ContextBatch, ContextFact } from './context.ts'
 import type { LookupBudget } from './lookup.ts'
 import { overviewInput, type OverviewContext } from './overview.ts'
 import type { ProviderRequest } from './provider.ts'
@@ -18,7 +18,13 @@ const MAX_HISTORY_CHARS = 40_000
  */
 export const CONCLUSION_LOOKUPS: LookupBudget = { maxCalls: 16, maxChars: 60_000 }
 
-export function conclusionInstructions(lookups: boolean): string {
+// Only when the base branch moved under the pull request (issue #165). Never posted: the conclusion stays in the app.
+const STILL_WORTH = `## Still worth merging?
+The input lists what landed on the base branch since the change branched off ("Since this pull request branched"). Start with one of **Still fits**, **Needs rework** or **Probably superseded**. Needs rework: what changed on the base branch and the smallest change that would make this fit again. Probably superseded: by which commit (short id) or pull request, and the evidence in the code; read the base branch's version with read_file (version "tip"). Age alone is never a reason, and a commit that only touched the same file is not evidence. If you cannot tell, say so and what would settle it.
+
+`
+
+export function conclusionInstructions(lookups: boolean, drift = false): string {
 	return `A developer has reviewed a code change with an AI reviewer. Its findings each point at one place in the code. Now step back and give your conclusion on the change as a whole, the way an experienced colleague would after reading all of it. Then answer the developer's follow-up questions about it.
 
 The conclusion is Markdown with these sections, in this order, with these headings:
@@ -32,7 +38,7 @@ Was this a good way to solve the problem? Name at most three other ways to build
 ## What the findings add up to
 Only when several findings share one cause, or one change of approach would remove them: say which ones and why. Otherwise say in one sentence that they are separate problems, or that there were none. Do not repeat findings one by one; the developer has read them. Never bring back a dismissed finding.
 
-## Follow-ups
+${drift ? STILL_WORTH : ''}## Follow-ups
 Two short lists, "Before merging" and "Later" (only what deserves its own change). Each item says what to do and why, in one or two sentences, with the file and line when you know them. Leave out an empty list. If both are empty, write "Nothing to follow up."
 
 Rules for the conclusion and every answer:
@@ -56,6 +62,7 @@ export interface ConclusionContext extends Omit<OverviewContext, 'closing'> {
 	explanation: ChangeExplanation | null // what Explain this change said, when it was asked
 	history: Array<CodeMessage> // the conclusion and the conversation so far, oldest first; empty for a new conclusion
 	question: string | null // a follow-up; null asks for the conclusion
+	drift?: ContextFact | null // what landed on the base branch since the pull request branched (issue #165)
 }
 
 export function buildConclusionRequest(c: ConclusionContext): { request: ProviderRequest; omitted: Array<string> } {
@@ -63,7 +70,7 @@ export function buildConclusionRequest(c: ConclusionContext): { request: Provide
 	const { input, omitted } = overviewInput({ ...c, maxChars: Math.max(0, c.maxChars - closing.length), closing })
 	return {
 		request: {
-			instructions: conclusionInstructions(!!c.tools),
+			instructions: conclusionInstructions(!!c.tools, !!c.drift),
 			input,
 			batch: EMPTY_BATCH,
 			schema: { name: CONCLUSION_SCHEMA_NAME, json: CONCLUSION_JSON_SCHEMA },
@@ -74,9 +81,10 @@ export function buildConclusionRequest(c: ConclusionContext): { request: Provide
 }
 
 /** The findings, the earlier explanation, the conversation, then what to do: write the conclusion or answer. */
-export function closingText({ run, decisions, explanation, history, question }: ConclusionContext): string {
+export function closingText({ run, decisions, explanation, history, question, drift }: ConclusionContext): string {
 	const out: Array<string> = []
 	if (explanation) out.push('# What an earlier explanation said the change is for', explanation.purpose, '')
+	if (drift) out.push(`# ${drift.title}`, drift.text, '')
 	const listed = run.findings.filter((f) => !f.mergedInto && !f.heldBack)
 	const dismissed = listed.filter((f) => decisions[f.id]?.status === 'dismissed')
 	const open = listed.filter((f) => decisions[f.id]?.status !== 'dismissed')
