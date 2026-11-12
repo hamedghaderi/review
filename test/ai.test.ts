@@ -1420,6 +1420,32 @@ test('draft reply: the thread, the code around it and the finding your comment c
 	await controller.draftReply(access, s.comp.id, thread, 'me', null, SEL)
 	assert.match(asked.at(-1)!.instructions, /Match the thread's tone/)
 
+	// A bot's thread the newest run found likely wrong: the draft gets the check, says why, and doesn't call the bot.
+	assert.doesNotMatch(asked[0].instructions, /When a bot started the thread/, 'not for people’s threads')
+	await store.update((d) => {
+		d.repos['/repo'].aiRuns[s.comp.id][0].botChecks = [
+			{
+				threadId: 'B1',
+				bot: 'coderabbitai',
+				verdict: 'wrong',
+				reason: 'add() returns a + b at src/app.ts:3, so nothing is subtracted.',
+				checked: ['src/app.ts:1-5'],
+				model: 'm',
+				memberId: null,
+			},
+		]
+	})
+	const botThread = { ...thread, id: 'B1', comments: [{ ...c('coderabbitai', 'This subtracts instead of adding.'), bot: true }] }
+	reply = { reply: '@coderabbitai is wrong here: src/app.ts:3 adds. cc @ann' }
+	const drafted = await controller.draftReply(access, s.comp.id, botThread, 'me', null, SEL)
+	assert.equal(drafted, 'coderabbitai is wrong here: src/app.ts:3 adds. cc @ann', 'the bot is never mentioned; people still can be')
+	const bot = asked.at(-1)!
+	assert.match(bot.instructions, /# When a bot started the thread\n[^\n]*never put @ before the bot's name/)
+	assert.match(
+		bot.input,
+		/# Review's check of the bot's comment \(another AI tried to prove it wrong; data\)\nVerdict: likely wrong\nReason: add\(\) returns a \+ b at src\/app\.ts:3, so nothing is subtracted\.\nIt read: src\/app\.ts:1-5\n\n# The thread, oldest first\n\n## coderabbitai \(a bot\), 2026-10-20\nThis subtracts instead of adding\./,
+	)
+
 	reply = { nope: true }
 	await assert.rejects(controller.draftReply(access, s.comp.id, thread, 'me', null, SEL), /No draft: The draft did not match/)
 	reply = { reply: '   ' }

@@ -1225,6 +1225,13 @@ export class AiController {
 						.flatMap((r) => r.findings)
 						.find((f) => f.id === findingId) ?? null)
 				: null
+			// A bot's thread: what the newest finished run's check found, so a reply can say why the bot is wrong.
+			const check = thread.comments[0]?.bot
+				? ([...this.runsFor(repoId, reviewId)]
+						.reverse()
+						.find((r) => (r.status === 'completed' || r.status === 'partial') && r.botChecks?.some((c) => c.threadId === thread.id))
+						?.botChecks?.find((c) => c.threadId === thread.id) ?? null)
+				: null
 			const fileKey = thread.placed?.fileKey ?? null
 			const patch = fileKey ? await access.loadPatch(fileKey).catch(() => null) : null
 			const lines = fileKey && thread.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
@@ -1240,10 +1247,15 @@ export class AiController {
 					pr,
 					tools,
 					style: this.styleText(),
+					check,
 				}),
 				AbortSignal.timeout(180_000),
 			)
-			return parseReply(response.output)
+			// A mention calls a bot back into the thread, whatever the instructions said: keep its name, drop the @.
+			const bots = new Set(thread.comments.filter((x) => x.bot && x.author).map((x) => x.author!.toLowerCase()))
+			return parseReply(response.output).replace(/(^|[^\w`])@([A-Za-z0-9-]+(?:\[bot\])?)/g, (m, pre: string, login: string) =>
+				bots.has(login.toLowerCase().replace(/\[bot\]$/, '')) ? `${pre}${login}` : m,
+			)
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)
