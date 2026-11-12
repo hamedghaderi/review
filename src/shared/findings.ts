@@ -169,16 +169,25 @@ export function levelLine(f: Pick<Finding, 'severity' | 'category' | 'signature'
 }
 
 /**
- * The comment text for an accepted finding: a level label line, the body as written (result first), a link to the
+ * The line an automatic review puts under the level label of every comment it posts. Its summary says AI wrote the
+ * review, but comments are mostly read on their own (the Files tab, a thread, a notification), where they would
+ * otherwise look typed by the person they're posted as. Plain text, so it reads the same on GitHub and in the app.
+ */
+export const autoMark = (model: string): string => `🤖 Written by AI (${model}) and posted automatically.`
+export const AUTO_MARK = /^🤖 Written by AI \(.+\) and posted automatically\.$/u
+
+/**
+ * The comment text for an accepted finding: a level label line, `mark` (see autoMark) when an automatic review posts
+ * it, the body as written (result first), a link to the
  * thread it follows up on, then the disproof for blocking findings and a collapsed background, which is what a
  * reviewer would post. "Why flagged" stays in the app.
  */
-export function findingCommentBody(f: Finding): string {
+export function findingCommentBody(f: Finding, mark: string | null = null): string {
 	if (f.body === undefined)
 		return [`**${f.title}** (${f.severity})`, '', f.problem, '', `Consequence: ${f.consequence}`, '', `Suggestion: ${f.suggestion}`].join(
 			'\n',
 		)
-	const parts = [levelLine(f), f.body]
+	const parts = [levelLine(f), ...(mark ? [mark] : []), f.body]
 	if (f.raisedBefore?.url) parts.push(`Follows up on [an earlier thread](${f.raisedBefore.url}).`)
 	if (f.alsoAt?.length)
 		parts.push(`**The same problem is also at:** ${f.alsoAt.map((x) => `\`${x.path}${x.line === null ? '' : `:${x.line}`}\``).join(', ')}`)
@@ -201,6 +210,7 @@ export function autoAddFindings(
 	roots: Map<string, string>,
 	levels: ReadonlyArray<FindingLevel>,
 	hold: (f: Finding) => boolean = () => false,
+	mark: (f: Finding) => string | null = () => null,
 ): { review: Review; added: number; commentIds: Array<string> } {
 	const byId = new Map(runs.flatMap((x) => x.findings.map((f) => [f.id, f] as const)))
 	let review = r
@@ -217,7 +227,7 @@ export function autoAddFindings(
 		const c: ReviewComment = {
 			id: crypto.randomUUID(),
 			anchor: f.anchor,
-			body: findingCommentBody(f),
+			body: findingCommentBody(f, mark(f)),
 			createdAt: t,
 			updatedAt: t,
 			findingId: f.id,

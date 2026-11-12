@@ -1,4 +1,4 @@
-import { findingCommentBody } from '../../shared/findings.ts'
+import { AUTO_MARK, findingCommentBody } from '../../shared/findings.ts'
 import { MAX_STYLE_CHARS, type AiRun, type Review, type StyleBasis } from '../../shared/types.ts'
 export { MAX_STYLE_CHARS, STYLE_REFRESH_EVERY } from '../../shared/types.ts'
 import type { ContextBatch } from './context.ts'
@@ -56,11 +56,12 @@ export const exampleCount = (x: StyleExamples): number => x.edits.length + x.own
 const clip = (s: string): string => (s.length > MAX_EXAMPLE_CHARS ? `${s.slice(0, MAX_EXAMPLE_CHARS)}…` : s)
 const norm = (s: string): string => s.replace(/\r\n/g, '\n').trim()
 
-// The parts findingCommentBody adds around the body: the level label line, the follow-up link, the other places, the
-// disproof and the collapsed background. What is left is the text you wrote or kept.
+// The parts findingCommentBody adds around the body: the level label line, an automatic review's AI line, the
+// follow-up link, the other places, the disproof and the collapsed background. What is left is the text you wrote or kept.
 const LEVEL_LINE = /^[\p{Extended_Pictographic}\uFE0F\u200D]+ <kbd>[^<]*<\/kbd>( <kbd>[^<]*<\/kbd>)?$/u
 const ADDED = [
 	LEVEL_LINE,
+	AUTO_MARK,
 	/^Follows up on \[an earlier thread\]\(/,
 	/^\*\*The same problem is also at:\*\*/,
 	/^\*\*How to check this is wrong:\*\*/,

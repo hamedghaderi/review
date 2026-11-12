@@ -25,7 +25,7 @@ import { ReviewService } from '../src/main/service.ts'
 import { migrate, ReviewStore, STORE_VERSION } from '../src/main/store.ts'
 import { reviewStyleEdit, stylePrList } from '../src/main/validate.ts'
 import { parsePrRef } from '../src/shared/prQuery.ts'
-import { CATEGORY_LABEL, findingCommentBody, LEVEL_META, RESIDUE_LABEL, TEST_PATTERN_LABEL } from '../src/shared/findings.ts'
+import { autoMark, CATEGORY_LABEL, findingCommentBody, LEVEL_META, RESIDUE_LABEL, TEST_PATTERN_LABEL } from '../src/shared/findings.ts'
 import type { AiRun, Anchor, Finding, FindingCategory, Review, ReviewComment, Severity, TestPattern } from '../src/shared/types.ts'
 
 const anchor = { fileKey: 'k', side: 'new', startLine: 1, endLine: 1, excerpt: '' } as unknown as Anchor
@@ -81,6 +81,25 @@ test('examples: a finding whose only change was dropping the parts the app adds 
 	const f = finding('f1', { disproof: 'Run the list test twice.', background: 'The cache lives in memory.' })
 	const x = styleExamples([repo([comment('c1', `${findingCommentBody(f).split('\n\n')[0]}\n\n${f.body}`, { findingId: 'f1' })], [f])], [])
 	assert.equal(exampleCount(x), 0)
+})
+
+test('automatic review comments: the AI line sits under the level label, and is never learned as your words', () => {
+	const f = finding('f1', { disproof: 'Run the list test twice.' })
+	const body = findingCommentBody(f, autoMark('claude-fable-5-2-high'))
+	const [level, mark, text] = body.split('\n\n')
+	assert.match(level, /<kbd>SHOULD FIX<\/kbd>/)
+	assert.equal(mark, '🤖 Written by AI (claude-fable-5-2-high) and posted automatically.')
+	assert.equal(text, f.body)
+	assert.equal(withoutAdded(body), f.body, 'the AI line is one of the parts the app adds')
+
+	const edited = finding('f2')
+	const reworded = `${findingCommentBody(edited, autoMark('m')).split('\n\n').slice(0, 2).join('\n\n')}\n\nnit: clear the cache here too?`
+	const x = styleExamples(
+		[repo([comment('c1', body, { findingId: 'f1' }), comment('c2', reworded, { findingId: 'f2' })], [f, edited])],
+		[{ body, createdAt: '2026-11-02' }],
+	)
+	assert.deepEqual(x.edits, [{ ai: edited.body, yours: 'nit: clear the cache here too?' }])
+	assert.equal(x.github.length, 0, 'a posted automatic comment on GitHub is a finding, not yours')
 })
 
 test('examples: carried copies, comments whose finding is gone and duplicates count once or not at all', () => {
