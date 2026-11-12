@@ -39,7 +39,17 @@ function finding(id: string, over: Partial<Finding> = {}): Finding {
 }
 
 function run(findings: Array<Finding>, status: AiRun['status'] = 'completed'): AiRun {
-	return { id: 'run1', reviewId: 'b..h1', repoId: 'r', status, findings, errors: [], providerLabel: 'P', model: 'm' } as unknown as AiRun
+	return {
+		id: 'run1',
+		reviewId: 'b..h1',
+		repoId: 'r',
+		headSha: 'h1',
+		status,
+		findings,
+		errors: [],
+		providerLabel: 'P',
+		model: 'm',
+	} as unknown as AiRun
 }
 
 function review(over: Partial<Review> = {}): Review {
@@ -284,6 +294,40 @@ test('waits for unfinished CI before approving, and approves once it passes', as
 	assert.ok(reads >= 3, 'CI was read again while it was running')
 	assert.deepEqual(calls.slice(-1), ['submit APPROVE'])
 	assert.equal(records[0].outcome, 'approved')
+})
+
+test('new commits pushed during the run, or a head that cannot be read, get a comment instead of an approval', async () => {
+	let plans = 0
+	const bodies: Array<string> = []
+	const submit: AutoReviewDeps['submit'] = async (_r, _id, ev, body) => {
+		bodies.push(body)
+		return { id: 'rv', url: 'u', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }
+	}
+	// The first plan is read before the run (head h1); the last one, right before submitting, sees h2.
+	const pushed = await setup({ plan: async () => plan(++plans > 1 ? { pr: { ...plan().pr, headSha: 'h2' } } : {}), submit }, [])
+	pushed.auto.take([event()])
+	await pushed.auto.idle()
+	assert.equal(pushed.records[0].outcome, 'commented')
+	assert.match(bodies[0], /It reviewed h1, and newer commits \(up to h2\) were pushed since, so this is not an approval\./)
+
+	let reads = 0
+	const unreadable = await setup(
+		{
+			plan: async () => {
+				if (++reads > 1) throw new AppFail('github-failed', 'GitHub is down')
+				return plan()
+			},
+		},
+		[],
+	)
+	unreadable.auto.take([event()])
+	await unreadable.auto.idle()
+	assert.equal(unreadable.records[0].outcome, 'commented', 'an unknown head is not approved either')
+
+	// Findings that request changes still do: they are about the commit they name.
+	const r = run([finding('f1', { severity: 'blocking' })])
+	assert.equal(autoVerdict(r, review(), [r], 1, who, green, 'h2').event, 'REQUEST_CHANGES')
+	assert.equal(autoVerdict(run([]), review(), [run([])], 0, who, green, 'h1').event, 'APPROVE', 'the same head is approved')
 })
 
 test('CI that is still running when the wait ends, or that failed, gets a comment instead of an approval', async () => {

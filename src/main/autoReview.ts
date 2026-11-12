@@ -32,7 +32,9 @@ const paused = (label: string, why: string): string => `Automatic review of ${la
  * it couldn't be read); otherwise comment. Dismissed findings never count. A finding whose text a person should read
  * first (see screenFinding) is never posted; it rules out an approval but doesn't request changes, since its text may
  * be what someone steered the AI into writing. `ciStopped` says when CI alone stood in the way of an approval, so the
- * caller can wait for checks that haven't finished.
+ * caller can wait for checks that haven't finished. `prHead` is the pull request's head as GitHub reports it just before
+ * submitting (null: it couldn't be read; left out while waiting for CI): an approval only covers the commit reviewed,
+ * and GitHub keeps an approval on new commits unless the repository dismisses stale ones.
  */
 export function autoVerdict(
 	run: AiRun,
@@ -41,6 +43,7 @@ export function autoVerdict(
 	posted: number,
 	who: { reviewer: string; viewer: string | null },
 	ci: HeadChecks | null,
+	prHead?: string | null,
 ): { event: ReviewEvent; body: string; ciStopped: 'failed' | 'pending' | 'unreadable' | null } {
 	const roots = findingRoots(runs)
 	const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
@@ -55,7 +58,8 @@ export function autoVerdict(
 	const complete = run.status === 'completed'
 	const findingsAllow = !blocking.length && !concerns.length && !screened.size && !posted && complete
 	const ciStopped = !findingsAllow ? null : !ci ? 'unreadable' : ci.failed.length ? 'failed' : ci.pending.length ? 'pending' : null
-	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped ? 'APPROVE' : 'COMMENT'
+	const moved = prHead !== undefined && prHead !== run.headSha
+	const event: ReviewEvent = blocking.length ? 'REQUEST_CHANGES' : findingsAllow && !ciStopped && !moved ? 'APPROVE' : 'COMMENT'
 	const lines = [
 		`🤖 This review was written and submitted automatically by AI (${who.reviewer}, in the Review app)${who.viewer ? ` on behalf of ${who.viewer}` : ''}.`,
 	]
@@ -88,6 +92,12 @@ export function autoVerdict(
 			parts.push(`CI failed on this commit (${ci.failed[0].name}${more}), so this is not an approval.${also}`)
 		} else if (ciStopped === 'pending') parts.push('CI had not finished on this commit, so this is not an approval.')
 		else if (ciStopped === 'unreadable') parts.push('CI for this commit could not be read, so this is not an approval.')
+		else if (findingsAllow && moved)
+			parts.push(
+				prHead
+					? `It reviewed ${run.headSha.slice(0, 7)}, and newer commits (up to ${prHead.slice(0, 7)}) were pushed since, so this is not an approval.`
+					: `The pull request's latest commit could not be read before submitting, so this is not an approval of ${run.headSha.slice(0, 7)}.`,
+			)
 		if (findingsAllow) parts.unshift('It found no blocking, should-fix or question findings in the changed files.')
 		lines.push(parts.join(' '))
 	}
@@ -297,15 +307,23 @@ export class AutoReviewer {
 			if (!stored) throw new AppFail('not-found', 'The review was removed while it was being posted.')
 			const who = { reviewer, viewer: this.d.viewer() }
 			const readCi = () => this.d.checks(e.repoId, c.id).catch(() => null)
-			let verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, await readCi())
+			let ci = await readCi()
+			let verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci)
 			// Nothing but unfinished CI stands in the way of an approval: wait for it, then decide.
 			const until = Date.now() + (this.d.ciWaitMs ?? 20 * 60_000)
 			while (verdict.ciStopped === 'pending' && Date.now() < until) {
 				await new Promise((r) => setTimeout(r, this.d.ciPollMs ?? 60_000))
 				if (!this.d.enabled())
 					return record('skipped', `Automatic review was turned off while waiting for CI. The findings for ${label} are in the app.`)
-				verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, await readCi())
+				ci = await readCi()
+				verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci)
 			}
+			// The author may have pushed during the run or the wait. Read the head last, right before submitting.
+			const prHead = await this.d.plan(e.repoId, c.id).then(
+				(p) => p.pr.headSha,
+				() => null,
+			)
+			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, prHead)
 			const done = await this.d.submit(e.repoId, c.id, verdict.event, verdict.body)
 			const said =
 				verdict.event === 'APPROVE'
