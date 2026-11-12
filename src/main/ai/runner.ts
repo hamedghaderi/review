@@ -673,7 +673,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					attempt--
 					continue
 				}
-				if (!e.retryable || attempt + 1 >= options.maxAttempts) return { ok: false, error: e }
+				if (!e.retryAfter(attempt, options.maxAttempts)) return { ok: false, error: e }
 				await sleep(options.backoffMs(attempt, e), controller.signal)
 				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
 			} finally {
@@ -746,7 +746,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return
-				if (!e.retryable || attempt + 1 >= options.maxAttempts) {
+				if (!e.retryAfter(attempt, options.maxAttempts)) {
 					notice(`Findings could not be checked for duplicates, so each is listed on its own: ${e.message}`)
 					return
 				}
@@ -882,7 +882,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return failed('cancelled')
-				if (!e.retryable || attempt + 1 >= options.maxAttempts) return failed(e.message)
+				if (!e.retryAfter(attempt, options.maxAttempts)) return failed(e.message)
 				await sleep(options.backoffMs(attempt, e), controller.signal)
 			} finally {
 				if (tools && run.coverage.lookups && !controller.signal.aborted) addLookups(run.coverage.lookups, tools.log)
@@ -937,7 +937,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			} catch (error) {
 				const e = asProviderError(error)
 				if (controller.signal.aborted || e.kind === 'cancelled') return failed('cancelled')
-				if (!e.retryable || attempt + 1 >= options.maxAttempts) return failed(e.message)
+				if (!e.retryAfter(attempt, options.maxAttempts)) return failed(e.message)
 				await sleep(options.backoffMs(attempt, e), controller.signal)
 			} finally {
 				if (tools && run.coverage.lookups && !controller.signal.aborted) addLookups(run.coverage.lookups, tools.log)
