@@ -316,12 +316,14 @@ export function ThreadReplyBox({
 	onDraft,
 	modelPicker,
 	asked = false,
+	refute = false,
 }: {
 	t: DiscussionThread
 	onReply: ReplyFn
 	onDraft?: DraftFn
 	modelPicker?: ReactNode
 	asked?: boolean
+	refute?: boolean // a bot started it and Review's check found it likely wrong: offer a draft that says why
 }) {
 	const [open, setOpen] = useState(false)
 	const [text, setText] = useState('')
@@ -350,7 +352,11 @@ export function ThreadReplyBox({
 			className={`btn small ${open ? 'ghost' : ''}`}
 			onClick={() => void draft()}
 			disabled={drafting || busy}
-			title="Your model for questions drafts a reply from the thread and the code. Nothing is sent until you press Reply."
+			title={
+				refute
+					? "Your model for questions drafts a reply saying why the bot's comment doesn't hold, from Review's check and the code. Nothing is sent until you press Reply."
+					: 'Your model for questions drafts a reply from the thread and the code. Nothing is sent until you press Reply.'
+			}
 		>
 			{drafting ? (
 				<>
@@ -358,6 +364,8 @@ export function ThreadReplyBox({
 				</>
 			) : open ? (
 				'Draft with AI'
+			) : refute ? (
+				'Draft why it’s wrong'
 			) : (
 				'Draft reply'
 			)}
@@ -380,7 +388,7 @@ export function ThreadReplyBox({
 				<button className="btn small ghost" onClick={() => setOpen(true)}>
 					Reply
 				</button>
-				{asked && draftButton}
+				{(asked || refute) && draftButton}
 				{t.resolved === false && (
 					<button className="btn small ghost" onClick={() => void send(true)} disabled={busy}>
 						{busy ? 'Resolving…' : 'Resolve'}
@@ -519,7 +527,16 @@ export function ThreadCard({
 						</div>
 					))}
 					<MoreOnGitHub t={t} />
-					{onReply && <ThreadReplyBox t={t} onReply={onReply} onDraft={onDraft} modelPicker={modelPicker} asked={asked} />}
+					{onReply && (
+						<ThreadReplyBox
+							t={t}
+							onReply={onReply}
+							onDraft={onDraft}
+							modelPicker={modelPicker}
+							asked={asked}
+							refute={check?.verdict === 'wrong' && !check.error}
+						/>
+					)}
 				</>
 			)}
 		</div>
