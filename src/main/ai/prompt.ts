@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-12.3'
+export const PROMPT_VERSION = 'reviewer-2026-11-12.4'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -134,6 +134,17 @@ Some requests carry facts the app computed or read, not repository text:
 {{LOOKUPS}}{{UNSETTLED}}
 
 Report each distinct problem once.`
+
+/**
+ * Added to the instructions only when the pull request takes over another one that could be read (issue #168), so
+ * every other review pays nothing for it.
+ */
+export const TAKEOVER_INSTRUCTIONS = `
+
+# The pull request this one takes over
+The background includes the pull request this one takes over: what it set out to do, and its review threads still open there, labelled O1, O2….
+- Its reader may never have seen those threads. When the changed lines here still have the problem one raised, report it under its usual rule with "raised_before" set to that thread and "why_again" saying this change carries it over; the body opens by saying it was raised on that pull request. An O thread never settles a finding. A concern about code this change no longer has is not a finding.
+- With the fact "What #N changed" (its files and patches; read its code with version "original"): list under "dropped_behaviour" what it set out to deliver (its description, its changes) that this change no longer does: the file and line in its head that did it, and in one sentence what is lost. Only with such a place, and not what this change's description says it leaves out on purpose. This is never a finding.`
 
 export const DEFAULT_LEVELS: Array<FindingLevel> = ['blocking', 'should_fix', 'question', 'suggestion', 'nit', 'pre_existing']
 

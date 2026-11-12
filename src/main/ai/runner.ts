@@ -30,6 +30,7 @@ import type { LinkedIssue } from '../github.ts'
 import type { RequestImage } from './provider.ts'
 import type { ContextBatch, ContextExcerpt, ContextFact, ContextLimits, ContextPackage, FileSource } from './context.ts'
 import { capacityChars, CHARS_PER_TOKEN, fitToModel, packContext, prepareChange, settleFiles } from './context.ts'
+import { originalLineUrl } from '../takeover.ts'
 import {
 	applyBudget,
 	findingKey,
@@ -41,7 +42,7 @@ import {
 	withKnownMentions,
 } from './findings.ts'
 import { buildBackground } from './background.ts'
-import { buildInput, DEFAULT_LEVELS, instructionsFor, withExternalTools, PROMPT_VERSION } from './prompt.ts'
+import { buildInput, DEFAULT_LEVELS, instructionsFor, withExternalTools, PROMPT_VERSION, TAKEOVER_INSTRUCTIONS } from './prompt.ts'
 import { modelMaker } from './catalog.ts'
 import type { RelatedResult } from './related.ts'
 import { classifyRisk } from './risk.ts'
@@ -128,9 +129,14 @@ export interface RunInput {
 	 */
 	loadDrift?: (used: Array<string>, signal: AbortSignal) => Promise<ContextFact | null>
 	/** Linked issues and the conversation so far, for pull requests; the description is always included without it. */
-	loadBackground?: (
-		signal: AbortSignal,
-	) => Promise<{ issues: Array<LinkedIssue>; discussion: Discussion | null; takeover?: Takeover | null; notes: Array<string> }>
+	loadBackground?: (signal: AbortSignal) => Promise<{
+		issues: Array<LinkedIssue>
+		discussion: Discussion | null
+		takeover?: Takeover | null
+		takeoverFact?: ContextFact | null // what the original changed, for finding behaviour this one drops
+		takeoverFiles?: Array<string>
+		notes: Array<string>
+	}>
 	/** Notes and text files you gave the reviewer for this review. */
 	context?: ReviewContext | null
 	/** The images of that context, sent with every request to models that accept them. */
@@ -244,6 +250,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const automatic = input.automatic === true
 	let background = buildBackground({ description, context: input.context ?? null, issues: [], discussion: null, pr, automatic })
 	let discussion: Discussion | null = null // the PR's threads, once read, for checking the ones bots started
+	let takeoverFact: ContextFact | null = null // what the pull request this one takes over changed (issue #168)
+	let takeoverFiles = new Set<string>()
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups, options.style ?? null)
 		: options.team
@@ -364,6 +372,15 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						automatic,
 						takeover: b.takeover ?? null,
 					})
+					if (b.takeover?.status === 'read') {
+						const o = b.takeover.original
+						run.takeover = { repo: o.repo, number: o.number, url: o.url, headSha: o.headSha }
+						for (const w of workers) w.instructions += TAKEOVER_INSTRUCTIONS
+						if (b.takeoverFact) {
+							takeoverFact = b.takeoverFact
+							takeoverFiles = new Set(b.takeoverFiles ?? [])
+						}
+					}
 				} catch (e) {
 					if (controller.signal.aborted) return finish(null)
 					notice(
@@ -437,6 +454,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 			const allFacts = [
 				...(drift ? [drift] : []),
+				...(takeoverFact ? [takeoverFact] : []),
 				...(facts?.facts ?? []),
 				...importFacts(related?.importers ?? []),
 				...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
@@ -488,6 +506,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				facts: [
 					...(background.summary ? [{ kind: 'background' as const, text: background.summary }] : []),
 					...(drift ? [{ kind: 'drift' as const, text: drift.title }] : []),
+					...(takeoverFact ? [{ kind: 'takeover' as const, text: takeoverFact.title }] : []),
 					...(facts?.summary ?? []),
 					...(related?.importers.length ? [{ kind: 'structure' as const, text: importSummary(related.importers) }] : []),
 					...(told.length
@@ -684,6 +703,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		for (const u of value.unexplained) if (!run.unexplained!.some((x) => x.fileKey === u.fileKey)) run.unexplained!.push(u)
 		run.outdatedDocs ??= []
 		for (const d of value.outdatedDocs) if (!run.outdatedDocs.some((x) => x.path === d.path && x.line === d.line)) run.outdatedDocs.push(d)
+		// Only a place in a file the original changed: "reported only with a concrete place in #N that did it".
+		if (run.takeover && takeoverFiles.size)
+			for (const d of value.dropped) {
+				if (!takeoverFiles.has(d.path) || (run.dropped ??= []).some((x) => x.path === d.path && x.line === d.line)) continue
+				run.dropped.push({ ...d, url: originalLineUrl(run.takeover, d.path, d.line) })
+			}
 		for (const l of value.limitations) {
 			const text = w.role ? `${w.role}: ${l}` : l
 			if (!run.limitations.includes(text)) run.limitations.push(text)

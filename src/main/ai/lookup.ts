@@ -54,7 +54,7 @@ export interface LookupLog {
 /** Lines of one file a request had in front of it. */
 export interface SeenLines {
 	path: string
-	version: 'head' | 'base' | 'tip'
+	version: 'head' | 'base' | 'tip' | 'original'
 	start: number
 	end: number
 }
@@ -92,9 +92,9 @@ export const TOOL_DEFINITIONS: Array<ToolDefinition> = [
 				path: { type: 'string', description: 'Path from the repository root, e.g. "src/app/cart.ts".' },
 				version: {
 					type: 'string',
-					enum: ['head', 'base', 'tip'],
+					enum: ['head', 'base', 'tip', 'original'],
 					description:
-						'"head" for the version with the change, "base" for before it, "tip" for the base branch as it is now (only when the facts include "Since this pull request branched").',
+						'"head" for the version with the change, "base" for before it, "tip" for the base branch as it is now (only when the facts include "Since this pull request branched"), "original" for the head of the pull request this one takes over (only when the facts include "What #N changed").',
 				},
 				start_line: { type: ['integer', 'null'], description: 'First line to read (1-based), or null for the start of the file.' },
 				end_line: {
@@ -136,7 +136,8 @@ export const TOOL_DEFINITIONS: Array<ToolDefinition> = [
 ]
 
 export function createReviewTools(
-	repo: { root: string; baseSha: string; headSha: string; tipSha?: string | null }, // tipSha: the base branch now (issue #165)
+	// tipSha: the base branch now (issue #165); originalSha: the head of the pull request this one takes over (issue #168)
+	repo: { root: string; baseSha: string; headSha: string; tipSha?: string | null; originalSha?: string | null },
 	budget: LookupBudget,
 	external: ExternalTools | null = null,
 ): ReviewTools {
@@ -156,14 +157,20 @@ export function createReviewTools(
 			case 'read_file': {
 				const path = cleanPath(a.path)
 				if (path === null || !path) return refuse('"path" must be a file path from the repository root, without ".." parts.')
-				const version = a.version === 'base' ? 'base' : a.version === 'tip' ? 'tip' : 'head'
+				const version = a.version === 'base' || a.version === 'tip' || a.version === 'original' ? a.version : 'head'
 				if (version === 'tip' && !repo.tipSha)
 					return refuse(
 						'There is no base branch tip for this review: the base branch has not moved, or it could not be read. Read "head" or "base".',
 					)
-				const sha = version === 'base' ? repo.baseSha : version === 'tip' ? repo.tipSha! : repo.headSha
+				if (version === 'original' && !repo.originalSha)
+					return refuse('This pull request takes over no other one that could be read. Read "head" or "base".')
+				const sha =
+					version === 'base' ? repo.baseSha : version === 'tip' ? repo.tipSha! : version === 'original' ? repo.originalSha! : repo.headSha
 				const r = await readAt(repo.root, sha, path, FILE_LIMIT, signal)
-				if (!r) return refuse(`No file "${path}" at the ${version === 'tip' ? 'base branch tip' : `${version} commit`}.`)
+				if (!r)
+					return refuse(
+						`No file "${path}" at the ${version === 'tip' ? 'base branch tip' : version === 'original' ? 'head of the pull request this one takes over' : `${version} commit`}.`,
+					)
 				if (r.truncated) return refuse(`"${path}" is larger than ${FILE_LIMIT / 1024 / 1024} MB and cannot be read.`)
 				if (r.buf.subarray(0, 8000).includes(0)) return refuse(`"${path}" is a binary file.`)
 				seen(log.paths, path)
@@ -260,7 +267,7 @@ export function shownLines(name: 'read_file' | 'search_code', text: string): Arr
 	}
 	const lines = text.split('\n')
 	if (name === 'read_file') {
-		const head = /^(.+) \((head|base|tip)\), lines \d+-\d+ of \d+:$/.exec(lines[0] ?? '')
+		const head = /^(.+) \((head|base|tip|original)\), lines \d+-\d+ of \d+:$/.exec(lines[0] ?? '')
 		if (!head) return out
 		for (const l of lines.slice(1)) {
 			const m = /^\s*(\d+) \| /.exec(l)

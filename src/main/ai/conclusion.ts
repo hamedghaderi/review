@@ -99,6 +99,10 @@ export function closingText({ run, decisions, explanation, history, question, dr
 			out.push(findingLine(f, ['dismissed', d?.reason, d?.note].filter(Boolean).join(': ')))
 		}
 	}
+	if (run.takeover && run.dropped?.length) {
+		out.push('', `# What #${run.takeover.number}, which this pull request takes over, did that this one no longer does`)
+		for (const d of run.dropped.slice(0, 10)) out.push(`- ${d.path}:${d.line} in #${run.takeover.number}: ${d.what}`)
+	}
 	for (const l of run.limitations.slice(0, 5)) out.push(`- Reviewer limitation: ${l}`)
 	out.push('')
 	const earlier = recent(history.filter((m) => !m.error))

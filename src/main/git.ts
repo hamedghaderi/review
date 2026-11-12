@@ -267,6 +267,43 @@ export async function sharedCommits(
 	return same + patched
 }
 
+/**
+ * What a pull request changed, per file: its patch from where it branched off `base` to `head`, with two lines of
+ * context, and its added and removed line counts. Deleted files are listed by their old path. Null when the history
+ * isn't in this clone. Files past `maxBytes` of patch are left out.
+ */
+export async function changesOf(
+	cwd: string,
+	base: string,
+	head: string,
+	maxBytes = 2 * 1024 * 1024,
+): Promise<Array<{ path: string; added: number; removed: number; patch: string }> | null> {
+	if (!isSha(base) || !isSha(head)) return null
+	const mb = await git(cwd, ['merge-base', base, head])
+	const from = mb.stdout.toString('utf8').trim()
+	if (mb.code !== 0 || !isSha(from)) return null
+	const r = await git(cwd, ['diff-tree', ...DIFF_FLAGS, '-p', '-U2', '--src-prefix=a/', '--dst-prefix=b/', from, head], maxBytes)
+	if (!r.truncated && r.code !== 0) return null
+	const files = r.stdout
+		.toString('utf8')
+		.split(/^(?=diff --git )/m)
+		.filter((x) => x.startsWith('diff --git '))
+	if (r.truncated) files.pop() // cut off part-way
+	return files.map((patch) => {
+		const lines = patch.split('\n')
+		const plus = /^\+\+\+ b\/(.*)$/m.exec(patch)?.[1]
+		const minus = /^--- a\/(.*)$/m.exec(patch)?.[1]
+		const path = plus ?? minus ?? /^diff --git a\/(.*?) b\//.exec(patch)?.[1] ?? ''
+		const body = lines.filter((l) => !l.startsWith('+++ ') && !l.startsWith('--- '))
+		return {
+			path,
+			added: body.filter((l) => l.startsWith('+')).length,
+			removed: body.filter((l) => l.startsWith('-')).length,
+			patch,
+		}
+	})
+}
+
 /** A commit's message without its subject line, trimmed. */
 export async function commitBody(cwd: string, sha: string): Promise<string> {
 	if (!isSha(sha)) return ''

@@ -766,6 +766,28 @@ function RunSummary({
 					</ul>
 				</div>
 			)}
+			{run.takeover && (run.dropped ?? []).length > 0 && (
+				<div className="small unexplained">
+					<b>
+						What{' '}
+						<a href={run.takeover.url} target="_blank" rel="noreferrer">
+							#{run.takeover.number}
+						</a>{' '}
+						did that this pull request no longer does
+					</b>{' '}
+					(this pull request takes it over; not posted):
+					<ul>
+						{run.dropped!.map((d) => (
+							<li key={`${d.path}:${d.line}`}>
+								<a className="mono" href={d.url} target="_blank" rel="noreferrer" title="Open that line of the original on GitHub">
+									{d.path}:{d.line}
+								</a>
+								: {d.what}
+							</li>
+						))}
+					</ul>
+				</div>
+			)}
 			{run.errors.length > 0 && <div className="small error-text">{errorText(run, run.errors[run.errors.length - 1])}</div>}
 			{showDetails && (
 				<div className="run-details small">
@@ -936,6 +958,7 @@ const FACT_LABEL = {
 	decisions: 'Your earlier decisions',
 	earlier: 'Earlier run',
 	drift: 'Base branch',
+	takeover: 'Taken-over PR',
 } as const
 
 /** Requests that must report on a rule: the owning member's share of a team run, or every request of a single-model run. */

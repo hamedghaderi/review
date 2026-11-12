@@ -29,7 +29,7 @@ export interface Background {
  * A review thread a finding says it raises again. `settled`: someone with write access, other than the PR author,
  * answered or resolved it; only such a thread may settle a finding (never on an automatic review).
  */
-export type EarlierThread = Pick<DiscussionThread, 'id' | 'url' | 'path'> & { settled: boolean }
+export type EarlierThread = Pick<DiscussionThread, 'id' | 'url' | 'path'> & { settled: boolean; original?: number }
 
 /** Who wrote the pull request, so the conversation can say whose answer is whose. */
 export interface PrAuthor {
@@ -353,6 +353,12 @@ export function buildBackground(o: {
 		})
 		parts.push(t.summary)
 	}
+	// The original's open threads, under the labels they were sent with; one of them never settles a finding here.
+	const original = o.takeover?.status === 'read' ? o.takeover.original : null
+	const originalThreads: Array<[string, EarlierThread]> = (original?.threads ?? []).map((th, i) => [
+		`O${i + 1}`,
+		{ id: th.id, url: th.url, path: th.path, settled: false, original: original!.number },
+	])
 	const d = o.discussion
 	if (d && d.status !== 'unavailable') {
 		const c = conversationText(d, prLogin, o.automatic === true)
@@ -372,7 +378,7 @@ export function buildBackground(o: {
 		sections,
 		chars: sections.reduce((n, s) => n + s.title.length + s.text.length + 30, 0),
 		summary: parts.length ? parts.join('; ') : null,
-		threads,
+		threads: new Map([...threads, ...originalThreads]),
 		outside: outsiders(o.pr ?? null, o.issues, o.discussion, o.takeover?.status === 'read' ? o.takeover.original : null),
 		people: participants(prLogin, o.issues, o.discussion),
 	}
