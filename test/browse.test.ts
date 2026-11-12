@@ -994,11 +994,23 @@ test('comments an automatic review added survive a save from a window that has n
 		endLine: 1,
 		excerpt: '',
 	}
-	const run = { id: 'run1', status: 'completed', findings: [{ id: 'f1', anchor, severity: 'blocking', title: 't', body: 'b' }] }
+	const run = {
+		id: 'run1',
+		status: 'completed',
+		model: 'gpt-6-astra-high',
+		team: { members: [{ id: 'sec', model: 'claude-fable-5-2-high' }] },
+		findings: [{ id: 'f1', anchor, severity: 'blocking', title: 't', body: 'b', memberId: 'sec' }],
+	}
 	await store.update((d) => void (d.repos[s.repo.id].aiRuns[c.id] = [run as never]))
 	svc.attachAi({ cancelUnless() {}, runsFor: () => store.read().repos[s.repo.id].aiRuns[c.id] } as never)
 	const [added] = await svc.addAutoFindings(s.repo.id, c.id, 'run1', ['blocking'])
 	assert.ok(added)
+	const posted = store.read().repos[s.repo.id].reviews[c.id].comments.find((x) => x.id === added)!
+	assert.match(
+		posted.body,
+		/\n\n🤖 Written by AI \(claude-fable-5-2-high\) and posted automatically\.\n\nb$/,
+		'marked with the model of the member that raised it',
+	)
 	const stale = { ...loaded.review, comments: [] }
 	await svc.saveReview(stale)
 	const now = () => store.read().repos[s.repo.id].reviews[c.id]

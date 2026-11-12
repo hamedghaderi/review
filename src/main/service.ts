@@ -120,7 +120,7 @@ import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
-import { autoAddFindings, findingRoots } from '../shared/findings.ts'
+import { autoAddFindings, autoMark, findingRoots } from '../shared/findings.ts'
 import { screenFinding } from '../shared/screen.ts'
 import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
@@ -675,6 +675,8 @@ export class ReviewService {
 				findingRoots(runs),
 				levels,
 				(f) => !!f.carried || screenFinding(f, r.pr?.repo ?? null).length > 0,
+				// The model that raised it: in a team, its member's.
+				(f) => autoMark(run.team?.members.find((m) => m.id === f.memberId)?.model ?? run.model),
 			)
 			if (!res.added) return
 			r.comments = res.review.comments
