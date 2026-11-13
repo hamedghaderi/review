@@ -1284,10 +1284,28 @@ export interface FindingReproducer {
 
 /** The double-check of a finding (blocking ones after the run, any one on demand): a separate request asked to prove it wrong. */
 /**
- * An open review thread an AI review bot started, checked against the code like a finding (the bot's comment is the
- * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
- * finding of the run.
+ * How a double-check's verdict changes when only the order of its answers or the framing of its question changes
+ * (issue #196). "as-is" is the double-check as sent today; "repeat" sends it again, to tell plain noise from the rest.
  */
+export type ConsistencyVariant = 'as-is' | 'repeat' | 'reversed' | 'reframed'
+export type ConsistencyVerdict = 'holds' | 'wrong' | 'unsure' | 'failed'
+
+export interface ConsistencyRow {
+	findingId: string
+	title: string
+	place: string
+	kind: 'blocking' | 'fixed' // a blocking finding's double-check, or a gone finding's "is it fixed?" check
+	verdicts: Record<ConsistencyVariant, ConsistencyVerdict>
+}
+
+export interface ConsistencyReport {
+	model: string
+	at: string
+	rows: Array<ConsistencyRow>
+	// Each variant against "as-is": findings where both answered, how many differ, how many swapped wrong and holds.
+	variants: Array<{ variant: Exclude<ConsistencyVariant, 'as-is'>; compared: number; changed: number; wrongHolds: number; failed: number }>
+}
+
 /**
  * What the pull request author's replies do about another reviewer's thread (issue #195). Only "addressed" settles it
  * for an automatic approval; `kind` null means it couldn't be told (no model for questions, a budget, a failed request).
@@ -1303,6 +1321,11 @@ export interface AuthorReplyCheck {
 	at: string
 }
 
+/**
+ * An open review thread an AI review bot started, checked against the code like a finding (the bot's comment is the
+ * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
+ * finding of the run.
+ */
 export interface BotThreadCheck {
 	threadId: string
 	bot: string | null // the bot's login
@@ -1561,10 +1584,6 @@ export interface AiCost {
 	unpriced: boolean
 }
 
-// review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
-// verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
-// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
-// summary: a drafted review summary.
 /**
  * What "Rewrite with AI" found about one file:line reference in your summary (issue #191). "unopened": the app could
  * not read it at the head commit (no such file, a name several files share, a line past the end), so nothing was checked.
@@ -1581,6 +1600,10 @@ export interface SummaryRewrite {
 	dropped: Array<string> // references in your text that the rewrite left out
 }
 
+// review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
+// verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
+// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
+// summary: a drafted review summary.
 export type UsageKind =
 	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit'
 
@@ -2139,6 +2162,8 @@ export const IPC = {
 	aiDraftReply: 'ai:draft-reply',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
+	aiConsistencyPlan: 'ai:consistency-plan',
+	aiCheckConsistency: 'ai:check-consistency',
 	reviewStyle: 'ai:review-style',
 	stylePrs: 'ai:style-prs',
 	setStylePrs: 'ai:set-style-prs',
@@ -2401,6 +2426,10 @@ export interface ReviewApi {
 	 * it cites against the head commit (issue #191). Nothing is sent.
 	 */
 	rewriteSummary(reviewId: string, event: ReviewEvent, text: string, partial: boolean): Promise<Result<SummaryRewrite>>
+	/** How many double-checked findings of the review the consistency check would use, and requests it would send (issue #196). */
+	consistencyPlan(reviewId: string): Promise<Result<{ findings: number; requests: number }>>
+	/** Sends those double-checks again in each variant with the model for questions, and reports how often verdicts change. */
+	checkConsistency(reviewId: string): Promise<Result<ConsistencyReport>>
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): Promise<Result<ReviewStyle | null>>
 	/** Builds the note from your comments with the model for questions. When you had edited it, the new one waits in `proposed`. */

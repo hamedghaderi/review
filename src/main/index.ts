@@ -574,6 +574,12 @@ function registerIpc(): void {
 			'Your rewritten review summary',
 		)
 	})
+	handle(IPC.aiConsistencyPlan, async (reviewId: unknown) => service.consistencyPlan(comparisonId(reviewId)))
+	handle(IPC.aiCheckConsistency, async (reviewId: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		return answered(service.checkConsistency(comparisonId(reviewId), selection), 'Verdict consistency check')
+	})
 	handle(IPC.reviewStyle, async () => service.reviewStyle())
 	handle(IPC.buildReviewStyle, async () => {
 		const selection = connections.view().questionModel

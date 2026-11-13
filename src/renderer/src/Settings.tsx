@@ -10,6 +10,7 @@ import { KeymapSettings } from './KeymapSettings.tsx'
 import { ReviewingSettings } from './ReviewingSettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
 import { StyleSettings } from './StyleSettings.tsx'
+import { ConsistencySettings } from './ConsistencySettings.tsx'
 
 /**
  * A page in the settings window. Fixed pages have plain names; pages for one item carry its id after a colon:
@@ -41,6 +42,7 @@ export function Settings(props: {
 	github: GitHubStatus
 	mapping: GitHubMapping | null
 	repoId: string | null // the open repository, for MCP servers started in its folder and its Claude Code settings
+	reviewId?: string | null // the review open in the window, for the verdict consistency check
 	onClose(): void
 	onAi(view: AiSettingsView): void
 	onGitHub(status: GitHubStatus): void
@@ -161,6 +163,7 @@ export function Settings(props: {
 					{ id: 'levels', label: 'Finding levels', keywords: 'blocking should fix question nit comments' },
 					{ id: 'style', label: 'Your review style', keywords: 'tone voice wording learn my comments sound like me' },
 					{ id: 'limits', label: 'Review input', keywords: 'limits context lines batch related code lookups verify duplicates' },
+					{ id: 'consistency', label: 'Verdict consistency', keywords: 'double-check verify order wording flip noise test' },
 					{
 						id: 'mcp',
 						label: 'MCP servers',
@@ -474,6 +477,7 @@ export function Settings(props: {
 				</div>
 			)
 		if (page === 'style') return <StyleSettings hasQuestionModel={!!ai.questionModel} />
+		if (page === 'consistency') return <ConsistencySettings reviewId={props.reviewId ?? null} model={ai.questionModel?.modelId ?? null} />
 		if (page === 'limits')
 			return (
 				<div className="settings-main">
