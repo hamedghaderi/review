@@ -33,6 +33,7 @@ import {
 	type ReviewLimits,
 	type RunEstimate,
 	type ReviewEvent,
+	type SummaryRewrite,
 	type CommitCheck,
 	type CommitCheckEstimate,
 	REVIEW_RULES,
@@ -80,6 +81,7 @@ import { type Background, buildBackground } from './background.ts'
 import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
 import { buildStyleRequest, parseStyle, type StyleExamples } from './style.ts'
 import { buildSummaryRequest, parseSummary } from './summary.ts'
+import { buildRewriteRequest, findCitations, parseRewrite, resolveCitations, rewriteInput, type HeadFiles } from './rewrite.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
@@ -112,6 +114,8 @@ export interface ComparisonAccess {
 	loadBackground?: RunInput['loadBackground']
 	/** The change's commit messages, oldest first. */
 	commits?(): Promise<Array<{ sha: string; subject: string; body: string }>>
+	/** Files at the head commit, for checking the references in a summary you wrote (issue #191). */
+	headFiles?: HeadFiles
 	/** The notes and files you gave the reviewer for this review, as saved when the run starts. */
 	reviewContext?(): ReviewContext | null
 	/** The images in that context, read from disk when the run starts. */
@@ -1301,6 +1305,54 @@ export class AiController {
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/**
+	 * Rewrites summary text you wrote (`partial`: a selected part of it) and checks the file:line references in it at the
+	 * head commit, with the model for questions and its lookups (see rewrite.ts, issue #191).
+	 */
+	async rewriteSummary(
+		access: ComparisonAccess,
+		reviewId: string,
+		event: ReviewEvent,
+		text: string,
+		partial: boolean,
+		selection: ModelSelection,
+	): Promise<SummaryRewrite> {
+		const repoId = access.comparison.repoId
+		const busy = `rewrite:${reviewId}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'This summary is already being rewritten.')
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'summary', repoId)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		try {
+			const citations = findCitations(text)
+			const cited = access.headFiles ? await resolveCitations(citations, access.headFiles) : []
+			const context = { text, partial, event, title: access.comparison.pr?.title ?? null, style: this.styleText(), cited }
+			// Lookups as Ask gets them, and only when there is code to check.
+			const l = config.provider.limits
+			const room =
+				capacityChars(
+					l.contextWindow,
+					outputBudget(l),
+					buildRewriteRequest(context).instructions.length + JSON.stringify(TOOL_DEFINITIONS).length,
+				) - rewriteInput(context).length
+			const tools =
+				config.limits.lookups !== false && access.tools && cited.some((x) => x.path !== null) && room >= 2000
+					? access.tools({ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) }, null)
+					: undefined
+			const response = await config.provider.review(buildRewriteRequest(context, tools), AbortSignal.timeout(300_000))
+			return parseRewrite(response.output, text, cited)
+		} catch (e) {
+			if (e instanceof AppFail) throw e
+			throw new AppFail('ai-unavailable', `No rewrite: ${e instanceof Error ? e.message : String(e)}`)
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}

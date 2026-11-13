@@ -91,6 +91,7 @@ import {
 	outcomeFilter,
 	budgetSettings,
 } from './validate.ts'
+import { MAX_REWRITE_CHARS } from './ai/rewrite.ts'
 
 let win: BrowserWindow | null = null
 const runStatus = new Map<string, AiRun['status']>() // runs seen running, so their end can play a sound
@@ -561,6 +562,16 @@ function registerIpc(): void {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
 		return answered(service.draftSummary(comparisonId(reviewId), reviewEvent(event), selection), 'Your drafted review summary')
+	})
+	handle(IPC.aiRewriteSummary, async (reviewId: unknown, event: unknown, text: unknown, partial: unknown) => {
+		const selection = connections.view().questionModel
+		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
+		const body = str(text, 'text', MAX_REWRITE_CHARS)
+		if (!body.trim()) throw new AppFail('invalid-input', 'There is no text to rewrite.')
+		return answered(
+			service.rewriteSummary(comparisonId(reviewId), reviewEvent(event), body, bool(partial, 'partial'), selection),
+			'Your rewritten review summary',
+		)
 	})
 	handle(IPC.reviewStyle, async () => service.reviewStyle())
 	handle(IPC.buildReviewStyle, async () => {

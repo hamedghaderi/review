@@ -259,6 +259,24 @@ export const summarySchema = z.object({
 export const SUMMARY_SCHEMA_NAME = 'review_summary'
 export const SUMMARY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(summarySchema, { target: 'draft-7' }))
 
+/** Your own summary text, rewritten, with what the code says about each reference it cites (issue #191). */
+export const rewriteSchema = z.object({
+	text: z.string().describe('The rewritten text, in Markdown, still written as the reviewer to the author.'),
+	checks: z
+		.array(
+			z.object({
+				ref: z.string().describe('The reference exactly as listed under "Cited code", e.g. "src/a.ts:12-14".'),
+				verdict: z
+					.enum(['holds', 'wrong', 'unsure'])
+					.describe('"holds": the code supports what the text says there. "wrong": it shows otherwise. "unsure": it does not settle it.'),
+				note: z.string().describe('One sentence: what the code at that reference shows.'),
+			}),
+		)
+		.describe('One entry per reference listed under "Cited code".'),
+})
+export const REWRITE_SCHEMA_NAME = 'summary_rewrite'
+export const REWRITE_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(rewriteSchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

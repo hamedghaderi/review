@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
-import type { AppError, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
+import type { AppError, CitationCheck, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 
@@ -84,6 +84,15 @@ export function PublishDialog({
 	const [drafting, setDrafting] = useState(false)
 	const [drafted, setDrafted] = useState(false) // the summary holds an AI draft you have not cleared
 	const [draftError, setDraftError] = useState<string | null>(null)
+	const [rewriting, setRewriting] = useState(false)
+	// The last rewrite (issue #191): what it replaced, for undo, and what it found about the references in your text.
+	const [rewrite, setRewrite] = useState<{
+		before: string
+		after: string
+		wasDrafted: boolean
+		checks: Array<CitationCheck>
+		dropped: Array<string>
+	} | null>(null)
 	const [confirmSubmit, setConfirmSubmit] = useState(false)
 	const [showSent, setShowSent] = useState(false)
 	const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -109,6 +118,46 @@ export function PublishDialog({
 		} finally {
 			setDrafting(false)
 		}
+	}
+
+	// Rewrites what you selected, or all of it when nothing is: your words, tightened, with their references checked.
+	const rewriteSummary = async (): Promise<void> => {
+		if (rewriting || drafting) return
+		const el = summaryRef.current
+		const current = el?.value ?? summary
+		let start = el?.selectionStart ?? 0
+		let end = el?.selectionEnd ?? 0
+		const partial = end > start && !!current.slice(start, end).trim() && (start > 0 || end < current.length)
+		if (!partial) {
+			start = 0
+			end = current.length
+		}
+		const picked = current.slice(start, end)
+		if (!picked.trim()) return
+		setRewriting(true)
+		setDraftError(null)
+		try {
+			const r = await window.review.rewriteSummary(reviewId, event, picked, partial)
+			if (!r.ok) return setDraftError(r.error.message)
+			// The selection's own leading and trailing blank space stays, so paragraphs around it keep their spacing.
+			const lead = /^\s*/.exec(picked)![0]
+			const trail = /\s*$/.exec(picked)![0]
+			const inserted = `${lead}${r.value.text}${trail}`
+			const after = current.slice(0, start) + inserted + current.slice(end)
+			setRewrite({ before: current, after, wasDrafted: drafted, checks: r.value.checks, dropped: r.value.dropped })
+			setSummary(after)
+			setDrafted(true)
+			placeCursor(start + inserted.length)
+		} finally {
+			setRewriting(false)
+		}
+	}
+	const undoRewrite = (): void => {
+		if (!rewrite) return
+		setSummary(rewrite.before)
+		setDrafted(rewrite.wasDrafted)
+		setRewrite(null)
+		placeCursor(rewrite.before.length)
 	}
 
 	// Inserts at the cursor (replacing a selection), then puts the cursor after the inserted text.
@@ -579,37 +628,48 @@ export function PublishDialog({
 										}}
 										onKeyDown={(e) => void (gifCommand.onKeyDown(e) || mention.onKeyDown(e))}
 										rows={drafted ? 6 : 4}
-										readOnly={drafting}
+										readOnly={drafting || rewriting}
 										disabled={!!running}
 									/>
 									{gifCommand.panel}
 									{mention.panel}
-									<div className="summary-tools">
+									{/* Formatting on the left, the AI on the right: a bar under the text, never over it. */}
+									<div className="summary-tools" role="toolbar" aria-label="Summary tools">
 										<EmojiPicker disabled={!!running} onPick={insertText} />
 										<GifPicker disabled={!!running} onPick={pickGif} onOpenSettings={onOpenGitHubSettings} />
-										{drafted && summary.trim() && (
-											<span className="muted small summary-note">Drafted by AI: check it before you submit.</span>
-										)}
 										<span className="spacer" />
+										{rewrite && summary === rewrite.after && (
+											<button className="btn small ghost" onClick={undoRewrite} disabled={rewriting || !!running}>
+												Undo rewrite
+											</button>
+										)}
+										{canDraft && summary.trim() && (
+											<button
+												className="btn small ai"
+												onClick={() => void rewriteSummary()}
+												disabled={rewriting || drafting || !!running}
+												title="Your model for questions rewrites what you selected, or all of it, in fewer words and in your review style, without changing what it says. Each file:line it cites is checked against the head commit. Nothing is sent until you submit."
+											>
+												{rewriting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{rewriting ? 'Rewriting…' : 'Rewrite with AI'}
+											</button>
+										)}
 										{canDraft && (
 											<button
-												className="btn small ghost"
+												className="btn small ai"
 												onClick={() => void draftSummary()}
 												disabled={drafting || !!running}
 												title={`Your model for questions drafts a summary for “${EVENTS.find((e) => e[0] === event)![1]}” from your comments in this review, in your review style when that is on. Nothing is sent until you submit.`}
 											>
-												{drafting ? (
-													<>
-														<AiOrb activity="reasoning" size={12} /> Drafting…
-													</>
-												) : (
-													'Draft with AI'
-												)}
+												{drafting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{drafting ? 'Drafting…' : 'Draft with AI'}
 											</button>
 										)}
 									</div>
-									{draftError && <p className="small error-text">{draftError}</p>}
 								</div>
+								{drafted && summary.trim() && <p className="muted small summary-note">Drafted by AI: check it before you submit.</p>}
+								{draftError && <p className="small error-text">{draftError}</p>}
+								{rewrite && <RewriteChecks checks={rewrite.checks} dropped={rewrite.dropped} />}
 							</section>
 						</>
 					)}
@@ -783,5 +843,50 @@ function CiLine({
 				Refresh
 			</button>
 		</p>
+	)
+}
+
+const CHECK_LABEL: Record<CitationCheck['verdict'], string> = {
+	holds: 'matches the code',
+	wrong: 'not what the code shows',
+	unsure: 'not settled by the code',
+	unopened: 'not checked',
+}
+
+/** What the last rewrite found about each file:line your text cites; anything not confirmed is said plainly. */
+function RewriteChecks({ checks, dropped }: { checks: Array<CitationCheck>; dropped: Array<string> }) {
+	const opened = checks.filter((c) => c.verdict !== 'unopened').length
+	return (
+		<div className="rewrite-checks small" role="status">
+			<p className="muted">
+				{checks.length
+					? `Checked ${opened} of ${checks.length} file:line reference${checks.length === 1 ? '' : 's'} against the head commit. Claims without one weren't checked.`
+					: 'Your text cites no file:line, so nothing in it was checked against the code.'}
+			</p>
+			{(checks.length > 0 || dropped.length > 0) && (
+				<ul>
+					{checks.map((c) => (
+						<li key={c.ref} className={`rewrite-check ${c.verdict}`}>
+							<code>{c.ref}</code> {CHECK_LABEL[c.verdict]}
+							{c.note && <span className="muted">: {c.note}</span>}
+						</li>
+					))}
+					{dropped.map((ref) => (
+						<li key={`dropped:${ref}`} className="rewrite-check dropped">
+							The rewrite left out <code>{ref}</code>; put it back if the claim needs it.
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	)
+}
+
+/** The mark on buttons that ask the AI to write something: a four-point sparkle, in the button's colour. */
+function AiMark() {
+	return (
+		<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+			<path d="M8 0.5c.4 3.6 3.9 7.1 7.5 7.5-3.6.4-7.1 3.9-7.5 7.5C7.6 11.9 4.1 8.4.5 8 4.1 7.6 7.6 4.1 8 .5Z" />
+		</svg>
 	)
 }

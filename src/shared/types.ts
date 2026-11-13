@@ -1532,6 +1532,22 @@ export interface AiCost {
 // verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
 // change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
 // summary: a drafted review summary.
+/**
+ * What "Rewrite with AI" found about one file:line reference in your summary (issue #191). "unopened": the app could
+ * not read it at the head commit (no such file, a name several files share, a line past the end), so nothing was checked.
+ */
+export interface CitationCheck {
+	ref: string // as written in your text
+	verdict: 'holds' | 'wrong' | 'unsure' | 'unopened'
+	note: string
+}
+
+export interface SummaryRewrite {
+	text: string
+	checks: Array<CitationCheck>
+	dropped: Array<string> // references in your text that the rewrite left out
+}
+
 export type UsageKind =
 	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit'
 
@@ -2088,6 +2104,7 @@ export const IPC = {
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
 	aiDraftSummary: 'ai:draft-summary',
+	aiRewriteSummary: 'ai:rewrite-summary',
 	reviewStyle: 'ai:review-style',
 	stylePrs: 'ai:style-prs',
 	setStylePrs: 'ai:set-style-prs',
@@ -2343,6 +2360,11 @@ export interface ReviewApi {
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
 	/** Drafts the summary of the review you are about to submit with `event`, from your comments in it. Nothing is sent. */
 	draftSummary(reviewId: string, event: ReviewEvent): Promise<Result<string>>
+	/**
+	 * Rewrites `text` you wrote for that summary (`partial`: a selected part of it) and checks the file:line references
+	 * it cites against the head commit (issue #191). Nothing is sent.
+	 */
+	rewriteSummary(reviewId: string, event: ReviewEvent, text: string, partial: boolean): Promise<Result<SummaryRewrite>>
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): Promise<Result<ReviewStyle | null>>
 	/** Builds the note from your comments with the model for questions. When you had edited it, the new one waits in `proposed`. */

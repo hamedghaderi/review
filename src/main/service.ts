@@ -44,6 +44,7 @@ import type {
 	ReviewContext,
 	ContextImage,
 	ReviewEvent,
+	SummaryRewrite,
 	ReviewerChoice,
 	RunEstimate,
 	ReviewRule,
@@ -93,6 +94,7 @@ import {
 	setAppCloneRoots,
 	mergeBase,
 	ObjectUnavailable,
+	pathsAt,
 	readAt,
 	readBlob,
 	readPatch,
@@ -1765,6 +1767,18 @@ export class ReviewService {
 		return ai.draftSummary(access, reviewId, event, selection)
 	}
 
+	/** Rewrites summary text you wrote and checks what it cites (see AiController.rewriteSummary). */
+	async rewriteSummary(
+		reviewId: string,
+		event: ReviewEvent,
+		text: string,
+		partial: boolean,
+		selection: ModelSelection,
+	): Promise<SummaryRewrite> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.rewriteSummary(access, reviewId, event, text, partial, selection)
+	}
+
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): ReviewStyle | null {
 		return this.store.read().reviewStyle ?? null
@@ -1900,6 +1914,15 @@ export class ReviewService {
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
 				commits: () => commitMessages(data.root, data.comparison.baseSha, data.comparison.headSha),
+				headFiles: {
+					read: async (path) => {
+						const r = await readAt(data.root, data.comparison.headSha, path, FILE_LINES_LIMIT).catch(() => null)
+						const l = r ? blobLines(r.buf, r.truncated) : null
+						return l?.kind === 'text' ? l.lines : null
+					},
+					paths: async () => (await pathsAt(data.root, data.comparison.headSha).catch(() => null)) ?? [],
+					changed: data.comparison.files.flatMap((f) => (f.newPath ? [f.newPath] : [])),
+				},
 				reviewContext: () => this.store.read().repos[repoId]?.reviews[reviewId]?.context ?? null,
 				contextImages: async () => {
 					const list = this.store.read().repos[repoId]?.reviews[reviewId]?.context?.images ?? []
