@@ -3,7 +3,10 @@ import { publicRepo, screenFinding } from '../shared/screen.ts'
 import { watchKey } from '../shared/inbox.ts'
 import { hasWriteRole } from '../shared/trust.ts'
 import type {
+	AuthorReplyCheck,
+	AuthorReplyKind,
 	BotThreadCheck,
+	DiscussionThread,
 	PreparedReview,
 	Discussion,
 	DiscussionReview,
@@ -137,17 +140,55 @@ export function autoVerdict(
  */
 export interface OthersConcerns {
 	changes: Array<{ login: string; at: string | null; url: string | null }>
-	threads: Array<{ login: string; path: string; url: string | null }>
+	// `reply`: what the author's replies do about it (issue #195); null: the author hasn't replied, "unchecked": it couldn't be told.
+	threads: Array<{ login: string; path: string; url: string | null; reply: Exclude<AuthorReplyKind, 'addressed'> | 'unchecked' | null }>
 	bots: Array<{ bot: string; path: string; url: string | null }>
+}
+
+const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+
+/** A thread's newest comment as said (a pending one is nobody's yet): what a judgement of its replies is tied to. */
+export function newestComment(t: DiscussionThread): string | null {
+	return t.comments.filter((c) => !c.pending).at(-1)?.id ?? null
+}
+
+/**
+ * Open, current threads started by someone with write access (not you, not the author) in which the author replied:
+ * whether they still hold an approval depends on what the replies say (issue #195).
+ */
+export function repliedThreads(d: Discussion, o: { viewer: string | null; author: string | null }): Array<DiscussionThread> {
+	return d.threads.filter((t) => {
+		const [root, ...replies] = t.comments
+		return (
+			t.resolved !== true &&
+			!t.outdated &&
+			!!root &&
+			countsAsOther(root.author, root.association, root.bot, o) &&
+			replies.some((c) => !c.pending && same(c.author, o.author))
+		)
+	})
+}
+
+function countsAsOther(
+	login: string | null,
+	association: string | null | undefined,
+	bot: boolean | undefined,
+	o: { viewer: string | null; author: string | null },
+): login is string {
+	return !!login && !bot && hasWriteRole(association) && !same(login, o.viewer) && !same(login, o.author)
 }
 
 export function othersConcerns(
 	d: Discussion,
-	o: { viewer: string | null; author: string | null; botChecks: ReadonlyArray<BotThreadCheck> },
+	o: {
+		viewer: string | null
+		author: string | null
+		botChecks: ReadonlyArray<BotThreadCheck>
+		replies?: Readonly<Record<string, AuthorReplyCheck>> // by thread id (see repliedThreads)
+	},
 ): OthersConcerns {
-	const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
 	const counts = (login: string | null, association: string | null | undefined, bot?: boolean): login is string =>
-		!!login && !bot && hasWriteRole(association) && !same(login, o.viewer) && !same(login, o.author)
+		countsAsOther(login, association, bot, o)
 	// A standing change request: someone's newest approve, request-changes or dismissal, as GitHub keeps them.
 	const standing = new Map<string, DiscussionReview>()
 	for (const r of [...d.reviews].sort((a, b) => (a.submittedAt ?? '').localeCompare(b.submittedAt ?? '')))
@@ -156,12 +197,18 @@ export function othersConcerns(
 		.filter((r) => r.state === 'CHANGES_REQUESTED' && counts(r.author, r.association, r.bot))
 		.map((r) => ({ login: r.author!, at: r.submittedAt, url: r.url }))
 	const live = d.threads.filter((t) => t.resolved !== true && !t.outdated)
-	const threads = live
-		.filter((t) => {
-			const [root, ...replies] = t.comments
-			return !!root && counts(root.author, root.association, root.bot) && !replies.some((c) => same(c.author, o.author))
-		})
-		.map((t) => ({ login: t.comments[0].author!, path: t.path, url: t.url }))
+	const replied = new Set(repliedThreads(d, o).map((t) => t.id))
+	const threads = live.flatMap((t): OthersConcerns['threads'] => {
+		const root = t.comments[0]
+		if (!root || !counts(root.author, root.association, root.bot)) return []
+		const item = { login: root.author, path: t.path, url: t.url }
+		if (!replied.has(t.id)) return [{ ...item, reply: null }]
+		// Only a judgement of the thread as it is now counts, and not when GitHub left comments out of it.
+		const check = o.replies?.[t.id]
+		const kind = check && check.newest === newestComment(t) && t.commentsOmitted === 0 ? check.kind : null
+		if (kind === 'addressed') return []
+		return [{ ...item, reply: kind ?? 'unchecked' }]
+	})
 	const bots = live.flatMap((t) => {
 		const check = o.botChecks.find((c) => c.threadId === t.id)
 		return check && check.verdict === 'holds' && !check.error ? [{ bot: check.bot ?? 'a bot', path: t.path, url: t.url }] : []
@@ -170,13 +217,24 @@ export function othersConcerns(
 }
 
 /** Why it isn't an approval, naming people without @ so the review doesn't notify them. */
+// Why a thread the author replied to still holds the approval (issue #195).
+const REPLY_WORDS: Record<Exclude<OthersConcerns['threads'][number]['reply'], null>, string> = {
+	deferred: 'the author put it off for later',
+	disagreed: "the author disagreed, and it isn't settled",
+	asked: 'the author asked something back',
+	unrelated: "the author's reply doesn't address it",
+	unchecked: "the author replied, but whether that settles it couldn't be checked",
+}
+
 function othersLine(o: OthersConcerns | null): string {
 	if (!o) return "The other reviewers' threads could not be read, so this is not an approval."
+	const unanswered = o.threads.filter((t) => t.reply === null)
 	const parts = [
 		...o.changes.map((c) => `${c.login} requested changes${c.at ? ` (${c.at.slice(0, 10)})` : ''}`),
-		o.threads.length
-			? `${plural(o.threads.length, 'thread')} from ${[...new Set(o.threads.map((t) => t.login))].join(', ')} ${o.threads.length === 1 ? 'is' : 'are'} unanswered`
+		unanswered.length
+			? `${plural(unanswered.length, 'thread')} from ${[...new Set(unanswered.map((t) => t.login))].join(', ')} ${unanswered.length === 1 ? 'is' : 'are'} unanswered`
 			: null,
+		...o.threads.flatMap((t) => (t.reply === null ? [] : [`${t.login}'s thread on ${t.path}: ${REPLY_WORDS[t.reply]}`])),
 		o.bots.length
 			? `${plural(o.bots.length, 'bot comment')} (${o.bots.map((b) => `${b.bot} on ${b.path}`).join(', ')}) could not be disproved`
 			: null,
@@ -218,6 +276,16 @@ export interface AutoReviewDeps {
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview>
 	/** The pull request's threads and reviews, as GitHub reports them now. */
 	discussion?(repoId: string, reviewId: string): Promise<Discussion>
+	/**
+	 * What the author's replies do in `threads` (see repliedThreads), judged once per newest comment and kept on the
+	 * review (issue #195). Absent, or a thread left out: its concern stands.
+	 */
+	judgeReplies?(
+		repoId: string,
+		reviewId: string,
+		threads: Array<DiscussionThread>,
+		author: string,
+	): Promise<Record<string, AuthorReplyCheck>>
 	/** CI for the snapshot's head commit, as GitHub reports it now. */
 	checks(repoId: string, reviewId: string): Promise<HeadChecks>
 	/** The automatic review added comments to a stored review, so a window showing it can load them. */
@@ -453,11 +521,17 @@ export class AutoReviewer {
 				),
 				this.d.discussion ? this.d.discussion(e.repoId, c.id).catch(() => null) : Promise.resolve(undefined),
 			])
+			const author = stored.pr?.author ?? null
+			const readable = discussion && discussion.status !== 'unavailable' ? discussion : null
+			// The author's replies in others' threads are judged right before deciding: only one that addresses it counts.
+			const replied = readable && author ? repliedThreads(readable, { viewer: this.d.viewer(), author }) : []
+			const replies =
+				replied.length && author && this.d.judgeReplies ? await this.d.judgeReplies(e.repoId, c.id, replied, author).catch(() => ({})) : {}
 			const others =
 				discussion === undefined
 					? undefined
-					: discussion && discussion.status !== 'unavailable'
-						? othersConcerns(discussion, { viewer: this.d.viewer(), author: stored.pr?.author ?? null, botChecks: final.botChecks ?? [] })
+					: readable
+						? othersConcerns(readable, { viewer: this.d.viewer(), author, botChecks: final.botChecks ?? [], replies })
 						: null
 			const pr = { ...state, others }
 			verdict = autoVerdict(final, stored, this.d.runsFor(e.repoId, c.id), posted, who, ci, pr)

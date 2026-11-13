@@ -4,6 +4,8 @@ import { basename, join } from 'node:path'
 import type {
 	AppClone,
 	AiRun,
+	AuthorReplyCheck,
+	DiscussionThread,
 	FixedThread,
 	CarriedRun,
 	FileCoverage,
@@ -139,6 +141,7 @@ import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
 import { fixedThread, fixedThreadCandidates, MAX_FIXED_CHECKS } from './fixedThreads.ts'
+import { newestComment } from './autoReview.ts'
 import type { ContextFact, FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
@@ -323,6 +326,47 @@ export class ReviewService {
 		if (!ids.length) return
 		const { ai, access } = this.aiAccess(reviewId)
 		await ai.checkFixedMany(access, reviewId, runId, ids, picked)
+	}
+
+	/**
+	 * What the PR author's replies do in other reviewers' `threads` (see AutoReviewDeps.judgeReplies, issue #195). A
+	 * judgement of the same newest comment is reused; new ones are kept on the review. One that couldn't be made (no model
+	 * for questions, a budget, a failure) isn't kept, so it's asked again next time, and its concern stands meanwhile.
+	 */
+	async judgeAuthorReplies(
+		repoId: string,
+		reviewId: string,
+		threads: Array<DiscussionThread>,
+		author: string,
+		selection: ModelSelection | null,
+	): Promise<Record<string, AuthorReplyCheck>> {
+		const kept = this.store.read().repos[repoId]?.reviews[reviewId]?.authorReplies ?? {}
+		const out: Record<string, AuthorReplyCheck> = {}
+		const fresh: Array<AuthorReplyCheck> = []
+		for (const t of threads) {
+			const newest = newestComment(t)
+			if (!newest) continue
+			const had = kept[t.id]
+			if (had && had.newest === newest && had.kind !== null) {
+				out[t.id] = had
+				continue
+			}
+			const judged =
+				!selection || !this.ai
+					? { kind: null, reason: 'No model for questions is set, so the reply was not checked.', model: null }
+					: t.commentsOmitted
+						? { kind: null, reason: 'GitHub left some of its comments out, so the reply was not checked.', model: null }
+						: await this.ai.judgeAuthorReply(repoId, t, author, selection)
+			const check: AuthorReplyCheck = { threadId: t.id, newest, at: new Date().toISOString(), ...judged }
+			out[t.id] = check
+			if (check.kind !== null) fresh.push(check)
+		}
+		if (fresh.length)
+			await this.store.update((d) => {
+				const r = d.repos[repoId]?.reviews[reviewId]
+				if (r) r.authorReplies = { ...(r.authorReplies ?? {}), ...Object.fromEntries(fresh.map((c) => [c.threadId, c])) }
+			})
+		return out
 	}
 
 	private newestFinished(repoId: string, reviewId: string): AiRun | null {

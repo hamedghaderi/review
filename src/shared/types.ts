@@ -637,6 +637,8 @@ export interface Review {
 	drafts: Array<CommentDraft>
 	viewed: Array<string> // file keys
 	findingDecisions: Record<string, FindingDecision> // keyed by finding id
+	// The PR author's replies in other reviewers' threads, as judged for an automatic approval, by thread id (issue #195).
+	authorReplies?: Record<string, AuthorReplyCheck> // written by the main process only
 	publication?: Publication // GitHub reviews this snapshot's comments were published to; written by the main process only
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
@@ -1286,6 +1288,21 @@ export interface FindingReproducer {
  * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
  * finding of the run.
  */
+/**
+ * What the pull request author's replies do about another reviewer's thread (issue #195). Only "addressed" settles it
+ * for an automatic approval; `kind` null means it couldn't be told (no model for questions, a budget, a failed request).
+ */
+export type AuthorReplyKind = 'addressed' | 'deferred' | 'disagreed' | 'asked' | 'unrelated'
+
+export interface AuthorReplyCheck {
+	threadId: string
+	newest: string // the thread's newest comment when it was judged; a newer comment asks again
+	kind: AuthorReplyKind | null
+	reason: string
+	model: string | null
+	at: string
+}
+
 export interface BotThreadCheck {
 	threadId: string
 	bot: string | null // the bot's login

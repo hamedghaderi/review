@@ -277,6 +277,18 @@ export const rewriteSchema = z.object({
 export const REWRITE_SCHEMA_NAME = 'summary_rewrite'
 export const REWRITE_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(rewriteSchema, { target: 'draft-7' }))
 
+/** What the pull request author's replies do about another reviewer's concern (issue #195). */
+export const authorReplySchema = z.object({
+	kind: z
+		.enum(['addressed', 'deferred', 'disagreed', 'asked', 'unrelated'])
+		.describe(
+			'"addressed": fixed, changed or answered, or the reviewer has since said it is fine. "deferred": agreed but put off for later. "disagreed": pushed back, not settled. "asked": asked the reviewer something not yet answered. "unrelated": anything else.',
+		),
+	reason: z.string().describe('One sentence quoting or naming what in the replies decides it.'),
+})
+export const AUTHOR_REPLY_SCHEMA_NAME = 'author_reply'
+export const AUTHOR_REPLY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(authorReplySchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z
