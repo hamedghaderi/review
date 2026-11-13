@@ -1286,6 +1286,29 @@ export interface FindingReproducer {
  * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
  * finding of the run.
  */
+/**
+ * How a double-check's verdict changes when only the order of its answers or the framing of its question changes
+ * (issue #196). "as-is" is the double-check as sent today; "repeat" sends it again, to tell plain noise from the rest.
+ */
+export type ConsistencyVariant = 'as-is' | 'repeat' | 'reversed' | 'reframed'
+export type ConsistencyVerdict = 'holds' | 'wrong' | 'unsure' | 'failed'
+
+export interface ConsistencyRow {
+	findingId: string
+	title: string
+	place: string
+	kind: 'blocking' | 'fixed' // a blocking finding's double-check, or a gone finding's "is it fixed?" check
+	verdicts: Record<ConsistencyVariant, ConsistencyVerdict>
+}
+
+export interface ConsistencyReport {
+	model: string
+	at: string
+	rows: Array<ConsistencyRow>
+	// Each variant against "as-is": findings where both answered, how many differ, how many swapped wrong and holds.
+	variants: Array<{ variant: Exclude<ConsistencyVariant, 'as-is'>; compared: number; changed: number; wrongHolds: number; failed: number }>
+}
+
 export interface BotThreadCheck {
 	threadId: string
 	bot: string | null // the bot's login
@@ -2122,6 +2145,8 @@ export const IPC = {
 	aiDraftReply: 'ai:draft-reply',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
+	aiConsistencyPlan: 'ai:consistency-plan',
+	aiCheckConsistency: 'ai:check-consistency',
 	reviewStyle: 'ai:review-style',
 	stylePrs: 'ai:style-prs',
 	setStylePrs: 'ai:set-style-prs',
@@ -2384,6 +2409,10 @@ export interface ReviewApi {
 	 * it cites against the head commit (issue #191). Nothing is sent.
 	 */
 	rewriteSummary(reviewId: string, event: ReviewEvent, text: string, partial: boolean): Promise<Result<SummaryRewrite>>
+	/** How many double-checked findings of the review the consistency check would use, and requests it would send (issue #196). */
+	consistencyPlan(reviewId: string): Promise<Result<{ findings: number; requests: number }>>
+	/** Sends those double-checks again in each variant with the model for questions, and reports how often verdicts change. */
+	checkConsistency(reviewId: string): Promise<Result<ConsistencyReport>>
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): Promise<Result<ReviewStyle | null>>
 	/** Builds the note from your comments with the model for questions. When you had edited it, the new one waits in `proposed`. */

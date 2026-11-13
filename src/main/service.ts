@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import type {
 	AppClone,
 	AiRun,
+	ConsistencyReport,
 	FixedThread,
 	CarriedRun,
 	FileCoverage,
@@ -1827,6 +1828,18 @@ export class ReviewService {
 	): Promise<SummaryRewrite> {
 		const { ai, access } = this.aiAccess(reviewId)
 		return ai.rewriteSummary(access, reviewId, event, text, partial, selection)
+	}
+
+	/** See AiController.consistencyPlan (issue #196). */
+	consistencyPlan(reviewId: string): { findings: number; requests: number } {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.consistencyPlan(access.comparison.repoId, reviewId)
+	}
+
+	/** See AiController.checkConsistency (issue #196). */
+	checkConsistency(reviewId: string, selection: ModelSelection): Promise<ConsistencyReport> {
+		const { ai, access } = this.aiAccess(reviewId)
+		return ai.checkConsistency(access, reviewId, selection)
 	}
 
 	/** Your review style note, or null until it is built. */

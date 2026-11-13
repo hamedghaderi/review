@@ -2625,6 +2625,7 @@ export function App() {
 						github={github}
 						mapping={session?.github ?? null}
 						repoId={session?.repo.id ?? null}
+						reviewId={comparison?.id ?? null}
 						onClose={() => setSettingsOpen(false)}
 						onAi={setAiSettings}
 						onGitHub={setGithub}

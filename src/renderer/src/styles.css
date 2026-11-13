@@ -6035,3 +6035,38 @@ textarea.style-edit {
 	background: var(--chrome);
 	border-radius: 0 0 10px 10px;
 }
+
+/* Settings › Verdict consistency (issue #196). */
+.consistency-table {
+	border-collapse: collapse;
+	width: 100%;
+	margin: 6px 0;
+}
+.consistency-table th,
+.consistency-table td {
+	text-align: left;
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border);
+	vertical-align: top;
+}
+.consistency-table th {
+	font-weight: 600;
+	color: var(--text-2);
+}
+.consistency-table td:first-child {
+	display: flex;
+	flex-direction: column;
+	max-width: 280px;
+}
+.consistency-table td.differs {
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+}
+.consistency-table td.swap {
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--danger);
+	font-weight: 600;
+}
+.consistency-table td.cv-failed {
+	color: var(--text-2);
+}

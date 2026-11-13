@@ -34,6 +34,9 @@ import {
 	type RunEstimate,
 	type ReviewEvent,
 	type SummaryRewrite,
+	type ConsistencyReport,
+	type ConsistencyRow,
+	type ConsistencyVerdict,
 	type CommitCheck,
 	type CommitCheckEstimate,
 	REVIEW_RULES,
@@ -62,6 +65,7 @@ import type { Baseline } from './history.ts'
 import { askInput, buildAskRequest, codeAround, MAX_QUESTION_CHARS, MAX_THREAD_MESSAGES, parseAnswer, seenAround } from './ask.ts'
 import { Seen, unreadRefs, verificationTexts, withUnread } from './citations.ts'
 import { buildVerifyRequest, parseVerification } from './verify.ts'
+import { consistencyFindings, placeOf, summarize, variantRequest, VARIANTS } from './consistency.ts'
 import { buildReproducerRequest, parseReproducer } from './reproduce.ts'
 import { capacityChars } from './context.ts'
 import { LOOKUPS_BY_RISK, TOOL_DEFINITIONS } from './lookup.ts'
@@ -1371,6 +1375,72 @@ export class AiController {
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No rewrite: ${e instanceof Error ? e.message : String(e)}`)
+		} finally {
+			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/** How many findings and requests checkConsistency would use for this review. */
+	consistencyPlan(repoId: string, reviewId: string): { findings: number; requests: number } {
+		const n = consistencyFindings(this.runsFor(repoId, reviewId)).length
+		return { findings: n, requests: n * VARIANTS.length }
+	}
+
+	/**
+	 * Sends the review's double-checks again in each variant (see consistency.ts, issue #196) with `selection`, and reports
+	 * how often the verdict changes. You start it, but a budget you set that is reached refuses it. Nothing is saved.
+	 */
+	async checkConsistency(access: ComparisonAccess, reviewId: string, selection: ModelSelection): Promise<ConsistencyReport> {
+		const { comparison } = access
+		const repoId = comparison.repoId
+		const picked = consistencyFindings(this.runsFor(repoId, reviewId))
+		if (!picked.length)
+			throw new AppFail(
+				'invalid-input',
+				'This review has no double-checked findings. Run a review with double-checks on, or check a fixed finding, first.',
+			)
+		const busy = `consistency:${reviewId}`
+		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'The consistency check is already running for this review.')
+		const label = this.models?.label(selection.connectionId) ?? selection.connectionId
+		const over = this.budget?.check([{ id: selection.connectionId, label }]).over ?? []
+		if (over.length) throw new AppFail('over-budget', over.join(' '))
+		let config: RunConfig
+		try {
+			config = await this.configFor(selection, 'verify', repoId)
+		} catch (e) {
+			throw new AppFail('ai-unavailable', e instanceof Error ? e.message : String(e))
+		}
+		this.onDemandBusy.add(busy)
+		try {
+			const rows: Array<ConsistencyRow> = []
+			for (const { finding, since, kind } of picked) {
+				const fileKey = finding.anchor.fileKey
+				const inChange = comparison.files.some((x) => x.key === fileKey)
+				const patch = inChange ? await access.loadPatch(fileKey).catch(() => null) : null
+				const lines = inChange && finding.anchor.side === 'new' ? await access.loadFileLines(fileKey).catch(() => null) : null
+				const around = codeAround(finding, patch, lines?.kind === 'text' ? lines.lines : null)
+				const base = buildVerifyRequest(finding, null, [], undefined, around, since)
+				// The variants of one finding go out together; findings one after another.
+				const verdicts = await Promise.all(
+					VARIANTS.map(async (v): Promise<ConsistencyVerdict> => {
+						const req = variantRequest(base, v)
+						if (!req) return 'failed'
+						try {
+							return parseVerification((await config.provider.review(req, AbortSignal.timeout(300_000))).output).verdict
+						} catch {
+							return 'failed'
+						}
+					}),
+				)
+				rows.push({
+					findingId: finding.id,
+					title: finding.title,
+					place: placeOf(finding),
+					kind,
+					verdicts: Object.fromEntries(VARIANTS.map((v, i) => [v, verdicts[i]])) as ConsistencyRow['verdicts'],
+				})
+			}
+			return { model: selection.modelId, at: new Date().toISOString(), rows, variants: summarize(rows) }
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}
