@@ -141,6 +141,7 @@ const api: ReviewApi = {
 	draftReply: (repoId, reviewId, threadId) => ipcRenderer.invoke(IPC.aiDraftReply, repoId, reviewId, threadId),
 	draftSummary: (reviewId, event) => ipcRenderer.invoke(IPC.aiDraftSummary, reviewId, event),
 	rewriteSummary: (reviewId, event, text, partial) => ipcRenderer.invoke(IPC.aiRewriteSummary, reviewId, event, text, partial),
+	agentSetup: () => ipcRenderer.invoke(IPC.agentSetup),
 	consistencyPlan: (reviewId) => ipcRenderer.invoke(IPC.aiConsistencyPlan, reviewId),
 	checkConsistency: (reviewId) => ipcRenderer.invoke(IPC.aiCheckConsistency, reviewId),
 	reviewStyle: () => ipcRenderer.invoke(IPC.reviewStyle),

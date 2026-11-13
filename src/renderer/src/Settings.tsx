@@ -10,6 +10,7 @@ import { KeymapSettings } from './KeymapSettings.tsx'
 import { ReviewingSettings } from './ReviewingSettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
 import { StyleSettings } from './StyleSettings.tsx'
+import { AgentSettings } from './AgentSettings.tsx'
 import { ConsistencySettings } from './ConsistencySettings.tsx'
 
 /**
@@ -163,6 +164,7 @@ export function Settings(props: {
 					{ id: 'levels', label: 'Finding levels', keywords: 'blocking should fix question nit comments' },
 					{ id: 'style', label: 'Your review style', keywords: 'tone voice wording learn my comments sound like me' },
 					{ id: 'limits', label: 'Review input', keywords: 'limits context lines batch related code lookups verify duplicates' },
+					{ id: 'agents', label: 'Coding agents', keywords: 'claude code mcp agent findings fix cursor codex' },
 					{ id: 'consistency', label: 'Verdict consistency', keywords: 'double-check verify order wording flip noise test' },
 					{
 						id: 'mcp',
@@ -477,6 +479,7 @@ export function Settings(props: {
 				</div>
 			)
 		if (page === 'style') return <StyleSettings hasQuestionModel={!!ai.questionModel} />
+		if (page === 'agents') return <AgentSettings />
 		if (page === 'consistency') return <ConsistencySettings reviewId={props.reviewId ?? null} model={ai.questionModel?.modelId ?? null} />
 		if (page === 'limits')
 			return (

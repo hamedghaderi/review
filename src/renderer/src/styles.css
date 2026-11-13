@@ -6070,3 +6070,26 @@ textarea.style-edit {
 .consistency-table td.cv-failed {
 	color: var(--text-2);
 }
+
+/* Settings › Coding agents (issue #200). */
+.agent-snippet {
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin: 8px 0;
+}
+.agent-snippet-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+.agent-snippet pre {
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-all;
+	user-select: text;
+}
+.agent-snippet p {
+	margin: 6px 0 0;
+}

@@ -1594,6 +1594,15 @@ export interface CitationCheck {
 	note: string
 }
 
+/** How to add Review's read-only MCP server to a coding agent (issue #200): Settings › Coding agents shows it. */
+export interface AgentSetup {
+	name: string // the server's name in the agent's config
+	command: string // Review's own binary, run in Node mode
+	args: Array<string> // the server script
+	env: Record<string, string>
+	ready: boolean // the script exists (in development: the app was built since this was added)
+}
+
 export interface SummaryRewrite {
 	text: string
 	checks: Array<CitationCheck>
@@ -2162,6 +2171,7 @@ export const IPC = {
 	aiDraftReply: 'ai:draft-reply',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
+	agentSetup: 'agent:setup',
 	aiConsistencyPlan: 'ai:consistency-plan',
 	aiCheckConsistency: 'ai:check-consistency',
 	reviewStyle: 'ai:review-style',
@@ -2426,6 +2436,8 @@ export interface ReviewApi {
 	 * it cites against the head commit (issue #191). Nothing is sent.
 	 */
 	rewriteSummary(reviewId: string, event: ReviewEvent, text: string, partial: boolean): Promise<Result<SummaryRewrite>>
+	/** How to start Review's read-only MCP server from a coding agent (issue #200). */
+	agentSetup(): Promise<Result<AgentSetup>>
 	/** How many double-checked findings of the review the consistency check would use, and requests it would send (issue #196). */
 	consistencyPlan(reviewId: string): Promise<Result<{ findings: number; requests: number }>>
 	/** Sends those double-checks again in each variant with the model for questions, and reports how often verdicts change. */

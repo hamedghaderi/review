@@ -1,4 +1,5 @@
 import { mkdir, realpath } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -21,6 +22,7 @@ import {
 	IPC,
 	MAX_STEP_COMMITS,
 	type AiRun,
+	type AgentSetup,
 	type AppUpdate,
 	type BudgetView,
 	type InboxOpen,
@@ -92,6 +94,7 @@ import {
 	budgetSettings,
 } from './validate.ts'
 import { MAX_REWRITE_CHARS } from './ai/rewrite.ts'
+import { AGENT_SERVER_NAME } from './agentServer.ts'
 
 let win: BrowserWindow | null = null
 const runStatus = new Map<string, AiRun['status']>() // runs seen running, so their end can play a sound
@@ -579,6 +582,17 @@ function registerIpc(): void {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')
 		return answered(service.checkConsistency(comparisonId(reviewId), selection), 'Verdict consistency check')
+	})
+	// Review's own binary in Node mode runs the agent server, which reads this app's data folder (issue #200).
+	handle(IPC.agentSetup, async (): Promise<AgentSetup> => {
+		const script = join(app.getAppPath(), 'out', 'main', 'agent.js')
+		return {
+			name: AGENT_SERVER_NAME,
+			command: process.execPath,
+			args: [script],
+			env: { ELECTRON_RUN_AS_NODE: '1', REVIEW_DATA_DIR: app.getPath('userData') },
+			ready: app.isPackaged || existsSync(script),
+		}
 	})
 	handle(IPC.reviewStyle, async () => service.reviewStyle())
 	handle(IPC.buildReviewStyle, async () => {
