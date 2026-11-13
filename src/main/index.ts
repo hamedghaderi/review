@@ -869,6 +869,8 @@ app.whenReady().then(async () => {
 		submit: (repoId, reviewId, event, body) => service.submitReview(repoId, reviewId, event, body),
 		checks: (repoId, reviewId) => service.headChecks(repoId, reviewId),
 		discussion: (repoId, reviewId) => service.prDiscussion(repoId, reviewId),
+		judgeReplies: (repoId, reviewId, threads, author) =>
+			service.judgeAuthorReplies(repoId, reviewId, threads, author, connections.view().questionModel),
 		reviewChanged: (repoId, reviewId) => {
 			const r = store.read().repos[repoId]?.reviews[reviewId]
 			if (r && win && !win.isDestroyed()) win.webContents.send(IPC.reviewChanged, r)

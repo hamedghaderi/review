@@ -3,13 +3,14 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { AutoReviewer, autoVerdict, othersConcerns, type AutoReviewDeps } from '../src/main/autoReview.ts'
+import { AutoReviewer, autoVerdict, othersConcerns, repliedThreads, type AutoReviewDeps } from '../src/main/autoReview.ts'
 import { AppFail } from '../src/main/git.ts'
 import type { RepoEvent } from '../src/main/inboxWatch.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import type { HeadChecks } from '../src/shared/ci.ts'
 import type {
 	AiRun,
+	AuthorReplyCheck,
 	AutoReviewRecord,
 	Comparison,
 	Discussion,
@@ -607,11 +608,103 @@ test("others' concerns: write access only; a standing change request, an unanswe
 		o.changes.map((c) => c.login),
 		['alice'],
 	)
+	// The author's reply in T2 hasn't been judged, so it still holds (issue #195): any reply no longer settles it.
 	assert.deepEqual(
-		o.threads.map((t) => t.url?.split('#')[1]),
-		['T1'],
+		o.threads.map((t) => [t.url?.split('#')[1], t.reply]),
+		[
+			['T1', null],
+			['T2', 'unchecked'],
+		],
 	)
 	assert.deepEqual(o.bots, [{ bot: 'coderabbitai', path: 'a.ts', url: 'https://github.com/octo/app/pull/7#T6' }])
+})
+
+const judged = (threadId: string, newest: string, kind: AuthorReplyCheck['kind']): AuthorReplyCheck => ({
+	threadId,
+	newest,
+	kind,
+	reason: 'r',
+	model: 'm',
+	at: '',
+})
+
+test("others' concerns: only a reply judged to address the thread as it is now settles it", () => {
+	const fixed = said('bob', 'Fixed in abc123.')
+	const d = discussionOf({
+		threads: [
+			thread('A', [said('carol', 'Null check?'), fixed]),
+			thread('B', [said('carol', 'Add a test?'), said('bob', "I'll add it in a follow-up.")]),
+			thread('C', [said('carol', 'Rename this?'), said('bob', 'No, the name matches the API.')]),
+			thread('D', [said('carol', 'Why sync?'), said('bob', 'Fixed.'), said('carol', 'Still blocks on line 4.')]),
+			thread('E', [said('carol', 'Retry?'), fixed], { commentsOmitted: 3 }),
+			thread('F', [said('carol', 'Cache?'), said('bob', 'Do you mean the client cache?')]),
+		],
+	})
+	const replies = {
+		A: judged('A', fixed.id, 'addressed'),
+		B: judged('B', "bob:I'll add it in a follow-up.", 'deferred'),
+		C: judged('C', 'bob:No, the name matches the API.', 'disagreed'),
+		D: judged('D', 'bob:Fixed.', 'addressed'), // judged before carol's newest comment: stale
+		E: judged('E', fixed.id, 'addressed'), // GitHub left comments out: the newest may not be this one
+		F: judged('F', 'bob:Do you mean the client cache?', null), // couldn't be judged
+	}
+	const o = othersConcerns(d, { viewer: 'me', author: 'bob', botChecks: [], replies })
+	assert.deepEqual(
+		o.threads.map((t) => [t.url?.split('#')[1], t.reply]),
+		[
+			['B', 'deferred'],
+			['C', 'disagreed'],
+			['D', 'unchecked'],
+			['E', 'unchecked'],
+			['F', 'unchecked'],
+		],
+	)
+	assert.deepEqual(
+		repliedThreads(d, { viewer: 'me', author: 'bob' }).map((t) => t.id),
+		['A', 'B', 'C', 'D', 'E', 'F'],
+	)
+})
+
+test("an automatic review asks what the author's replies do, approves once they address it, and says why when they don't", async () => {
+	const bodies: Array<string> = []
+	const submit: AutoReviewDeps['submit'] = async (_r, _id, ev, body) => {
+		bodies.push(body)
+		return { id: 'rv', url: 'u', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }
+	}
+	const d = discussionOf({
+		threads: [thread('T', [said('carol', 'Missing a test?'), said('bob', "I'll add one in a follow-up.")], { url: 'u#T' })],
+	})
+	const asked: Array<Array<string>> = []
+	// The stored review's pull request, whose author's replies are judged.
+	const byBob = (x: { store: ReviewStore }) =>
+		x.store.update((s) => void (s.repos.r.reviews['b..h1'].pr = { repo: 'Octo/App', number: 7, author: 'bob' } as Review['pr']))
+	const judge =
+		(kind: AuthorReplyCheck['kind']): AutoReviewDeps['judgeReplies'] =>
+		async (_repo, _review, threads, author) => {
+			asked.push(threads.map((t) => `${t.id}:${author}`))
+			return Object.fromEntries(threads.map((t) => [t.id, judged(t.id, t.comments.at(-1)!.id, kind)]))
+		}
+
+	const deferred = await setup({ discussion: async () => d, submit, judgeReplies: judge('deferred') }, [])
+	await byBob(deferred)
+	deferred.auto.take([event()])
+	await deferred.auto.idle()
+	assert.equal(deferred.records[0].outcome, 'commented')
+	assert.match(bodies[0], /carol's thread on a\.ts: the author put it off for later\./)
+	assert.deepEqual(asked[0], ['T:bob'])
+
+	const failed = await setup({ discussion: async () => d, submit, judgeReplies: judge(null) }, [])
+	await byBob(failed)
+	failed.auto.take([event()])
+	await failed.auto.idle()
+	assert.equal(failed.records[0].outcome, 'commented', 'not judged: the concern stands')
+	assert.match(bodies[1], /whether that settles it couldn't be checked/)
+
+	const addressed = await setup({ discussion: async () => d, submit, judgeReplies: judge('addressed') }, [])
+	await byBob(addressed)
+	addressed.auto.take([event()])
+	await addressed.auto.idle()
+	assert.equal(addressed.records[0].outcome, 'approved')
 })
 
 test("an automatic review doesn't approve over others' open concerns, or when they can't be read; it names people without pinging them", async () => {

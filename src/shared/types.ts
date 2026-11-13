@@ -637,6 +637,8 @@ export interface Review {
 	drafts: Array<CommentDraft>
 	viewed: Array<string> // file keys
 	findingDecisions: Record<string, FindingDecision> // keyed by finding id
+	// The PR author's replies in other reviewers' threads, as judged for an automatic approval, by thread id (issue #195).
+	authorReplies?: Record<string, AuthorReplyCheck> // written by the main process only
 	publication?: Publication // GitHub reviews this snapshot's comments were published to; written by the main process only
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
@@ -1282,11 +1284,6 @@ export interface FindingReproducer {
 
 /** The double-check of a finding (blocking ones after the run, any one on demand): a separate request asked to prove it wrong. */
 /**
- * An open review thread an AI review bot started, checked against the code like a finding (the bot's comment is the
- * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
- * finding of the run.
- */
-/**
  * How a double-check's verdict changes when only the order of its answers or the framing of its question changes
  * (issue #196). "as-is" is the double-check as sent today; "repeat" sends it again, to tell plain noise from the rest.
  */
@@ -1309,6 +1306,26 @@ export interface ConsistencyReport {
 	variants: Array<{ variant: Exclude<ConsistencyVariant, 'as-is'>; compared: number; changed: number; wrongHolds: number; failed: number }>
 }
 
+/**
+ * What the pull request author's replies do about another reviewer's thread (issue #195). Only "addressed" settles it
+ * for an automatic approval; `kind` null means it couldn't be told (no model for questions, a budget, a failed request).
+ */
+export type AuthorReplyKind = 'addressed' | 'deferred' | 'disagreed' | 'asked' | 'unrelated'
+
+export interface AuthorReplyCheck {
+	threadId: string
+	newest: string // the thread's newest comment when it was judged; a newer comment asks again
+	kind: AuthorReplyKind | null
+	reason: string
+	model: string | null
+	at: string
+}
+
+/**
+ * An open review thread an AI review bot started, checked against the code like a finding (the bot's comment is the
+ * claim). Shown on the thread with the double-check's words ("not disproved", "likely wrong", "not settled"); never a
+ * finding of the run.
+ */
 export interface BotThreadCheck {
 	threadId: string
 	bot: string | null // the bot's login
@@ -1567,10 +1584,6 @@ export interface AiCost {
 	unpriced: boolean
 }
 
-// review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
-// verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
-// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
-// summary: a drafted review summary.
 /**
  * What "Rewrite with AI" found about one file:line reference in your summary (issue #191). "unopened": the app could
  * not read it at the head commit (no such file, a name several files share, a line past the end), so nothing was checked.
@@ -1587,6 +1600,10 @@ export interface SummaryRewrite {
 	dropped: Array<string> // references in your text that the rewrite left out
 }
 
+// review: a run or a retry; question: Ask AI about a finding; explain: a question about code you selected;
+// verify and test: Verify and Write test on a finding; overview: Explain this change; conclusion: the conclusion on a
+// change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
+// summary: a drafted review summary.
 export type UsageKind =
 	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit'
 

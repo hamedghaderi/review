@@ -37,6 +37,7 @@ import {
 	type ConsistencyReport,
 	type ConsistencyRow,
 	type ConsistencyVerdict,
+	type AuthorReplyKind,
 	type CommitCheck,
 	type CommitCheckEstimate,
 	REVIEW_RULES,
@@ -85,6 +86,7 @@ import { type Background, buildBackground } from './background.ts'
 import { buildReplyRequest, parseReply, REPLY_LOOKUPS } from './reply.ts'
 import { buildStyleRequest, parseStyle, type StyleExamples } from './style.ts'
 import { buildSummaryRequest, parseSummary } from './summary.ts'
+import { buildAuthorReplyRequest, parseAuthorReply } from './authorReply.ts'
 import { buildRewriteRequest, findCitations, parseRewrite, resolveCitations, rewriteInput, type HeadFiles } from './rewrite.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
@@ -1443,6 +1445,30 @@ export class AiController {
 			return { model: selection.modelId, at: new Date().toISOString(), rows, variants: summarize(rows) }
 		} finally {
 			this.onDemandBusy.delete(busy)
+		}
+	}
+
+	/**
+	 * What the pull request author's replies in another reviewer's thread do about the concern (issue #195), with the
+	 * model for questions. The app asks this before an automatic verdict, not you, so it isn't asked once a budget you
+	 * set is reached. Any failure comes back as `kind` null, and the concern stands.
+	 */
+	async judgeAuthorReply(
+		repoId: string,
+		thread: DiscussionThread,
+		author: string,
+		selection: ModelSelection,
+	): Promise<{ kind: AuthorReplyKind | null; reason: string; model: string }> {
+		const model = selection.modelId
+		const label = this.models?.label(selection.connectionId) ?? selection.connectionId
+		if (this.budget?.check([{ id: selection.connectionId, label }]).over.length)
+			return { kind: null, reason: 'A budget you set is reached, so the reply was not checked.', model }
+		try {
+			const config = await this.configFor(selection, 'question', repoId)
+			const response = await config.provider.review(buildAuthorReplyRequest(thread, author), AbortSignal.timeout(120_000))
+			return { ...parseAuthorReply(response.output), model }
+		} catch (e) {
+			return { kind: null, reason: `Not checked: ${e instanceof Error ? e.message : String(e)}`, model }
 		}
 	}
 
