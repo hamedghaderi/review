@@ -5920,3 +5920,26 @@ textarea.style-edit {
 	margin: 6px 0 0;
 	padding-left: 18px;
 }
+
+/* What "Rewrite with AI" found about the references in your summary (issue #191). */
+.rewrite-checks {
+	margin-top: 6px;
+}
+.rewrite-checks p {
+	margin: 0 0 4px;
+}
+.rewrite-checks ul {
+	margin: 0;
+	padding-left: 18px;
+}
+.rewrite-check.holds::marker {
+	color: var(--ok);
+}
+.rewrite-check.wrong,
+.rewrite-check.dropped {
+	color: var(--danger);
+}
+.rewrite-check.unsure,
+.rewrite-check.unopened {
+	color: var(--warn-fg);
+}

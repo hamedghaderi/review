@@ -139,6 +139,7 @@ const api: ReviewApi = {
 	conclude: (reviewId, question) => ipcRenderer.invoke(IPC.aiConclude, reviewId, question),
 	draftReply: (repoId, reviewId, threadId) => ipcRenderer.invoke(IPC.aiDraftReply, repoId, reviewId, threadId),
 	draftSummary: (reviewId, event) => ipcRenderer.invoke(IPC.aiDraftSummary, reviewId, event),
+	rewriteSummary: (reviewId, event, text, partial) => ipcRenderer.invoke(IPC.aiRewriteSummary, reviewId, event, text, partial),
 	reviewStyle: () => ipcRenderer.invoke(IPC.reviewStyle),
 	buildReviewStyle: () => ipcRenderer.invoke(IPC.buildReviewStyle),
 	setReviewStyle: (next) => ipcRenderer.invoke(IPC.setReviewStyle, next),

@@ -913,6 +913,14 @@ export async function listAt(
 		})
 }
 
+/** Every file path at a commit; null when the commit can't be read. */
+export async function pathsAt(root: string, sha: string): Promise<Array<string> | null> {
+	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['ls-tree', '-r', '-z', '--name-only', '--full-tree', sha], 64 * 1024 * 1024)
+	if (r.code !== 0) return null
+	return r.stdout.toString('utf8').split('\0').filter(Boolean)
+}
+
 /** Which of `paths` are files at a commit. */
 export async function filesAt(root: string, sha: string, paths: Array<string>): Promise<Set<string>> {
 	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
