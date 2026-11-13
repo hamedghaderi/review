@@ -691,6 +691,24 @@ export class AiController {
 	}
 
 	/**
+	 * Double-checks gone findings of run `runId` one after another (issue #193), as checkFixed does for one. The app starts
+	 * these after a run, not you, so they don't start when a budget you set is reached; one that fails stays unchecked.
+	 */
+	async checkFixedMany(
+		access: ComparisonAccess,
+		reviewId: string,
+		runId: string,
+		findingIds: Array<string>,
+		picked: ModelSelection | null,
+	): Promise<void> {
+		const run = this.runsFor(access.comparison.repoId, reviewId).find((r) => r.id === runId)
+		const connectionId = picked?.connectionId ?? run?.connectionId ?? null
+		if (!run || !connectionId) return
+		if (this.budget?.check([{ id: connectionId, label: this.models?.label(connectionId) ?? connectionId }]).over.length) return
+		for (const id of findingIds) await this.checkFixed(access, reviewId, runId, id, picked).catch(() => null)
+	}
+
+	/**
 	 * Asks whether a finding of a commit run (`runKey`, see commitRunKey) is still a problem in the latest code, after
 	 * later commits changed its lines: the double-check, told the code changed since `commitSha`, given the latest code
 	 * where the finding would be now (`at`, `around`). The run's model answers. No lookups: one small request. The

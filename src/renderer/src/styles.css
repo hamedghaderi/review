@@ -5968,3 +5968,70 @@ textarea.style-edit {
 .rewrite-check.unopened {
 	color: var(--warn-fg);
 }
+
+/* Resolving your threads that a newer run found fixed (issue #193). */
+.modal.fixed-threads {
+	width: min(640px, 100%);
+	max-height: min(680px, 100%);
+}
+.fixed-body {
+	padding: 12px 14px;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.fixed-body > p {
+	margin: 0;
+}
+.fixed-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.fixed-row {
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.fixed-row.off {
+	opacity: 0.6;
+}
+.fixed-row p {
+	margin: 0;
+}
+.fixed-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.fixed-head .check {
+	min-width: 0;
+}
+.fixed-reply {
+	width: 100%;
+	font: inherit;
+	font-size: 12px;
+	padding: 4px 6px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+	color: var(--text);
+}
+.fixed-others ul {
+	margin: 6px 0 0;
+	padding-left: 18px;
+}
+.fixed-actions {
+	padding: 10px 14px;
+	border-top: 1px solid var(--border);
+	background: var(--chrome);
+	border-radius: 0 0 10px 10px;
+}

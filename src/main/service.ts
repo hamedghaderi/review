@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import type {
 	AppClone,
 	AiRun,
+	FixedThread,
 	CarriedRun,
 	FileCoverage,
 	Finding,
@@ -137,6 +138,7 @@ import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
+import { fixedThread, fixedThreadCandidates, MAX_FIXED_CHECKS } from './fixedThreads.ts'
 import type { ContextFact, FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
@@ -278,6 +280,54 @@ export class ReviewService {
 		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
 		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
 		return this.requireGitHub().replyToThread(pr.repo, pr.number, threadId, body, resolve)
+	}
+
+	/**
+	 * Your open threads from findings that the newest finished run of this review found gone (issue #193), each with its
+	 * double-check and the commit to name when replying. Empty for a branch review or when GitHub can't be read.
+	 */
+	async fixedThreads(repoId: string, reviewId: string): Promise<Array<FixedThread>> {
+		this.repo(repoId)
+		const run = this.newestFinished(repoId, reviewId)
+		const review = this.store.read().repos[repoId]?.reviews[reviewId]
+		const data = this.comparisons.get(reviewId)
+		if (!run?.history || !review?.pr || !data || !run.history.gone.some((g) => g.state === 'fixed' && g.comment)) return []
+		const d = await this.prDiscussion(repoId, reviewId)
+		if (d.status === 'unavailable') return []
+		const from = run.history.from.headSha
+		const rows: Array<FixedThread> = []
+		for (const c of fixedThreadCandidates(run, review, d)) {
+			const a = c.gone.at ?? c.gone.finding.anchor
+			const path = a.newPath ?? a.oldPath
+			// The one commit since the earlier snapshot that touched the file, when there is exactly one; else the head.
+			let commit = run.headSha
+			if (path && !run.history.rewritten) {
+				const touched = await commitsSince(data.root, from, run.headSha, [path], 2).catch(() => null)
+				if (touched?.touching === 1 && touched.commits[0]) commit = touched.commits[0].sha
+			}
+			rows.push(fixedThread(run.id, c, commit))
+		}
+		return rows
+	}
+
+	/**
+	 * After run `runId` finishes: double-checks the gone findings behind your open threads (at most MAX_FIXED_CHECKS), so
+	 * the review can offer to resolve the confirmed ones. Started by the app, so a budget you set stops it.
+	 */
+	async checkFixedThreads(repoId: string, reviewId: string, runId: string, picked: ModelSelection | null): Promise<void> {
+		if (this.newestFinished(repoId, reviewId)?.id !== runId) return
+		const ids = (await this.fixedThreads(repoId, reviewId))
+			.filter((r) => r.state === 'unchecked')
+			.map((r) => r.findingId)
+			.slice(0, MAX_FIXED_CHECKS)
+		if (!ids.length) return
+		const { ai, access } = this.aiAccess(reviewId)
+		await ai.checkFixedMany(access, reviewId, runId, ids, picked)
+	}
+
+	private newestFinished(repoId: string, reviewId: string): AiRun | null {
+		const runs = this.store.read().repos[repoId]?.aiRuns[reviewId] ?? []
+		return [...runs].reverse().find((r) => (r.status === 'completed' || r.status === 'partial') && !r.commitOf) ?? null
 	}
 
 	/** People who can be @mentioned in the open PR review's repository; empty without a token (GitHub needs one). */

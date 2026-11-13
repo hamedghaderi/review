@@ -1370,6 +1370,22 @@ export interface GoneFinding {
 	check?: FindingVerification | null // you asked whether it is still there: "wrong" means it was fixed
 }
 
+/**
+ * A GitHub thread you started from a finding that a newer run found gone (issue #193), offered for resolving. Only
+ * "confirmed" ones (the double-check says the problem is no longer there) are offered; the rest are listed as such.
+ */
+export interface FixedThread {
+	runId: string
+	findingId: string
+	title: string
+	place: string // "src/a.ts:12", where the finding was
+	threadId: string
+	url: string | null
+	state: 'confirmed' | 'not-confirmed' | 'unchecked'
+	reason: string | null // what the double-check said
+	commit: string // the commit to name in the reply: the one that touched the file, else the new head
+}
+
 // The accepted comment is linked through `findingId` on the draft/comment itself. 'open' overrides a decision
 // inherited from an equivalent finding of an earlier run (see Finding.repeatOf).
 export interface FindingDecision {
@@ -2071,6 +2087,7 @@ export const IPC = {
 	prDescriptionPreview: 'gh:description-preview',
 	prDescriptionUpdate: 'gh:description-update',
 	replyToThread: 'gh:thread-reply',
+	fixedThreads: 'gh:fixed-threads',
 	mentionable: 'gh:mentionable',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
@@ -2276,6 +2293,8 @@ export interface ReviewApi {
 	prDescriptionUpdate(repoId: string, reviewId: string, expected: string, body: string): Promise<Result<PrDescription>>
 	/** Posts a reply to a GitHub review thread (if `body` isn't blank) and/or resolves it. Only on explicit user action. */
 	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<Result<void>>
+	/** Your open threads from findings the newest finished run found gone, with their double-check (issue #193). */
+	fixedThreads(repoId: string, reviewId: string): Promise<Result<Array<FixedThread>>>
 	/** People GitHub lets you @mention in the PR's repository whose login or name matches `query`; empty without a token. */
 	mentionable(repoId: string, reviewId: string, query: string): Promise<Result<Array<MentionUser>>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
