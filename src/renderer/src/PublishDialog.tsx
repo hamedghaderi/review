@@ -633,12 +633,10 @@ export function PublishDialog({
 									/>
 									{gifCommand.panel}
 									{mention.panel}
-									<div className="summary-tools">
+									{/* Formatting on the left, the AI on the right: a bar under the text, never over it. */}
+									<div className="summary-tools" role="toolbar" aria-label="Summary tools">
 										<EmojiPicker disabled={!!running} onPick={insertText} />
 										<GifPicker disabled={!!running} onPick={pickGif} onOpenSettings={onOpenGitHubSettings} />
-										{drafted && summary.trim() && (
-											<span className="muted small summary-note">Drafted by AI: check it before you submit.</span>
-										)}
 										<span className="spacer" />
 										{rewrite && summary === rewrite.after && (
 											<button className="btn small ghost" onClick={undoRewrite} disabled={rewriting || !!running}>
@@ -647,40 +645,31 @@ export function PublishDialog({
 										)}
 										{canDraft && summary.trim() && (
 											<button
-												className="btn small ghost"
+												className="btn small ai"
 												onClick={() => void rewriteSummary()}
 												disabled={rewriting || drafting || !!running}
 												title="Your model for questions rewrites what you selected, or all of it, in fewer words and in your review style, without changing what it says. Each file:line it cites is checked against the head commit. Nothing is sent until you submit."
 											>
-												{rewriting ? (
-													<>
-														<AiOrb activity="reasoning" size={12} /> Rewriting…
-													</>
-												) : (
-													'Rewrite with AI'
-												)}
+												{rewriting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{rewriting ? 'Rewriting…' : 'Rewrite with AI'}
 											</button>
 										)}
 										{canDraft && (
 											<button
-												className="btn small ghost"
+												className="btn small ai"
 												onClick={() => void draftSummary()}
 												disabled={drafting || !!running}
 												title={`Your model for questions drafts a summary for “${EVENTS.find((e) => e[0] === event)![1]}” from your comments in this review, in your review style when that is on. Nothing is sent until you submit.`}
 											>
-												{drafting ? (
-													<>
-														<AiOrb activity="reasoning" size={12} /> Drafting…
-													</>
-												) : (
-													'Draft with AI'
-												)}
+												{drafting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{drafting ? 'Drafting…' : 'Draft with AI'}
 											</button>
 										)}
 									</div>
-									{draftError && <p className="small error-text">{draftError}</p>}
-									{rewrite && <RewriteChecks checks={rewrite.checks} dropped={rewrite.dropped} />}
 								</div>
+								{drafted && summary.trim() && <p className="muted small summary-note">Drafted by AI: check it before you submit.</p>}
+								{draftError && <p className="small error-text">{draftError}</p>}
+								{rewrite && <RewriteChecks checks={rewrite.checks} dropped={rewrite.dropped} />}
 							</section>
 						</>
 					)}
@@ -890,5 +879,14 @@ function RewriteChecks({ checks, dropped }: { checks: Array<CitationCheck>; drop
 				</ul>
 			)}
 		</div>
+	)
+}
+
+/** The mark on buttons that ask the AI to write something: a four-point sparkle, in the button's colour. */
+function AiMark() {
+	return (
+		<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+			<path d="M8 0.5c.4 3.6 3.9 7.1 7.5 7.5-3.6.4-7.1 3.9-7.5 7.5C7.6 11.9 4.1 8.4.5 8 4.1 7.6 7.6 4.1 8 .5Z" />
+		</svg>
 	)
 }

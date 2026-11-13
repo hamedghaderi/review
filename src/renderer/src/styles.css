@@ -5233,21 +5233,46 @@ textarea.style-edit {
 }
 .summary-box {
 	position: relative;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--bg);
+}
+/* The box is the field: it shows the focus, and the text and the toolbar sit inside it. */
+.summary-box:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 1px var(--accent);
 }
 .summary-box textarea.summary {
-	padding-bottom: 34px;
+	display: block;
 	min-height: 96px;
+	border: none;
+	border-radius: 6px 6px 0 0;
+	background: transparent;
+}
+.summary-box textarea.summary:focus-visible {
+	outline: none;
 }
 .summary-box .summary-tools {
-	position: absolute;
-	right: 6px;
-	bottom: 6px;
+	flex-wrap: wrap;
 	margin: 0;
+	padding: 4px 6px;
+	border-top: 1px solid var(--border);
+	border-radius: 0 0 6px 6px;
+	background: var(--chrome);
 }
-/* The tools sit at the box's right edge, so the emoji panel opens leftwards, inside the dialog. */
-.summary-box .emoji-pop {
-	left: auto;
-	right: 0;
+.summary-note {
+	margin: 4px 0 0;
+}
+/* Buttons that ask the AI to write: outlined in the accent, so they read as actions, not as text. */
+.btn.ai {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	color: var(--accent);
+}
+.btn.ai:hover:not(:disabled) {
+	background: var(--accent-soft);
 }
 .publish-footer {
 	display: flex;
