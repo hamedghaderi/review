@@ -1601,6 +1601,9 @@ export interface AgentSetup {
 	args: Array<string> // the server script
 	env: Record<string, string>
 	ready: boolean // the script exists (in development: the app was built since this was added)
+	// Running from an AppImage, which Linux mounts at a new temporary folder on every launch: the server runs from a copy
+	// extracted once into `folder` (by `command`), and `command`/`args` above point there.
+	extract: { appImage: string; folder: string; command: string } | null
 }
 
 export interface SummaryRewrite {
