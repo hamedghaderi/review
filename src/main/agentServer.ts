@@ -1,8 +1,9 @@
 import { realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { FINDING_LEVELS } from '../shared/types.ts'
+import { basename, dirname, join, relative } from 'node:path'
+import { extractCommand } from '../shared/agentSetup.ts'
+import { FINDING_LEVELS, type AgentSetup } from '../shared/types.ts'
 import { findingsText, pickReview, repoAt, reviewsText, runText, type Checkout, type HeadRelation, type ReviewPick } from './agentData.ts'
 import { git } from './git.ts'
 import { migrate, type StoreData } from './store.ts'
@@ -55,6 +56,40 @@ export const AGENT_TOOLS = [
 		},
 	},
 ]
+
+/**
+ * How an agent starts this server from this copy of Review: its own binary in Node mode, with the script inside it.
+ * An AppImage is the exception. Linux mounts it at a new temporary folder on every launch, and its launcher may put
+ * --no-sandbox before the arguments, which Node mode rejects. So it's extracted once into a fixed folder and the binary
+ * there is started directly (with the libraries the launcher would have added).
+ */
+export function agentSetup(o: {
+	platform: NodeJS.Platform
+	env: NodeJS.ProcessEnv
+	execPath: string
+	appPath: string // app.getAppPath(): the app.asar, or the project in development
+	userData: string
+	home: string
+	exists(path: string): boolean
+	packaged: boolean
+}): AgentSetup {
+	const script = join(o.appPath, 'out', 'main', 'agent.js')
+	const env = { ELECTRON_RUN_AS_NODE: '1', REVIEW_DATA_DIR: o.userData }
+	const appImage = o.platform === 'linux' ? o.env.APPIMAGE : undefined
+	const mount = o.env.APPDIR
+	if (appImage && mount) {
+		const folder = join(o.home, '.local', 'share', 'review-agent')
+		return {
+			name: AGENT_SERVER_NAME,
+			command: join(folder, relative(mount, o.execPath)),
+			args: [join(folder, relative(mount, script))],
+			env: { ...env, LD_LIBRARY_PATH: join(folder, 'usr', 'lib') },
+			ready: true,
+			extract: { appImage, folder, command: extractCommand(appImage, dirname(folder), basename(folder)) },
+		}
+	}
+	return { name: AGENT_SERVER_NAME, command: o.execPath, args: [script], env, ready: o.packaged || o.exists(script), extract: null }
+}
 
 /** Where Review keeps its data: REVIEW_DATA_DIR (set in the config Review gives you), else the platform's default. */
 export function dataDir(env: NodeJS.ProcessEnv = process.env, platform = process.platform, home = homedir()): string {

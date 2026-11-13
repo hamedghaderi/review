@@ -5,7 +5,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { DATA_NOTE } from '../src/main/agentData.ts'
-import { AGENT_TOOLS, callAgentTool, checkoutAt, dataDir, relationOf, storeReader, type AgentDeps } from '../src/main/agentServer.ts'
+import {
+	AGENT_TOOLS,
+	agentSetup,
+	callAgentTool,
+	checkoutAt,
+	dataDir,
+	relationOf,
+	storeReader,
+	type AgentDeps,
+} from '../src/main/agentServer.ts'
 import type { StoreData } from '../src/main/store.ts'
 import { claudeCommand, mcpJson } from '../src/shared/agentSetup.ts'
 import type { AiRun, Anchor, Finding, Review } from '../src/shared/types.ts'
@@ -241,6 +250,7 @@ test('setup: a Claude Code command that survives spaces and quotes, and the same
 		args: ['/Applications/Review.app/Contents/Resources/app.asar/out/main/agent.js'],
 		env: { ELECTRON_RUN_AS_NODE: '1', REVIEW_DATA_DIR: "/Users/a b/Library/Application Support/Review's" },
 		ready: true,
+		extract: null,
 	}
 	assert.equal(
 		claudeCommand(setup),
@@ -249,4 +259,71 @@ test('setup: a Claude Code command that survives spaces and quotes, and the same
 	assert.deepEqual(JSON.parse(mcpJson(setup)), {
 		mcpServers: { 'review-app': { command: setup.command, args: setup.args, env: setup.env } },
 	})
+})
+
+test('setup per platform: the app’s own binary and script; an AppImage points at a copy extracted once into a fixed folder', () => {
+	const base = { home: '/home/ann', exists: () => true, packaged: true }
+	const mac = agentSetup({
+		...base,
+		platform: 'darwin',
+		env: {},
+		execPath: '/Applications/Review.app/Contents/MacOS/Review',
+		appPath: '/Applications/Review.app/Contents/Resources/app.asar',
+		userData: '/Users/ann/Library/Application Support/Review',
+	})
+	assert.deepEqual(mac, {
+		name: 'review-app',
+		command: '/Applications/Review.app/Contents/MacOS/Review',
+		args: ['/Applications/Review.app/Contents/Resources/app.asar/out/main/agent.js'],
+		env: { ELECTRON_RUN_AS_NODE: '1', REVIEW_DATA_DIR: '/Users/ann/Library/Application Support/Review' },
+		ready: true,
+		extract: null,
+	})
+
+	const appImage = agentSetup({
+		...base,
+		platform: 'linux',
+		env: { APPIMAGE: '/home/ann/Downloads/Review-linux-x86_64.AppImage', APPDIR: '/tmp/.mount_ReviewAbC123' },
+		execPath: '/tmp/.mount_ReviewAbC123/review',
+		appPath: '/tmp/.mount_ReviewAbC123/resources/app.asar',
+		userData: '/home/ann/.config/Review',
+	})
+	assert.equal(appImage.command, '/home/ann/.local/share/review-agent/review')
+	assert.deepEqual(appImage.args, ['/home/ann/.local/share/review-agent/resources/app.asar/out/main/agent.js'])
+	assert.deepEqual(appImage.env, {
+		ELECTRON_RUN_AS_NODE: '1',
+		REVIEW_DATA_DIR: '/home/ann/.config/Review',
+		LD_LIBRARY_PATH: '/home/ann/.local/share/review-agent/usr/lib',
+	})
+	assert.doesNotMatch(JSON.stringify(appImage), /\.mount_/, 'nothing points at the temporary mount')
+	assert.deepEqual(appImage.extract, {
+		appImage: '/home/ann/Downloads/Review-linux-x86_64.AppImage',
+		folder: '/home/ann/.local/share/review-agent',
+		command:
+			'mkdir -p /home/ann/.local/share && cd /home/ann/.local/share && /home/ann/Downloads/Review-linux-x86_64.AppImage --appimage-extract >/dev/null && mv -T squashfs-root review-agent',
+	})
+
+	// An installed Linux build (not an AppImage), and a development copy that hasn't built the server yet.
+	const installed = agentSetup({
+		...base,
+		platform: 'linux',
+		env: {},
+		execPath: '/opt/Review/review',
+		appPath: '/opt/Review/resources/app.asar',
+		userData: '/home/ann/.config/Review',
+	})
+	assert.equal(installed.extract, null)
+	assert.equal(installed.command, '/opt/Review/review')
+	const dev = agentSetup({
+		...base,
+		packaged: false,
+		exists: () => false,
+		platform: 'darwin',
+		env: { APPIMAGE: '/x', APPDIR: '/y' },
+		execPath: '/e',
+		appPath: '/repo',
+		userData: '/u',
+	})
+	assert.equal(dev.ready, false)
+	assert.equal(dev.extract, null, 'APPIMAGE only counts on Linux')
 })

@@ -38,6 +38,23 @@ export function AgentSettings() {
 			)}
 			{setup && (
 				<>
+					{setup.extract && (
+						<div className="agent-snippet">
+							<div className="agent-snippet-head">
+								<strong className="small">First: extract the AppImage once</strong>
+								<span className="spacer" />
+								<button className="btn small" onClick={() => copy('extract', setup.extract!.command)}>
+									{copied === 'extract' ? 'Copied' : 'Copy'}
+								</button>
+							</div>
+							<pre className="mono small">{setup.extract.command}</pre>
+							<p className="muted small">
+								Review is running from an AppImage, which Linux opens in a different temporary folder each time, so an agent can’t start the
+								server from it. This unpacks it into <span className="mono">{setup.extract.folder}</span>, which the commands below use.
+								After you update Review, delete that folder and run this again.
+							</p>
+						</div>
+					)}
 					<div className="agent-snippet">
 						<div className="agent-snippet-head">
 							<strong className="small">Claude Code</strong>
@@ -60,7 +77,9 @@ export function AgentSettings() {
 						<pre className="mono small">{mcpJson(setup)}</pre>
 					</div>
 					<p className="muted small">
-						If you move or reinstall Review somewhere else, copy the command again: it points at this copy of the app.
+						{setup.extract
+							? 'The commands point at the extracted copy, not at the AppImage.'
+							: 'If you move or reinstall Review somewhere else, copy the command again: it points at this copy of the app.'}
 					</p>
 				</>
 			)}
