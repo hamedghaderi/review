@@ -8,6 +8,7 @@ import type {
 	AutoRound,
 	BaseDrift,
 	TakeoverInfo,
+	FixedThread,
 	AiSettingsView,
 	AiStartScope,
 	IncrementalOffer,
@@ -72,6 +73,7 @@ import { DescriptionPanel } from './DescriptionPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
 import type { PostedState } from './Comment.tsx'
 import { discussedAt, hasReply, ownThread } from './discussed.ts'
+import { FixedThreadsBanner, ResolveFixedDialog } from './FixedThreads.tsx'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
 import { AskModel, ModelPicker } from './ModelPicker.tsx'
@@ -1130,6 +1132,24 @@ export function App() {
 	}, [loaded])
 	useEffect(() => setConclusionOpen(false), [loaded?.review.id])
 	const lastFinished = [...aiRuns].reverse().find((r) => r.status === 'completed' || r.status === 'partial') ?? null
+	// Your threads from findings the latest run found gone, double-checked (issue #193): offered for resolving, never resolved
+	// for you. Read again when a double-check lands on the run, and after you resolve some.
+	const [fixed, setFixed] = useState<{ reviewId: string; rows: Array<FixedThread> } | null>(null)
+	const [fixedOpen, setFixedOpen] = useState(false)
+	const [fixedTick, setFixedTick] = useState(0)
+	const [fixedDismissed, setFixedDismissed] = useState<Set<string>>(new Set()) // run ids you said "not now" for
+	const fixedKey = lastFinished
+		? `${lastFinished.id}:${(lastFinished.history?.gone ?? []).map((g) => g.check?.verdict ?? '-').join('')}`
+		: ''
+	useEffect(() => {
+		if (!session || !comparison?.pr || !lastFinished?.history) return setFixed(null)
+		const id = comparison.id
+		void window.review.fixedThreads(session.repo.id, id).then((r) => {
+			if (r.ok && comparisonIdRef.current === id) setFixed({ reviewId: id, rows: r.value })
+		})
+	}, [session?.repo.id, comparison?.id, fixedKey, fixedTick]) // eslint-disable-line react-hooks/exhaustive-deps
+	const fixedRows = comparison && fixed?.reviewId === comparison.id ? fixed.rows : []
+	const offerFixed = !!lastFinished && !fixedDismissed.has(lastFinished.id) && fixedRows.some((r) => r.state === 'confirmed')
 	// Members the newest finished run didn't wait for: who is still reviewing, and the findings they added since the conclusion.
 	const stillReviewing = (lastFinished?.team?.members ?? []).filter((m) => m.late && m.status === 'running').map((m) => m.role)
 	const unreadLate = lateUnread(conclusion, lastFinished)
@@ -2038,6 +2058,13 @@ export function App() {
 								<DriftBanner drift={drift.value} open={driftOpen} onToggle={() => setDriftOpen((x) => !x)} />
 							)}
 							{view === 'review' && comparison && takeover?.reviewId === comparison.id && <TakeoverBanner info={takeover.value} />}
+							{view === 'review' && comparison?.pr && offerFixed && lastFinished && (
+								<FixedThreadsBanner
+									rows={fixedRows}
+									onOpen={() => setFixedOpen(true)}
+									onDismiss={() => setFixedDismissed((d) => new Set(d).add(lastFinished.id))}
+								/>
+							)}
 							{view === 'review' && comparison?.pr && autoRecord?.rounds ? <FollowUpBanner record={autoRecord} /> : null}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
@@ -2495,6 +2522,20 @@ export function App() {
 						</main>
 					)}
 				</div>
+				{fixedOpen && session && comparison?.pr && (
+					<ResolveFixedDialog
+						rows={fixedRows}
+						onResolve={async (threadId, body) => {
+							const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, true)
+							return r.ok ? null : r.error.message
+						}}
+						onClose={() => {
+							setFixedOpen(false)
+							setFixedTick((t) => t + 1)
+							loadDiscussion(session.repo.id, comparison.id)
+						}}
+					/>
+				)}
 				{publishOpen && session && comparison?.pr && github && (
 					<PublishDialog
 						repoId={session.repo.id}

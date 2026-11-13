@@ -440,6 +440,7 @@ function registerIpc(): void {
 	handle(IPC.mentionable, (repoId: unknown, reviewId: unknown, query: unknown) =>
 		service.mentionable(str(repoId, 'repository'), comparisonId(reviewId), typeof query === 'string' ? query.slice(0, 39) : ''),
 	)
+	handle(IPC.fixedThreads, (repoId: unknown, reviewId: unknown) => service.fixedThreads(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.replyToThread, (repoId: unknown, reviewId: unknown, threadId: unknown, body: unknown, resolve: unknown) =>
 		service.replyToThread(
 			str(repoId, 'repository'),
@@ -780,6 +781,11 @@ app.whenReady().then(async () => {
 			if (late.length) lateMembers.set(run.id, late)
 			else lateMembers.delete(run.id)
 			if (wasLate?.length && !late.length && !run.auto) lateFinished(run, wasLate)
+			// Threads you started from findings this run found gone are double-checked, so the review can offer to resolve them.
+			if (before === 'running' && (run.status === 'completed' || run.status === 'partial') && run.history?.gone.length)
+				void service
+					.checkFixedThreads(run.repoId, run.reviewId, run.id, connections.view().questionModel)
+					.catch((e) => console.warn('Fixed threads could not be checked:', e))
 			// Your edits to its findings come after a run, so this is when there may be enough new ones to update your style.
 			if (before === 'running' && run.status === 'completed') void service.refreshReviewStyle(connections.view().questionModel)
 		},
