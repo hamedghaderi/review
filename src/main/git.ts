@@ -132,6 +132,13 @@ export async function cloneGitHub(repo: string, parent: string, signal?: AbortSi
 	return { root: await realpath(dest), created: true }
 }
 
+/**
+ * How long Git's pipes may stay open after Git itself has exited before its output is taken as it is. A program Git
+ * started can outlive it and keep them open: ssh for a fetch, when Git is stopped for taking too long. Waiting for
+ * them to close would then wait for ssh, which may never finish.
+ */
+export const PIPE_GRACE_MS = 2000
+
 export function git(
 	cwd: string,
 	args: Array<string>,
@@ -145,12 +152,36 @@ export function git(
 			shell: false,
 			windowsHide: true,
 			signal: options.signal,
-			timeout: options.timeoutMs,
 		})
 		const out: Array<Buffer> = []
 		const err: Array<Buffer> = []
 		let size = 0
 		let truncated = false
+		let timedOut = false
+		let settled = false
+		let grace: NodeJS.Timeout | undefined
+		const timer =
+			options.timeoutMs === undefined
+				? undefined
+				: setTimeout(() => {
+						timedOut = true
+						child.kill()
+					}, options.timeoutMs)
+		const settle = (fn: () => void): void => {
+			if (settled) return
+			settled = true
+			clearTimeout(timer)
+			clearTimeout(grace)
+			fn()
+		}
+		const result = (code: number | null): GitOutput => {
+			let stderr = Buffer.concat(err).toString('utf8')
+			if (timedOut)
+				stderr = [stderr.trimEnd(), `Git did not finish within ${Math.round(options.timeoutMs! / 1000)} seconds and was stopped.`]
+					.filter(Boolean)
+					.join('\n')
+			return { code: code ?? -1, stdout: Buffer.concat(out), stderr, truncated }
+		}
 		child.stdout.on('data', (chunk: Buffer) => {
 			if (truncated) return
 			size += chunk.length
@@ -162,15 +193,22 @@ export function git(
 			out.push(chunk)
 		})
 		child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
-		child.on('error', (e: NodeJS.ErrnoException) => {
-			if (e.name === 'AbortError') reject(new AppFail('cancelled', 'Cancelled.'))
-			else if (e.code === 'ENOENT')
-				reject(new AppFail('git-missing', 'Git was not found. Install Git and make sure it is available on your PATH.'))
-			else reject(new AppFail('git-failed', `Could not run Git: ${e.message}`))
+		child.on('error', (e: NodeJS.ErrnoException) =>
+			settle(() => {
+				if (e.name === 'AbortError') reject(new AppFail('cancelled', 'Cancelled.'))
+				else if (e.code === 'ENOENT')
+					reject(new AppFail('git-missing', 'Git was not found. Install Git and make sure it is available on your PATH.'))
+				else reject(new AppFail('git-failed', `Could not run Git: ${e.message}`))
+			}),
+		)
+		child.on('exit', (code) => {
+			grace = setTimeout(() => {
+				child.stdout.destroy()
+				child.stderr.destroy()
+				settle(() => resolve(result(code)))
+			}, PIPE_GRACE_MS)
 		})
-		child.on('close', (code) => {
-			resolve({ code: code ?? -1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), truncated })
-		})
+		child.on('close', (code) => settle(() => resolve(result(code))))
 	})
 }
 
