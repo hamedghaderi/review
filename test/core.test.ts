@@ -4,7 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { compareBranches, compareSnapshot, countStatusEntries, findRoot, readPatch, readRepo } from '../src/main/git.ts'
+import { compareBranches, compareSnapshot, countStatusEntries, findRoot, git, PIPE_GRACE_MS, readPatch, readRepo } from '../src/main/git.ts'
 import { parsePatch, pickSection } from '../src/main/patch.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { buildRows, computeGaps, linesToReveal, normalizeSpan } from '../src/renderer/src/diffModel.ts'
@@ -209,4 +209,22 @@ test('store serialises writes, replaces atomically and survives reload', async (
 		),
 		'{broken',
 	)
+})
+
+// A shell alias that leaves `sleep` holding Git's pipes stands in for ssh outliving a fetch.
+const holder = (rest: string) => ['-c', `alias.hold=!sleep 10 & ${rest}`, 'hold']
+
+test('git: settles soon after Git exits even when a program it started still holds its pipes', async () => {
+	const started = Date.now()
+	const r = await git(tmpdir(), holder('exit 0'))
+	assert.equal(r.code, 0)
+	assert.ok(Date.now() - started < PIPE_GRACE_MS + 2000, `took ${Date.now() - started}ms`)
+})
+
+test('git: a timeout stops Git and settles, saying so, even when a program it started still holds its pipes', async () => {
+	const started = Date.now()
+	const r = await git(tmpdir(), holder('sleep 10'), undefined, { timeoutMs: 300 })
+	assert.notEqual(r.code, 0)
+	assert.match(r.stderr, /did not finish within \d+ seconds and was stopped/)
+	assert.ok(Date.now() - started < PIPE_GRACE_MS + 2000, `took ${Date.now() - started}ms`)
 })

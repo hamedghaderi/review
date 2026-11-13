@@ -2975,6 +2975,31 @@ test('background: when GitHub cannot be read, the run goes on with the descripti
 	assert.ok(run.notices.some((n) => n.includes('Linked issues and the PR conversation could not be read') && n.includes('offline')))
 })
 
+test('background: a read that never settles stops holding the run once its time is up; the run goes on with the description', async () => {
+	let asked = false
+	const { handle } = runWith(
+		() => {
+			asked = true
+			return out([])
+		},
+		{ backgroundTimeoutMs: 50 },
+		sources(),
+		// Ignores its signal, like a Git process whose ssh outlived it.
+		{ loadBackground: () => new Promise(() => {}) },
+	)
+	const run = await handle.done
+	assert.equal(run.status, 'completed')
+	assert.ok(asked)
+	assert.ok(run.notices.some((n) => n.includes('PR conversation were not read within')))
+})
+
+test('background: Stop ends a run whose background read never settles', async () => {
+	const { handle } = runWith(() => out([]), {}, sources(), { loadBackground: () => new Promise(() => {}) })
+	setTimeout(() => handle.cancel(), 20)
+	const run = await handle.done
+	assert.equal(run.status, 'cancelled')
+})
+
 test('context: your notes reach a branch review too, fenced, and the policy says how to treat them', async () => {
 	let seen = ''
 	const { handle } = runWith(

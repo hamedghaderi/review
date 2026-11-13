@@ -83,7 +83,7 @@ import { buildSummaryRequest, parseSummary } from './summary.ts'
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
-import { answeredRequests, defaultBackoff, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
+import { answeredRequests, defaultBackoff, settlesBy, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
 export type RunConfigSource = (selection: ModelSelection) => Promise<RunConfig>
@@ -1194,7 +1194,8 @@ export class AiController {
 		patches: Map<string, PatchResult | null>
 	}> {
 		const { comparison } = access
-		const extra = await access.loadBackground?.(AbortSignal.timeout(60_000)).catch(() => null)
+		const late = AbortSignal.timeout(60_000)
+		const extra = access.loadBackground ? await settlesBy(access.loadBackground(late), late).catch(() => null) : null
 		const background = buildBackground({
 			description: comparison.pr?.body ?? null,
 			context: access.reviewContext?.() ?? null,

@@ -87,6 +87,31 @@ export interface RunnerOptions {
 	 * flight finish, no new ones are sent, and the files not reached are skipped with `reason`.
 	 */
 	budget?: { usd: number; reason: string } | null
+	/** How long linked issues, the conversation and a takeover's original may take to read (default BACKGROUND_TIMEOUT_MS). */
+	backgroundTimeoutMs?: number
+}
+
+/**
+ * Reading a pull request's background can fetch the commits of the one it takes over, which on a large repository
+ * takes a while; past this the run goes on with the description alone rather than wait.
+ */
+export const BACKGROUND_TIMEOUT_MS = 120_000
+
+/**
+ * `p`, or a rejection with the signal's reason once `signal` aborts, whichever comes first. For loaders that can't
+ * always stop what they started (a Git process that ignores the signal, a read that takes none): the caller moves on
+ * and whatever they still do is dropped.
+ */
+export function settlesBy<T>(p: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) {
+		p.catch(() => {})
+		return Promise.reject(signal.reason)
+	}
+	return new Promise((resolve, reject) => {
+		const stop = (): void => reject(signal.reason)
+		signal.addEventListener('abort', stop, { once: true })
+		p.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop))
+	})
 }
 
 export interface TeamRunMember {
@@ -359,8 +384,12 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const sources = await input.loadSources()
 			if (controller.signal.aborted) return finish(null)
 			if (input.loadBackground) {
+				const ms = options.backgroundTimeoutMs ?? BACKGROUND_TIMEOUT_MS
+				const late = AbortSignal.timeout(ms)
 				try {
-					const b = await input.loadBackground(controller.signal)
+					// Raced, not only signalled: a part that never settles would otherwise hold the run (and Stop) forever.
+					const signal = AbortSignal.any([controller.signal, late])
+					const b = await settlesBy(input.loadBackground(signal), signal)
 					for (const n of b.notes) notice(n)
 					discussion = b.discussion
 					background = buildBackground({
@@ -384,7 +413,9 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				} catch (e) {
 					if (controller.signal.aborted) return finish(null)
 					notice(
-						`Linked issues and the PR conversation could not be read, so only the description was sent: ${e instanceof Error ? e.message : String(e)}`,
+						late.aborted
+							? `Linked issues and the PR conversation were not read within ${Math.round(ms / 1000)} seconds, so only the description was sent.`
+							: `Linked issues and the PR conversation could not be read, so only the description was sent: ${e instanceof Error ? e.message : String(e)}`,
 					)
 				}
 			}
