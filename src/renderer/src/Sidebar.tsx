@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { pane } from './panes.ts'
 import type { GitHubStatus, RepoTab } from '../../shared/types.ts'
 import { keyLabel, useKeymap } from './keymap.ts'
 
@@ -46,7 +47,7 @@ export function Sidebar(props: {
 		return parent ? `${parent}/${t.name}` : t.name
 	}
 	return (
-		<nav className={`sidebar${collapsed ? ' collapsed' : ''}`} aria-label="Pages and repositories" ref={nav}>
+		<nav className={`sidebar${collapsed ? ' collapsed' : ''}`} {...pane('Pages and repositories')} ref={nav}>
 			<div className="sidebar-top">
 				<button
 					className="side-item side-toggle"

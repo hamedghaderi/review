@@ -1,10 +1,11 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { ChangeConclusion } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
-import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 import { Markdown } from './Markdown.tsx'
 import { scrollBehavior } from './motion.ts'
+import { SpeakerHeading } from './SpeakerHeading.tsx'
 
 interface Props {
 	conclusion: ChangeConclusion | null
@@ -125,6 +126,7 @@ export function Conclusion({
 									again to include {late === 1 ? 'it' : 'them'}.
 								</p>
 							) : null}
+							<SpeakerHeading>{first.error ? 'The AI couldn’t write the conclusion' : `Conclusion by ${first.model}`}</SpeakerHeading>
 							{first.error ? (
 								<p className="error-text selectable">{first.text}</p>
 							) : (
@@ -155,18 +157,23 @@ export function Conclusion({
 					{busy !== 'writing' &&
 						rest.map((m) =>
 							m.role === 'you' ? (
-								<div key={m.id} className="conclusion-q selectable">
+								<article key={m.id} className="conclusion-q selectable">
+									<SpeakerHeading>{speaker(m)}</SpeakerHeading>
 									{m.text}
-								</div>
+								</article>
 							) : m.error ? (
-								<p key={m.id} className="error-text small selectable">
-									{m.text}
-								</p>
+								<article key={m.id}>
+									<SpeakerHeading>{speaker(m)}</SpeakerHeading>
+									<p className="error-text small selectable">{m.text}</p>
+								</article>
 							) : (
-								<div key={m.id} className="conclusion-a">
+								<article key={m.id} className="conclusion-a">
+									<SpeakerHeading>{speaker(m)}</SpeakerHeading>
 									<Markdown text={m.text} paths={paths} onOpenPath={onOpenPath} />
-									<span className="muted small">{m.model}</span>
-								</div>
+									<span className="muted small" aria-hidden>
+										{m.model}
+									</span>
+								</article>
 							),
 						)}
 					{asked && (

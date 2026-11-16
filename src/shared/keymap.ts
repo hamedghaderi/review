@@ -25,6 +25,14 @@ export const KEY_ACTIONS: ReadonlyArray<KeyAction> = [
 	{ id: 'quickOpen', label: 'Quick open', group: 'General', defaults: same('Mod+p'), note: 'Go to a pull request, branch or command.' },
 	{ id: 'search', label: 'Focus search', group: 'General', defaults: same('/'), note: 'The search box on screen.' },
 	{ id: 'sidebar', label: 'Toggle sidebar', group: 'General', defaults: same('Mod+b'), menu: true },
+	{
+		id: 'paneNext',
+		label: 'Next pane',
+		group: 'General',
+		defaults: { mac: ['F6', 'Ctrl+`'], other: ['F6'] },
+		note: 'Sidebar, files, code, then the side panel. Works while typing. On a Mac, F6 needs fn unless function keys are standard.',
+	},
+	{ id: 'panePrev', label: 'Previous pane', group: 'General', defaults: { mac: ['Shift+F6', 'Ctrl+Shift+`'], other: ['Shift+F6'] } },
 	{ id: 'home', label: 'Home', group: 'Navigation', defaults: same('Mod+0') },
 	{ id: 'outcomes', label: 'Outcomes', group: 'Navigation', defaults: same() },
 	...[1, 2, 3, 4, 5, 6, 7, 8].map((n): KeyAction => ({

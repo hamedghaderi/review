@@ -164,3 +164,10 @@ export function runAnnouncement(prev: AiRun | undefined, run: AiRun): { text: st
 	const partly = run.status === 'partial' ? ' Some files were not reviewed.' : ''
 	return { text: `${what} finished: ${found}.${partly}`, kind: 'result' }
 }
+
+/** Who said a message, as its hidden heading says it (issue #218): "You asked", "Opus 5.5 answered: still holds"… */
+export function speaker(m: { role: 'you' | 'ai'; model?: string | null; error?: boolean }, detail?: string | null): string {
+	if (m.role === 'you') return 'You asked'
+	if (m.error) return 'The AI couldn’t answer'
+	return `${m.model ?? 'The AI'} answered${detail ? `: ${detail}` : ''}`
+}

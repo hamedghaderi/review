@@ -218,6 +218,10 @@ textarea {
 	outline: 2px solid var(--accent);
 	outline-offset: 1px;
 }
+/* A pane reached with F6 (issue #218): the outline goes inside, where the pane's edge can't clip it. */
+[data-pane]:focus-visible {
+	outline-offset: -2px;
+}
 select,
 input[type='search'] {
 	height: 26px;

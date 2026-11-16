@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { pane } from './panes.ts'
 import { FILTER_NEEDS_LOGIN, parsePrQuery, PR_QUERY_EXAMPLES } from '../../shared/prQuery.ts'
 import type {
 	AppError,
@@ -317,7 +318,7 @@ export const Browser = forwardRef<BrowserHandle, Props>(function Browser(p, ref)
 
 	const parsed = isPrs ? parsePrQuery(state.prQuery) : null
 	const sections = (
-		<nav className="browse-side" aria-label="Browse" style={{ width: side.width }}>
+		<nav className="browse-side" {...pane('Browse')} style={{ width: side.width }}>
 			<SideItem
 				label="Pull requests"
 				icon="⇅"
@@ -389,7 +390,7 @@ export const Browser = forwardRef<BrowserHandle, Props>(function Browser(p, ref)
 		<div className="browse">
 			{sections}
 			<Splitter onPointerDown={side.start(1)} />
-			<section className="browse-main" ref={list}>
+			<section className="browse-main" {...pane('List')} ref={list}>
 				<div className="browse-tools">
 					<div className="search-wrap">
 						<input

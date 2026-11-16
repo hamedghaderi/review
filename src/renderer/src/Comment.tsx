@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, MyLastReview, ReviewComment } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
-import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { SpeakerHeading } from './SpeakerHeading.tsx'
 import {
 	AlreadyDiscussed,
 	AsksYou,
@@ -326,10 +327,15 @@ export function QuestionCard({ question: q, pending, disabled, modelPicker, onAs
 			{open && (
 				<>
 					{q.messages.map((m) => (
-						<div key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
-							{m.role === 'ai' && m.model && <div className="thread-meta">{m.model}</div>}
+						<article key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
+							<SpeakerHeading>{speaker(m)}</SpeakerHeading>
+							{m.role === 'ai' && m.model && (
+								<div className="thread-meta" aria-hidden>
+									{m.model}
+								</div>
+							)}
 							<span className="selectable">{m.text}</span>
-						</div>
+						</article>
 					))}
 					{pending && (
 						<div className="thread-msg ai muted">

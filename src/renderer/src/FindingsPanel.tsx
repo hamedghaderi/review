@@ -46,8 +46,9 @@ import type {
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
-import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { scrollBehavior } from './motion.ts'
+import { SpeakerHeading } from './SpeakerHeading.tsx'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
@@ -1881,9 +1882,20 @@ function Thread({ messages, pending }: { messages: Array<FindingMessage>; pendin
 	return (
 		<div className="finding-thread">
 			{messages.map((m) => (
-				<div key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
+				<article key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
+					<SpeakerHeading>
+						{speaker(
+							m,
+							[
+								m.verdict && VERDICT_TEXT[m.verdict].label.toLowerCase(),
+								m.verdict !== 'wrong' && m.level && LEVEL_META[m.level].label.toLowerCase(),
+							]
+								.filter(Boolean)
+								.join(', '),
+						)}
+					</SpeakerHeading>
 					{m.role === 'ai' && (
-						<div className="thread-meta">
+						<div className="thread-meta" aria-hidden>
 							<span>{m.model ?? 'AI'}</span>
 							{m.verdict && (
 								<span className={`verdict ${m.verdict}`} title={VERDICT_TEXT[m.verdict].hint}>
@@ -1898,7 +1910,7 @@ function Thread({ messages, pending }: { messages: Array<FindingMessage>; pendin
 						</div>
 					)}
 					<span className="selectable">{m.text}</span>
-				</div>
+				</article>
 			))}
 			{pending && messages[messages.length - 1]?.role !== 'you' && <div className="thread-msg you muted">Sending…</div>}
 			{pending && (
