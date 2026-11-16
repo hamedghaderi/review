@@ -954,6 +954,7 @@ const FACT_LABEL = {
 	project: 'Project context',
 	ci: 'CI',
 	dependencies: 'Dependencies',
+	coverage: 'Coverage exclusions',
 	structure: 'Imports',
 	decisions: 'Your earlier decisions',
 	earlier: 'Earlier run',

@@ -92,7 +92,7 @@ export interface ContextReference {
  * request; `fileKeys` null means every request, otherwise only requests that carry one of those files.
  */
 export interface ContextFact {
-	kind: 'project' | 'dependencies' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
+	kind: 'project' | 'dependencies' | 'coverage' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
 	title: string
 	text: string
 	fileKeys: Array<string> | null
@@ -365,7 +365,8 @@ const FACT_ORDER: Record<ContextFact['kind'], number> = {
 	earlier: 4,
 	ci: 5,
 	structure: 6,
-	dependencies: 7,
+	coverage: 7, // short, and only for the files that have them
+	dependencies: 8,
 }
 
 /** Facts in order (project context first: every finding may need it; then CI: it is short), cut to fit `budget` characters per request. */

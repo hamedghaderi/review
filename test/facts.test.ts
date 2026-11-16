@@ -351,7 +351,12 @@ test('without a .review folder, the first agent file is sent and the others, rul
 	git('add', '-A')
 	git('commit', '-qm', 'base')
 	const base = git('rev-parse', 'HEAD')
-	const sources = [{ file: { key: 'packages/api/src/user.ts', oldPath: 'packages/api/src/user.ts', newPath: 'packages/api/src/user.ts' } }]
+	const sources = [
+		{
+			file: { key: 'packages/api/src/user.ts', oldPath: 'packages/api/src/user.ts', newPath: 'packages/api/src/user.ts' },
+			patch: { kind: 'text', hunks: [], bytes: 0 },
+		},
+	]
 
 	const r = await loadFacts({ root: dir, baseSha: base, headSha: base, sources: sources as never, checks: null })
 	const [project] = r.facts

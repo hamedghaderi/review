@@ -3,6 +3,7 @@ import { baseLabel, CI_FAILED, CI_PASSED, compareChecks } from '../../shared/ci.
 import type { CommitChecks } from '../github.ts'
 import { markPreExisting, type BaseChecks } from '../baseCi.ts'
 import type { ContextFact, FileSource } from './context.ts'
+import { coverageMarkerFacts } from './coverageMarkers.ts'
 import { dependencyFacts } from './deps.ts'
 import { annotationFacts } from './evidence.ts'
 import { failureExcerpt } from '../ciLog.ts'
@@ -29,8 +30,8 @@ const MAX_STALE = 20
 
 /**
  * Facts the app computes or reads for the reviewer, so findings can rest on evidence instead of asking the reader to
- * go and check: the project context file, dependency range checks for manifest and lock file changes, and the CI
- * results for the head commit, compared with the base's. Any part may be missing; a failure becomes a note, never a
+ * go and check: the project context file, dependency range checks for manifest and lock file changes, the coverage
+ * exclusions the change adds, and the CI results for the head commit, compared with the base's. Any part may be missing; a failure becomes a note, never a
  * failed run.
  */
 export async function loadFacts(o: {
@@ -78,6 +79,15 @@ export async function loadFacts(o: {
 	} catch (e) {
 		if (o.signal?.aborted) throw e
 		out.notes.push(`Dependency facts could not be computed: ${e instanceof Error ? e.message : String(e)}`)
+	}
+	try {
+		const markers = coverageMarkerFacts(o.sources)
+		if (markers) {
+			out.facts.push(...markers.facts)
+			out.summary.push({ kind: 'coverage', text: markers.summary })
+		}
+	} catch (e) {
+		out.notes.push(`Coverage exclusions could not be listed: ${e instanceof Error ? e.message : String(e)}`)
 	}
 	if (o.checks) {
 		try {
