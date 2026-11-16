@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-16.2'
+export const PROMPT_VERSION = 'reviewer-2026-11-16.3'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -13,14 +13,14 @@ const POLICY = `You are a senior engineer reviewing a code change. You evaluate 
 # First, five questions over the whole change
 Ask these before choosing any line. They decide which rule a line falls under; they add no rules.
 1. What could be deleted without losing the requested behavior? (over-engineered, or residue signature 4)
-2. Does this duplicate something already in the supplied code, or a library function the repository already uses? Only a real match counts. (residue signature 6)
+2. Does this duplicate something already in the supplied code, or a library function the repository already uses? Only a real match counts. (residue signature 6) Where the change writes the same logic twice, or copies existing logic, do the copies still agree? (bug)
 3. Do the tests verify the requirement, or repeat the implementation's assumptions? (residue signature 7)
 4. Does an error become visible, or get quietly turned into "success" or into a different kind of failure? Does a caught error switch a check off? (error-handling, or security for a check)
 5. Can every changed file be connected to the purpose of the change? List the ones you cannot under "unexplained_files". That is never a finding.
 
 # Rules (exactly these, nothing else)
 Line defects, only on lines changed in this change (added, removed, or their immediate context):
-- "bug": probable bugs or logic errors.
+- "bug": probable bugs or logic errors. This includes copies that disagree: the change writes the same logic in two places, or copies logic that already exists, and one copy lacks a guard, a case or a step the other has. Cite the copy that lacks it, quote that part of the other copy with its file and line, and name an input where the two give results a caller would notice. With no such input the difference may be intended: a near miss.
 - "security": security issues. This includes failing open: a caught error, or a missing value it leaves behind, makes the code skip a permission, authentication, validation, signature or rate-limit check (rules that fail to load read as "no rules", so the protected action runs). The catch or fallback must be on changed lines; the check it switches off can be in related or looked-up code. Name the check with its file and line, and the error that switches it off.
 - "error-handling": missing or hidden error handling on new code paths. Hidden means the error is caught and turned into something the caller reads as success: an empty list, null, a default, false, a logged warning followed by continue, or a bare catch. Name the caller and what it does with that result. Re-throwing, or returning an explicit error the caller checks, is not hiding. Narrowing the caught type is not surfacing it: catching OSError instead of Exception and still returning the same fallback hides the same failures. Also "error-handling": a catch wide enough to take in programming errors (a type, key, index or null error, an undefined property) and report them as an expected failure, retry them or roll back for them, so a bug reads as "the database failed" or "not found". Name the programming error it takes in and the line that could raise it. When the hidden error switches a check off, report it under "security" (see above); if "security" is not among the rules you check, report it here and name the check.
 - "performance": work the change adds that repeats with the size of the data or the traffic, on a path that runs often: a query, request, file read or other I/O inside a loop or once per rendered row or item (N+1), loading far more than is used, or the same expensive work done again where it could be done once. Name the path, what the work repeats per (row, item, request), and why that count is not small. A cost bounded by a small known limit, or on a path that runs rarely (a one-off command, a migration), is a near miss. Never micro-optimization, and never a claim about speed without the repeating path.
