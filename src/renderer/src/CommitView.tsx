@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { pane } from './panes.ts'
 import type { Anchor, Comparison, CommitView as CommitData, Finding, Review } from '../../shared/types.ts'
 import { anchorToCommit, anchorToHead, type CommitFileMap } from '../../shared/commitStep.ts'
 import { DiffView } from './DiffView.tsx'
@@ -226,11 +227,11 @@ export function CommitView(p: Props) {
 	const date = new Date(commit.entry.at)
 	return (
 		<>
-			<aside className="side left" style={{ width: p.leftWidth }}>
+			<aside className="side left" {...pane('Commit files')} style={{ width: p.leftWidth }}>
 				<FileTree files={c.files} selected={selected} viewed={NO_VIEWED} commented={commented} onSelect={setSelected} />
 			</aside>
 			<Splitter onPointerDown={p.onSplitter} />
-			<section className="center">
+			<section className="center" {...pane('Code')}>
 				<div className="commit-head">
 					<div className="commit-title">
 						<span className="muted small nowrap">

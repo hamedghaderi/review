@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cyclePane, pane } from './panes.ts'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
 import { announce, runAnnouncement } from './announce.ts'
@@ -831,10 +832,13 @@ export function App() {
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Global shortcuts, as set in Settings › Keymap: settings, Home and Outcomes work from anywhere; quick open, the
-	// repositories and search need one open. A shortcut without ⌘/Ctrl/Alt never fires while typing.
+	// repositories and search need one open. A shortcut without ⌘/Ctrl/Alt never fires while typing, except moving
+	// between panes, which is how you get out of a box you typed in. An open dialog keeps focus inside it.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent): void => {
 			if (document.querySelector('.modal')) return
+			const dir = isKey(e, 'paneNext') ? 1 : isKey(e, 'panePrev') ? -1 : 0
+			if (dir && cyclePane(dir)) return e.preventDefault()
 			if (!e.metaKey && !e.ctrlKey && !e.altKey && isTyping(document.activeElement)) return
 			const run = (f: () => void): void => {
 				e.preventDefault()
@@ -2155,11 +2159,11 @@ export function App() {
 					)}
 
 					{page === 'outcomes' ? (
-						<main className="body home-body">
+						<main className="body home-body" {...pane('Outcomes')}>
 							<Outcomes />
 						</main>
 					) : home ? (
-						<main className="body home-body">
+						<main className="body home-body" {...pane('Home')}>
 							<Home
 								inbox={homeInbox}
 								notifications={!!github?.notifications.enabled}
@@ -2249,7 +2253,7 @@ export function App() {
 										/>
 									) : (
 										<>
-											<aside className="side left" style={{ width: left.width }}>
+											<aside className="side left" {...pane('Changed files')} style={{ width: left.width }}>
 												<FileTree
 													files={comparison.files}
 													selected={selected}
@@ -2261,7 +2265,7 @@ export function App() {
 												/>
 											</aside>
 											<Splitter onPointerDown={left.start(1)} />
-											<section className="center">
+											<section className="center" {...pane('Code')}>
 												{comparison.files.length === 0 ? (
 													<div className="empty">
 														<EmptyFigure figure="branches" />
@@ -2359,7 +2363,7 @@ export function App() {
 										</>
 									)}
 									<Splitter onPointerDown={right.start(-1)} />
-									<aside className="side right" style={{ width: right.width }}>
+									<aside className="side right" {...pane('Review panel')} style={{ width: right.width }}>
 										<div className="panel-title tabs" role="tablist">
 											<button
 												role="tab"
