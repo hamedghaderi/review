@@ -4,6 +4,7 @@ import { AiOrb } from './AiOrb.tsx'
 import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 import { Markdown } from './Markdown.tsx'
+import { scrollBehavior } from './motion.ts'
 
 interface Props {
 	conclusion: ChangeConclusion | null
@@ -47,7 +48,7 @@ export function Conclusion({
 	const [first, ...rest] = c?.messages ?? []
 	const count = rest.length + (asked ? 1 : 0)
 	useEffect(() => {
-		if (count) end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
+		if (count) end.current?.scrollIntoView({ block: 'end', behavior: scrollBehavior() })
 	}, [count, busy])
 	useAnnounceWait(busy === 'writing', 'Writing the conclusion: reading the whole change and the findings…')
 	useAnnounceWait(!!asked, 'Reading the code…')

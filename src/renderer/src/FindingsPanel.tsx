@@ -47,6 +47,7 @@ import type {
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
 import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { scrollBehavior } from './motion.ts'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
@@ -1580,7 +1581,7 @@ function FindingCard(p: CardProps) {
 	const [verifyError, setVerifyError] = useState<string | null>(null) // from Verify or Write failing test
 	const [writing, setWriting] = useState(false)
 	useEffect(() => {
-		if (selected) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+		if (selected) ref.current?.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
 	}, [selected])
 	const meta = LEVEL_META[f.severity]
 	return (

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { announce, announceLevel, setAnnounceLevel, type AnnounceLevel } from './announce.ts'
+import { motionPref, setMotionPref, type MotionPref } from './motion.ts'
 
 const OPTIONS: ReadonlyArray<{ id: AnnounceLevel; label: string; hint: string }> = [
 	{
@@ -11,15 +12,26 @@ const OPTIONS: ReadonlyArray<{ id: AnnounceLevel; label: string; hint: string }>
 	{ id: 'off', label: 'Nothing', hint: 'Screen readers are told nothing about the AI. What’s on screen doesn’t change.' },
 ]
 
+const MOTION: ReadonlyArray<{ id: MotionPref; label: string; hint: string }> = [
+	{ id: 'system', label: 'Follow the system', hint: 'Reduce motion when macOS, Windows or Linux is set to.' },
+	{ id: 'reduce', label: 'Reduce motion', hint: 'No animations or transitions: spinners and AI orbs hold still.' },
+	{ id: 'full', label: 'Keep motion', hint: 'Animations even when the system asks for less (the AI orbs still follow the system).' },
+]
+
 /**
- * Settings › Accessibility: how much screen readers are told about the AI (issue #217). Kept on this computer; the
- * review window reads it at its next announcement.
+ * Settings › Accessibility: how much screen readers are told about the AI (issue #217), and reduced motion (issue
+ * #219). Kept on this computer; the review window follows a change at once.
  */
 export function AccessibilitySettings() {
 	const [level, setLevel] = useState<AnnounceLevel>(announceLevel)
+	const [motion, setMotion] = useState<MotionPref>(motionPref)
 	const pick = (l: AnnounceLevel): void => {
 		setAnnounceLevel(l)
 		setLevel(l)
+	}
+	const pickMotion = (m: MotionPref): void => {
+		setMotionPref(m)
+		setMotion(m)
 	}
 	return (
 		<div className="form">
@@ -49,6 +61,18 @@ export function AccessibilitySettings() {
 					Try it
 				</button>
 			</div>
+			<fieldset className="radio-list">
+				<legend>Motion</legend>
+				{MOTION.map((o) => (
+					<label key={o.id} className="radio">
+						<input type="radio" name="motion" checked={motion === o.id} onChange={() => pickMotion(o.id)} />
+						<span>
+							{o.label}
+							<span className="muted block small">{o.hint}</span>
+						</span>
+					</label>
+				))}
+			</fieldset>
 		</div>
 	)
 }
