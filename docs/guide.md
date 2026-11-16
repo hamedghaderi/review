@@ -350,6 +350,8 @@ With a screen reader, your focus stays in the box you typed into, so Review tell
 
 **Settings → Accessibility** chooses how much is read: everything, only results (answers, drafts and how a run ended), or nothing. **Try it** reads a sample. The setting is kept on this computer.
 
+The same page has **Motion**: follow the system's reduced-motion setting (the default), reduce motion, or keep it. With motion reduced, animations and transitions stop: spinners hold as a still ring, the AI orbs stand still and panels scroll without gliding. **Keep motion** doesn't restart the AI orbs while the system asks for less.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

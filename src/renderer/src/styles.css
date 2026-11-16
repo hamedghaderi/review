@@ -1233,10 +1233,17 @@ a.ic-state:hover {
 		transform: rotate(360deg);
 	}
 }
-@media (prefers-reduced-motion: reduce) {
-	.spinner {
-		animation: none;
-	}
+/*
+ * Reduced motion (issue #219): motion.ts puts this class on the root when the system asks for it or you chose it in
+ * Settings › Accessibility. Every animation and transition stops; a spinner holds as a still ring. No other rule may set
+ * an animation or transition with !important, or it would win over this one (a test checks).
+ */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+	animation: none !important;
+	transition: none !important;
+	scroll-behavior: auto !important;
 }
 .ai-progress {
 	display: inline-flex;

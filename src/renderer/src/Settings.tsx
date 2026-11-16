@@ -119,7 +119,7 @@ export function Settings(props: {
 			{ id: 'reviewing', label: 'Reviewing', keywords: 'commits commit by commit step one at a time history message' },
 			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
 			{ id: 'sounds', label: 'Sounds', keywords: 'sound audio chime alert notification ai answer review finished' },
-			{ id: 'accessibility', label: 'Accessibility', keywords: 'screen reader voiceover announce aloud a11y live' },
+			{ id: 'accessibility', label: 'Accessibility', keywords: 'screen reader voiceover announce aloud a11y live motion animation reduce' },
 			{
 				id: 'github-group',
 				label: 'GitHub',

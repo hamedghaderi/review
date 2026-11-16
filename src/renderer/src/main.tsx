@@ -6,10 +6,12 @@ import './styles.css'
 import './themes.css'
 import { startTheme } from './theme.ts'
 import { startKeymap } from './keymap.ts'
+import { startMotion } from './motion.ts'
 
 document.title = `Review ${__APP_VERSION__}`
 startTheme()
 startKeymap()
+startMotion()
 
 createRoot(document.getElementById('root')!).render(
 	<StrictMode>
