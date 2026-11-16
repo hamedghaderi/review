@@ -58,7 +58,7 @@ Missing tests, test style and test length are not findings.`,
 		rules: ['bug', 'error-handling'],
 		brief: `Look hardest at "bug" and "error-handling", the way a pragmatic programmer who wants code to crash early would:
 - Walk each changed path with the inputs at its edges: empty, one, many, missing, duplicated, out of order, concurrent.
-- Follow every error the change can raise or catch to the caller that reads it, and check it reaches someone who can act on it instead of turning into a quiet success.
+- Follow every error the change can raise or catch to the caller that reads it, and check it reaches someone who can act on it instead of turning into a quiet success, or into a different kind of failure (a bug reported as "not found" or "the database failed").
 - Dead programs tell no lies: an assumption the changed code relies on and never checks is a "bug" only when the supplied code shows a caller that breaks it.`,
 	},
 	{
@@ -81,6 +81,7 @@ Missing tests, test style and test length are not findings.`,
 		brief: `Look hardest at "security", the way an auditor working through the OWASP Top 10 would:
 - For every value the changed lines use in a query, a command, a path, HTML, a redirect or a permission check, find where it comes from.
 - Check authorization on every new entry point, and what an unauthenticated or other user's request can reach.
+- For every catch, fallback or default the change adds, ask whether it can switch off a check: rules, keys or a policy that fail to load and then read as "nothing to check" fail open.
 - Follow "Where a value comes from" strictly: what you cannot see is a near miss and a limitation, never a finding.`,
 	},
 	{
