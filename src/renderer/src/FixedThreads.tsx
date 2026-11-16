@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { describeLeaks, findLeaks } from '../../shared/leaks.ts'
-import type { FixedThread } from '../../shared/types.ts'
+import type { FixedPatch, FixedThread, Result } from '../../shared/types.ts'
+import { FixedPatchDetails } from './FixedPatch.tsx'
 
 /**
  * Resolving your threads that a newer run found fixed (issue #193). The review only offers: a banner says how many look
@@ -36,9 +37,12 @@ type RowStatus = 'resolving' | 'done' | { error: string }
 export function ResolveFixedDialog({
 	rows,
 	onResolve,
+	loadPatch,
 	onClose,
 }: {
 	rows: Array<FixedThread>
+	/** What changed at the row's finding since it was raised, to check the verdict by eye (issue #215). */
+	loadPatch(row: FixedThread): Promise<Result<FixedPatch>>
 	/** Replies with `body` (when not empty) and resolves; returns why it failed, or null. */
 	onResolve(threadId: string, body: string): Promise<string | null>
 	onClose(): void
@@ -121,6 +125,7 @@ export function ResolveFixedDialog({
 										)}
 									</div>
 									{r.reason && <p className="muted small fixed-reason">{r.reason}</p>}
+									<FixedPatchDetails since={r.since} load={() => loadPatch(r)} />
 									<input
 										className="fixed-reply"
 										aria-label={`Reply to the thread on ${r.place}`}

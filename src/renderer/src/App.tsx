@@ -2489,6 +2489,7 @@ export function App() {
 													onVerify={verifyFinding}
 													onWriteTest={writeFindingTest}
 													onCheckFixed={checkFixed}
+													loadFixedPatch={(run, g) => window.review.fixedPatch(session.repo.id, comparison.id, run.id, g.finding.id)}
 													goneThread={(g) => {
 														// The comment made from it came along as a plain comment, keeping where it was published.
 														const c = g.comment ? review.comments.find((x) => (x.carried?.originId ?? x.id) === g.comment) : undefined
@@ -2525,6 +2526,7 @@ export function App() {
 				{fixedOpen && session && comparison?.pr && (
 					<ResolveFixedDialog
 						rows={fixedRows}
+						loadPatch={(r) => window.review.fixedPatch(session.repo.id, comparison.id, r.runId, r.findingId)}
 						onResolve={async (threadId, body) => {
 							const r = await window.review.replyToThread(session.repo.id, comparison.id, threadId, body, true)
 							return r.ok ? null : r.error.message

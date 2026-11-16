@@ -1424,6 +1424,19 @@ export interface FixedThread {
 	state: 'confirmed' | 'not-confirmed' | 'unchecked'
 	reason: string | null // what the double-check said
 	commit: string // the commit to name in the reply: the one that touched the file, else the new head
+	since: string // the head the finding was raised on, where What changed starts (issue #215)
+}
+
+/**
+ * What changed at a gone finding since the run that raised it (issue #215): the hunks at its lines, and at the lines
+ * the double-check read, between the earlier head and this run's. Read from Git so a "fixed" verdict can be checked by eye.
+ */
+export interface FixedPatch {
+	from: string // the head the finding was raised on
+	to: string // this run's head
+	parts: Array<{ path: string; why: 'finding' | 'checked'; hunks: Array<Hunk>; cut: boolean }>
+	more: number // hunks left out to keep it short
+	note: string | null // why it is empty, may include other changes (a force-push), or could not be read
 }
 
 // The accepted comment is linked through `findingId` on the draft/comment itself. 'open' overrides a decision
@@ -2140,6 +2153,7 @@ export const IPC = {
 	prDescriptionUpdate: 'gh:description-update',
 	replyToThread: 'gh:thread-reply',
 	fixedThreads: 'gh:fixed-threads',
+	fixedPatch: 'ai:fixed-patch',
 	mentionable: 'gh:mentionable',
 	loadPatch: 'diff:patch',
 	loadFileLines: 'diff:file-lines',
@@ -2350,6 +2364,8 @@ export interface ReviewApi {
 	replyToThread(repoId: string, reviewId: string, threadId: string, body: string, resolve: boolean): Promise<Result<void>>
 	/** Your open threads from findings the newest finished run found gone, with their double-check (issue #193). */
 	fixedThreads(repoId: string, reviewId: string): Promise<Result<Array<FixedThread>>>
+	/** What changed at a gone finding of run `runId` since the run that raised it (issue #215). */
+	fixedPatch(repoId: string, reviewId: string, runId: string, findingId: string): Promise<Result<FixedPatch>>
 	/** People GitHub lets you @mention in the PR's repository whose login or name matches `query`; empty without a token. */
 	mentionable(repoId: string, reviewId: string, query: string): Promise<Result<Array<MentionUser>>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>

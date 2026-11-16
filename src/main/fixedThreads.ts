@@ -42,7 +42,7 @@ export function fixedThreadCandidates(
 }
 
 /** The row shown for a candidate: confirmed only when the double-check, run without error, says it's no longer there. */
-export function fixedThread(runId: string, { gone, thread }: FixedCandidate, commit: string): FixedThread {
+export function fixedThread(runId: string, { gone, thread }: FixedCandidate, commit: string, since: string): FixedThread {
 	const a = gone.at ?? gone.finding.anchor
 	const path = (a.side === 'old' ? a.oldPath : a.newPath) ?? a.newPath ?? a.oldPath ?? a.fileKey
 	const check = gone.check ?? null
@@ -56,5 +56,6 @@ export function fixedThread(runId: string, { gone, thread }: FixedCandidate, com
 		state: !check ? 'unchecked' : !check.error && check.verdict === 'wrong' ? 'confirmed' : 'not-confirmed',
 		reason: check ? check.reason : null,
 		commit,
+		since,
 	}
 }

@@ -7,6 +7,7 @@ import type {
 	ConsistencyReport,
 	AuthorReplyCheck,
 	DiscussionThread,
+	FixedPatch,
 	FixedThread,
 	CarriedRun,
 	FileCoverage,
@@ -141,6 +142,7 @@ import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
+import { loadFixedPatch } from './fixedPatch.ts'
 import { fixedThread, fixedThreadCandidates, MAX_FIXED_CHECKS } from './fixedThreads.ts'
 import { newestComment } from './autoReview.ts'
 import type { ContextFact, FileSource } from './ai/context.ts'
@@ -309,9 +311,22 @@ export class ReviewService {
 				const touched = await commitsSince(data.root, from, run.headSha, [path], 2).catch(() => null)
 				if (touched?.touching === 1 && touched.commits[0]) commit = touched.commits[0].sha
 			}
-			rows.push(fixedThread(run.id, c, commit))
+			rows.push(fixedThread(run.id, c, commit, from))
 		}
 		return rows
+	}
+
+	/**
+	 * What changed at gone finding `findingId` of run `runId` between the head it was raised on and the run's (issue
+	 * #215), for checking a "fixed" verdict by eye. Read from Git; no model is asked.
+	 */
+	async fixedPatch(repoId: string, reviewId: string, runId: string, findingId: string): Promise<FixedPatch> {
+		this.repo(repoId)
+		const run = this.store.read().repos[repoId]?.aiRuns[reviewId]?.find((r) => r.id === runId)
+		const gone = run?.history?.gone.find((g) => g.finding.id === findingId)
+		if (!run?.history || !gone) throw new AppFail('not-found', 'That finding is no longer listed as gone.')
+		const data = this.loaded(reviewId)
+		return loadFixedPatch(data.root, run.history.from.headSha, run.headSha, gone, run.history.rewritten)
 	}
 
 	/**

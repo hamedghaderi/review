@@ -99,6 +99,7 @@ const api: ReviewApi = {
 	replyToThread: (repoId, reviewId, threadId, body, resolve) =>
 		ipcRenderer.invoke(IPC.replyToThread, repoId, reviewId, threadId, body, resolve),
 	fixedThreads: (repoId, reviewId) => ipcRenderer.invoke(IPC.fixedThreads, repoId, reviewId),
+	fixedPatch: (repoId, reviewId, runId, findingId) => ipcRenderer.invoke(IPC.fixedPatch, repoId, reviewId, runId, findingId),
 	mentionable: (repoId, reviewId, query) => ipcRenderer.invoke(IPC.mentionable, repoId, reviewId, query),
 	loadPatch: (comparisonId, fileKey, force) => ipcRenderer.invoke(IPC.loadPatch, comparisonId, fileKey, force),
 	loadFileLines: (comparisonId, fileKey) => ipcRenderer.invoke(IPC.loadFileLines, comparisonId, fileKey),

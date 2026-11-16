@@ -32,6 +32,7 @@ import type {
 	FindingMessage,
 	FindingVerification,
 	FindingReproducer,
+	FixedPatch,
 	GoneFinding,
 	NearMissCheck,
 	Review,
@@ -39,10 +40,12 @@ import type {
 	RuleEvaluation,
 	Reach,
 	ReachVerdict,
+	Result,
 	Severity,
 	StoredRule,
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
+import { FixedPatchDetails } from './FixedPatch.tsx'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
@@ -80,6 +83,8 @@ interface Props {
 	onWriteTest(finding: Finding): Promise<string | null>
 	/** Asks whether a gone finding is still in the code; resolves with an error message, or null once the verdict is saved. */
 	onCheckFixed(run: AiRun, gone: GoneFinding): Promise<string | null>
+	/** What changed at a gone finding since the run that raised it (issue #215). */
+	loadFixedPatch(run: AiRun, gone: GoneFinding): Promise<Result<FixedPatch>>
 	/** The GitHub thread of the comment you made from a gone finding, when it was published. */
 	goneThread(gone: GoneFinding): DiscussionThread | null
 	/** Resolves a GitHub thread; absent without a pull request. Resolves with an error message, or null. */
@@ -143,6 +148,7 @@ export function FindingsPanel({
 	onVerify,
 	onWriteTest,
 	onCheckFixed,
+	loadFixedPatch,
 	goneThread,
 	onResolveThread,
 	askModelPicker,
@@ -414,6 +420,7 @@ export function FindingsPanel({
 								at={run.history!.from.headSha}
 								thread={goneThread(g)}
 								onCheck={run.status === 'running' ? null : () => onCheckFixed(run, g)}
+								loadPatch={() => loadFixedPatch(run, g)}
 								onResolve={onResolveThread}
 							/>
 						))
@@ -1292,12 +1299,14 @@ function GoneCard({
 	at,
 	thread,
 	onCheck,
+	loadPatch,
 	onResolve,
 }: {
 	gone: GoneFinding
 	at: string
 	thread: DiscussionThread | null
 	onCheck: (() => Promise<string | null>) | null // null while the run is running
+	loadPatch(): Promise<Result<FixedPatch>>
 	onResolve?: (threadId: string) => Promise<string | null>
 }) {
 	const f = g.finding
@@ -1372,6 +1381,7 @@ function GoneCard({
 				)}
 				{error && <span className="small error-text">{error}</span>}
 			</div>
+			<FixedPatchDetails since={at} load={loadPatch} />
 			<details className="small">
 				<summary>What it said</summary>
 				{f.body !== undefined ? (
