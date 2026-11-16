@@ -150,7 +150,7 @@ export const RESIDUE_LABEL = [
 	'Docstring repeats the signature',
 	'Guard that cannot fire',
 	'Unused addition',
-	'Text addressed to a chat reader',
+	'Left over from a chat or an earlier draft',
 	'Re-implements an existing helper',
 	'Test that cannot fail',
 ]
