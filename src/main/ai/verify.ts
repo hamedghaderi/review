@@ -109,10 +109,22 @@ const EMPTY_BATCH: ContextBatch = { index: 0, excerpts: [], references: [], fact
 
 /**
  * Checking whether a finding was fixed: it was raised on an earlier commit and not again on the current one, so the
- * question is whether it still holds for the code as it is now.
+ * question is whether it still holds for the code as it is now. Fixed means what goes wrong can no longer happen, not
+ * that the cited lines changed: coding agents fix a named pattern with the smallest patch that hides it (issue #203).
+ * Kept as prose: the consistency check finds the verdict lines by their `- "wrong":` start (see variantRequest).
  */
 function sinceNote(since: string): string {
-	return `The finding below was reported on an earlier version of the change, at commit ${since.slice(0, 7)}. The code has changed since, and the review of the current version did not report it again. Judge it only against the code as it is now: "holds" means the problem is still there, "wrong" means it was fixed or no longer applies (name the line that fixes it), and "unsure" means the code you can read does not settle it. Its location and cited lines are from the earlier version; the location is moved to about where that code is now.
+	return `The finding below was reported on an earlier version of the change, at commit ${since.slice(0, 7)}. The code has changed since, and the review of the current version did not report it again. Judge it only against the code as it is now, by what the finding says goes wrong, not by whether its cited lines changed.
+
+First name that consequence: what goes wrong, and for which input or caller. Then find the code that now does what the cited lines did, and check whether the consequence can still happen there. "holds" means it still can, even if the cited lines look different; a partial fix holds, so name the path or caller where it still happens. "wrong" means it can no longer happen, or the code it was about was removed and nothing else does that job; name the line that prevents it. "unsure" means the code you can read does not settle it.
+
+These do not fix a problem on their own:
+- catching a narrower error type, or a different one, while still returning the same fallback (null, an empty value, a default, false);
+- moving or renaming the code, or wrapping the same behavior in a helper;
+- adding a comment, a pragma, a log line, a type annotation or a test that leaves the behavior as it was;
+- guarding one caller when the finding names another.
+
+Its location and cited lines are from the earlier version; the location is moved to about where that code is now.
 
 `
 }
