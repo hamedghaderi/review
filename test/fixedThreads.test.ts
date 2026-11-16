@@ -99,7 +99,7 @@ test('rows: confirmed only when the double-check ran cleanly and says the proble
 	const t = thread('t1', { id: 'n', url: null, author: 'me' })
 	const check = (verdict: FindingVerification['verdict'], error = false) =>
 		({ verdict, reason: `said ${verdict}`, level: null, checked: [], ...(error ? { error: true } : {}) }) as FindingVerification
-	const row = (g: GoneFinding) => fixedThread('run1', { gone: g, thread: t }, 'abc1234def')
+	const row = (g: GoneFinding) => fixedThread('run1', { gone: g, thread: t }, 'abc1234def', 'old0000aaa')
 	assert.deepEqual(row(gone('a', { check: check('wrong') })), {
 		runId: 'run1',
 		findingId: 'a',
@@ -110,6 +110,7 @@ test('rows: confirmed only when the double-check ran cleanly and says the proble
 		state: 'confirmed',
 		reason: 'said wrong',
 		commit: 'abc1234def',
+		since: 'old0000aaa',
 	})
 	assert.equal(row(gone('a')).state, 'unchecked')
 	assert.equal(row(gone('a', { check: check('holds') })).state, 'not-confirmed')

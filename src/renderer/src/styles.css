@@ -6036,6 +6036,66 @@ textarea.style-edit {
 	border-radius: 0 0 10px 10px;
 }
 
+/* What changed at a gone finding since it was raised (issue #215). */
+.fixed-patch > summary {
+	cursor: pointer;
+	color: var(--text-2);
+}
+.fixed-patch-body {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 6px;
+}
+.fixed-patch-body p {
+	margin: 0;
+}
+.fixed-patch-file {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+.fixed-patch-hunk {
+	margin: 0;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	overflow-x: auto;
+	font-size: 12px;
+	line-height: 1.45;
+	background: var(--bg);
+}
+.fixed-patch-line {
+	display: flex;
+	white-space: pre;
+	user-select: text;
+}
+.fixed-patch-num {
+	flex: none;
+	width: 4ch;
+	padding: 0 6px;
+	text-align: right;
+	color: var(--text-2);
+	user-select: none;
+}
+.fixed-patch-sign {
+	flex: none;
+	width: 2ch;
+	user-select: none;
+}
+.fixed-patch-line.add {
+	background: var(--add-bg);
+}
+.fixed-patch-line.add .fixed-patch-sign {
+	color: var(--add-fg);
+}
+.fixed-patch-line.del {
+	background: var(--del-bg);
+}
+.fixed-patch-line.del .fixed-patch-sign {
+	color: var(--del-fg);
+}
+
 /* Settings › Verdict consistency (issue #196). */
 .consistency-table {
 	border-collapse: collapse;

@@ -856,18 +856,21 @@ export async function readPatch(data: ComparisonData, file: ChangedFile, maxByte
 	return { text: r.stdout.toString('utf8'), truncated: r.truncated }
 }
 
-/** One path's 3-line-context patch between any two commits, e.g. the diff GitHub shows when it differs from the comparison's. */
+/**
+ * One path's 3-line-context patch between any two commits, e.g. the diff GitHub shows when it differs from the
+ * comparison's. Pass a file's old and new paths together to keep a rename as one file.
+ */
 export async function readPatchBetween(
 	root: string,
 	base: string,
 	head: string,
-	path: string,
+	path: string | ReadonlyArray<string>,
 	maxBytes: number,
 ): Promise<{ text: string; truncated: boolean }> {
 	if (!isSha(base) || !isSha(head)) throw new AppFail('invalid-input', 'Invalid commit id.')
 	const r = await git(
 		root,
-		['diff-tree', ...DIFF_FLAGS, '-p', '-U3', '--src-prefix=a/', '--dst-prefix=b/', base, head, '--', path],
+		['diff-tree', ...DIFF_FLAGS, '-p', '-U3', '--src-prefix=a/', '--dst-prefix=b/', base, head, '--', ...[path].flat()],
 		maxBytes,
 	)
 	if (!r.truncated && r.code !== 0) throw new AppFail('git-failed', `git diff-tree failed: ${r.stderr.trim()}`)

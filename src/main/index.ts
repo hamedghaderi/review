@@ -445,6 +445,9 @@ function registerIpc(): void {
 		service.mentionable(str(repoId, 'repository'), comparisonId(reviewId), typeof query === 'string' ? query.slice(0, 39) : ''),
 	)
 	handle(IPC.fixedThreads, (repoId: unknown, reviewId: unknown) => service.fixedThreads(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.fixedPatch, (repoId: unknown, reviewId: unknown, runId: unknown, findingId: unknown) =>
+		service.fixedPatch(str(repoId, 'repository'), comparisonId(reviewId), str(runId, 'run id', 64), str(findingId, 'finding id', 64)),
+	)
 	handle(IPC.replyToThread, (repoId: unknown, reviewId: unknown, threadId: unknown, body: unknown, resolve: unknown) =>
 		service.replyToThread(
 			str(repoId, 'repository'),
