@@ -7,6 +7,7 @@ import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 const oldCount = (ci: HeadChecks): number => ci.failed.filter((f) => f.atBase === 'fails').length
 import { ago } from './branches.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { announce } from './announce.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
 import { useMentionCommand } from './Mention.tsx'
@@ -107,10 +108,15 @@ export function PublishDialog({
 		if (drafting) return
 		setDrafting(true)
 		setDraftError(null)
+		announce('Drafting a summary…', 'progress')
 		try {
 			await beforePublish()
 			const r = await window.review.draftSummary(reviewId, event)
-			if (!r.ok) return setDraftError(r.error.message)
+			if (!r.ok) {
+				announce(`The AI couldn’t draft a summary: ${r.error.message}`, 'result')
+				return setDraftError(r.error.message)
+			}
+			announce('Draft ready in the summary box.', 'result')
 			const typed = summaryRef.current?.value ?? summary
 			setSummary(typed.trim() ? `${typed.trimEnd()}\n\n${r.value}` : r.value)
 			setDrafted(true)
@@ -136,9 +142,14 @@ export function PublishDialog({
 		if (!picked.trim()) return
 		setRewriting(true)
 		setDraftError(null)
+		announce('Rewriting…', 'progress')
 		try {
 			const r = await window.review.rewriteSummary(reviewId, event, picked, partial)
-			if (!r.ok) return setDraftError(r.error.message)
+			if (!r.ok) {
+				announce(`The AI couldn’t rewrite it: ${r.error.message}`, 'result')
+				return setDraftError(r.error.message)
+			}
+			announce('Rewritten in the summary box. Undo puts your text back.', 'result')
 			// The selection's own leading and trailing blank space stays, so paragraphs around it keep their spacing.
 			const lead = /^\s*/.exec(picked)![0]
 			const trail = /\s*$/.exec(picked)![0]

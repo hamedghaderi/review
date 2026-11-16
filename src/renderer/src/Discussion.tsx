@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types.ts'
 import { describeLeaks, findLeaks } from '../../shared/leaks.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
@@ -341,9 +342,14 @@ export function ThreadReplyBox({
 		setOpen(true)
 		setDrafting(true)
 		setError(null)
+		announce('Drafting a reply…', 'progress')
 		const r = await onDraft(t.id)
 		setDrafting(false)
-		if ('error' in r) return setError(r.error)
+		if ('error' in r) {
+			announce(`The AI couldn’t draft a reply: ${r.error}`, 'result')
+			return setError(r.error)
+		}
+		announce('Draft ready in the reply box. Nothing is sent until you press Reply.', 'result')
 		setText((x) => (x.trim() ? `${x.trimEnd()}\n\n${r.text}` : r.text))
 		setDrafted(true)
 		requestAnimationFrame(() => ref.current?.focus())

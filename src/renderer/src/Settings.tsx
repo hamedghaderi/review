@@ -8,6 +8,7 @@ import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { KeymapSettings } from './KeymapSettings.tsx'
 import { ReviewingSettings } from './ReviewingSettings.tsx'
+import { AccessibilitySettings } from './AccessibilitySettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
 import { StyleSettings } from './StyleSettings.tsx'
 import { AgentSettings } from './AgentSettings.tsx'
@@ -118,6 +119,7 @@ export function Settings(props: {
 			{ id: 'reviewing', label: 'Reviewing', keywords: 'commits commit by commit step one at a time history message' },
 			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
 			{ id: 'sounds', label: 'Sounds', keywords: 'sound audio chime alert notification ai answer review finished' },
+			{ id: 'accessibility', label: 'Accessibility', keywords: 'screen reader voiceover announce aloud a11y live' },
 			{
 				id: 'github-group',
 				label: 'GitHub',
@@ -291,6 +293,7 @@ export function Settings(props: {
 		if (page === 'reviewing') return <ReviewingSettings />
 		if (page === 'keymap') return <KeymapSettings />
 		if (page === 'sounds') return <SoundSettings githubNotifications={github.notifications.enabled} />
+		if (page === 'accessibility') return <AccessibilitySettings />
 		if (page === 'github') return <GitHubAccount status={github} act={act} />
 		if (page === 'notifications') return <GitHubNotifications status={github} act={act} />
 		if (page === 'auto-review')

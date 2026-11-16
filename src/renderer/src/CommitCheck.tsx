@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CommitCheck, CommitCheckEstimate, CommitCheckNote, CommitEntry } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { announce, useAnnounceNew, useAnnounceWait } from './announce.ts'
 
 export const VERDICT_LABEL: Record<CommitCheck['verdict'], string> = {
 	matches: 'Matches its message',
@@ -118,6 +119,10 @@ const money = (n: number): string => `$${n.toFixed(2)}`
 /** "Check all commits": what it would cost, then progress, with a way to stop. */
 export function CheckAll({ cc, disabled }: { cc: CommitChecks; disabled: string | null }) {
 	const a = cc.all
+	const step = a.state === 'running' ? `Checking commit ${a.done + 1} of ${a.shas.length}…` : ''
+	useEffect(() => {
+		if (step) announce(step, 'progress')
+	}, [step])
 	if (a.state === 'confirm') {
 		const e = a.estimate
 		return (
@@ -145,7 +150,7 @@ export function CheckAll({ cc, disabled }: { cc: CommitChecks; disabled: string 
 	}
 	if (a.state === 'running')
 		return (
-			<div className="commit-check-all" role="status">
+			<div className="commit-check-all">
 				<AiOrb activity="reasoning" size={14} />
 				<span>
 					Checking commit {a.done + 1} of {a.shas.length}…
@@ -198,6 +203,17 @@ export function CommitCheckPanel({
 	const busy = cc.busy.has(sha)
 	const error = cc.errors[sha]
 	const running = cc.all.state === 'running'
+	useAnnounceWait(busy, 'Checking the commit against its message…')
+	useAnnounceNew(
+		check ? [check] : [],
+		(c) => `${c.sha}:${c.at}`,
+		(c) => `Commit check: ${VERDICT_LABEL[c.verdict].toLowerCase()}. ${c.summary}`,
+	)
+	useAnnounceNew(
+		error ? [error.message] : [],
+		(x) => x,
+		(x) => x,
+	)
 	return (
 		<div className="commit-check">
 			<div className="commit-check-head">

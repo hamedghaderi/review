@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { ChangeExplanation } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 
 interface Props {
@@ -25,6 +26,20 @@ const SOURCE: Record<ChangeExplanation['source'], { label: string; title: string
  * for questions. The text is the model's, shown as plain text; it reads the code but can still be wrong.
  */
 export function ExplainChange({ explanation: e, busy, error, disabled, modelPicker, described, onExplain, onOpenPath }: Props) {
+	useAnnounceWait(busy, 'Reading the change…')
+	useAnnounceNew(
+		e ? [e] : [],
+		(x) => x.at,
+		(x) =>
+			`What this change is for, ${SOURCE[x.source].label.toLowerCase()}: ${x.purpose}` +
+			(x.changes.length ? ` ${x.changes.length} change${x.changes.length === 1 ? '' : 's'} listed.` : '') +
+			(x.questions.length ? ` ${x.questions.length} question${x.questions.length === 1 ? '' : 's'} for the author.` : ''),
+	)
+	useAnnounceNew(
+		error ? [error] : [],
+		(x) => x,
+		(x) => x,
+	)
 	const ask = (label: string) => (
 		<button className="btn small" onClick={onExplain} disabled={busy || !!disabled} title={disabled ?? undefined}>
 			{busy ? (

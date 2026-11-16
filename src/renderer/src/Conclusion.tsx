@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { ChangeConclusion } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 import { Markdown } from './Markdown.tsx'
 
@@ -48,6 +49,23 @@ export function Conclusion({
 	useEffect(() => {
 		if (count) end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
 	}, [count, busy])
+	useAnnounceWait(busy === 'writing', 'Writing the conclusion: reading the whole change and the findings…')
+	useAnnounceWait(!!asked, 'Reading the code…')
+	useAnnounceNew(
+		c?.messages ?? [],
+		(m) => m.id,
+		(m) =>
+			m.role === 'you'
+				? null
+				: m.error
+					? `The AI couldn’t answer: ${m.text}`
+					: `${m.id === c?.messages[0]?.id ? `Conclusion by ${m.model}` : `${m.model} answered`}: ${speakable(m.text)}`,
+	)
+	useAnnounceNew(
+		error ? [error] : [],
+		(e) => e,
+		(e) => e,
+	)
 	const send = async (): Promise<void> => {
 		const q = text.trim()
 		if (!q || busy || askDisabled) return

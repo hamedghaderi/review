@@ -344,6 +344,12 @@ Select lines you don't understand (drag across the code, or click a line number 
 
 The models weren't assigned to changes at random (you may give the hardest ones to one model), and "accepted" is your decision, not the pull request author's, so a difference between rows is a hint rather than a measurement. Fixture runs aren't counted.
 
+### Screen readers
+
+With a screen reader, your focus stays in the box you typed into, so Review tells it what the AI is doing and what it answered. This covers Ask AI on findings and on lines of code, the conclusion, Explain this change, drafted replies and summaries, commit checks, and review runs. Waiting text such as "Reading the code…" is read when it appears. An answer is read once, when it's complete, with a code block or table described by its size. A review run is read when it starts, when it double-checks findings, and when it ends, with its findings count. All of it goes through one live region, so nothing is read twice.
+
+**Settings → Accessibility** chooses how much is read: everything, only results (answers, drafts and how a run ended), or nothing. **Try it** reads a sample. The setting is kept on this computer.
+
 ### Input limits and context windows
 
 **Settings → AI providers → Review input limits** sets context lines, characters per request and characters per run. Each run also shrinks the per-request size to fit the selected model's context window, which comes from provider discovery, the catalog, or (for custom endpoints) the value you enter, since servers like Ollama truncate silently past `num_ctx`. If a response reports far fewer input tokens than were sent, the batch is treated as truncated and the files are marked as not reviewed. Content over any limit is listed as skipped, never cut off.

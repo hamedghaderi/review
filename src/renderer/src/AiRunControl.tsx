@@ -166,8 +166,6 @@ export function AiRunControl({
 		return (
 			<span
 				className="ai-progress"
-				role="status"
-				aria-live="polite"
 				title={`${activeRun.team ? activeRun.team.name : 'AI review'} running. The Findings tab shows each reviewer's progress.`}
 			>
 				{/* Before the first request the app gathers related code and CI results; then the model reviews. */}
