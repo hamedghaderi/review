@@ -46,6 +46,7 @@ import type {
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
+import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
@@ -1110,7 +1111,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 	// Rules this run never asked (a bugs-only run, or rules added since) read as not checked, not as nothing found.
 	const notAsked = RULE_GROUPS.flatMap((g) => g.rules).filter((r) => !byRule.has(r))
 	return (
-		<div className="checklist small" aria-live="polite">
+		<div className="checklist small">
 			<div className="checklist-head">
 				<b>Rules checked</b>
 				<span className="muted">
@@ -1865,8 +1866,19 @@ const VERDICT_TEXT: Record<'holds' | 'wrong' | 'unsure', { label: string; hint: 
 }
 
 function Thread({ messages, pending }: { messages: Array<FindingMessage>; pending: boolean }) {
+	useAnnounceWait(pending, 'Thinking…')
+	useAnnounceNew(
+		messages,
+		(m) => m.id,
+		(m) =>
+			m.role === 'you'
+				? null
+				: m.error
+					? `The AI couldn’t answer: ${m.text}`
+					: `${m.model ?? 'The AI'} answered${m.verdict ? `, ${VERDICT_TEXT[m.verdict].label.toLowerCase()}` : ''}: ${speakable(m.text)}`,
+	)
 	return (
-		<div className="finding-thread" aria-live="polite">
+		<div className="finding-thread">
 			{messages.map((m) => (
 				<div key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
 					{m.role === 'ai' && (

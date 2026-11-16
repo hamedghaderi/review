@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, MyLastReview, ReviewComment } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { speakable, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import {
 	AlreadyDiscussed,
 	AsksYou,
@@ -291,6 +292,13 @@ export function QuestionCard({ question: q, pending, disabled, modelPicker, onAs
 	const [text, setText] = useState('')
 	const [error, setError] = useState<string | null>(null)
 	const first = q.messages[0]
+	useAnnounceWait(pending, 'Reading the code…')
+	useAnnounceNew(
+		q.messages,
+		(m) => m.id,
+		(m) =>
+			m.role === 'you' ? null : m.error ? `The AI couldn’t answer: ${m.text}` : `${m.model ?? 'The AI'} answered: ${speakable(m.text)}`,
+	)
 	const send = async (): Promise<void> => {
 		const t = text.trim()
 		if (!t || pending) return

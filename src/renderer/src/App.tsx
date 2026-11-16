@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
+import { announce, runAnnouncement } from './announce.ts'
 import { ago } from './branches.ts'
 import type {
 	AiRun,
@@ -311,6 +312,8 @@ export function App() {
 				const next = i < 0 ? [...runs, run] : runs.map((r) => (r.id === run.id ? run : r))
 				runsRef.current = next
 				setAiRuns(next)
+				const said = runAnnouncement(runs[i], run)
+				if (said) announce(said.text, said.kind)
 				// When a run finishes, its findings at the chosen levels go into the code as comments. An automatic review's
 				// run is the main process's to add and publish; its comments arrive through onReviewChanged.
 				const finished = runs[i]?.status === 'running' && (run.status === 'completed' || run.status === 'partial')
