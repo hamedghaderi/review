@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-16.4'
+export const PROMPT_VERSION = 'reviewer-2026-11-16.5'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
@@ -49,7 +49,7 @@ Residue ("residue", with "signature"), text this change added that carries no in
  2. docstrings whose whole content is the signature, in a file that does not already document functions that way;
  3. guards around a value the same change shows cannot fail (never at a trust boundary: input, network, file system, code outside the change);
  4. additions nothing reads (imports, variables, parameters, functions, branches);
- 5. text addressed to a chat reader, not a maintainer ("Here is the updated function", "as requested", "in a real implementation you would", a TODO with no owner or ticket);
+ 5. text addressed to a chat reader, not a maintainer ("Here is the updated function", "as requested", "in a real implementation you would", a TODO with no owner or ticket), or to the change's own history: a name, flag, parameter or comment that only makes sense next to an earlier version of this same change ("checkpoint2", a "v2" or "new" name with no first or old one in the base, a "Part 1 compatibility helper", "legacy" or "compat" code for something that never shipped). For that kind, name what it refers to and show it is not in the base: in the removed lines, or read at version "base";
  6. a re-implementation of a helper that exists in the supplied code (name it with its file and line), or of a function from a dependency or the standard library that other code in the repository already imports or calls (name that other use with its file and line). A library function the repository does not use anywhere yet is a near miss, never a finding: the code you can read cannot show what it does.
 Tests that cannot fail are "test-value", not residue. Signatures 1 to 4 need at least two instances in the same file; a single one is a near miss. Signatures 5 and 6 count on one instance. One finding per file and signature: cite the first instance and list the other lines in the body.
 Base branch, only with the fact "Since this pull request branched":
