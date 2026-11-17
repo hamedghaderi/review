@@ -16,6 +16,7 @@ import type {
 import { CommentCard, Composer, DraftStub, QuestionCard, type PostedState } from './Comment.tsx'
 import { ThreadCard, type DraftFn, type ReplyFn } from './Discussion.tsx'
 import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
+import { describeHiddenChars, findHiddenChars, hiddenInHunks } from '../../shared/hiddenChars.ts'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
 
 const EXPAND_STEP = 20
@@ -142,6 +143,11 @@ export function DiffView(p: Props) {
 	const { rows, blocks } = useMemo(
 		() => (hunks ? buildRows(hunks, gaps, shown, fileLines) : { rows: [] as Array<Row>, blocks: [] }),
 		[hunks, gaps, shown, fileLines],
+	)
+	// Added lines whose characters change how the code looks (issue #223). Marks that are normal in some text don't count.
+	const hidden = useMemo(
+		() => (hunks ? hiddenInHunks(file.key, file.newPath ?? file.key, hunks).filter((l) => l.found.some((h) => h.warn)) : []),
+		[hunks, file.key, file.newPath],
 	)
 
 	const activeDraft = p.drafts.find((d) => d.id === p.activeDraftId) ?? null
@@ -495,7 +501,7 @@ export function DiffView(p: Props) {
 						{l.kind === 'add' ? '+' : l.kind === 'del' ? '−' : ' '}
 					</span>
 					<span className="code">
-						{l.text}
+						<CodeText text={l.text} fileStart={(l.kind === 'del' ? l.oldNo : l.newNo) === 1} />
 						{l.noNewline && (
 							<span className="eol" title="No newline at end of file">
 								{' '}
@@ -598,6 +604,18 @@ export function DiffView(p: Props) {
 				)}
 			</div>
 			{notice && <div className="notice">{notice}</div>}
+			{hidden.length > 0 && (
+				<div className="notice hidden-notice" role="note">
+					<b>Check these lines:</b> the change adds {describeHiddenChars(hidden.flatMap((l) => l.found.filter((h) => h.warn)))} on{' '}
+					{hidden.length === 1 ? 'line' : 'lines'}{' '}
+					{hidden
+						.slice(0, 5)
+						.map((l) => l.line)
+						.join(', ')}
+					{hidden.length > 5 ? ` and ${hidden.length - 5} more` : ''}. They change how the code looks, not what it does, and are marked in
+					the code.
+				</div>
+			)}
 			<div className="diff-scroll" ref={scroller}>
 				{(fileLevel.length > 0 || unplaced.length > 0 || elsewhere.length > 0) && (
 					<div className="file-items">
@@ -620,4 +638,41 @@ export function DiffView(p: Props) {
 			</div>
 		</div>
 	)
+}
+
+/**
+ * A line's text with hidden and direction-changing characters drawn as labelled boxes, and look-alike letters marked
+ * (issue #223). Each box is an isolated inline block, so a bidi control inside it can't reorder the rest of the line; the
+ * character itself stays in the text, so copying the line copies what is really there.
+ */
+function CodeText({ text, fileStart }: { text: string; fileStart: boolean }) {
+	const found = useMemo(() => findHiddenChars(text, fileStart), [text, fileStart])
+	if (!found.length) return <>{text}</>
+	const out: Array<React.ReactNode> = []
+	let at = 0
+	for (const h of found) {
+		if (h.start > at) out.push(text.slice(at, h.start))
+		const raw = text.slice(h.start, h.end)
+		out.push(
+			h.kind === 'lookalike' ? (
+				<span key={h.start} className={`lookalike${h.warn ? ' warn' : ''}`} title={h.name}>
+					{raw}
+				</span>
+			) : (
+				<span
+					key={h.start}
+					className={`hidden-char${h.warn ? ' warn' : ''}`}
+					data-label={h.label}
+					title={h.name}
+					role="img"
+					aria-label={h.name}
+				>
+					<span className="hc-raw">{raw}</span>
+				</span>
+			),
+		)
+		at = h.end
+	}
+	if (at < text.length) out.push(text.slice(at))
+	return <>{out}</>
 }

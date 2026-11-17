@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
+import { describeHiddenChars, type HiddenLine } from '../../shared/hiddenChars.ts'
 import type { AppError, CitationCheck, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
@@ -227,6 +228,18 @@ export function PublishDialog({
 	useEffect(() => {
 		void loadCi()
 	}, [loadCi])
+
+	// Added lines with hidden or direction-changing characters (issue #223): an approval says you read code you couldn't see.
+	const [hidden, setHidden] = useState<Array<HiddenLine>>([])
+	useEffect(() => {
+		let live = true
+		void window.review.hiddenChars(reviewId).then((r) => live && r.ok && setHidden(r.value))
+		return () => {
+			live = false
+		}
+	}, [reviewId])
+	const ciWarns = !!ci && (ci.failed.length > 0 || ci.pending.length > 0)
+	const approveWarning = [ciWarns ? ciWarning(ci!) : null, hidden.length ? hiddenWarning(hidden) : null].filter(Boolean).join(' ')
 
 	async function askToSubmit(): Promise<void> {
 		if (event === 'APPROVE') {
@@ -608,6 +621,14 @@ export function PublishDialog({
 									</div>
 								)}
 								<CiLine ci={ci} error={ciError} approving={event === 'APPROVE'} onRefresh={() => void loadCi()} />
+								{event === 'APPROVE' && hidden.length > 0 && (
+									<p
+										className="small warn-text"
+										title={hidden.map((l) => `${l.path}:${l.line}: ${l.found.map((h) => h.name).join('; ')}`).join('\n')}
+									>
+										{hiddenWarning(hidden)} They change how the code looks, not what it does, so check them in the diff before approving.
+									</p>
+								)}
 								<div className="seg verdict" role="radiogroup" aria-label="Review verdict">
 									{EVENTS.map(([k, label, hint]) => (
 										<button
@@ -691,9 +712,9 @@ export function PublishDialog({
 							<span className="small muted" role="status">
 								<span className="spinner small" aria-hidden /> {running}
 							</span>
-						) : confirmSubmit && event === 'APPROVE' && ci && (ci.failed.length > 0 || ci.pending.length > 0) ? (
+						) : confirmSubmit && event === 'APPROVE' && approveWarning ? (
 							<span className="small warn-text" role="alert">
-								<strong>{ciWarning(ci)}</strong> Approve anyway? Everyone on the pull request will see it, and it can’t be unsent.
+								<strong>{approveWarning}</strong> Approve anyway? Everyone on the pull request will see it, and it can’t be unsent.
 							</span>
 						) : confirmSubmit ? (
 							<span className="small">
@@ -713,9 +734,7 @@ export function PublishDialog({
 									Cancel
 								</button>
 								<button className={`btn primary ${event.toLowerCase()}`} onClick={() => void submit()} disabled={!!running}>
-									{event === 'APPROVE' && ci && (ci.failed.length > 0 || ci.pending.length > 0)
-										? 'Approve anyway'
-										: EVENTS.find((e) => e[0] === event)![1]}
+									{event === 'APPROVE' && approveWarning ? 'Approve anyway' : EVENTS.find((e) => e[0] === event)![1]}
 								</button>
 							</>
 						) : (
@@ -800,6 +819,13 @@ function ciWarning(ci: HeadChecks): string {
 	}
 	if (ci.pending.length) parts.push(`${ci.pending.length} ${ci.pending.length === 1 ? 'hasn’t' : 'haven’t'} finished`)
 	return `${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]}.`
+}
+
+/** "This change adds 1 bidirectional control (RLO) in src/a.ts:12." */
+function hiddenWarning(lines: Array<HiddenLine>): string {
+	const where = lines.slice(0, 3).map((l) => `${l.path}:${l.line}`)
+	const more = lines.length > 3 ? ` and ${lines.length - 3} more line${lines.length - 3 === 1 ? '' : 's'}` : ''
+	return `This change adds ${describeHiddenChars(lines.flatMap((l) => l.found))} in ${where.join(', ')}${more}.`
 }
 
 /** "✕ Lint: also fails at base abc1234" for the tooltip. */

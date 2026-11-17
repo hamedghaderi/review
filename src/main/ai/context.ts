@@ -92,7 +92,7 @@ export interface ContextReference {
  * request; `fileKeys` null means every request, otherwise only requests that carry one of those files.
  */
 export interface ContextFact {
-	kind: 'project' | 'dependencies' | 'coverage' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
+	kind: 'project' | 'dependencies' | 'coverage' | 'hidden' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
 	title: string
 	text: string
 	fileKeys: Array<string> | null
@@ -359,14 +359,15 @@ export function settleFiles(
 
 const FACT_ORDER: Record<ContextFact['kind'], number> = {
 	project: 0,
-	drift: 1,
-	takeover: 2,
-	decisions: 3,
-	earlier: 4,
-	ci: 5,
-	structure: 6,
-	coverage: 7, // short, and only for the files that have them
-	dependencies: 8,
+	hidden: 1, // short, rare, and invisible in the excerpts without it
+	drift: 2,
+	takeover: 3,
+	decisions: 4,
+	earlier: 5,
+	ci: 6,
+	structure: 7,
+	coverage: 8, // short, and only for the files that have them
+	dependencies: 9,
 }
 
 /** Facts in order (project context first: every finding may need it; then CI: it is short), cut to fit `budget` characters per request. */

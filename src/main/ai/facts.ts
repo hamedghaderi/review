@@ -4,6 +4,7 @@ import type { CommitChecks } from '../github.ts'
 import { markPreExisting, type BaseChecks } from '../baseCi.ts'
 import type { ContextFact, FileSource } from './context.ts'
 import { coverageMarkerFacts } from './coverageMarkers.ts'
+import { hiddenCharFacts } from './hiddenCharFacts.ts'
 import { dependencyFacts } from './deps.ts'
 import { annotationFacts } from './evidence.ts'
 import { failureExcerpt } from '../ciLog.ts'
@@ -88,6 +89,15 @@ export async function loadFacts(o: {
 		}
 	} catch (e) {
 		out.notes.push(`Coverage exclusions could not be listed: ${e instanceof Error ? e.message : String(e)}`)
+	}
+	try {
+		const hidden = hiddenCharFacts(o.sources)
+		if (hidden) {
+			out.facts.push(...hidden.facts)
+			out.summary.push({ kind: 'hidden', text: hidden.summary })
+		}
+	} catch (e) {
+		out.notes.push(`Hidden characters could not be listed: ${e instanceof Error ? e.message : String(e)}`)
 	}
 	if (o.checks) {
 		try {
