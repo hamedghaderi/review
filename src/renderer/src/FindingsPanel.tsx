@@ -965,6 +965,7 @@ const FACT_LABEL = {
 	ci: 'CI',
 	dependencies: 'Dependencies',
 	coverage: 'Coverage exclusions',
+	hidden: 'Hidden characters',
 	structure: 'Imports',
 	decisions: 'Your earlier decisions',
 	earlier: 'Earlier run',

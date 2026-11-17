@@ -113,6 +113,7 @@ import {
 } from './git.ts'
 import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
+import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
@@ -1540,6 +1541,24 @@ export class ReviewService {
 			d.repos[repoId].browser = state
 		})
 		return true
+	}
+
+	/**
+	 * Added lines whose hidden or direction-changing characters are worth stopping an approval for (issue #223). Files too
+	 * large to show are not read, like in the diff.
+	 */
+	async hiddenChars(comparisonId: string): Promise<Array<HiddenLine>> {
+		const out: Array<HiddenLine> = []
+		for (const f of this.loaded(comparisonId).comparison.files) {
+			if (f.binary || f.submodule || !f.newPath || !f.additions) continue
+			const p = await this.loadPatch(comparisonId, f.key, false).catch(() => null)
+			if (p?.kind !== 'text') continue
+			for (const l of hiddenInHunks(f.key, f.newPath, p.hunks)) {
+				const found = l.found.filter((h) => h.warn)
+				if (found.length) out.push({ ...l, found })
+			}
+		}
+		return out
 	}
 
 	async loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<PatchResult> {

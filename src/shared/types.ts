@@ -6,6 +6,7 @@ import type { ThemeSettings } from './theme.ts'
 import type { KeymapOverrides } from './keymap.ts'
 import type { CommitFileMap } from './commitStep.ts'
 import type { NotesRange } from './releases.ts'
+import type { HiddenLine } from './hiddenChars.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -1528,7 +1529,18 @@ export interface AiRunCoverage {
 	// Code outside the change sent as read-only reference (definitions and uses); absent on older runs.
 	related?: { symbols: number; sent: number; chars: number; omitted: number; notes: Array<string> } | null
 	facts?: Array<{
-		kind: 'background' | 'project' | 'dependencies' | 'coverage' | 'ci' | 'structure' | 'decisions' | 'earlier' | 'drift' | 'takeover'
+		kind:
+			| 'background'
+			| 'project'
+			| 'dependencies'
+			| 'coverage'
+			| 'hidden'
+			| 'ci'
+			| 'structure'
+			| 'decisions'
+			| 'earlier'
+			| 'drift'
+			| 'takeover'
 		text: string
 	}> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
@@ -2156,6 +2168,7 @@ export const IPC = {
 	fixedPatch: 'ai:fixed-patch',
 	mentionable: 'gh:mentionable',
 	loadPatch: 'diff:patch',
+	hiddenChars: 'diff:hidden-chars',
 	loadFileLines: 'diff:file-lines',
 	loadFileAt: 'diff:file-at',
 	filesAtHead: 'diff:files-at-head',
@@ -2369,6 +2382,8 @@ export interface ReviewApi {
 	/** People GitHub lets you @mention in the PR's repository whose login or name matches `query`; empty without a token. */
 	mentionable(repoId: string, reviewId: string, query: string): Promise<Result<Array<MentionUser>>>
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
+	/** Added lines with hidden or direction-changing characters worth checking before an approval (issue #223). */
+	hiddenChars(comparisonId: string): Promise<Result<Array<HiddenLine>>>
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
 	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */
 	loadFileAt(comparisonId: string, path: string, side: Side): Promise<Result<FileLinesResult>>

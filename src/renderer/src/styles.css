@@ -768,6 +768,42 @@ input[type='checkbox'] {
 .eol {
 	color: var(--del-fg);
 }
+/* Hidden and direction-changing characters (issue #223): a labelled box, isolated so it can't reorder the line. */
+.hidden-char {
+	display: inline-block;
+	unicode-bidi: isolate;
+	margin: 0 1px;
+	padding: 0 3px;
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	color: var(--text-2);
+	font-size: 0.8em;
+	line-height: 1.3;
+	vertical-align: baseline;
+	user-select: none;
+}
+.hidden-char.warn {
+	border-color: var(--warn-fg);
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+}
+.hidden-char::before {
+	content: attr(data-label);
+}
+.hc-raw {
+	font-size: 0;
+	user-select: text;
+}
+.lookalike {
+	text-decoration: underline dotted var(--text-2);
+}
+.lookalike.warn {
+	text-decoration: underline wavy var(--warn-fg);
+	background: var(--warn-bg);
+}
+.hidden-notice {
+	padding: 6px 12px;
+}
 .hunk-row {
 	background: var(--hunk-bg);
 	color: var(--text-2);
