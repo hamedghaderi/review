@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "Open in Review",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Press Shift+R on a GitHub pull request to open its review in the Review desktop app.",
 	"homepage_url": "https://review-code.dev/",
 	"icons": {
@@ -24,7 +24,7 @@
 	"browser_specific_settings": {
 		"gecko": {
 			"id": "open-in-review@review-code.dev",
-			"strict_min_version": "109.0",
+			"strict_min_version": "140.0",
 			"data_collection_permissions": {
 				"required": ["none"]
 			}
