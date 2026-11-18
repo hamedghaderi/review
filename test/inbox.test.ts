@@ -14,7 +14,7 @@ import {
 	withSeen,
 	type WatchedPr,
 } from '../src/shared/inbox.ts'
-import { GitHubService, type TokenStore } from '../src/main/github.ts'
+import { GitHubService, ownChangesKey, type TokenStore } from '../src/main/github.ts'
 import { InboxWatcher, type WatchEvent } from '../src/main/inboxWatch.ts'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
@@ -366,6 +366,94 @@ test('the watcher neither notifies nor counts new commits you marked seen, and f
 		[['updated', 9]],
 	)
 	assert.equal(badges.at(-1), 1, 'the next push waits for you again')
+	assert.deepEqual(store.read().seenHeads, {})
+})
+
+test('own changes: a base merge moves line numbers and context, not what the author changed', () => {
+	const at = (start: number, context: string, added = '+  return a + b') => ({
+		filename: 'src/sum.ts',
+		status: 'modified',
+		patch: `@@ -${start},3 +${start},3 @@\n ${context}\n-  return a\n${added}\n }`,
+	})
+	const logo = { filename: 'logo.png', status: 'added', sha: 'b1' }
+	const key = ownChangesKey([at(10, 'function sum(a, b) {'), logo])
+	assert.equal(ownChangesKey([logo, at(42, 'export function sum(a, b) {')]), key, 'base moved it down and renamed the context')
+	assert.notEqual(ownChangesKey([at(10, 'function sum(a, b) {', '+  return a - b'), logo]), key, 'the author changed a line')
+	assert.notEqual(ownChangesKey([at(10, 'function sum(a, b) {'), { ...logo, sha: 'b2' }]), key, 'a binary file changed')
+	assert.notEqual(ownChangesKey([at(10, 'function sum(a, b) {')]), key, 'a file dropped')
+	assert.equal(ownChangesKey(Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}`, status: 'added', patch: '+x' }))), null)
+})
+
+test('the watcher stays quiet when a push only merges the base branch, and speaks up when the author changes something', async () => {
+	const A = 'a'.repeat(40)
+	const B = 'b'.repeat(40)
+	const C = 'c'.repeat(40)
+	let head = A
+	const own: Record<string, string> = { [A]: '+  return a + b', [B]: '+  return a + b', [C]: '+  return a - b' }
+	const compares: Array<string> = []
+	const gh = new GitHubService(tokens(), {
+		base: 'http://gh.test',
+		fetch: async (url, init) => {
+			if (url.endsWith('/user')) return Response.json({ login: 'me' })
+			const m = /\/repos\/octo\/app\/compare\/main\.\.\.([0-9a-f]{40})$/.exec(url)
+			if (m) {
+				compares.push(m[1])
+				// After the merge the author's hunk sits lower down; only the line numbers differ.
+				const start = m[1] === A ? 10 : 40
+				return Response.json({
+					files: [{ filename: 'sum.ts', status: 'modified', patch: `@@ -${start},2 +${start},2 @@\n-  return a\n${own[m[1]]}` }],
+				})
+			}
+			const q = (JSON.parse(String(init.body)) as { variables: { q: string } }).variables.q
+			const nodes = q.includes('reviewed-by:@me')
+				? [
+						{
+							...node(9, 'octo/app', true),
+							headRefOid: head,
+							latestReviews: {
+								nodes: [{ author: { login: 'me' }, state: 'COMMENTED', submittedAt: '2026-11-01T00:00:00Z', commit: { oid: A } }],
+							},
+						},
+					]
+				: []
+			return Response.json({
+				data: { viewer: { login: 'me' }, search: { issueCount: nodes.length, pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+			})
+		},
+	})
+	await gh.setToken('t', false)
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'inbox-')))
+	await store.load()
+	const notified: Array<WatchEvent> = []
+	const badges: Array<number> = []
+	const watcher = new InboxWatcher({
+		github: gh,
+		store,
+		known: () => new Map(),
+		notify: (e) => notified.push(...e),
+		badge: (n) => badges.push(n),
+	})
+	try {
+		await watcher.check()
+		assert.deepEqual([badges.at(-1), compares], [0, []], 'your review is on the head: nothing to compare')
+		head = B
+		await watcher.check()
+		assert.deepEqual(notified, [], 'only the base branch came in')
+		assert.equal(badges.at(-1), 0)
+		assert.deepEqual(store.read().seenHeads, { 'octo/app#9': B })
+		assert.deepEqual(compares.sort(), [A, B])
+		await watcher.check()
+		assert.equal(compares.length, 2, 'each head is compared once')
+		head = C
+		await watcher.check()
+	} finally {
+		watcher.stop()
+	}
+	assert.deepEqual(
+		notified.map((e) => [e.kind, e.pr.number]),
+		[['updated', 9]],
+	)
+	assert.equal(badges.at(-1), 1, 'the author changed a line since your review')
 	assert.deepEqual(store.read().seenHeads, {})
 })
 
