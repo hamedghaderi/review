@@ -2,7 +2,7 @@ import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AiRun, AutoReviewRecord, BrowserState, MergedPr, Review, ReviewStyle, StyleBasis, StylePr } from '../shared/types.ts'
 import { MAX_STYLE_PRS } from '../shared/types.ts'
-import type { WatchedPr, WatchState } from '../shared/inbox.ts'
+import type { SeenHeads, WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 import { parseKeymap, type KeymapOverrides } from '../shared/keymap.ts'
 import { storedSounds, type SoundPrefs } from '../shared/sounds.ts'
@@ -18,6 +18,7 @@ export interface StoreData {
 	// `prs` (absent in older files) is what the start page lists, so it shows at launch before the first check.
 	inboxWatch?: { login: string | null; state: WatchState; at: string; prs?: Array<WatchedPr> }
 	mutedRepos?: Array<string> // GitHub repositories ("owner/name", lower case) that do not notify or count
+	seenHeads?: SeenHeads // new commits you marked as seen: "owner/name#number" → that head; forgotten once it moves
 	appClones?: Record<string, { repo: string; at: string }> // folders the app cloned itself, by real path: deletable here
 	cloneParent?: string // the folder last chosen for a clone, where the folder picker starts next time
 	skippedVersion?: string // a release you chose not to be told about again
@@ -153,6 +154,7 @@ export function migrate(raw: unknown): StoreData {
 		...(typeof d.seenVersion === 'string' ? { seenVersion: d.seenVersion } : {}),
 		...(d.autoReviews ? { autoReviews: d.autoReviews } : {}),
 		...(Array.isArray(d.mutedRepos) ? { mutedRepos: d.mutedRepos } : {}),
+		...(d.seenHeads && typeof d.seenHeads === 'object' ? { seenHeads: d.seenHeads } : {}),
 		...(d.appClones && typeof d.appClones === 'object' ? { appClones: d.appClones } : {}),
 		...(typeof d.cloneParent === 'string' ? { cloneParent: d.cloneParent } : {}),
 		...(d.theme ? { theme: parseTheme(d.theme) } : {}),

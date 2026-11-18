@@ -5634,13 +5634,22 @@ textarea.style-edit {
 .home-list li + li {
 	border-top: 1px solid var(--border);
 }
+.home-list li {
+	display: flex;
+	align-items: center;
+}
 .home-list li.muted-row {
 	opacity: 0.6;
+}
+.home-seen {
+	flex-shrink: 0;
+	margin-right: 10px;
 }
 .home-row {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
+	flex: 1;
 	width: 100%;
 	min-width: 0;
 	padding: 8px 12px;

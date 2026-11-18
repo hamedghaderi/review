@@ -137,7 +137,17 @@ import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
 import { autoAddFindings, autoMark, findingRoots } from '../shared/findings.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
-import { inboxStatus, requestCount, sortInbox, waitsForYou, type HomeInbox, type WatchedPr } from '../shared/inbox.ts'
+import {
+	canMarkSeen,
+	inboxStatus,
+	requestCount,
+	sortInbox,
+	waitsForYou,
+	watchKey,
+	withSeen,
+	type HomeInbox,
+	type WatchedPr,
+} from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
@@ -1364,9 +1374,18 @@ export class ReviewService {
 
 	private withInboxStatus(repoId: string, page: PrPage): PrPage {
 		const viewer = this.github?.status().login ?? null
-		const seen = this.store.read().repos[repoId]?.seenPrs ?? {}
+		const d = this.store.read()
+		const seen = d.repos[repoId]?.seenPrs ?? {}
+		const repo = this.githubRepoFor(repoId)
+		// New commits you marked as seen, at the head the background check last saw (the search does not give heads).
+		const seenCommits = (n: number): boolean => {
+			const key = watchKey({ repo, number: n })
+			const head = d.seenHeads?.[key]
+			return !!head && d.inboxWatch?.state[key]?.head === head
+		}
 		const items = page.items.flatMap((pr) => {
-			const inbox = inboxStatus(pr, viewer, pr.reviewRequested === 'you', !!seen[pr.number])
+			let inbox = inboxStatus(pr, viewer, pr.reviewRequested === 'you', !!seen[pr.number])
+			if (inbox === 'updated' && seenCommits(pr.number)) inbox = 'reviewed'
 			return inbox ? [{ ...pr, inbox }] : []
 		})
 		return { ...page, items: sortInbox(items), total: items.length }
@@ -1468,12 +1487,15 @@ export class ReviewService {
 		return {
 			state: 'ready',
 			at: watch.at,
-			prs: watch.prs.filter(waitsForYou).map((p) => ({
-				...p,
-				repoId: known.get(p.repo.toLowerCase()) ?? null,
-				muted: muted.has(p.repo.toLowerCase()),
-				appClone: isManagedClone(d.repos[known.get(p.repo.toLowerCase()) ?? '']?.root ?? ''),
-			})),
+			prs: watch.prs
+				.map((p) => withSeen(p, d.seenHeads))
+				.filter(waitsForYou)
+				.map((p) => ({
+					...p,
+					repoId: known.get(p.repo.toLowerCase()) ?? null,
+					muted: muted.has(p.repo.toLowerCase()),
+					appClone: isManagedClone(d.repos[known.get(p.repo.toLowerCase()) ?? '']?.root ?? ''),
+				})),
 		}
 	}
 
@@ -1483,6 +1505,19 @@ export class ReviewService {
 			const rest = (d.mutedRepos ?? []).filter((r) => r !== key)
 			d.mutedRepos = muted ? [...rest, key] : rest
 		})
+		return this.homeInbox()
+	}
+
+	/**
+	 * Marks the new commits on a pull request you reviewed as seen, up to `head`: it stops waiting for you until the
+	 * next push. Only for one the background check lists because of those commits, at that head.
+	 */
+	async markCommitsSeen(repo: string, number: number, head: string): Promise<HomeInbox> {
+		const key = watchKey({ repo, number })
+		const pr = this.store.read().inboxWatch?.prs?.find((p) => watchKey(p) === key)
+		if (!pr || !canMarkSeen(pr)) throw new AppFail('not-found', `${repo}#${number} is not waiting for you because of new commits.`)
+		if (pr.head !== head) throw new AppFail('invalid-input', `${repo}#${number} has newer commits; look again before marking them seen.`)
+		await this.store.update((d) => void ((d.seenHeads ??= {})[key] = head))
 		return this.homeInbox()
 	}
 

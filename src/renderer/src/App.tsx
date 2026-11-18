@@ -102,7 +102,7 @@ import { EmptyFigure } from './EmptyFigure.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
 import type { NotesRange } from '../../shared/releases.ts'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
-import { homeCount, type HomePr } from '../../shared/inbox.ts'
+import { canMarkSeen, homeCount, type HomePr } from '../../shared/inbox.ts'
 
 type SaveState = { kind: 'idle' | 'dirty' | 'saving' | 'saved' | 'error'; at?: string; message?: string }
 
@@ -643,6 +643,11 @@ export function App() {
 
 	const [homeInbox, setHomeInbox] = useHomeInbox(true, github?.state)
 	const openFromHome = (pr: HomePr): Promise<boolean> => openPr({ repoId: pr.repoId, repo: pr.repo, number: pr.number })
+	const markCommitsSeen = async (pr: HomePr): Promise<void> => {
+		const r = await window.review.markCommitsSeen(pr.repo, pr.number, pr.head!)
+		if (r.ok) setHomeInbox(r.value)
+		else setTabError(r.error.message)
+	}
 	const muteRepo = async (repo: string, muted: boolean): Promise<void> => {
 		const r = await window.review.setRepoMuted(repo, muted)
 		if (r.ok) setHomeInbox(r.value)
@@ -1058,6 +1063,13 @@ export function App() {
 	const prGraph = usePrGraph(session?.repo.id ?? null, !!stackRepo && github?.state === 'connected', comparison?.id)
 	const myReviews = useMyReviews(session?.repo.id ?? null, !!stackRepo && github?.state === 'connected', comparison?.id)
 	const guide = stackRepo && prGraph && comparison?.pr ? stackGuide(prGraph, comparison.pr.number, myReviews) : null
+	// The open pull request waits for you only because of new commits since your review: offer to mark them seen.
+	const seenable =
+		(comparison?.pr &&
+			homeInbox?.prs.find(
+				(p) => p.number === comparison.pr!.number && p.repo.toLowerCase() === comparison.pr!.repo.toLowerCase() && canMarkSeen(p),
+			)) ||
+		null
 
 	const openFinding = (f: Finding): void => {
 		selectFile(f.anchor.fileKey)
@@ -1893,6 +1905,15 @@ export function App() {
 									{comparison.pr && prReview?.id === comparison.id && (
 										<ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />
 									)}
+									{seenable && (
+										<button
+											className="btn small ghost"
+											onClick={() => void markCommitsSeen(seenable)}
+											title={`Nothing in the commits since your review needs a look (e.g. the base branch was merged in). #${seenable.number} stops waiting for you until the next push.`}
+										>
+											Mark new commits seen
+										</button>
+									)}
 									{guide && comparison.pr && session && (
 										<StackControl
 											guide={guide}
@@ -2169,6 +2190,7 @@ export function App() {
 								notifications={!!github?.notifications.enabled}
 								onOpen={(pr) => void openFromHome(pr)}
 								onMute={(repo, muted) => void muteRepo(repo, muted)}
+								onMarkSeen={(pr) => void markCommitsSeen(pr)}
 								onRefresh={refreshHome}
 								onConnect={() => openSettings('github')}
 								onOpenRepo={() => void openRepo()}

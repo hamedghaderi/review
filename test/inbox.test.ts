@@ -3,7 +3,17 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { diffInbox, homeCount, inboxStatus, requestCount, sortInbox, type WatchedPr } from '../src/shared/inbox.ts'
+import {
+	canMarkSeen,
+	diffInbox,
+	homeCount,
+	inboxStatus,
+	keepSeen,
+	requestCount,
+	sortInbox,
+	withSeen,
+	type WatchedPr,
+} from '../src/shared/inbox.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
 import { InboxWatcher, type WatchEvent } from '../src/main/inboxWatch.ts'
 import { ReviewService } from '../src/main/service.ts'
@@ -299,6 +309,64 @@ test('the watcher reports new commits on a PR you reviewed, and tells open lists
 	)
 	assert.equal(changes, 2)
 	assert.deepEqual(badges, [1, 1, 1], 'new commits since your review count, as on the start page')
+})
+
+test('marking new commits seen: only for a reviewed PR waiting because of them, at that head, until the next push', () => {
+	const pr = w(1, { reviewed: true, requested: false, stale: true, head: 'h2' })
+	assert.equal(canMarkSeen(pr), true)
+	assert.equal(canMarkSeen({ ...pr, requested: true }), false, 'a request is answered by reviewing')
+	assert.equal(canMarkSeen({ ...pr, stale: false }), false, 'nothing new')
+	assert.equal(canMarkSeen({ ...pr, head: null }), false)
+	const seen = { 'octo/app#1': 'h2' }
+	assert.equal(withSeen(pr, seen).stale, false)
+	assert.equal(withSeen({ ...pr, head: 'h3' }, seen).stale, true, 'a later push waits for you again')
+	assert.equal(withSeen({ ...pr, requested: true }, seen).requested, true, 'a request still stands')
+	assert.deepEqual(
+		keepSeen({ 'octo/app#1': 'h2', 'octo/app#2': 'h9', 'octo/app#3': 'h1' }, [pr, w(2, { head: 'h10' })]),
+		{
+			'octo/app#1': 'h2',
+		},
+		'moved on or no longer watched: forgotten',
+	)
+})
+
+test('the watcher neither notifies nor counts new commits you marked seen, and forgets the mark at the next push', async () => {
+	let head = 'h1'
+	const { gh } = fakeGitHub((q) => (q.includes('reviewed-by:@me') ? [{ ...node(9, 'octo/app', true), headRefOid: head }] : []))
+	await gh.setToken('t', false)
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'inbox-')))
+	await store.load()
+	const notified: Array<WatchEvent> = []
+	const badges: Array<number> = []
+	const watcher = new InboxWatcher({
+		github: gh,
+		store,
+		known: () => new Map(),
+		notify: (e) => notified.push(...e),
+		badge: (n) => badges.push(n),
+	})
+	const svc = new ReviewService(store, gh)
+	try {
+		await watcher.check()
+		assert.equal(badges.at(-1), 1)
+		await assert.rejects(svc.markCommitsSeen('octo/app', 9, 'h0'), /newer commits/)
+		await assert.rejects(svc.markCommitsSeen('octo/app', 8, 'h1'), /not waiting/)
+		const home = await svc.markCommitsSeen('Octo/App', 9, 'h1')
+		assert.deepEqual(home.prs, [], 'off the start page at once')
+		await watcher.check()
+		assert.equal(badges.at(-1), 0, 'and off the badge')
+		assert.deepEqual(store.read().seenHeads, { 'octo/app#9': 'h1' })
+		head = 'h2'
+		await watcher.check()
+	} finally {
+		watcher.stop()
+	}
+	assert.deepEqual(
+		notified.map((e) => [e.kind, e.pr.number]),
+		[['updated', 9]],
+	)
+	assert.equal(badges.at(-1), 1, 'the next push waits for you again')
+	assert.deepEqual(store.read().seenHeads, {})
 })
 
 test('tab request count: open, non-draft requests in that repository only, as the dock badge counts them', () => {

@@ -1,4 +1,4 @@
-import { diffInbox, homeCount, type InboxEvent } from '../shared/inbox.ts'
+import { diffInbox, homeCount, keepSeen, withSeen, type InboxEvent } from '../shared/inbox.ts'
 import type { GitHubService } from './github.ts'
 import type { ReviewStore } from './store.ts'
 
@@ -78,12 +78,18 @@ export class InboxWatcher {
 			if (!r) return this.o.badge(0)
 			const saved = store.read().inboxWatch
 			const prev = saved && saved.login === r.viewer ? saved.state : null
-			const { events, state } = diffInbox(prev, r.prs)
-			await store.update((d) => void (d.inboxWatch = { login: r.viewer, state, at: new Date().toISOString(), prs: r.prs }))
+			// New commits you marked as seen neither notify nor count; a mark is dropped once the pull request moves on.
+			const seen = keepSeen(store.read().seenHeads, r.prs)
+			const prs = r.prs.map((p) => withSeen(p, seen))
+			const { events, state } = diffInbox(prev, prs)
+			await store.update((d) => {
+				d.inboxWatch = { login: r.viewer, state, at: new Date().toISOString(), prs: r.prs }
+				d.seenHeads = keepSeen(d.seenHeads, r.prs) // re-read, so a mark made during this check is kept
+			})
 			const known = this.o.known()
 			const muted = new Set(store.read().mutedRepos ?? [])
 			const isMuted = (repo: string): boolean => muted.has(repo.toLowerCase())
-			this.o.badge(notify ? homeCount(r.prs.map((p) => ({ ...p, repoId: null, muted: isMuted(p.repo), appClone: false }))) : 0)
+			this.o.badge(notify ? homeCount(prs.map((p) => ({ ...p, repoId: null, muted: isMuted(p.repo), appClone: false }))) : 0)
 			if (!prev || JSON.stringify(prev) !== JSON.stringify(state)) this.o.changed?.()
 			const loud = events.filter((e) => !isMuted(e.pr.repo)).map((e) => ({ ...e, repoId: known.get(e.pr.repo.toLowerCase()) ?? null }))
 			if (loud.length) this.o.notify(loud)
