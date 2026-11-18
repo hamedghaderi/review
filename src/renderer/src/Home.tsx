@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { homeCount, INBOX_LABEL, type HomeInbox, type HomePr } from '../../shared/inbox.ts'
+import { canMarkSeen, homeCount, INBOX_LABEL, type HomeInbox, type HomePr } from '../../shared/inbox.ts'
 import type { InboxStatus } from '../../shared/types.ts'
 import { ago } from './branches.ts'
 import { useStored } from './useStored.ts'
@@ -53,6 +53,7 @@ export function Home(props: {
 	notifications: boolean
 	onOpen(pr: HomePr): void
 	onMute(repo: string, muted: boolean): void
+	onMarkSeen(pr: HomePr): void
 	onRefresh(): Promise<void>
 	onConnect(): void
 	onOpenRepo(): void
@@ -215,6 +216,15 @@ export function Home(props: {
 										)}
 									</div>
 								</button>
+								{canMarkSeen(pr) && (
+									<button
+										className="btn small ghost home-seen"
+										onClick={() => props.onMarkSeen(pr)}
+										title={`Nothing in the new commits needs your review (e.g. the base branch was merged in). #${pr.number} stops waiting for you until the next push.`}
+									>
+										Mark as seen
+									</button>
+								)}
 							</li>
 						)
 					})}

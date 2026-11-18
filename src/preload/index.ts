@@ -46,6 +46,7 @@ const api: ReviewApi = {
 	homeInbox: () => ipcRenderer.invoke(IPC.homeInbox),
 	refreshHome: () => ipcRenderer.invoke(IPC.refreshHome),
 	setRepoMuted: (repo, muted) => ipcRenderer.invoke(IPC.setRepoMuted, repo, muted),
+	markCommitsSeen: (repo, n, head) => ipcRenderer.invoke(IPC.markCommitsSeen, repo, n, head),
 	chooseCloneFolder: (repo) => ipcRenderer.invoke(IPC.chooseCloneFolder, repo),
 	openGitHubClone: (repo, parent) => ipcRenderer.invoke(IPC.openGitHubClone, repo, parent),
 	appClones: () => ipcRenderer.invoke(IPC.appClones),

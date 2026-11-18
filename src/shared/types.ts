@@ -2139,6 +2139,7 @@ export const IPC = {
 	homeInbox: 'inbox:home',
 	refreshHome: 'inbox:home-refresh',
 	setRepoMuted: 'inbox:mute',
+	markCommitsSeen: 'inbox:commits-seen',
 	openGitHubClone: 'repo:open-github-clone',
 	chooseCloneFolder: 'repo:choose-clone-folder',
 	appClones: 'repo:app-clones',
@@ -2306,6 +2307,8 @@ export interface ReviewApi {
 	refreshHome(): Promise<Result<HomeInbox>>
 	/** Mutes a GitHub repository ("owner/name"): its pull requests stop notifying and counting, but stay listed. */
 	setRepoMuted(repo: string, muted: boolean): Promise<Result<HomeInbox>>
+	/** Marks the new commits on a pull request you reviewed as seen, up to `head`: it stops waiting for you until the next push. */
+	markCommitsSeen(repo: string, number: number, head: string): Promise<Result<HomeInbox>>
 	/** Records that you looked at a pull request, so the Inbox stops calling it new. */
 	markPrSeen(repoId: string, number: number): Promise<Result<boolean>>
 	/** Asks where to clone a GitHub repository ("owner/name"); null when cancelled. The clone goes in <folder>/<name>. */

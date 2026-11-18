@@ -38,7 +38,7 @@ import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
 import { AppFail, setAppCloneRoots, setManagedClones } from './git.ts'
-import { watchKey } from '../shared/inbox.ts'
+import { watchKey, type HomeInbox } from '../shared/inbox.ts'
 import { ghCli } from './ghcli.ts'
 import { GitHubService } from './github.ts'
 import { AutoReviewer } from './autoReview.ts'
@@ -378,6 +378,7 @@ function registerIpc(): void {
 		await watcher.check()
 		return service.homeInbox()
 	})
+	handle(IPC.markCommitsSeen, (repo: unknown, n: unknown, head: unknown) => markCommitsSeen(githubRepo(repo), prNumber(n), commitSha(head)))
 	handle(IPC.setRepoMuted, async (repo: unknown, muted: unknown) => {
 		const home = await service.setRepoMuted(githubRepo(repo), bool(muted, 'muted'))
 		void watcher.check() // the badge follows
@@ -1023,6 +1024,14 @@ function budgetView(): BudgetView {
 	return { budgets: connections.budgets(), ...spent, over: checkBudget(connections.budgets(), spent, all).over, paused }
 }
 
+/** Marks new commits as seen (from the app or a notification's button), then updates the badge and open lists. */
+async function markCommitsSeen(repo: string, number: number, head: string): Promise<HomeInbox> {
+	const home = await service.markCommitsSeen(repo, number, head)
+	void watcher.check()
+	if (win && !win.isDestroyed()) win.webContents.send(IPC.inboxChanged)
+	return home
+}
+
 function showNotifications(events: Array<WatchEvent>): void {
 	// One sound for the lot: a review request outranks new commits.
 	const silent = playSound(events.every((e) => e.kind === 'updated') ? 'commits' : 'request')
@@ -1041,14 +1050,33 @@ function showNotifications(events: Array<WatchEvent>): void {
 							.map((e) => `${e.pr.repo.split('/')[1]}#${e.pr.number} ${e.pr.title}`)
 							.join('\n'),
 						target: null,
+						seen: null,
 					},
 				]
 			: events.map((e) => ({
 					title: `${EVENT_TITLE[e.kind]}: ${e.pr.repo.split('/')[1]}#${e.pr.number}`,
 					body: `${e.pr.title}${e.pr.author ? `\nby ${e.pr.author}` : ''}`,
 					target: { repoId: e.repoId, repo: e.pr.repo, number: e.pr.number } satisfies InboxOpen,
+					// New commits you don't need to look at (e.g. the base branch merged in) can be marked seen from the banner.
+					seen: e.kind === 'updated' && e.pr.head ? { repo: e.pr.repo, number: e.pr.number, head: e.pr.head } : null,
 				}))
-	for (const b of batches) void present(new Notification({ title: b.title, body: b.body, silent }), b.target)
+	for (const b of batches) {
+		const seen = b.seen
+		const n = new Notification({
+			title: b.title,
+			body: b.body,
+			silent,
+			...(seen ? { actions: [{ type: 'button', text: 'Mark as seen' }] } : {}),
+		})
+		if (seen)
+			n.on('action', () => {
+				shown.delete(n)
+				markCommitsSeen(seen.repo, seen.number, seen.head).catch((e) =>
+					console.warn('[inbox] could not mark commits seen:', e instanceof Error ? e.message : e),
+				)
+			})
+		void present(n, b.target)
+	}
 }
 
 /**

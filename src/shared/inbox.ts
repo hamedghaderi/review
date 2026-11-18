@@ -64,6 +64,28 @@ export function waitsForYou(pr: WatchedPr): boolean {
 	return pr.requested !== false || !!pr.stale
 }
 
+/**
+ * Heads you marked as seen, keyed by "owner/name#number": the new commits up to that head need no review from you.
+ * A later push moves the head, so the pull request waits for you again.
+ */
+export type SeenHeads = Record<string, string>
+
+/** Whether you can mark this pull request's new commits as seen: it waits for you only because of them. */
+export function canMarkSeen(pr: WatchedPr): boolean {
+	return pr.requested === false && !!pr.stale && !!pr.head
+}
+
+/** The pull request without "new commits since your review" when you marked its current head as seen. */
+export function withSeen(pr: WatchedPr, seen: SeenHeads | undefined): WatchedPr {
+	return pr.stale && pr.head && seen?.[watchKey(pr)] === pr.head ? { ...pr, stale: false } : pr
+}
+
+/** The marks still in use: a pull request that moved on, or is no longer watched, forgets its mark. */
+export function keepSeen(seen: SeenHeads | undefined, prs: ReadonlyArray<WatchedPr>): SeenHeads {
+	const heads = new Map(prs.map((p) => [watchKey(p), p.head ?? null]))
+	return Object.fromEntries(Object.entries(seen ?? {}).filter(([key, head]) => heads.get(key) === head))
+}
+
 /** A watched pull request on the start page, with the clone it maps to (null: none opened yet) and whether its repository is muted. */
 export type HomePr = WatchedPr & { repoId: string | null; muted: boolean; appClone: boolean }
 
