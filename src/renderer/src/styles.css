@@ -1475,6 +1475,38 @@ a.ic-state:hover {
 .findings-scroll {
 	overflow-y: auto;
 }
+/*
+ * One sweep of colour across the findings panel when you add or dismiss the run's last open finding (cleared.ts). It
+ * sits over the panel at the panel's place on screen, takes no clicks, and is gone after SWEEP_MS. The reduce-motion
+ * rule would freeze it, so FindingsPanel doesn't add it at all then.
+ */
+.cleared-sweep {
+	position: fixed;
+	z-index: 5;
+	overflow: hidden;
+	pointer-events: none;
+}
+.cleared-sweep > span {
+	position: absolute;
+	top: -10%;
+	bottom: -10%;
+	left: 0;
+	width: 70%;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in srgb, var(--accent-line) 38%, transparent) 40%,
+		color-mix(in srgb, var(--ok) 30%, transparent) 62%,
+		transparent
+	);
+	transform: translateX(-110%) skewX(-14deg);
+	animation: cleared-sweep 900ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes cleared-sweep {
+	to {
+		transform: translateX(175%) skewX(-14deg);
+	}
+}
 .findings-filters {
 	display: flex;
 	gap: 6px;
