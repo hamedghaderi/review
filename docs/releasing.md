@@ -25,7 +25,7 @@ To remove the warnings, sign and notarize with an Apple Developer ID (`mac.ident
 
 The **Open in Review** extension (`extension/`) and the userscript (`site/open-in-review.user.js`) add a shortcut on GitHub pull request pages, Shift+R by default, that opens the review in the app through a `review-code://` link. They change separately from the app and have their own version numbers: bump `version` in `extension/manifest.json`, and `@version` in the userscript, when either changes.
 
-- **Userscript**: the website serves it, so merging to `main` publishes it. Userscript managers check its `@updateURL` and pick up a higher `@version` by themselves.
+- **Userscript**: it does not update itself (`@downloadURL` and `@updateURL` are `none`), so a new version reaches people only when they install it again. Bump `@version` anyway, so they can tell which one they have, and keep both keys at `none`: the script runs on every github.com page while signed in, and an automatic update would hand whoever controls the download location that same access.
 - **Chrome Web Store**: `npm run extension:pack` writes `dist/open-in-review.zip`. Upload it in the [developer dashboard](https://chrome.google.com/webstore/devconsole) (a one-time $5 registration). The only permission is `storage`, for the shortcut setting, and the content script runs on `https://github.com/*` only. Say so in the privacy section: it reads nothing from the page except its address and sends nothing anywhere.
 - **Firefox Add-ons**: upload the same zip at [addons.mozilla.org](https://addons.mozilla.org/developers/). The add-on id is set in `browser_specific_settings` in the manifest. Keep it, or Firefox treats the upload as a different add-on.
 
