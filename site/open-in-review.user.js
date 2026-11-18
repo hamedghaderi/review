@@ -1,15 +1,18 @@
 // ==UserScript==
 // @name         Open in Review
 // @namespace    https://review-code.dev/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Press Shift+R on a GitHub pull request to open its review in the Review desktop app.
 // @homepageURL  https://review-code.dev/
-// @downloadURL  https://review-code.dev/open-in-review.user.js
-// @updateURL    https://review-code.dev/open-in-review.user.js
+// @downloadURL  none
+// @updateURL    none
 // @match        https://github.com/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
+
+// It never updates itself: it runs on every github.com page, signed in, so a newer copy is installed by hand, after
+// reading it. `none` (not just leaving the keys out) stops managers falling back to the URL it was installed from.
 
 // The same as the browser extension (extension/content.js), with the shortcut set here instead of in options.
 // GitHub swaps pages without reloading, so the address is read when the key is pressed. The page's content is never read.

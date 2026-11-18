@@ -104,3 +104,9 @@ test('extension: asks for no access beyond github.com and its own settings', () 
 	assert.match(SCRIPTS.userscript, /\/\/ @match {8}https:\/\/github\.com\/\*\n/)
 	assert.match(SCRIPTS.userscript, /\/\/ @grant {8}none\n/)
 })
+
+test('the userscript never updates itself: it runs signed in on every github.com page', () => {
+	const meta = (key: string) => new RegExp(`^// @${key}\\s+(\\S+)\\s*$`, 'm').exec(SCRIPTS.userscript)?.[1]
+	assert.equal(meta('downloadURL'), 'none', 'left out, managers fall back to the URL it was installed from')
+	assert.equal(meta('updateURL'), 'none')
+})
