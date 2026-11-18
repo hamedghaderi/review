@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "Open in Review",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Press Shift+R on a GitHub pull request to open its review in the Review desktop app.",
 	"homepage_url": "https://review-code.dev/",
 	"icons": {
