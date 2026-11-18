@@ -44,6 +44,8 @@ export interface WatchedPr {
 	reviewed: boolean // you have reviewed it before
 	requested?: boolean // your review is requested now (false: listed only because you reviewed it)
 	head?: string | null // head commit
+	base?: string // the branch it merges into; absent on older stored state
+	reviewedCommit?: string | null // the commit your latest submitted review was on; absent on older stored state
 	stale?: boolean // your latest review is on an older commit than `head`
 	verdict?: ReviewVerdict | null // what your latest review said; absent on older stored state
 	updatedAt?: string // absent on older stored state

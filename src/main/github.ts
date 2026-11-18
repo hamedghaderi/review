@@ -492,6 +492,8 @@ export class GitHubService {
 				reviewed: !!mine,
 				requested: isRequested,
 				head: n.headRefOid ?? null,
+				base: n.baseRefName,
+				reviewedCommit: viewer ? reviewedCommit(n, viewer) : null,
 				stale: !!mine?.behind,
 				verdict: mine?.verdict ?? null,
 				updatedAt: n.updatedAt,
@@ -507,6 +509,18 @@ export class GitHubService {
 			if (w && !prs.has(watchKey(w))) prs.set(watchKey(w), w)
 		}
 		return { viewer, prs: [...prs.values()] }
+	}
+
+	/**
+	 * A pull request's own changes at `head`: the diff from where it branches off `base`, as GitHub shows the pull
+	 * request, in a form two heads can be compared by (see ownChangesKey). Null when GitHub leaves part of it out.
+	 */
+	async ownChanges(repo: string, base: string, head: string, signal?: AbortSignal): Promise<string | null> {
+		checkRepo(repo)
+		if (!isSha(head)) throw new AppFail('invalid-input', 'Invalid commit id.')
+		const ref = encodeURIComponent(base).replace(/%2F/g, '/')
+		const c = await this.get<{ files?: Array<CompareFile> }>(`/repos/${repo}/compare/${ref}...${head}`, signal)
+		return ownChangesKey(c.files ?? [])
 	}
 
 	private async searchRest(search: string, q: PrQuery, signal?: AbortSignal): Promise<Omit<PrPage, 'fetchedAt'>> {
@@ -1736,6 +1750,41 @@ interface GqlPr {
 	reviewDecision?: string | null
 	latestOpinionatedReviews?: { nodes: Array<GqlReview | null> } | null
 	latestReviews?: { nodes: Array<GqlReview | null> } | null
+}
+
+/** A file in GitHub's compare response. `patch` is left out for binary files and very large diffs. */
+export interface CompareFile {
+	filename: string
+	status: string
+	previous_filename?: string
+	sha?: string | null // the file's blob at the head
+	patch?: string
+}
+
+const COMPARE_FILE_CAP = 300 // GitHub lists at most this many files in a comparison
+
+/**
+ * What the author changed, line by line, without where it sits: each file's name, status and added or removed lines,
+ * leaving out line numbers and unchanged context, which move when the base branch is merged in. A file without a
+ * patch (binary or too large) counts by its whole content, so a base change to it counts too. Null when GitHub cut
+ * the file list short, since the rest is unknown.
+ */
+export function ownChangesKey(files: ReadonlyArray<CompareFile>): string | null {
+	if (files.length >= COMPARE_FILE_CAP) return null
+	const each = files.map((f) => {
+		const lines = f.patch === undefined ? [`blob ${f.sha ?? ''}`] : f.patch.split('\n').filter((l) => /^[-+\\]/.test(l))
+		return [f.status, f.previous_filename ?? '', f.filename, ...lines].join('\n')
+	})
+	return JSON.stringify(each.sort())
+}
+
+/** The commit of the viewer's latest submitted review, of any kind. */
+function reviewedCommit(n: GqlPr, viewer: string): string | null {
+	const mine = [...(n.latestReviews?.nodes ?? []), ...(n.latestOpinionatedReviews?.nodes ?? [])].filter(
+		(r): r is GqlReview => !!r && !!r.submittedAt && r.state !== 'PENDING' && r.author?.login.toLowerCase() === viewer.toLowerCase(),
+	)
+	const latest = mine.sort((a, b) => b.submittedAt!.localeCompare(a.submittedAt!))[0]
+	return latest?.commit?.oid ?? null
 }
 
 interface GqlReview {
