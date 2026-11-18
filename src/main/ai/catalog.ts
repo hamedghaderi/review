@@ -6,7 +6,7 @@ import type { EndpointPreset, ModelPrice, ProviderDescriptor, ProviderKind } fro
  * Prices are list prices in US dollars per million tokens at the standard tier, for prompts under the long-context
  * threshold, as published on CATALOG_UPDATED; they are shown as estimates. Update CATALOG_UPDATED when this list changes.
  */
-export const CATALOG_UPDATED = '2026-11-09'
+export const CATALOG_UPDATED = '2026-11-18'
 
 export interface CatalogModel {
 	id: string
@@ -93,8 +93,11 @@ export const MODEL_CATALOG: Partial<Record<ProviderKind, Array<CatalogModel>>> =
 		{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', contextWindow: 1_000_000, maxOutputTokens: 128_000, price: null },
 	],
-	// The models Codex offers with a ChatGPT login, from its own model list (2026-10-22). No price, as for Claude Code.
+	// The models Codex offers with a ChatGPT login, from its own model list (2026-11-18, Codex 0.170.0). No price, as for Claude Code.
 	codex: [
+		{ id: 'gpt-6.2-sol', label: 'GPT-6.2 Sol', contextWindow: 500_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'gpt-6.2-astra', label: 'GPT-6.2 Astra', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
+		{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', contextWindow: 500_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', contextWindow: 500_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'gpt-6-sol', label: 'GPT-6 Sol', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
 		{ id: 'gpt-6-astra', label: 'GPT-6 Astra', contextWindow: 272_000, maxOutputTokens: 128_000, price: null },
