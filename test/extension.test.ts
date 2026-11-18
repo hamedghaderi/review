@@ -17,6 +17,7 @@ interface Key {
 	ctrlKey?: boolean
 	metaKey?: boolean
 	repeat?: boolean
+	isTrusted?: boolean
 	target?: { isContentEditable?: boolean; closest?: (s: string) => unknown }
 }
 
@@ -37,6 +38,7 @@ function page(source: string, stored: unknown = null) {
 		location.href = `https://github.com${pathname}`
 		let prevented = false
 		onKey!({
+			isTrusted: true,
 			shiftKey: false,
 			altKey: false,
 			ctrlKey: false,
@@ -62,6 +64,12 @@ for (const [name, source] of Object.entries(SCRIPTS)) {
 			assert.match(r.href, /^review-code:\/\/open\//)
 			assert.ok(parsePrLink(r.href), `${r.href} is a link the app opens`)
 		}
+	})
+
+	test(`${name}: a key a script dispatched does nothing`, () => {
+		const r = page(source)('/o/r/pull/1', { ...SHIFT_R, isTrusted: false })
+		assert.equal(r.prevented, false)
+		assert.match(r.href, /^https:\/\/github\.com\//)
 	})
 
 	test(`${name}: other pages, other keys and typing keep the key`, () => {

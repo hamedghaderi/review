@@ -12,7 +12,8 @@
 	})
 
 	document.addEventListener('keydown', (e) => {
-		if (e.repeat || e.isComposing || !matches(e, shortcut) || typing(e.target)) return
+		// Only a key you pressed: a script on the page can dispatch a fake one.
+		if (!e.isTrusted || e.repeat || e.isComposing || !matches(e, shortcut) || typing(e.target)) return
 		const m = PR_PATH.exec(location.pathname)
 		if (!m || m[2] === '.' || m[2] === '..') return
 		e.preventDefault()

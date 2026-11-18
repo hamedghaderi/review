@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Open in Review
 // @namespace    https://review-code.dev/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Press Shift+R on a GitHub pull request to open its review in the Review desktop app.
 // @homepageURL  https://review-code.dev/
 // @downloadURL  none
@@ -23,7 +23,8 @@
 	const PR_PATH = /^\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})\/pull\/([1-9]\d{0,9})(?:\/|$)/
 
 	document.addEventListener('keydown', (e) => {
-		if (e.repeat || e.isComposing || !matches(e, SHORTCUT) || typing(e.target)) return
+		// Only a key you pressed: a script on the page can dispatch a fake one.
+		if (!e.isTrusted || e.repeat || e.isComposing || !matches(e, SHORTCUT) || typing(e.target)) return
 		const m = PR_PATH.exec(location.pathname)
 		if (!m || m[2] === '.' || m[2] === '..') return
 		e.preventDefault()
