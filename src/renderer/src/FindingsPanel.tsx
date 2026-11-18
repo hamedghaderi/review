@@ -47,7 +47,9 @@ import type {
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
-import { scrollBehavior } from './motion.ts'
+import { scrollBehavior, useReducedMotion } from './motion.ts'
+import { clearedLast, SWEEP_MS, type OpenTally } from './cleared.ts'
+import { createPortal } from 'react-dom'
 import { SpeakerHeading } from './SpeakerHeading.tsx'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
@@ -280,6 +282,29 @@ export function FindingsPanel({
 		return () => window.removeEventListener('keydown', onKey)
 	}, [onOpen, onAccept, onDismiss])
 
+	// One sweep over the panel when you add or dismiss the run's last open finding (cleared.ts). The list underneath has
+	// already moved on; the sweep only marks it. Nothing plays when motion is reduced.
+	const reduced = useReducedMotion()
+	const rootRef = useRef<HTMLDivElement>(null)
+	const tally = useRef<OpenTally | null>(null)
+	const [sweep, setSweep] = useState<{ key: number; box: DOMRect } | null>(null)
+	const openNow = items.filter((it) => it.state === 'open').length
+	useEffect(() => {
+		if (!run) return
+		const next = { runId: run.id, running: run.status === 'running', open: openNow }
+		const cleared = clearedLast(tally.current, next)
+		tally.current = next
+		if (cleared && !reduced && filter === 'open' && rootRef.current) {
+			setSweep({ key: Date.now(), box: rootRef.current.getBoundingClientRect() })
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [run?.id, run?.status, openNow])
+	useEffect(() => {
+		if (!sweep) return
+		const t = setTimeout(() => setSweep(null), SWEEP_MS + 100)
+		return () => clearTimeout(t)
+	}, [sweep])
+
 	if (!run) {
 		return (
 			<div className="comments-list">
@@ -292,7 +317,19 @@ export function FindingsPanel({
 	}
 
 	return (
-		<div className="comments findings-scroll">
+		<div className="comments findings-scroll" ref={rootRef}>
+			{sweep &&
+				createPortal(
+					<div
+						key={sweep.key}
+						className="cleared-sweep"
+						aria-hidden
+						style={{ left: sweep.box.left, top: sweep.box.top, width: sweep.box.width, height: sweep.box.height }}
+					>
+						<span />
+					</div>,
+					document.body,
+				)}
 			<RunSummary
 				run={run}
 				since={sinceCounts}
