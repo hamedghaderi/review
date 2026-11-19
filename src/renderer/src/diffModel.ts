@@ -178,6 +178,52 @@ export function linesToReveal(gaps: Array<Gap>, r: Range, totalNew: number): Arr
 	return out
 }
 
+const JUMP_BEFORE = 3 // lines above a jump target: decorators, doc comments, the line before
+const JUMP_AFTER = 3 // lines below one that opens no block
+const JUMP_BODY = 40 // at most this much of a body; the rest stays collapsed behind its gap row
+
+const indentOf = (s: string): number => /^[ \t]*/.exec(s)![0].replace(/\t/g, '    ').length
+// A line at the opening line's own indent that still belongs to it: a closing bracket or `end`.
+const CLOSER = /^\s*([}\])]|end\b)/
+
+/**
+ * The lines to show around line `n` (1-based) of `lines` when you jump to it (issue #244): a few lines above, and
+ * the block it opens, read from indentation: the lines below indented deeper than it, and the closing line at its own
+ * indent (`}`, `)`, `end`). A closing line that opens the body (Python's `) -> T:`, `) {`) keeps going. A line that
+ * opens no block gets a few lines below instead.
+ */
+export function blockSpan(lines: ReadonlyArray<string>, n: number): { start: number; end: number } {
+	const own = indentOf(lines[n - 1] ?? '')
+	let last = n
+	for (let i = n + 1; i <= lines.length && i - n <= JUMP_BODY; i++) {
+		const t = lines[i - 1]
+		if (!t.trim()) continue
+		if (indentOf(t) > own) {
+			last = i
+			continue
+		}
+		if (!CLOSER.test(t)) break
+		last = i
+		if (!/[:{]\s*$/.test(t)) break
+	}
+	return { start: Math.max(1, n - JUMP_BEFORE), end: Math.min(lines.length, Math.max(last, n + JUMP_AFTER)) }
+}
+
+/**
+ * What to open for a jump to `line` on `side` (go to definition, a file:line reference), in new line numbers: see
+ * blockSpan. Only the new version is loaded, so a removed line, which has no unchanged text to read, opens just itself.
+ */
+export function jumpContext(gaps: ReadonlyArray<Gap>, fileLines: ReadonlyArray<string>, side: Side, line: number): Range {
+	let n: number | null = side === 'new' ? line : null
+	if (side === 'old')
+		for (const g of gaps) {
+			const at = line - g.offset
+			if (at >= g.from && at <= (g.to ?? fileLines.length)) n = at
+		}
+	if (n === null || n < 1 || n > fileLines.length) return { side, start: line, end: line }
+	return { side: 'new', ...blockSpan(fileLines, n) }
+}
+
 export function rangeLabel(r: { start: number; end: number }): string {
 	return r.start === r.end ? `line ${r.start}` : `lines ${r.start}–${r.end}`
 }
