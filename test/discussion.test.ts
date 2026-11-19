@@ -406,8 +406,8 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 	])
 	assert.deepEqual(
 		g.threads[0].comments.map((c) => c.html),
-		['<details><summary>Fix</summary><p>b</p></details>', undefined, undefined, fits],
-		'over 200,000 characters or blank: plain text instead',
+		['<details><summary>Fix</summary><p>b</p></details>', undefined, '', fits],
+		'over 200,000 characters: plain text instead; blank: kept as nothing to show',
 	)
 	assert.deepEqual(
 		g.threads[0].comments.map((c) => c.body),
@@ -469,9 +469,9 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 			[undefined, 'y'],
 			[fits, 'z'],
 			[undefined, 'z'],
-			[undefined, 'z'],
+			['', 'z'],
 		],
-		'REST: no body_html, over 200,000 characters or blank: plain text, the body as written kept',
+		'REST: no body_html or over 200,000 characters: plain text; blank: nothing to show; the body as written kept',
 	)
 })
 

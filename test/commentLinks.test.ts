@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { webHost, webUrl, withoutNotes } from '../src/renderer/src/commentLinks.ts'
+import { webHost, webUrl } from '../src/renderer/src/commentLinks.ts'
 
 test('webUrl: only http(s) addresses a browser can open, in the form that opens', () => {
 	assert.equal(webUrl('https://github.com/o/r/pull/1'), 'https://github.com/o/r/pull/1')
@@ -58,46 +58,18 @@ test('webHost: the host check itself, which Node never reaches for hosts its own
 		assert.equal(webHost(bad), false, bad)
 })
 
-test('withoutNotes: hides the HTML comments GitHub hides, keeps the ones it shows', () => {
-	assert.equal(withoutNotes('<!-- coderabbit-ai-generated:v1 -->\n\nHello').trim(), 'Hello')
-	assert.equal(withoutNotes('   <!-- three spaces is still a note -->\nShown'), 'Shown')
-	assert.equal(withoutNotes('<!-- a note\nover lines -->\nAfter'), 'After')
-	assert.equal(withoutNotes('<!-- note --> Hello\nWorld'), ' Hello\nWorld', 'text after the note on its line stays')
-	assert.equal(withoutNotes('<!--> not closed by itself\nstill -->\nAfter'), 'After')
-	assert.equal(withoutNotes('Done <!-- bot metadata -->'), 'Done ', 'a closed note inside a line is hidden too')
-	assert.equal(withoutNotes('a <!-- x --> b <!-- y --> c'), 'a  b  c')
-	assert.equal(withoutNotes('<!-- note --> Done <!-- more -->'), ' Done ')
-	assert.equal(
-		withoutNotes('```js\n<!-- code -->\n``` not a close\n<!-- still code -->\n```\n<!-- note -->\nEnd'),
-		'```js\n<!-- code -->\n``` not a close\n<!-- still code -->\n```\nEnd',
-		'a fence closes only on a line of its own',
-	)
-	assert.equal(withoutNotes('Done <!-- bot metadata\nmore -->\nNext'), 'Done \nNext', 'a note that starts after text can run over lines')
-	assert.equal(withoutNotes('Done <!-- a\nb\nc --> kept\nNext'), 'Done \n kept\nNext', 'text after its --> stays')
-	assert.equal(withoutNotes('Done <!-- never closed\nNext'), 'Done <!-- never closed\nNext')
-	assert.equal(withoutNotes('```\r\n<!-- code -->\r\n```\r\n<!-- note -->\r\nEnd'), '```\n<!-- code -->\n```\nEnd', 'Windows line endings')
-	assert.equal(
-		withoutNotes('> ```html\n> <!-- quoted code -->\n> ```\n<!-- note -->\nEnd'),
-		'> ```html\n> <!-- quoted code -->\n> ```\nEnd',
-		'a fence in a quote',
-	)
-	assert.equal(withoutNotes('>     <!-- quoted indented code -->'), '>     <!-- quoted indented code -->')
-	assert.equal(withoutNotes('> <!-- a quoted note -->\n> Shown'), '> \n> Shown', 'a note in a quote still hides')
-	assert.equal(withoutNotes('``` a`b\n<!-- a note -->\nEnd'), '``` a`b\nEnd', 'backticks after the fence: not a fence, so the note hides')
+test('webUrl: percent escapes compare equal whatever their case', () => {
+	assert.equal(webUrl('https://example.com/badge%2dpassed.svg'), 'https://example.com/badge%2Dpassed.svg')
+	assert.equal(webUrl('https://example.com/badge%2dpassed.svg'), webUrl('https://example.com/badge%2Dpassed.svg'))
+})
 
-	const kept = [
-		'Use `<!--` to start a comment',
-		'Use ``<!-- x -->`` inline',
-		'Use `` `<!-- x -->` `` inline',
-		'Escaped \\<!-- shown --> text',
-		'Before <!-- never closed',
-		'<!-- never closed\nWorld',
-		'```html\n<!-- in a fence -->\n```',
-		'~~~~\n```\n<!-- still in the outer fence -->\n~~~~',
-		'Write:\n\n    <!-- indented code -->\n\nlike that',
-		'\t<!-- tab-indented code -->',
-	]
-	for (const body of kept) assert.equal(withoutNotes(body), body, body)
-
-	assert.equal(withoutNotes('```\n<!-- code -->\n```\n<!-- note -->\nEnd'), '```\n<!-- code -->\n```\nEnd', 'notes after a fence still go')
+test('webUrl: the checks after parsing hold with a parser as lenient as Chromium’s', () => {
+	// Chromium turns `https://exa mple.com/` into the host `exa%20mple.com` instead of failing, as Node does.
+	const chromiumLike = (s: string) =>
+		/exa( |%20)mple/.test(s)
+			? { protocol: 'https:', username: '', password: '', hostname: 'exa%20mple.com', href: 'https://exa%20mple.com/' }
+			: new URL(s)
+	assert.equal(webUrl('https://exa mple.com/', chromiumLike), null)
+	assert.equal(webUrl('https://exa%20mple.com/', chromiumLike), null)
+	assert.equal(webUrl('https://github.com/x', chromiumLike), 'https://github.com/x', 'the stand-in parser itself works')
 })

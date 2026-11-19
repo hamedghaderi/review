@@ -1,6 +1,7 @@
 import DOMPurify, { type Config } from 'dompurify'
 import { useEffect, useRef } from 'react'
-import { webUrl, withoutNotes } from './commentLinks.ts'
+import { webUrl } from './commentLinks.ts'
+import { withoutNotes } from './commentNotes.ts'
 
 const MEDIA = /^review-media:\/\/media\/[0-9a-f]{32}$/
 // DOMPurify's own list of safe link schemes, plus the one release-note media is served from.
@@ -76,7 +77,7 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		const only = !!a && !a.textContent?.trim() && a.querySelectorAll('img, video').length === 1
 		const href = a?.getAttribute('href') ?? null // checked above: links left standing go somewhere real
 		// GitHub links an image to its own full-size file; anywhere else (a CI run, a report) is the author's link.
-		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].map(webUrl).includes(href)
+		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].map((s) => webUrl(s)).includes(href)
 		if (decorative(img)) {
 			if (only && !toSelf)
 				box.replaceWith(`🔗 ${new URL(href!).hostname}`) // the link is all there is: keep it findable
@@ -94,7 +95,7 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		// Only the release's own files play; a video from anywhere else isn't loaded, only linked (an attachment
 		// GitHub shows inline would otherwise vanish from the comment).
 		if (!own.length) {
-			const web = sources.map(webUrl).find((s) => s !== null) ?? null
+			const web = sources.map((s) => webUrl(s)).find((s) => s !== null) ?? null
 			const text = label(null, 'video')
 			video.replaceWith(video.closest('a') ? text : mediaLink(doc, web, text, 'Videos aren’t played in the app. Opens in your browser.'))
 			continue
@@ -114,6 +115,13 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		)
 	}
 	for (const input of root.querySelectorAll('input')) input.setAttribute('disabled', '')
+	// A suggested change's removed and added lines: the - and + as text, so the preview has them too.
+	for (const [cls, mark] of [
+		['blob-code-deletion', '-'],
+		['blob-code-addition', '+'],
+	] as const)
+		for (const cell of root.querySelectorAll(`.${cls}`))
+			cell.prepend(Object.assign(doc.createElement('span'), { className: 'blob-marker', textContent: `${mark} ` }))
 }
 
 const label = (alt: string | null | undefined, kind: 'image' | 'video') => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
@@ -154,20 +162,24 @@ const texts = new Map<string, string>()
  * apart, even when GitHub put no whitespace between them. Nothing here is attached to the page, so nothing loads.
  */
 export function commentText(c: { body: string; html?: string }): string {
-	if (!c.html) return withoutNotes(c.body).trim()
+	if (c.html === undefined) return withoutNotes(c.body).trim()
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
 		// A closed <details> shows only its summary, so that's all the preview reads of it.
-		for (const d of body.querySelectorAll('details:not([open])'))
-			for (const child of [...d.childNodes]) if (child.nodeName !== 'SUMMARY') child.remove()
+		// Without a <summary>, the browser labels it "Details".
+		for (const d of body.querySelectorAll('details:not([open])')) {
+			const summary = [...d.children].find((child) => child.nodeName === 'SUMMARY')
+			d.replaceChildren(summary ?? 'Details')
+		}
 		standIns(body, body.ownerDocument, false)
 		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
 		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = walk.nextNode(); n; n = walk.nextNode())
 			if (!n.parentElement?.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
-		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)')) cell.before(' · ')
+		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)'))
+			if (cell.previousElementSibling?.textContent?.trim()) cell.before(' · ') // not after an empty cell, like a line number
 		for (const block of body.querySelectorAll(BLOCKS)) {
 			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too
 			block.after('\n')

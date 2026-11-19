@@ -48,9 +48,14 @@ export function body(text: string | null | undefined): { body: string; bodyTrunc
 	return t.length > BODY_LIMIT ? { body: t.slice(0, BODY_LIMIT), bodyTruncated: true } : { body: t, bodyTruncated: false }
 }
 
-/** GitHub's own rendering of a body, kept whole or not at all: cut HTML can't be shown faithfully. Sanitised again when shown. */
+/**
+ * GitHub's own rendering of a body, kept whole or not at all: cut HTML can't be shown faithfully. Sanitised again when
+ * shown. A rendering with nothing in it is kept as '' (a body of only hidden `<!-- -->` notes shows nothing on GitHub
+ * either), apart from a missing one, which falls back to the body as written.
+ */
 export function html(h: string | null | undefined): { html?: string } {
-	return typeof h === 'string' && h.trim() && h.length <= HTML_LIMIT ? { html: h } : {}
+	if (typeof h !== 'string' || h.length > HTML_LIMIT) return {}
+	return { html: h.trim() ? h : '' }
 }
 
 /** Links are shown only when they point at github.com, so a crafted comment can't hand the viewer another site. */

@@ -5591,7 +5591,7 @@ textarea.style-edit {
 .md-body .blob-code-inner {
 	white-space: pre;
 }
-.md-body .blob-code-inner::before {
+.md-body .blob-marker {
 	user-select: none;
 }
 .md-body .blob-num-deletion {
@@ -5600,8 +5600,7 @@ textarea.style-edit {
 .md-body .blob-code-deletion {
 	background: var(--del-bg);
 }
-.md-body .blob-code-deletion::before {
-	content: '- ';
+.md-body .blob-code-deletion .blob-marker {
 	color: var(--del-fg);
 }
 .md-body .blob-num-addition {
@@ -5610,8 +5609,7 @@ textarea.style-edit {
 .md-body .blob-code-addition {
 	background: var(--add-bg);
 }
-.md-body .blob-code-addition::before {
-	content: '+ ';
+.md-body .blob-code-addition .blob-marker {
 	color: var(--add-fg);
 }
 

@@ -241,7 +241,7 @@ function BotCheckNote({ check }: { check: BotThreadCheck }) {
  * and folded sections), else the body as written, as plain text. `className` styles the plain-text form.
  */
 function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boolean; html?: string }; className: string }) {
-	if (c.html) return <GitHubHtml html={c.html} empty="" className="gh-html" />
+	if (c.html !== undefined) return <GitHubHtml html={c.html} empty="No visible text." className="gh-html" />
 	return (
 		<div className={`${className} selectable`}>
 			{c.body}
