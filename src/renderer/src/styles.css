@@ -5554,6 +5554,23 @@ textarea.style-edit {
 .md-body.gh-html > :last-child {
 	margin-bottom: 0;
 }
+/* Text a GitHub comment hides (<!-- notes -->) but the AI reads, shown on request. */
+.hidden-notes {
+	margin-top: 4px;
+	color: var(--text-2);
+}
+.hidden-notes-text {
+	margin: 4px 0 0;
+	padding: 6px 8px;
+	max-height: 240px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--mono);
+	font-size: 12px;
+	background: var(--hover);
+	border-radius: 6px;
+}
 /* GitHub's "Suggested change" box: a table of removed and added lines that relies on GitHub's own classes. Without
    these the removed line reads like an added one and the indentation is lost. */
 .md-body .js-suggested-changes-blob {

@@ -15,7 +15,7 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
-import { commentText, GitHubHtml } from './GitHubHtml.tsx'
+import { commentText, GitHubHtml, hiddenNotes } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
@@ -241,11 +241,39 @@ function BotCheckNote({ check }: { check: BotThreadCheck }) {
  * and folded sections), else the body as written, as plain text. `className` styles the plain-text form.
  */
 function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boolean; html?: string }; className: string }) {
-	if (c.html !== undefined) return <GitHubHtml html={c.html} empty="No visible text." className="gh-html" />
+	if (c.html !== undefined)
+		return (
+			<>
+				<GitHubHtml html={c.html} empty="No visible text." className="gh-html" />
+				<HiddenNotes notes={hiddenNotes(c)} />
+			</>
+		)
 	return (
 		<div className={`${className} selectable`}>
 			{c.body}
 			{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
+		</div>
+	)
+}
+
+/**
+ * Says when a comment holds text GitHub doesn't show (`<!-- … -->` notes) that the AI reviewer still reads, and shows
+ * it on request as plain text, so nothing can speak to the AI out of your sight.
+ */
+function HiddenNotes({ notes }: { notes: Array<string> }) {
+	const [open, setOpen] = useState(false)
+	if (!notes.length) return null
+	return (
+		<div className="hidden-notes small">
+			<button
+				className="btn small ghost"
+				onClick={() => setOpen((x) => !x)}
+				aria-expanded={open}
+				title="Text in this comment that GitHub doesn't show (HTML comments). The AI reviewer reads it."
+			>
+				{open ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
+			</button>
+			{open && <pre className="hidden-notes-text selectable">{notes.join('\n\n')}</pre>}
 		</div>
 	)
 }

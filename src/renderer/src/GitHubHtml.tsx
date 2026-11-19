@@ -1,5 +1,6 @@
 import DOMPurify, { type Config } from 'dompurify'
 import { useEffect, useRef } from 'react'
+import { notesNotShown } from './commentHidden.ts'
 import { sameAddress, webUrl } from './commentLinks.ts'
 
 const MEDIA = /^review-media:\/\/media\/[0-9a-f]{32}$/
@@ -10,6 +11,9 @@ const sanitizeConfig = (media: boolean): Config => ({
 	USE_PROFILES: { html: true },
 	// Videos are kept here only so standIns can turn them into links; none from outside the app plays.
 	FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'audio'],
+	// No inline styles: GitHub strips them from what people write, but if one got through it could lay a fake banner
+	// or button over the app (`position: fixed`). Our CSS does what GitHub's own inline styles did.
+	FORBID_ATTR: ['style'],
 	...(media ? { ALLOWED_URI_REGEXP: URI_WITH_MEDIA } : {}),
 })
 
@@ -167,6 +171,25 @@ const ICON_PX = 32
 const BLOCKS =
 	'address,article,aside,blockquote,dd,details,div,dl,dt,figcaption,figure,h1,h2,h3,h4,h5,h6,hr,li,ol,p,pre,section,summary,table,tr,ul'
 const texts = new Map<string, string>()
+const notes = new Map<string, Array<string>>()
+
+/**
+ * The `<!-- … -->` notes in a comment that GitHub doesn't show but the AI reviewer reads (see notesNotShown), so a
+ * note can't carry instructions to the AI unseen. Compared with all the text GitHub renders, folded sections and code
+ * included. None when there's no HTML: then the comment is shown as written, notes and all.
+ */
+export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
+	if (c.html === undefined || !c.body.includes('<!--')) return []
+	const key = `${c.html}\u0000${c.body}`
+	let found = notes.get(key)
+	if (found === undefined) {
+		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
+		found = notesNotShown(c.body, body.textContent ?? '')
+		if (notes.size > 500) notes.delete(notes.keys().next().value!)
+		notes.set(key, found)
+	}
+	return found
+}
 // Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
 const CODE_SPACE = '\uE000'
 const CODE_BLANK = '\uE001'
