@@ -26,9 +26,18 @@ export interface ThemeSettings {
 	codeSize: number // px, for code in diffs and files
 	uiFont: string // a font family name for everything else; '' for the system font
 	uiScale: number // percent: the whole window's zoom, which View › Zoom changes too
+	syntax: boolean // code coloured by language (issue #237)
 }
 
-export const DEFAULT_THEME: ThemeSettings = { appearance: 'system', theme: 'review', codeFont: '', codeSize: 12, uiFont: '', uiScale: 100 }
+export const DEFAULT_THEME: ThemeSettings = {
+	appearance: 'system',
+	theme: 'review',
+	codeFont: '',
+	codeSize: 12,
+	uiFont: '',
+	uiScale: 100,
+	syntax: true,
+}
 
 export const CODE_SIZES = { min: 10, max: 20 }
 // The same steps as browser zoom, so View › Zoom In and Out move through these.
@@ -104,6 +113,7 @@ export function parseTheme(raw: unknown): ThemeSettings {
 				: DEFAULT_THEME.codeSize,
 		uiFont: fontName(v.uiFont),
 		uiScale: typeof v.uiScale === 'number' && UI_SCALES.includes(v.uiScale) ? v.uiScale : DEFAULT_THEME.uiScale,
+		syntax: typeof v.syntax === 'boolean' ? v.syntax : DEFAULT_THEME.syntax,
 	}
 }
 

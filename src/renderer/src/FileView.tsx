@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FileLinesResult, Side } from '../../shared/types.ts'
 import { useSymbolLinks, type SymbolRequest } from './SymbolNav.tsx'
+import { CodeText } from './CodeText.tsx'
+import { useSyntax } from './useSyntax.ts'
 
 export interface OutsideFile {
 	path: string
@@ -25,6 +27,7 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 		state: 'loading',
 	})
 	const scroller = useRef<HTMLDivElement>(null)
+	const tokens = useSyntax(file.path, lines.state === 'done' && lines.value.kind === 'text' ? lines.value.lines : null)
 	placeRef.current = () => scroller.current?.scrollTop ?? 0
 	useSymbolLinks(
 		scroller,
@@ -62,7 +65,9 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 				{lines.value.lines.map((text, i) => (
 					<div key={i} data-line={i + 1} className={`row line ctx ${i + 1 === file.line ? 'jump-target' : ''}`}>
 						<span className="ln">{i + 1}</span>
-						<span className="code">{text}</span>
+						<span className="code">
+							<CodeText text={text} tokens={tokens?.[i] ?? null} fileStart={i === 0} marks={false} />
+						</span>
 					</div>
 				))}
 			</div>

@@ -73,6 +73,36 @@
 	}
 }
 
+/*
+ * Code coloured by language (issue #237): a theme without its own --syn-* colours uses these. [data-theme] gives a
+ * theme preview these too, not the window's theme's.
+ */
+:root,
+[data-theme] {
+	--syn-comment: #5e5e6c;
+	--syn-keyword: #a3238f;
+	--syn-string: #2a6e2f;
+	--syn-constant: #a14a00;
+	--syn-function: #3b4fc4;
+	--syn-type: #0b6e80;
+	--syn-tag: #b42318;
+	--syn-attr: #8a5300;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root,
+	[data-theme] {
+		--syn-comment: #a9aabb;
+		--syn-keyword: #d79cf5;
+		--syn-string: #a3d9a5;
+		--syn-constant: #f5a97f;
+		--syn-function: #8fb0ff;
+		--syn-type: #6fd0e0;
+		--syn-tag: #ff8f87;
+		--syn-attr: #e8c27a;
+	}
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -736,6 +766,52 @@ input[type='checkbox'] {
 .code::selection,
 .code *::selection {
 	background: var(--sel-bg);
+}
+.tk-comment {
+	color: var(--syn-comment);
+}
+.tk-keyword {
+	color: var(--syn-keyword);
+}
+.tk-string,
+.tk-regexp {
+	color: var(--syn-string);
+}
+.tk-constant,
+.tk-escape {
+	color: var(--syn-constant);
+}
+.tk-function {
+	color: var(--syn-function);
+}
+.tk-type {
+	color: var(--syn-type);
+}
+.tk-tag {
+	color: var(--syn-tag);
+}
+.tk-attr {
+	color: var(--syn-attr);
+}
+.tk-heading {
+	color: var(--syn-function);
+	font-weight: 600;
+}
+.tk-bold {
+	font-weight: 600;
+}
+.tk-italic {
+	font-style: italic;
+}
+.tk-link {
+	color: var(--syn-string);
+	text-decoration: underline;
+}
+.tk-inserted {
+	color: var(--add-fg);
+}
+.tk-deleted {
+	color: var(--del-fg);
 }
 .line.add {
 	background: var(--add-bg);
