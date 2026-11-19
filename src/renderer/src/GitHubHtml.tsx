@@ -45,7 +45,6 @@ export function GitHubHtml({
 		}
 		// A <picture>'s other files: its <img> stands for it below.
 		for (const s of frag.querySelectorAll('picture > source')) s.remove()
-		const label = (alt: string | null | undefined, kind: string) => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
 		for (const img of frag.querySelectorAll('img')) {
 			const src = img.getAttribute('src') ?? ''
 			if (media && MEDIA.test(src)) {
@@ -55,14 +54,22 @@ export function GitHubHtml({
 				)
 				continue
 			}
-			// GitHub wraps images in a link to the full-size file; keep a single link, or none.
 			const parent = img.parentElement
 			const wrapped = parent instanceof HTMLAnchorElement && parent.childNodes.length === 1
-			if (decorative(img)) {
+			const text = imageText(img)
+			// A link from the image to somewhere else (a badge to its CI run, an icon to a report): keep that link, with
+			// words for the image. Only http(s) links still have an href here.
+			const href = wrapped ? parent.getAttribute('href') : null
+			if (href && href !== src && href !== img.getAttribute('data-canonical-src')) {
+				img.replaceWith(text ?? `🔗 ${hostOf(href)}`)
+				continue
+			}
+			// GitHub wraps images in a link to the full-size file; keep a single link, or none for an icon.
+			if (text === null) {
 				;(wrapped ? parent : img).remove()
 				continue
 			}
-			const link = mediaLink(src, label(img.getAttribute('alt'), 'image'), 'Images aren’t loaded in the app. Opens in your browser.')
+			const link = mediaLink(src, text, 'Images aren’t loaded in the app. Opens in your browser.')
 			if (wrapped) parent.replaceWith(link)
 			else img.replaceWith(link)
 		}
@@ -97,6 +104,21 @@ export function GitHubHtml({
 	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}${className ? ` ${className}` : ''}`} />
 }
 
+const label = (alt: string | null | undefined, kind: 'image' | 'video') => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
+
+/** The words that stand for an image that isn't loaded, "🖼 alt", or null for an icon, which is left out. */
+function imageText(img: Element): string | null {
+	return decorative(img) ? null : label(img.getAttribute('alt'), 'image')
+}
+
+function hostOf(href: string): string {
+	try {
+		return new URL(href).hostname
+	} catch {
+		return 'link'
+	}
+}
+
 /** A link to an image or video that isn't loaded in the app, or plain text when its address isn't a web one. */
 function mediaLink(src: string, text: string, title: string): HTMLElement {
 	const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
@@ -115,7 +137,7 @@ function mediaLink(src: string, text: string, title: string): HTMLElement {
  * An icon, not content: an empty alt and a declared size no bigger than an icon's (CodeRabbit's are 16 or 20px). A
  * plain `![](screenshot.png)` also has an empty alt but no size, so it stays as a link.
  */
-function decorative(img: HTMLImageElement): boolean {
+function decorative(img: Element): boolean {
 	const size = (a: string) => Number(img.getAttribute(a) || NaN)
 	return img.getAttribute('alt')?.trim() === '' && size('width') <= ICON_PX && size('height') <= ICON_PX
 }
@@ -127,15 +149,17 @@ const texts = new Map<string, string>()
 
 /**
  * A comment as plain text, for one-line and clamped previews: the words of GitHub's HTML when there is some (no
- * Markdown marks, tags or hidden `<!-- -->` notes), else the body as written without the HTML comments that start a
- * line (a `<!--` inside a sentence or code span is text). Block elements end a line even when GitHub put no newline
- * between them. The HTML is parsed in an inert document, so nothing in it loads or runs.
+ * Markdown marks, tags or hidden `<!-- -->` notes; images and videos as the same words the comment shows), else the
+ * body as written without its hidden notes (see withoutNotes). Block elements end a line even when GitHub put no
+ * newline between them. The HTML is parsed in an inert document, so nothing in it loads or runs.
  */
 export function commentText(c: { body: string; html?: string }): string {
-	if (!c.html) return c.body.replace(/(^|\n)[ \t]*<!--[\s\S]*?-->/g, '$1').trim()
+	if (!c.html) return withoutNotes(c.body).trim()
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const doc = new DOMParser().parseFromString(c.html, 'text/html')
+		for (const img of doc.body.querySelectorAll('img')) img.replaceWith(imageText(img) ?? '')
+		for (const video of doc.body.querySelectorAll('video')) video.replaceWith(label(null, 'video'))
 		for (const br of doc.body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const block of doc.body.querySelectorAll(BLOCKS)) block.after('\n')
 		t = (doc.body.textContent ?? '')
@@ -147,4 +171,45 @@ export function commentText(c: { body: string; html?: string }): string {
 		texts.set(c.html, t)
 	}
 	return t
+}
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})/
+
+/**
+ * Markdown without the HTML comments that start a line, which GitHub hides (a bot's `<!-- generated -->` marker). A
+ * `<!--` inside a sentence, a code span or a fenced code block is shown by GitHub, so it stays; so does one never closed.
+ */
+function withoutNotes(body: string): string {
+	const lines = body.split('\n')
+	const out: Array<string> = []
+	let fence: string | null = null
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]
+		const f = FENCE.exec(line)?.[1]
+		if (fence) {
+			if (f && f[0] === fence[0] && f.length >= fence.length) fence = null
+			out.push(line)
+			continue
+		}
+		if (f) {
+			fence = f
+			out.push(line)
+			continue
+		}
+		if (!/^[ \t]*<!--/.test(line)) {
+			out.push(line)
+			continue
+		}
+		const from = (j: number) => (j === i ? line.indexOf('<!--') + 4 : 0) // `<!-->` doesn't close itself
+		let end = i
+		while (end < lines.length && lines[end].indexOf('-->', from(end)) < 0) end++
+		if (end === lines.length) {
+			out.push(line) // never closed: GitHub shows it as text
+			continue
+		}
+		const rest = lines[end].slice(lines[end].indexOf('-->', from(end)) + 3)
+		if (rest.trim()) out.push(rest)
+		i = end
+	}
+	return out.join('\n')
 }

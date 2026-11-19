@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { fromGraphql, fromRest, HTML_LIMIT, safeUrl, type Activity, type RawThread } from '../src/main/activity.ts'
+import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '../src/main/activity.ts'
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
@@ -343,7 +343,6 @@ test('bots are recognised from GitHub’s actor type (GraphQL) or user type (RES
 })
 
 test('GitHub’s HTML comes along with the body, whole or not at all, from GraphQL and REST', () => {
-	assert.equal(HTML_LIMIT, 200_000)
 	const fits = 'x'.repeat(200_000)
 	const over = 'x'.repeat(200_001)
 	const comment = (id: string, bodyHTML: string | null) => ({

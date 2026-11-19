@@ -38,7 +38,7 @@ export interface RawThread {
 export const BODY_LIMIT = 20_000
 // GitHub's HTML for a comment runs several times the Markdown (CodeRabbit's folded diffs especially). Past this it is
 // dropped and the comment shows as plain text, as before.
-export const HTML_LIMIT = 200_000
+const HTML_LIMIT = 200_000
 export const THREAD_PAGES = 10 // 50 threads each
 export const COMMENTS_PER_THREAD = 30
 export const LIST_LIMIT = 100 // reviews and conversation comments
