@@ -19,6 +19,7 @@ import { hiddenNotes } from './commentHidden.ts'
 import { commentText, NOTHING_VISIBLE } from './commentHtml.ts'
 import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
+import { tabKey } from './tabKey.ts'
 import { useStored } from './useStored.ts'
 
 const THREAD_FILTERS: ReadonlyArray<ThreadFilter> = ['all', 'since', 'open', 'resolved']
@@ -485,7 +486,7 @@ export function ThreadReplyBox({
 					if (!e.target.value.trim()) setDrafted(false) // emptied: what you type next is yours
 				}}
 				onKeyDown={(e) => {
-					if (mention.onKeyDown(e)) return
+					if (mention.onKeyDown(e) || tabKey(e)) return
 					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 						e.preventDefault()
 						void send(false)

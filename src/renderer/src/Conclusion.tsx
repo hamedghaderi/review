@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { ChangeConclusion } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { tabKey } from './tabKey.ts'
 import { ago } from './branches.ts'
 import { Markdown } from './Markdown.tsx'
 import { scrollBehavior } from './motion.ts'
@@ -196,6 +197,7 @@ export function Conclusion({
 						placeholder="Ask about the conclusion, e.g. “Would the event approach really be simpler here?”"
 						onChange={(e) => setText(e.target.value)}
 						onKeyDown={(e) => {
+							if (tabKey(e)) return
 							if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 								e.preventDefault()
 								void send()

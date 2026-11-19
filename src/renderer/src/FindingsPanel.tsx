@@ -48,6 +48,7 @@ import type {
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
+import { tabKey } from './tabKey.ts'
 import { scrollBehavior, useReducedMotion } from './motion.ts'
 import { clearedLast, SWEEP_MS, type OpenTally } from './cleared.ts'
 import { createPortal } from 'react-dom'
@@ -2015,6 +2016,7 @@ function AskBox({ focus, disabled, onBusy, onAsk, modelPicker }: AskProps) {
 				disabled={busy}
 				onChange={(e) => setText(e.target.value)}
 				onKeyDown={(e) => {
+					if (tabKey(e)) return
 					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 						e.preventDefault()
 						void send()

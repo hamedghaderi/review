@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AppError, PrDescription } from '../../shared/types.ts'
 import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
+import { tabKey } from './tabKey.ts'
 
 interface Props {
 	repoId: string
@@ -172,7 +173,7 @@ export function DescriptionPanel({ repoId, reviewId, onConnect, explain }: Props
 							aria-label="Pull request description (Markdown)"
 							onChange={(e) => setDraft({ ...draft, text: e.target.value })}
 							onKeyDown={(e) => {
-								if (mention.onKeyDown(e)) return
+								if (mention.onKeyDown(e) || tabKey(e)) return
 								if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && draft.text !== draft.base) {
 									e.preventDefault()
 									void save()
