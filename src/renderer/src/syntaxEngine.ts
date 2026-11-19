@@ -49,11 +49,27 @@ async function load(h: HighlighterCore, lang: string): Promise<boolean> {
 }
 
 /**
- * Each line's tokens, read as the file at `path` is (by its name), or null to leave it plain: no grammar for it, too
- * big, or `pause` (awaited between chunks of lines) returned false because the answer is no longer wanted.
+ * The grammar for code: the language a code block names (```py), else the file it's about. A block that names a
+ * language Shiki doesn't know (```text, ```console) stays plain; one that names none, or GitHub's ```suggestion, is
+ * read as `path`.
  */
-export async function tokenize(path: string, lines: Array<string>, pause?: () => Promise<boolean>): Promise<Array<LineTokens> | null> {
-	const lang = languageFor(path, knownLanguage)
+export function grammarFor(path: string | null, named: string | null): string | null {
+	const name = named?.trim().toLowerCase() ?? ''
+	if (name && name !== 'suggestion') return knownLanguage(name) ?? null
+	return path ? languageFor(path, knownLanguage) : null
+}
+
+/**
+ * Each line's tokens, read as `grammarFor(path, named)` says, or null to leave it plain: no grammar for it, too big,
+ * or `pause` (awaited between chunks of lines) returned false because the answer is no longer wanted.
+ */
+export async function tokenize(
+	path: string | null,
+	lines: Array<string>,
+	pause?: () => Promise<boolean>,
+	named: string | null = null,
+): Promise<Array<LineTokens> | null> {
+	const lang = grammarFor(path, named)
 	if (!lang || lines.reduce((n, l) => n + l.length + 1, 0) > LIMITS.chars) return null
 	const h = await start()
 	if (!(await load(h, lang))) return null

@@ -1,6 +1,7 @@
-import { memo, useMemo } from 'react'
+import { Fragment, memo, useMemo } from 'react'
 import { findHiddenChars } from '../../shared/hiddenChars.ts'
-import { KINDS, pieces, type LineTokens } from './syntax.ts'
+import { KINDS, pieces, splitFences, type LineTokens } from './syntax.ts'
+import { useSyntax } from './useSyntax.ts'
 
 /**
  * A line of code, coloured by its language when `tokens` are known (issue #237). With `marks`, hidden and
@@ -55,3 +56,36 @@ export const CodeText = memo(function CodeText({
 		</>
 	)
 })
+
+/**
+ * A fenced code block, coloured by the language it names, else as the file `path` it's about (an AI answer about a
+ * line quotes that file's code without saying so).
+ */
+export function CodeBlock({ lines, lang, path }: { lines: Array<string>; lang: string | null; path: string | null }) {
+	const tokens = useSyntax(path, lines, lang)
+	return (
+		<pre className="code-block">
+			<code>
+				{lines.map((l, i) => (
+					<Fragment key={i}>
+						<CodeText text={l} tokens={tokens?.[i] ?? null} fileStart={false} marks={false} />
+						{i < lines.length - 1 ? '\n' : null}
+					</Fragment>
+				))}
+			</code>
+		</pre>
+	)
+}
+
+/** An AI answer: its prose as written, its fenced code blocks coloured (see CodeBlock). */
+export function AnswerText({ text, path }: { text: string; path: string | null }) {
+	const parts = useMemo(() => splitFences(text), [text])
+	if (!parts.some((p) => p.kind === 'code')) return <span className="selectable">{text}</span>
+	return (
+		<div className="selectable answer-text">
+			{parts.map((p, i) =>
+				p.kind === 'text' ? <Fragment key={i}>{p.text}</Fragment> : <CodeBlock key={i} lines={p.lines} lang={p.lang} path={path} />,
+			)}
+		</div>
+	)
+}

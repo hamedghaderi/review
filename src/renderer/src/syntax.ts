@@ -271,3 +271,41 @@ export function pieces(text: string, tokens: LineTokens | null, marks: Array<{ s
 	}
 	return out
 }
+
+export type Segment = { kind: 'text'; text: string } | { kind: 'code'; lang: string | null; lines: Array<string> }
+
+const FENCE_OPEN = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/
+
+/**
+ * An AI answer cut into its prose and its fenced code blocks, so the code can be shown coloured and the prose exactly
+ * as written. A block left open runs to the end. The line breaks next to a fence belong to it, so the prose around a
+ * block doesn't gain blank lines.
+ */
+export function splitFences(text: string): Array<Segment> {
+	const lines = text.replace(/\r\n?/g, '\n').split('\n')
+	const out: Array<Segment> = []
+	let prose: Array<string> = []
+	const flush = (): void => {
+		if (prose.some((l) => l.trim())) out.push({ kind: 'text', text: prose.join('\n').replace(/^\n+|\n+$/g, '') })
+		prose = []
+	}
+	for (let i = 0; i < lines.length; i++) {
+		const open = FENCE_OPEN.exec(lines[i])
+		if (!open) {
+			prose.push(lines[i])
+			continue
+		}
+		flush()
+		const code: Array<string> = []
+		const close = open[1][0]
+		const min = open[1].length
+		for (i++; i < lines.length; i++) {
+			const t = lines[i].trim()
+			if (t.length >= min && [...t].every((c) => c === close)) break
+			code.push(lines[i])
+		}
+		out.push({ kind: 'code', lang: open[2] || null, lines: code })
+	}
+	flush()
+	return out
+}

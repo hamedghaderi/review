@@ -813,6 +813,91 @@ input[type='checkbox'] {
 .tk-deleted {
 	color: var(--del-fg);
 }
+
+/* A fenced code block in an AI answer, coloured like the diff. In Markdown it has .md-body's look. */
+.answer-text .code-block {
+	margin: 4px 0;
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+	font: 12px / 1.5 var(--mono);
+	white-space: pre;
+	overflow-x: auto;
+	tab-size: 4;
+}
+.answer-text .code-block code {
+	font: inherit;
+	background: none;
+	padding: 0;
+}
+
+/*
+ * Code blocks in GitHub's HTML (comments, descriptions) come already split by GitHub into pl-* spans; these give them
+ * the theme's code colours. Turning colours off in Appearance turns these off too.
+ */
+.md-body .pl-c,
+.md-body .pl-sg {
+	color: var(--syn-comment);
+}
+.md-body .pl-k,
+.md-body .pl-pse,
+.md-body .pl-ml {
+	color: var(--syn-keyword);
+}
+.md-body .pl-s,
+.md-body .pl-pds,
+.md-body .pl-sr {
+	color: var(--syn-string);
+}
+.md-body .pl-c1,
+.md-body .pl-cce,
+.md-body .pl-s .pl-v {
+	color: var(--syn-constant);
+}
+.md-body .pl-e,
+.md-body .pl-en {
+	color: var(--syn-function);
+}
+.md-body .pl-v,
+.md-body .pl-smw {
+	color: var(--syn-type);
+}
+.md-body .pl-ent {
+	color: var(--syn-tag);
+}
+.md-body .pl-s .pl-s1,
+.md-body .pl-smi {
+	color: var(--text);
+}
+.md-body .pl-mh,
+.md-body .pl-mh .pl-en,
+.md-body .pl-ms {
+	color: var(--syn-function);
+	font-weight: 600;
+}
+.md-body .pl-mb {
+	font-weight: 600;
+}
+.md-body .pl-mi {
+	font-style: italic;
+}
+.md-body .pl-corl {
+	color: var(--syn-string);
+	text-decoration: underline;
+}
+.md-body .pl-mi1 {
+	color: var(--add-fg);
+}
+.md-body .pl-md {
+	color: var(--del-fg);
+}
+[data-syntax='off'] .md-body [class*='pl-'] {
+	color: inherit;
+	font-weight: inherit;
+	font-style: inherit;
+	text-decoration: inherit;
+}
 .line.add {
 	background: var(--add-bg);
 }

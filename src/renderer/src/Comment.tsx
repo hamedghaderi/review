@@ -20,6 +20,7 @@ import { useMentionCommand } from './Mention.tsx'
 import { asksYou } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
+import { AnswerText } from './CodeText.tsx'
 
 export function anchorLabel(a: Anchor): string {
 	if (a.side === null || a.startLine === null || a.endLine === null) return 'File comment'
@@ -334,7 +335,7 @@ export function QuestionCard({ question: q, pending, disabled, modelPicker, onAs
 									{m.model}
 								</div>
 							)}
-							<span className="selectable">{m.text}</span>
+							<AnswerText text={m.text} path={q.anchor.newPath ?? q.anchor.oldPath} />
 						</article>
 					))}
 					{pending && (

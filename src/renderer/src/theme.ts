@@ -25,6 +25,9 @@ function apply(t: ThemeSettings): void {
 	root.style.setProperty('--sans', fontStack(t.uiFont, 'var(--sans-default)'))
 	root.style.setProperty('--code-size', `${t.codeSize}px`)
 	root.style.setProperty('--code-line', `${Math.round((t.codeSize * 5) / 3)}px`) // 20px at the default 12px
+	// GitHub's own colouring of code in comments (pl-* classes) follows the setting through CSS.
+	if (t.syntax) delete root.dataset.syntax
+	else root.dataset.syntax = 'off'
 	if (t.syntax !== syntax) {
 		syntax = t.syntax
 		for (const f of syntaxListeners) f()

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { THEMES } from '../src/shared/theme.ts'
-import { KINDS, languageFor, pieces, sideLines, type LineTokens } from '../src/renderer/src/syntax.ts'
-import { knownLanguage, tokenize } from '../src/renderer/src/syntaxEngine.ts'
+import { KINDS, languageFor, pieces, sideLines, splitFences, type LineTokens } from '../src/renderer/src/syntax.ts'
+import { grammarFor, knownLanguage, tokenize } from '../src/renderer/src/syntaxEngine.ts'
 import type { Hunk } from '../src/shared/types.ts'
 
 // A line's tokens as kind:text pairs, '.' for plain.
@@ -135,6 +135,31 @@ test('syntax: a line is cut into runs of one kind, marked characters whole, and 
 	assert.deepEqual(show('', tok()), [])
 })
 
+test('syntax: an AI answer keeps its prose as written and gives each fenced block its language', () => {
+	assert.deepEqual(splitFences('Plain answer.\nTwo lines.'), [{ kind: 'text', text: 'Plain answer.\nTwo lines.' }])
+	assert.deepEqual(splitFences('Change it to:\n\n```py\nif x:\n    y()\n```\n\nThen run it.'), [
+		{ kind: 'text', text: 'Change it to:' },
+		{ kind: 'code', lang: 'py', lines: ['if x:', '    y()'] },
+		{ kind: 'text', text: 'Then run it.' },
+	])
+	// No language, a longer fence holding a shorter one, and a block left open.
+	assert.deepEqual(splitFences('````\n```ts\nx\n```\n````'), [{ kind: 'code', lang: null, lines: ['```ts', 'x', '```'] }])
+	assert.deepEqual(splitFences('a\r\n~~~ suggestion\r\nb'), [
+		{ kind: 'text', text: 'a' },
+		{ kind: 'code', lang: 'suggestion', lines: ['b'] },
+	])
+})
+
+test('syntax: a block is read in the language it names, else as the file it is about', () => {
+	assert.equal(grammarFor('src/a.py', 'ts'), 'typescript')
+	assert.equal(grammarFor('src/a.py', 'TSX'), 'tsx')
+	assert.equal(grammarFor('src/a.py', null), 'python')
+	assert.equal(grammarFor('src/a.py', 'suggestion'), 'python')
+	assert.equal(grammarFor('src/a.py', 'text'), null)
+	assert.equal(grammarFor(null, null), null)
+	assert.equal(grammarFor(null, 'go'), 'go')
+})
+
 // The colours each theme gives code, light and dark, as styles.css and themes.css set them on the window.
 function themeColours(): Map<string, Record<string, string>> {
 	const css = ['styles.css', 'themes.css']
@@ -194,7 +219,7 @@ const contrast = (a: string, b: string): number => {
 	return (x + 0.05) / (y + 0.05)
 }
 
-test('syntax: every theme colours code in both light and dark, readable on plain, added and deleted lines', () => {
+test('syntax: every theme colours code in both light and dark, readable on plain, added and deleted lines and in code blocks', () => {
 	const colours = themeColours()
 	const syn = ['comment', 'keyword', 'string', 'constant', 'function', 'type', 'tag', 'attr']
 	const failures: Array<string> = []
@@ -204,7 +229,7 @@ test('syntax: every theme colours code in both light and dark, readable on plain
 		for (const k of syn) {
 			const fg = vars[`--syn-${k}`]
 			assert.match(fg ?? '', /^#[0-9a-f]{6}$/i, `${name} --syn-${k}`)
-			for (const bg of ['--bg', '--add-bg', '--del-bg']) {
+			for (const bg of ['--bg', '--add-bg', '--del-bg', '--hover']) {
 				const c = contrast(fg, vars[bg])
 				if (c < min) failures.push(`${name}: --syn-${k} ${fg} on ${bg} ${vars[bg]} is ${c.toFixed(2)}`)
 			}

@@ -8,7 +8,7 @@ let worker: Worker | null | undefined // undefined: not started; null: couldn't 
 let nextId = 1
 const waiting = new Map<number, (t: Tokens) => void>()
 
-// The last few files' colours, so going back to a file shows them at once. Keyed by path and text.
+// The last few files' colours, so going back to a file shows them at once. Keyed by path, language and text.
 const cache = new Map<string, Tokens>()
 const CACHE_SIZE = 12
 
@@ -40,14 +40,18 @@ function remember(key: string, tokens: Tokens): void {
 
 /**
  * Each line's syntax tokens for `lines` of the file at `path` (issue #237), or null while they're worked out, when the
- * file's language isn't known, or when colouring is off in Settings · Appearance.
+ * language isn't known, or when colouring is off in Settings · Appearance. `lang`: the language a code block names,
+ * which wins over the path (see grammarFor).
  */
-export function useSyntax(path: string | null, lines: Array<string> | null): Tokens {
+export function useSyntax(path: string | null, lines: Array<string> | null, lang: string | null = null): Tokens {
 	const on = useSyntaxColours()
-	const key = useMemo(() => (on && path && lines?.length ? `${path}\0${lines.join('\n')}` : null), [on, path, lines])
+	const key = useMemo(
+		() => (on && (path || lang) && lines?.length ? `${path ?? ''}\0${lang ?? ''}\0${lines.join('\n')}` : null),
+		[on, path, lang, lines],
+	)
 	const [got, setGot] = useState<{ key: string; tokens: Tokens } | null>(null)
 	useEffect(() => {
-		if (!key || cache.has(key) || !path || !lines) return
+		if (!key || cache.has(key) || !lines) return
 		const w = start()
 		if (!w) return
 		const id = nextId++
@@ -56,12 +60,12 @@ export function useSyntax(path: string | null, lines: Array<string> | null): Tok
 			remember(key, tokens)
 			if (live) setGot({ key, tokens })
 		})
-		w.postMessage({ id, path, lines })
+		w.postMessage({ id, path, lang, lines })
 		return () => {
 			live = false
 			if (waiting.delete(id)) w.postMessage({ cancel: id })
 		}
-	}, [key]) // eslint-disable-line react-hooks/exhaustive-deps -- path and lines are in the key
+	}, [key]) // eslint-disable-line react-hooks/exhaustive-deps -- path, lang and lines are in the key
 	if (!key) return null
 	if (got?.key === key) return got.tokens
 	return cache.get(key) ?? null
