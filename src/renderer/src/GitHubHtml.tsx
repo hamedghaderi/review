@@ -7,8 +7,8 @@ const URI_WITH_MEDIA = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matri
 
 /**
  * HTML that GitHub rendered from Markdown, sanitised again here: no scripts, styles, forms or event handlers. Links
- * open in your browser and show where they go; images become links, since the window loads no remote images, and
- * images with an empty alt (decorative, like a bot's severity icon) are left out.
+ * open in your browser and show where they go; images and videos become links, since the window loads no remote
+ * media. Small images with an empty alt (decorative, like a bot's 16px severity icon) are left out.
  * `media`: Review's own release notes, whose images and videos the main process serves as `review-media:` (see
  * ReleaseMedia); those are shown, and anything else is still a link. Never set for text written by other people.
  * `className`: added to `md-body`, e.g. to fit it inside a comment card.
@@ -30,7 +30,8 @@ export function GitHubHtml({
 		if (!el) return
 		const frag = DOMPurify.sanitize(html, {
 			USE_PROFILES: { html: true },
-			FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'audio', ...(media ? [] : ['video', 'source'])],
+			// Videos are kept here only so the loop below can turn them into links; none from outside the app plays.
+			FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'audio'],
 			...(media ? { ALLOWED_URI_REGEXP: URI_WITH_MEDIA } : {}),
 			RETURN_DOM_FRAGMENT: true,
 		})
@@ -42,6 +43,8 @@ export function GitHubHtml({
 				a.setAttribute('title', href)
 			} else a.removeAttribute('href') // in-page anchors and other schemes: text only
 		}
+		// A <picture>'s other files: its <img> stands for it below.
+		for (const s of frag.querySelectorAll('picture > source')) s.remove()
 		const label = (alt: string | null | undefined, kind: string) => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
 		for (const img of frag.querySelectorAll('img')) {
 			const src = img.getAttribute('src') ?? ''
@@ -55,31 +58,25 @@ export function GitHubHtml({
 			// GitHub wraps images in a link to the full-size file; keep a single link, or none.
 			const parent = img.parentElement
 			const wrapped = parent instanceof HTMLAnchorElement && parent.childNodes.length === 1
-			if (img.getAttribute('alt')?.trim() === '') {
+			if (decorative(img)) {
 				;(wrapped ? parent : img).remove()
 				continue
 			}
-			const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
-			link.textContent = label(img.getAttribute('alt'), 'image')
-			link.className = 'desc-image'
-			if (link instanceof HTMLAnchorElement) {
-				link.href = src
-				link.target = '_blank'
-				link.rel = 'noreferrer noopener'
-				link.title = 'Images aren’t loaded in the app. Opens in your browser.'
-			}
+			const link = mediaLink(src, label(img.getAttribute('alt'), 'image'), 'Images aren’t loaded in the app. Opens in your browser.')
 			if (wrapped) parent.replaceWith(link)
 			else img.replaceWith(link)
 		}
 		for (const video of frag.querySelectorAll('video')) {
 			const sources = [video.getAttribute('src'), ...[...video.querySelectorAll('source')].map((s) => s.getAttribute('src'))]
-			const own = sources.filter((s): s is string => !!s && MEDIA.test(s))
-			// Only the release's own files play; a video from anywhere else isn't loaded.
-			for (const s of video.querySelectorAll('source')) if (!MEDIA.test(s.getAttribute('src') ?? '')) s.remove()
+			const own = media ? sources.filter((s): s is string => !!s && MEDIA.test(s)) : []
+			// Only the release's own files play; a video from anywhere else isn't loaded, only linked (an attachment
+			// GitHub shows inline would otherwise vanish from the comment).
 			if (!own.length) {
-				video.replaceWith(Object.assign(document.createElement('span'), { className: 'desc-image', textContent: label(null, 'video') }))
+				const web = sources.find((s): s is string => !!s && /^https?:\/\//i.test(s)) ?? ''
+				video.replaceWith(mediaLink(web, label(null, 'video'), 'Videos aren’t played in the app. Opens in your browser.'))
 				continue
 			}
+			for (const s of video.querySelectorAll('source')) if (!MEDIA.test(s.getAttribute('src') ?? '')) s.remove()
 			if (video.getAttribute('src') && !MEDIA.test(video.getAttribute('src')!)) video.removeAttribute('src')
 			video.removeAttribute('autoplay')
 			video.removeAttribute('loop')
@@ -100,18 +97,47 @@ export function GitHubHtml({
 	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}${className ? ` ${className}` : ''}`} />
 }
 
+/** A link to an image or video that isn't loaded in the app, or plain text when its address isn't a web one. */
+function mediaLink(src: string, text: string, title: string): HTMLElement {
+	const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
+	link.textContent = text
+	link.className = 'desc-image'
+	if (link instanceof HTMLAnchorElement) {
+		link.href = src
+		link.target = '_blank'
+		link.rel = 'noreferrer noopener'
+		link.title = title
+	}
+	return link
+}
+
+/**
+ * An icon, not content: an empty alt and a declared size no bigger than an icon's (CodeRabbit's are 16 or 20px). A
+ * plain `![](screenshot.png)` also has an empty alt but no size, so it stays as a link.
+ */
+function decorative(img: HTMLImageElement): boolean {
+	const size = (a: string) => Number(img.getAttribute(a) || NaN)
+	return img.getAttribute('alt')?.trim() === '' && size('width') <= ICON_PX && size('height') <= ICON_PX
+}
+
+const ICON_PX = 32
+const BLOCKS =
+	'address,article,aside,blockquote,dd,details,div,dl,dt,figcaption,figure,h1,h2,h3,h4,h5,h6,hr,li,ol,p,pre,section,summary,table,tr,ul'
 const texts = new Map<string, string>()
 
 /**
  * A comment as plain text, for one-line and clamped previews: the words of GitHub's HTML when there is some (no
- * Markdown marks, tags or hidden `<!-- -->` notes), else the body as written without its HTML comments. The HTML is
- * parsed in an inert document, so nothing in it loads or runs.
+ * Markdown marks, tags or hidden `<!-- -->` notes), else the body as written without the HTML comments that start a
+ * line (a `<!--` inside a sentence or code span is text). Block elements end a line even when GitHub put no newline
+ * between them. The HTML is parsed in an inert document, so nothing in it loads or runs.
  */
 export function commentText(c: { body: string; html?: string }): string {
-	if (!c.html) return c.body.replace(/<!--[\s\S]*?(?:-->|$)/g, '').trim()
+	if (!c.html) return c.body.replace(/(^|\n)[ \t]*<!--[\s\S]*?-->/g, '$1').trim()
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const doc = new DOMParser().parseFromString(c.html, 'text/html')
+		for (const br of doc.body.querySelectorAll('br')) br.replaceWith('\n')
+		for (const block of doc.body.querySelectorAll(BLOCKS)) block.after('\n')
 		t = (doc.body.textContent ?? '')
 			.split('\n')
 			.map((l) => l.trim())

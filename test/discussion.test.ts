@@ -343,7 +343,9 @@ test('bots are recognised from GitHub’s actor type (GraphQL) or user type (RES
 })
 
 test('GitHub’s HTML comes along with the body, whole or not at all, from GraphQL and REST', () => {
-	const big = `<p>${'x'.repeat(HTML_LIMIT)}</p>`
+	assert.equal(HTML_LIMIT, 200_000)
+	const fits = 'x'.repeat(200_000)
+	const over = 'x'.repeat(200_001)
 	const comment = (id: string, bodyHTML: string | null) => ({
 		id,
 		body: '**b**',
@@ -375,8 +377,13 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 						diffSide: 'RIGHT',
 						subjectType: 'LINE',
 						comments: {
-							totalCount: 3,
-							nodes: [comment('C1', '<details><summary>Fix</summary><p>b</p></details>'), comment('C2', big), comment('C3', '  ')],
+							totalCount: 4,
+							nodes: [
+								comment('C1', '<details><summary>Fix</summary><p>b</p></details>'),
+								comment('C2', over),
+								comment('C3', '  '),
+								comment('C4', fits),
+							],
 						},
 					},
 				],
@@ -400,10 +407,14 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 	])
 	assert.deepEqual(
 		g.threads[0].comments.map((c) => c.html),
-		['<details><summary>Fix</summary><p>b</p></details>', undefined, undefined],
-		'too large or blank: plain text instead',
+		['<details><summary>Fix</summary><p>b</p></details>', undefined, undefined, fits],
+		'over 200,000 characters or blank: plain text instead',
 	)
-	assert.equal(g.threads[0].comments[1].body, '**b**', 'the body as written stays for the AI')
+	assert.deepEqual(
+		g.threads[0].comments.map((c) => c.body),
+		['**b**', '**b**', '**b**', '**b**'],
+		'the body as written stays for the AI, with or without HTML',
+	)
 	assert.equal(g.reviews[0].html, '<p><strong>r</strong></p>')
 	assert.equal(g.conversation[0].html, '<p><strong>b</strong></p>')
 
@@ -434,6 +445,7 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 		[{ node_id: 'I1', user: { login: 'u' }, author_association: 'NONE', body: 'y', created_at: null, html_url: null }],
 	)
 	assert.equal(rest.threads[0].comments[0].html, '<p><code>x</code></p>')
+	assert.equal(rest.threads[0].comments[0].body, '`x`')
 	assert.equal(rest.reviews[0].html, '<p>r</p>')
 	assert.equal(rest.conversation[0].html, undefined, 'no body_html: plain text')
 })
