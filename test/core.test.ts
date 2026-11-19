@@ -86,6 +86,32 @@ test('gaps, expansion and text-selection normalisation use source line numbers',
 	assert.deepEqual(linesToReveal(gaps, { side: 'old', start: 8, end: 8 }, 9), [9])
 })
 
+test("a hunk's @@ row shows only while the line just above it is hidden", () => {
+	const hunk = (start: number, section: string): Hunk => ({
+		oldStart: start,
+		oldCount: 1,
+		newStart: start,
+		newCount: 1,
+		section,
+		lines: [{ kind: 'ctx', oldNo: start, newNo: start, text: 'x' }],
+	})
+	const hunks = [hunk(1, 'top'), hunk(5, 'class TableInfo')]
+	const file = ['x', 'b', 'c', 'd', 'x', 'f']
+	const gaps = computeGaps(hunks, file.length)
+	const headers = (revealed: Array<number>) =>
+		buildRows(hunks, gaps, new Set(revealed), file).rows.flatMap((r) => (r.t === 'hunk' ? [r.hunk.section] : []))
+	assert.deepEqual(headers([]), ['top', 'class TableInfo'])
+	assert.deepEqual(headers([2, 3]), ['top', 'class TableInfo'], 'the line just above is hidden: the row stays')
+	assert.deepEqual(headers([3, 4]), ['top'], 'expanded upwards from the hunk: line 2 is still hidden, but behind its own gap row')
+	assert.deepEqual(headers([2, 3, 4]), ['top'], 'all shown')
+	assert.deepEqual(headers([2, 3, 4, 6]), ['top'], 'a hunk at line 1 has no gap above it and keeps its row')
+	// Without the file's lines nothing can be shown, so every row stays.
+	assert.deepEqual(
+		buildRows(hunks, gaps, new Set([2, 3, 4]), null).rows.flatMap((r) => (r.t === 'hunk' ? [r.hunk.section] : [])),
+		['top', 'class TableInfo'],
+	)
+})
+
 test('file tree compacts single-child folders and keeps every file', () => {
 	const f = (p: string) => ({
 		key: p,

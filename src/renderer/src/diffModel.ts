@@ -16,7 +16,9 @@ export interface Range {
 
 /**
  * Builds rendered rows: gap i precedes hunk i, the last gap trails. Revealed gap lines become context rows,
- * remaining hidden runs become gap rows.
+ * remaining hidden runs become gap rows. A hunk's "@@" row marks where lines were left out, so it shows only while the
+ * line just above the hunk is hidden: once that line is shown the code runs straight on, even if lines further up are
+ * still hidden behind their own gap row. A hunk with no gap above it (one starting at line 1) keeps it.
  */
 export function buildRows(
 	hunks: Array<Hunk>,
@@ -28,12 +30,14 @@ export function buildRows(
 	const blocks: Array<number> = []
 	let inBlock = false
 
-	const pushGap = (g: Gap, edge: 'top' | 'mid' | 'bottom'): void => {
+	/** Pushes the gap's rows; true when it has lines and its last one, the line just above the next hunk, is shown. */
+	const pushGap = (g: Gap, edge: 'top' | 'mid' | 'bottom'): boolean => {
 		const to = g.to ?? (fileLines ? fileLines.length : null)
 		if (to === null) {
 			rows.push({ t: 'gap', key: `g${g.from}-`, from: g.from, to: null, offset: g.offset, edge })
-			return
+			return false
 		}
+		let lastHidden = false
 		let runStart: number | null = null
 		const flush = (end: number): void => {
 			if (runStart === null) return
@@ -44,15 +48,19 @@ export function buildRows(
 			if (revealed.has(n) && fileLines && n <= fileLines.length) {
 				flush(n - 1)
 				rows.push({ t: 'line', key: `c${n}`, line: { kind: 'ctx', oldNo: n + g.offset, newNo: n, text: fileLines[n - 1] }, block: null })
-			} else if (runStart === null) runStart = n
+			} else {
+				lastHidden = n === to
+				if (runStart === null) runStart = n
+			}
 		}
 		flush(to)
+		return !lastHidden && to >= g.from
 	}
 
 	hunks.forEach((h, i) => {
 		const g = gaps?.[i]
-		if (g) pushGap(g, i === 0 ? 'top' : 'mid')
-		rows.push({ t: 'hunk', key: `h${h.oldStart},${h.newStart}`, hunk: h })
+		const shown = g ? pushGap(g, i === 0 ? 'top' : 'mid') : false
+		if (!shown) rows.push({ t: 'hunk', key: `h${h.oldStart},${h.newStart}`, hunk: h })
 		inBlock = false
 		h.lines.forEach((line, j) => {
 			const changed = line.kind !== 'ctx'
