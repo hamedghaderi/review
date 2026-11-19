@@ -21,4 +21,5 @@ jobs:
       - run: npm ci
       - run: npm run format:check
       - run: npm run typecheck
-      - run: npm test
+      # A virtual display for the test that runs code in Chromium (an Electron window).
+      - run: xvfb-run -a npm test

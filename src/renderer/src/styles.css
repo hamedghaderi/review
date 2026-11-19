@@ -1069,6 +1069,17 @@ a.ic-state:hover {
 .comment-item.outdated:focus-visible {
 	opacity: 1;
 }
+.comment-item.static {
+	cursor: default; /* only its buttons do anything */
+}
+.comment-item.static:hover {
+	border-color: var(--border);
+}
+.comment-item .read-here {
+	display: flex;
+	gap: 4px;
+	align-self: flex-start;
+}
 .comment-item:disabled {
 	cursor: default;
 }
@@ -5545,6 +5556,94 @@ textarea.style-edit {
 }
 .md-body .desc-image {
 	font-size: 0.9em;
+}
+/* A GitHub comment rendered inside a comment card or the Discussion panel: the card already has its padding. */
+.md-body.gh-html {
+	padding: 0;
+	font-size: inherit;
+}
+.md-body.gh-html > :last-child {
+	margin-bottom: 0;
+}
+/* Text a GitHub comment hides (<!-- notes -->) but the AI reads, shown on request. */
+.hidden-notes {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	margin-top: 4px;
+	color: var(--text-2);
+}
+.hidden-notes-text {
+	flex-basis: 100%;
+	margin: 4px 0 0;
+	padding: 6px 8px;
+	max-height: 240px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--mono);
+	font-size: 12px;
+	background: var(--hover);
+	border-radius: 6px;
+}
+/* GitHub's "Suggested change" box: a table of removed and added lines that relies on GitHub's own classes. Without
+   these the removed line reads like an added one and the indentation is lost. */
+.md-body .js-suggested-changes-blob {
+	margin: 0 0 0.75em;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	overflow: hidden;
+}
+.md-body .js-suggested-changes-blob > .border-bottom {
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border);
+	color: var(--text-2);
+	font-size: 0.9em;
+}
+.md-body .js-suggested-changes-blob table {
+	margin: 0;
+	width: 100%;
+	font-family: var(--mono);
+	font-size: 0.9em;
+}
+.md-body .js-suggested-changes-blob td {
+	border: 0;
+	padding: 1px 8px;
+}
+.md-body .blob-num {
+	width: 1%;
+	text-align: right;
+	white-space: nowrap;
+	color: var(--text-2);
+	user-select: none;
+}
+.md-body .blob-num::before {
+	content: attr(data-line-number);
+}
+.md-body .blob-code-inner {
+	white-space: pre;
+}
+.md-body .blob-marker {
+	user-select: none;
+}
+.md-body .blob-num-deletion {
+	background: var(--del-num);
+}
+.md-body .blob-code-deletion {
+	background: var(--del-bg);
+}
+.md-body .blob-code-deletion .blob-marker {
+	color: var(--del-fg);
+}
+.md-body .blob-num-addition {
+	background: var(--add-num);
+}
+.md-body .blob-code-addition {
+	background: var(--add-bg);
+}
+.md-body .blob-code-addition .blob-marker {
+	color: var(--add-fg);
 }
 
 /* A pull request link waiting for its repository's clone */

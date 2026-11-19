@@ -854,8 +854,9 @@ export interface DiscussionComment {
 	author: string | null // null: deleted account
 	association: string | null // OWNER, MEMBER, CONTRIBUTOR, NONE…
 	bot?: boolean // written by an app or bot account (an AI review bot, Dependabot…); absent: a person, or read before this was
-	body: string
+	body: string // as written: what the AI reads, and what's shown when there's no `html`
 	bodyTruncated: boolean
+	html?: string // GitHub's rendering of the whole body, sanitised again when shown; '': renders as nothing; absent: none or too large
 	createdAt: string | null
 	url: string | null // only github.com links
 	pending: boolean // in the viewer's own unsubmitted review
@@ -913,6 +914,7 @@ export interface DiscussionReview {
 	state: string // passed through as GitHub reports it
 	body: string
 	bodyTruncated: boolean
+	html?: string // see DiscussionComment
 	submittedAt: string | null
 	url: string | null
 }

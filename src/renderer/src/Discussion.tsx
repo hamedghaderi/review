@@ -15,6 +15,9 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
+import { hiddenNotes } from './commentHidden.ts'
+import { commentText, NOTHING_VISIBLE } from './commentHtml.ts'
+import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
@@ -235,7 +238,75 @@ function BotCheckNote({ check }: { check: BotThreadCheck }) {
 	)
 }
 
-/** One GitHub comment inside an inline card: author, time, text. Third-party text: plain text only. */
+/**
+ * A GitHub comment's text. Third-party: GitHub's HTML, sanitised again by GitHubHtml (bots like CodeRabbit write HTML
+ * and folded sections), else the body as written, as plain text. `className` styles the plain-text form.
+ */
+function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boolean; html?: string }; className: string }) {
+	if (c.html !== undefined)
+		return (
+			<>
+				<GitHubHtml html={c.html} empty={NOTHING_VISIBLE} className="gh-html" />
+				<CommentSource c={c} />
+			</>
+		)
+	return (
+		<div className={`${className} selectable`}>
+			{c.body}
+			{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
+		</div>
+	)
+}
+
+/**
+ * Under a comment shown from GitHub's HTML: what the rendering may leave out of what the AI reviewer reads. "HTML notes"
+ * appears when the comment has `<!-- -->` notes (see hiddenNotes); "Source" is always there, the comment as written,
+ * which is exactly what the AI gets (it also holds what no note check catches, like an unused link definition).
+ */
+function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?: string } }) {
+	const [view, setView] = useState<'notes' | 'source' | null>(null)
+	const notes = hiddenNotes(c)
+	const toggle = (v: 'notes' | 'source') => setView((x) => (x === v ? null : v))
+	return (
+		<div className="hidden-notes small">
+			{notes.length > 0 && (
+				<button
+					className="btn small ghost"
+					onClick={() => toggle('notes')}
+					aria-expanded={view === 'notes'}
+					title="HTML comments (<!-- -->) in this comment as written. GitHub hides them, except in code, so you may not have seen them; the AI reviewer reads them all."
+				>
+					{view === 'notes' ? '▾' : '▸'} HTML notes: {notes.length}
+				</button>
+			)}
+			<button
+				className="btn small ghost"
+				onClick={() => toggle('source')}
+				aria-expanded={view === 'source'}
+				title="The comment as written, which is what the AI reviewer reads."
+			>
+				{view === 'source' ? '▾' : '▸'} Source
+			</button>
+			{view === 'notes' && (
+				<pre className="hidden-notes-text selectable">
+					{notes
+						.map((n) =>
+							n.endsWith('-->') ? n : `${n} …(${c.bodyTruncated ? 'cut off: the comment is longer than Review keeps' : 'no closing -->'})`,
+						)
+						.join('\n\n')}
+				</pre>
+			)}
+			{view === 'source' && (
+				<pre className="hidden-notes-text selectable">
+					{c.body}
+					{c.bodyTruncated && '\n…(truncated: the comment is longer than Review keeps)'}
+				</pre>
+			)}
+		</div>
+	)
+}
+
+/** One GitHub comment inside an inline card: author, time, text. */
 export function InlineReply({ c }: { c: DiscussionComment }) {
 	return (
 		<div className="ic-reply">
@@ -249,10 +320,7 @@ export function InlineReply({ c }: { c: DiscussionComment }) {
 					</span>
 				)}
 			</div>
-			<div className="ic-body selectable">
-				{c.body}
-				{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
-			</div>
+			<CommentBody c={c} className="ic-body" />
 		</div>
 	)
 }
@@ -290,11 +358,7 @@ function CommentView({ c }: { c: DiscussionComment }) {
 				{c.pending && <span className="gh-pill">Pending · only you</span>}
 				{c.createdAt && <span className="muted">{new Date(c.createdAt).toLocaleString()}</span>}
 			</div>
-			{/* Third-party text: plain text only. */}
-			<div className="gh-comment-body selectable">
-				{c.body}
-				{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
-			</div>
+			<CommentBody c={c} className="gh-comment-body" />
 		</div>
 	)
 }
@@ -458,6 +522,37 @@ export function ThreadReplyBox({
 }
 
 /** Replies a card leaves out, linked to GitHub. */
+/**
+ * A thread on a file that isn't in this snapshot, so it can't open in the code: its comments open here instead, in
+ * full (folded sections, hidden-text notes), rather than leaving only the preview.
+ */
+function ReadHere({ t, children }: { t: DiscussionThread; children: ReactNode }) {
+	const [open, setOpen] = useState(false)
+	return (
+		<div className="comment-item static">
+			{children}
+			<div className="read-here">
+				<button className="btn small ghost" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
+					{open ? '▾ Hide comments' : '▸ Read here'}
+				</button>
+				{t.url && (
+					<a className="btn small ghost" href={t.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+						↗ GitHub
+					</a>
+				)}
+			</div>
+			{open && (
+				<div className="gh-thread">
+					{t.comments.map((c) => (
+						<CommentView key={c.id} c={c} />
+					))}
+					<MoreOnGitHub t={t} />
+				</div>
+			)}
+		</div>
+	)
+}
+
 export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
 	if (!t.commentsOmitted) return null
 	return <div className="muted small">{count(t.commentsOmitted, 'more reply', 'more replies')} on GitHub.</div>
@@ -498,7 +593,7 @@ export function ThreadCard({
 				<ThreadState t={t} />
 				{asked && <AsksYou />}
 				{from === 0 && <span className="ic-state accent">New since your review</span>}
-				{!open && root && <span className="ellipsis muted">{root.body.split('\n')[0]}</span>}
+				{!open && root && <span className="ellipsis muted">{commentText(root).split('\n')[0]}</span>}
 				{open && root?.createdAt && (
 					<span className="muted small" title={new Date(root.createdAt).toLocaleString()}>
 						{ago(root.createdAt)}
@@ -523,12 +618,7 @@ export function ThreadCard({
 						</div>
 					)}
 					{t.unplaced && t.diffHunk && <pre className="outdated-code">{hunkTail(t.diffHunk)}</pre>}
-					{root && (
-						<div className="ic-body selectable">
-							{root.body}
-							{root.bodyTruncated && <span className="muted"> …(truncated)</span>}
-						</div>
-					)}
+					{root && <CommentBody c={root} className="ic-body" />}
 					{check && <BotCheckNote check={check} />}
 					{replies.map((c, i) => (
 						<div key={c.id}>
@@ -742,8 +832,8 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 							const from = firstNew(t.comments, mine)
 							const fresh = from > 0 ? t.comments.slice(from).filter((c) => c.author !== mine?.viewer) : []
 							const last = fresh[fresh.length - 1]
-							return (
-								<button key={t.id} className="comment-item" disabled={!t.fileKey} onClick={() => onOpen(t)}>
+							const row = (
+								<>
 									<div className="ci-loc">
 										<span className="mono ellipsis">{t.path}</span>
 										<span className="muted small nowrap">{placeLabel(t)}</span>
@@ -759,11 +849,11 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 										{!t.placed && t.fileKey && <span className="gh-pill">Listed with the file</span>}
 									</div>
 									<div className="ci-body">
-										<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0]?.body}
+										<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0] && commentText(t.comments[0])}
 									</div>
 									{last && (
 										<div className="ci-body ci-new">
-											<b>{last.author ?? 'unknown user'}:</b> {last.body}
+											<b>{last.author ?? 'unknown user'}:</b> {commentText(last)}
 										</div>
 									)}
 									{t.comments.length + t.commentsOmitted > 1 && (
@@ -772,7 +862,16 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 											{fresh.length ? `, ${fresh.length} new` : ''}
 										</div>
 									)}
+								</>
+							)
+							return t.fileKey ? (
+								<button key={t.id} className="comment-item" onClick={() => onOpen(t)}>
+									{row}
 								</button>
+							) : (
+								<ReadHere key={t.id} t={t}>
+									{row}
+								</ReadHere>
 							)
 						})}
 					</section>
@@ -796,7 +895,7 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 										</a>
 									)}
 								</div>
-								{r.body && <div className="gh-comment-body selectable">{r.body}</div>}
+								{r.body && <CommentBody c={r} className="gh-comment-body" />}
 							</div>
 						))}
 					</section>

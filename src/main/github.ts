@@ -46,6 +46,7 @@ const PAGE_SIZE = 50
 const INBOX_SIZE = 50 // per part of the Inbox (requested, reviewed)
 const SEARCH_CAP = 1000 // GitHub search never returns more than 1,000 results per query
 const TIMEOUT_MS = 20_000
+const WITH_HTML = 'application/vnd.github.full+json' // REST bodies as written plus GitHub's HTML (`body_html`)
 // Fine-grained tokens (metadata:read is implied). Browsing needs read; publishing reviews needs write. Actions read
 // lets the AI review read why a CI job failed.
 export const TOKEN_URL =
@@ -1000,16 +1001,19 @@ export class GitHubService {
 		return res
 	}
 
-	private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+	/** `accept`: another media type, e.g. full+json to get `body_html` next to `body`. Cached apart from the default. */
+	private async get<T>(path: string, signal?: AbortSignal, accept?: string): Promise<T> {
 		const url = `${this.base}${path}`
-		const cached = this.etags.get(url)
-		const res = await this.request(url, { method: 'GET', headers: cached ? { 'if-none-match': cached.etag } : {} }, signal)
+		const key = accept ? `${accept} ${url}` : url
+		const cached = this.etags.get(key)
+		const headers: Record<string, string> = { ...(accept ? { accept } : {}), ...(cached ? { 'if-none-match': cached.etag } : {}) }
+		const res = await this.request(url, { method: 'GET', headers }, signal)
 		if (res.status === 304 && cached) return cached.body as T
 		const body = (await res.json()) as T
 		const etag = res.headers.get('etag')
 		if (etag) {
 			if (this.etags.size > 500) this.etags.delete(this.etags.keys().next().value!)
-			this.etags.set(url, { etag, body })
+			this.etags.set(key, { etag, body })
 		}
 		return body
 	}
@@ -1259,13 +1263,17 @@ fragment LinkedIssue on Issue {
 			const comments: Array<RestReviewComment> = []
 			let page = 1
 			for (; page <= 5; page++) {
-				const batch = await this.get<Array<RestReviewComment>>(`/repos/${repo}/pulls/${number}/comments?per_page=100&page=${page}`, signal)
+				const batch = await this.get<Array<RestReviewComment>>(
+					`/repos/${repo}/pulls/${number}/comments?per_page=100&page=${page}`,
+					signal,
+					WITH_HTML,
+				)
 				comments.push(...batch)
 				if (batch.length < 100) break
 			}
 			const [reviews, issue] = await Promise.all([
-				this.get<Array<RestReview>>(`/repos/${repo}/pulls/${number}/reviews?per_page=100`, signal),
-				this.get<Array<RestIssueComment>>(`/repos/${repo}/issues/${number}/comments?per_page=100`, signal),
+				this.get<Array<RestReview>>(`/repos/${repo}/pulls/${number}/reviews?per_page=100`, signal, WITH_HTML),
+				this.get<Array<RestIssueComment>>(`/repos/${repo}/issues/${number}/comments?per_page=100`, signal, WITH_HTML),
 			])
 			return fromRest(pr, comments, page > 5, reviews, issue, this.login)
 		}

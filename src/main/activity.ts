@@ -36,6 +36,9 @@ export interface RawThread {
 }
 
 export const BODY_LIMIT = 20_000
+// GitHub's HTML for a comment runs several times the Markdown (CodeRabbit's folded diffs especially). Past this it is
+// dropped and the comment shows as plain text, as before.
+const HTML_LIMIT = 200_000
 export const THREAD_PAGES = 10 // 50 threads each
 export const COMMENTS_PER_THREAD = 30
 export const LIST_LIMIT = 100 // reviews and conversation comments
@@ -43,6 +46,16 @@ export const LIST_LIMIT = 100 // reviews and conversation comments
 export function body(text: string | null | undefined): { body: string; bodyTruncated: boolean } {
 	const t = text ?? ''
 	return t.length > BODY_LIMIT ? { body: t.slice(0, BODY_LIMIT), bodyTruncated: true } : { body: t, bodyTruncated: false }
+}
+
+/**
+ * GitHub's own rendering of a body, kept whole or not at all: cut HTML can't be shown faithfully. Sanitised again when
+ * shown. A rendering with nothing in it is kept as '' (a body of only hidden `<!-- -->` notes shows nothing on GitHub
+ * either), apart from a missing one, which falls back to the body as written.
+ */
+export function html(h: string | null | undefined): { html?: string } {
+	if (typeof h !== 'string' || h.length > HTML_LIMIT) return {}
+	return { html: h.trim() ? h : '' }
 }
 
 /** Links are shown only when they point at github.com, so a crafted comment can't hand the viewer another site. */
@@ -74,17 +87,17 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
           path line startLine originalLine originalStartLine diffSide subjectType
           comments(first: ${COMMENTS_PER_THREAD}) {
             totalCount
-            nodes { id body author { login __typename } authorAssociation createdAt url state diffHunk originalCommit { oid } }
+            nodes { id body bodyHTML author { login __typename } authorAssociation createdAt url state diffHunk originalCommit { oid } }
           }
         }
       }
       reviews(last: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login __typename } authorAssociation state body submittedAt url commit { oid } }
+        nodes { id author { login __typename } authorAssociation state body bodyHTML submittedAt url commit { oid } }
       }
       comments(first: ${LIST_LIMIT}) @include(if: $first) {
         totalCount
-        nodes { id author { login __typename } authorAssociation body createdAt url }
+        nodes { id author { login __typename } authorAssociation body bodyHTML createdAt url }
       }
     }
   }
@@ -93,6 +106,7 @@ export const ACTIVITY_QUERY = `query($owner: String!, $name: String!, $number: I
 interface GqlComment {
 	id: string
 	body: string
+	bodyHTML?: string | null
 	author: { login: string; __typename?: string } | null // __typename "Bot" for apps
 	authorAssociation?: string | null
 	createdAt: string | null
@@ -134,6 +148,7 @@ export interface GqlActivity {
 					authorAssociation?: string | null
 					state: string
 					body: string
+					bodyHTML?: string | null
 					submittedAt: string | null
 					url: string
 					commit?: { oid: string } | null
@@ -151,6 +166,7 @@ function gqlComment(c: GqlComment): DiscussionComment {
 		association: c.authorAssociation ?? null,
 		...(c.author?.__typename === 'Bot' ? { bot: true } : {}),
 		...body(c.body),
+		...html(c.bodyHTML),
 		createdAt: c.createdAt,
 		url: safeUrl(c.url),
 		pending: c.state === 'PENDING',
@@ -214,6 +230,7 @@ export function fromGraphql(
 				...(r.author?.__typename === 'Bot' ? { bot: true } : {}),
 				state: r.state,
 				...body(r.body),
+				...html(r.bodyHTML),
 				submittedAt: r.submittedAt,
 				url: safeUrl(r.url),
 			})),
@@ -257,6 +274,7 @@ export interface RestReviewComment {
 	user: { login: string; type?: string } | null // type "Bot" for apps
 	author_association: string | null
 	body: string
+	body_html?: string | null // with the full+json media type
 	created_at: string | null
 	html_url: string | null
 }
@@ -267,6 +285,7 @@ export interface RestReview {
 	author_association?: string | null
 	state: string
 	body: string | null
+	body_html?: string | null // with the full+json media type
 	submitted_at: string | null
 	html_url: string | null
 	commit_id?: string | null
@@ -277,6 +296,7 @@ export interface RestIssueComment {
 	user: { login: string; type?: string } | null // type "Bot" for apps
 	author_association: string | null
 	body: string | null
+	body_html?: string | null // with the full+json media type
 	created_at: string | null
 	html_url: string | null
 }
@@ -300,6 +320,7 @@ export function fromRest(
 		user: { login: string; type?: string } | null
 		author_association: string | null
 		body: string | null
+		body_html?: string | null
 		created_at: string | null
 		html_url: string | null
 	}): DiscussionComment => ({
@@ -308,6 +329,7 @@ export function fromRest(
 		association: c.author_association,
 		...(c.user?.type === 'Bot' ? { bot: true } : {}),
 		...body(c.body),
+		...html(c.body_html),
 		createdAt: c.created_at,
 		url: safeUrl(c.html_url),
 		pending: false,
@@ -346,6 +368,7 @@ export function fromRest(
 			...(r.user?.type === 'Bot' ? { bot: true } : {}),
 			state: r.state,
 			...body(r.body),
+			...html(r.body_html),
 			submittedAt: r.submitted_at,
 			url: safeUrl(r.html_url),
 		})),
