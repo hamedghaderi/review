@@ -15,7 +15,8 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
-import { commentText, hiddenNotes, NOTHING_VISIBLE } from './commentHtml.ts'
+import { hiddenNotes } from './commentHidden.ts'
+import { commentText, NOTHING_VISIBLE } from './commentHtml.ts'
 import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
@@ -273,7 +274,7 @@ function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?
 					className="btn small ghost"
 					onClick={() => toggle('notes')}
 					aria-expanded={view === 'notes'}
-					title="Text in this comment that GitHub doesn't show (HTML comments). The AI reviewer reads it."
+					title="HTML comments (<!-- -->) in this comment as written. GitHub hides them unless they're inside code; the AI reviewer reads them all."
 				>
 					{view === 'notes' ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
 				</button>

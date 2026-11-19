@@ -1,5 +1,4 @@
 import DOMPurify, { type Config } from 'dompurify'
-import { notesNotShown } from './commentHidden.ts'
 import { webUrl } from './commentLinks.ts'
 
 /**
@@ -22,7 +21,8 @@ export const sanitizeConfig = (media: boolean): Config => ({
 })
 
 // Elements that show something with no text in them, so a comment holding one isn't empty.
-export const SHOWS_WITHOUT_TEXT = 'img, video, hr, input, details' // a <details> with no <summary> still reads "Details"
+// A <details> with no <summary> still reads "Details"; a numbered list item, even empty, shows its number.
+export const SHOWS_WITHOUT_TEXT = 'img, video, hr, input, details, ol > li'
 /** What a comment that shows nothing says, in the comment and its preview alike. */
 export const NOTHING_VISIBLE = 'No visible text.'
 
@@ -109,13 +109,18 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 		['blob-code-addition', '+'],
 	] as const)
 		for (const cell of root.querySelectorAll(`.${cls}`)) {
-			let target: Element = cell
-			while (target.firstElementChild?.matches(BLOCKS) && !textBefore(target.firstElementChild)) target = target.firstElementChild
-			target.prepend(Object.assign(doc.createElement('span'), { className: 'blob-marker', textContent: `${mark} ` }))
+			firstLine(cell).prepend(Object.assign(doc.createElement('span'), { className: 'blob-marker', textContent: `${mark} ` }))
 		}
 	// A <summary> with nothing to read still opens its section: give it the browser's own label, as when it's missing.
 	for (const summary of root.querySelectorAll('summary'))
 		if (!summary.textContent?.trim() && !summary.querySelector(SHOWS_WITHOUT_TEXT)) summary.textContent = 'Details'
+}
+
+/** Where `el`'s first line of text starts: inside the blocks it opens with, so a mark put there stays on that line. */
+function firstLine(el: Element): Element {
+	let target = el
+	while (target.firstElementChild?.matches(BLOCKS) && !textBefore(target.firstElementChild)) target = target.firstElementChild
+	return target
 }
 
 /** Whether any text comes before `el` within its parent. */
@@ -162,32 +167,10 @@ function decorative(img: Element): boolean {
 const ICON_PX = 32
 const BLOCKS =
 	'address,article,aside,blockquote,dd,details,div,dl,dt,figcaption,figure,h1,h2,h3,h4,h5,h6,hr,li,ol,p,pre,section,summary,table,tr,ul'
-// Per comment object, so they last as long as the discussion they came with and go with it, however many it holds.
-// The HTML is kept with each answer in case an object is reused for another comment.
+// Previews per comment object, so they last as long as the discussion they came with and go with it, however many it
+// holds. The HTML is kept with each one in case an object is reused for another comment.
 const texts = new WeakMap<object, { html: string; text: string }>()
-const notes = new WeakMap<object, { html: string; body: string; found: Array<string> }>()
 
-/**
- * The `<!-- … -->` notes in a comment that GitHub doesn't show but the AI reviewer reads (see notesNotShown), so a
- * note can't carry instructions to the AI unseen. Compared with all the text GitHub renders, folded sections and code
- * included. None when there's no HTML: then the comment is shown as written, notes and all.
- */
-export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
-	if (c.html === undefined || !c.body.includes('<!--')) return []
-	const cached = notes.get(c)
-	if (cached && cached.html === c.html && cached.body === c.body) return cached.found
-	const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
-	// The only place a note as written can show: in code. (Not in an image's alt text, its 🖼 label: DOMPurify drops
-	// any attribute holding `-->`, so the label reads "image".)
-	// Each piece once: a <pre> holds its <code>, so not both. A suggested change's added lines count as code too; its
-	// removed lines come from the file, not the comment, so they show nothing the comment wrote.
-	const canShow = [...body.querySelectorAll('pre, code:not(pre code), .blob-code-inner:not(.blob-code-deletion)')]
-		.map((code) => code.textContent ?? '')
-		.join('\n')
-	const found = notesNotShown(c.body, canShow)
-	notes.set(c, { html: c.html, body: c.body, found })
-	return found
-}
 // Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
 const CODE_SPACE = '\uE000'
 const CODE_BLANK = '\uE001'
@@ -212,7 +195,8 @@ export function commentText(c: { body: string; html?: string }): string {
 		for (const d of body.querySelectorAll('details')) {
 			const summary = [...d.children].find((child) => child.nodeName === 'SUMMARY')
 			if (!d.hasAttribute('open')) d.replaceChildren(summary ?? 'Details')
-			else if (!summary) d.prepend('Details') // open, it still shows the browser's label
+			// Open, it still shows the browser's label, on a line of its own.
+			else if (!summary) d.prepend(Object.assign(body.ownerDocument.createElement('summary'), { textContent: 'Details' }))
 		}
 		standIns(body, body.ownerDocument, false)
 		for (const box of body.querySelectorAll('input[type="checkbox"]')) box.replaceWith(box.hasAttribute('checked') ? '[x] ' : '[ ] ')
@@ -220,7 +204,7 @@ export function commentText(c: { body: string; html?: string }): string {
 		const own = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = own.nextNode(); n; n = own.nextNode())
 			n.nodeValue = n.nodeValue!.replace(/[\uE000-\uE002]/g, (ch) => `${CODE_ESCAPE}${ch.charCodeAt(0) - 0xe000}`)
-		for (const br of body.querySelectorAll('pre br, .blob-code-inner br')) br.replaceWith('\n') // a line break in code
+		for (const br of body.querySelectorAll('pre br, .blob-code-inner br')) br.replaceWith('\n')
 		// Code keeps its spacing and blank lines: written with stand-ins the steps below leave alone, put back at the end.
 		for (const code of body.querySelectorAll('pre, .blob-code-inner'))
 			code.textContent = code
@@ -235,10 +219,11 @@ export function commentText(c: { body: string; html?: string }): string {
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)'))
 			if (cell.previousElementSibling!.textContent!.trim()) cell.before(' · ') // not after an empty cell, like a line number
-		// A numbered list keeps its numbers, from where it starts.
 		for (const ol of body.querySelectorAll('ol')) {
 			const start = Number.parseInt(ol.getAttribute('start') ?? '1', 10)
-			;[...ol.children].filter((li) => li.nodeName === 'LI').forEach((li, i) => li.prepend(`${(Number.isNaN(start) ? 1 : start) + i}. `))
+			;[...ol.children]
+				.filter((li) => li.nodeName === 'LI')
+				.forEach((li, i) => firstLine(li).prepend(`${(Number.isNaN(start) ? 1 : start) + i}. `))
 		}
 		for (const block of body.querySelectorAll(BLOCKS)) {
 			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too

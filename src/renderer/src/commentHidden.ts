@@ -1,32 +1,25 @@
 /**
- * Text in a GitHub comment that GitHub doesn't show but the AI reviewer reads: the comment's `<!-- … -->` notes. No
- * DOM, so it's tested directly; commentHtml's hiddenNotes supplies the text of the comment's code.
+ * Text in a GitHub comment that GitHub may not show but the AI reviewer reads: the comment's `<!-- … -->` notes. No
+ * DOM, so it's tested directly.
  */
 
 /**
- * The `<!-- … -->` notes in `body` (the Markdown as written, which the AI reads) that GitHub doesn't show. GitHub only
- * ever shows a note as written inside code, so `canShow` is the text of the rendering's code: a note found there is
- * shown, once for each time it appears (a marker shown once in code and used once as a note is one hidden note). An
- * example written escaped (`&lt;!--`, or `\<!--` after an odd run of backslashes; `\\` is just a backslash) reads the
- * same on screen but isn't a note, so it can't cancel one. Whitespace is compared loosely, as rendering collapses it.
- * A `<!--` never closed counts when it starts a line: GitHub then hides everything after it (and Review may have cut
- * a long body inside a note). Inside a line it's plain text. Its opening line stands for it when looking in code, so
- * an example in a code block (`<!--` alone on a line) isn't taken for a note hiding the rest of the comment.
+ * The `<!-- … -->` notes in a comment as written (which the AI reads), for the "Hidden text" line under a comment
+ * shown from GitHub's HTML; none when there's no HTML, since then the comment is shown as written, notes and all.
+ *
+ * Every note is listed, even one GitHub shows because it's inside code: telling an example from a real note means
+ * matching it to the rendering, and each way of doing that let a real note go unflagged. A security warning had
+ * better say too much, and Source shows the comment as written to settle it.
+ *
+ * A note is closed anywhere it isn't escaped (`\<!--` after an odd run of backslashes; `\\` is just a backslash;
+ * `&lt;!--` is never one). One never closed counts where it starts a block (a line, also inside a `>` quote or a list
+ * item), since GitHub then hides everything after it; and anywhere at the end of a body Review cut short, which may
+ * have cut a closed note in two. Elsewhere inside a line an unclosed `<!--` is plain text.
  */
-export function notesNotShown(body: string, canShow: string): Array<string> {
-	const loose = (s: string) => s.replace(/\s+/g, ' ').trim()
-	const visible = loose(canShow)
-	const left = new Map<string, number>() // how many more times each note's text is shown
-	// Closed anywhere not escaped (after an even run of backslashes, none included); unclosed only at the start of a
-	// line, with no `-->` after.
-	const notes = body.match(/(?<=(?:^|[^\\])(?:\\\\)*)<!--[\s\S]*?-->|(?<=^|\n) {0,3}<!--(?![\s\S]*?-->)[\s\S]*$/g) ?? []
-	return notes
-		.map((note) => note.trimStart())
-		.filter((note) => {
-			const key = loose(note.endsWith('-->') ? note : note.split('\n')[0])
-			if (!left.has(key)) left.set(key, visible.split(key).length - 1)
-			const n = left.get(key)!
-			left.set(key, n - 1)
-			return n <= 0
-		})
+export function hiddenNotes(c: { body: string; bodyTruncated?: boolean; html?: string }): Array<string> {
+	if (c.html === undefined) return []
+	const unescaped = '(?<=(?:^|[^\\\\])(?:\\\\\\\\)*)'
+	const blockStart = '(?<=(?:^|\\n)[ \\t>*+\\-\\d.)]*)' // a line's start, after any quote and list markers
+	const notes = new RegExp(`${unescaped}<!--[\\s\\S]*?-->|${c.bodyTruncated ? unescaped : blockStart}<!--(?![\\s\\S]*?-->)[\\s\\S]*$`, 'g')
+	return c.body.match(notes) ?? []
 }

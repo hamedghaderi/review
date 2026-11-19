@@ -82,35 +82,10 @@ test(
 )
 
 test(
-	'comment HTML in Chromium: hidden notes and previews, from GitHub-style HTML through the real sanitising',
+	'comment previews in Chromium, from GitHub-style HTML through the real sanitising',
 	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
 	async () => {
 		const icon = (src: string) => `<img src="${src}" width="16" height="16" alt="">`
-		const hidden = {
-			// Escaped examples in prose read like a note on screen but aren't code, so they don't cancel the real one.
-			escaped: {
-				body: 'Example: &lt;!-- draft --&gt; and \\<!-- draft --> too\n\n<!-- draft -->',
-				html: '<p>Example: &lt;!-- draft --&gt; and &lt;!-- draft --&gt; too</p>',
-			},
-			// <pre><code> is one piece of code: the note shown there covers one use, not two.
-			preCode: { body: '```\n<!-- m -->\n```\n\n<!-- m -->', html: '<pre><code>&lt;!-- m --&gt;\n</code></pre>' },
-			// A suggested change's line is code too.
-			suggestion: {
-				body: '```suggestion\n<!-- keep -->\n```',
-				html: '<div class="js-suggested-changes-blob"><table><tr><td class="blob-num"></td><td class="blob-code-inner blob-code-addition">&lt;!-- keep --&gt;</td></tr></table></div>',
-			},
-			codeSpan: { body: 'Use `<!-- x -->` here', html: '<p>Use <code>&lt;!-- x --&gt;</code> here</p>' },
-			// A removed line comes from the file, not the comment: it doesn't show the comment's own note.
-			deletion: {
-				body: '<!-- m -->\n```suggestion\nnew\n```',
-				html: '<table><tr><td class="blob-code-inner blob-code-deletion">&lt;!-- m --&gt;</td></tr><tr><td class="blob-code-inner blob-code-addition">new</td></tr></table>',
-			},
-			// GitHub keeps the alt text, but DOMPurify drops an attribute holding `-->`: the label reads "image".
-			altText: {
-				body: '![<!-- diagram -->](https://github.com/u/d.png)',
-				html: '<p><img src="https://github.com/u/d.png" alt="<!-- diagram -->"></p>',
-			},
-		}
 		const previews = {
 			divider: '<hr>',
 			iconAndDivider: `<p>${icon('https://camo.githubusercontent.com/i')}</p><hr>`,
@@ -120,20 +95,13 @@ test(
 			wrappedSuggestion:
 				'<table><tr><td class="blob-num"></td><td class="blob-code-inner blob-code-addition"><div>return 1</div></td></tr></table>',
 			blankSummary: '<details><summary> </summary><p>folded</p></details>',
+			openNoSummary: '<details open><p>Fix this</p></details>',
+			itemParagraph: '<ol><li><p>First step</p><p>more</p></li></ol>',
 		}
 		const out = inChromium(`${await bundle('commentHtml.ts')}
 			;({
-				hidden: Object.fromEntries(Object.entries(${JSON.stringify(hidden)}).map(([k, c]) => [k, App.hiddenNotes(c)])),
 				previews: Object.fromEntries(Object.entries(${JSON.stringify(previews)}).map(([k, html]) => [k, App.commentText({ body: '', html })])),
-			})`) as { hidden: Record<string, Array<string>>; previews: Record<string, string> }
-		assert.deepEqual(out.hidden, {
-			escaped: ['<!-- draft -->'],
-			preCode: ['<!-- m -->'],
-			suggestion: [],
-			codeSpan: [],
-			deletion: ['<!-- m -->'],
-			altText: ['<!-- diagram -->'],
-		})
+			})`) as { previews: Record<string, string> }
 		assert.deepEqual(out.previews, {
 			divider: 'Divider',
 			iconAndDivider: 'Divider',
@@ -142,6 +110,8 @@ test(
 			numbered: '3. Build\n4. Repeat step 3',
 			wrappedSuggestion: '+ return 1',
 			blankSummary: 'Details',
+			openNoSummary: 'Details\nFix this',
+			itemParagraph: '1. First step\nmore',
 		})
 	},
 )
