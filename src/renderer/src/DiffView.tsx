@@ -21,9 +21,30 @@ import { CodeText } from './CodeText.tsx'
 import { scrollBehavior } from './motion.ts'
 import { sideLines } from './syntax.ts'
 import { useSyntax } from './useSyntax.ts'
-import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
+import {
+	anchorRow,
+	buildRows,
+	computeGaps,
+	excerpt,
+	lineNo,
+	linesToReveal,
+	normalizeSpan,
+	searchLines,
+	type Range,
+	type Row,
+} from './diffModel.ts'
+import { FindBar } from './FindBar.tsx'
+import { countLabel, findMatches, firstFrom, scrollToRange, textRanges } from './findInFile.ts'
+import { isKey } from './keymap.ts'
+import { announce } from './announce.ts'
 
 const EXPAND_STEP = 20
+const FIND = 'code-find'
+const FIND_CURRENT = 'code-find-current'
+const FIND_CONTEXT = 3 // unchanged lines opened on each side of a match found in collapsed lines
+
+// What you last looked for. Each file gets its own view, so this is what ⌘F starts with in the next file.
+let lastFind = { query: '', matchCase: false }
 
 export interface RevealRequest {
 	fileKey: string
@@ -90,6 +111,11 @@ export function DiffView(p: Props) {
 	const [notice, setNotice] = useState<string | null>(null)
 	const [blockIdx, setBlockIdx] = useState(-1)
 	const [toFileComposer, setToFileComposer] = useState(0)
+	const [find, setFind] = useState<{ query: string; matchCase: boolean } | null>(null) // null: the find bar is closed
+	const [findFocus, setFindFocus] = useState(0)
+	const [cur, setCur] = useState<{ key: string; start: number } | null>(null) // the current match
+	const scrollToCur = useRef(false)
+	const findReturn = useRef<Element | null>(null)
 	const scroller = useRef<HTMLDivElement>(null)
 	p.placeRef.current = () => scroller.current?.scrollTop ?? 0
 	// Removed lines are looked up at the base commit, everything else at the head commit.
@@ -158,6 +184,143 @@ export function DiffView(p: Props) {
 		() => (hunks ? hiddenInHunks(file.key, file.newPath ?? file.key, hunks).filter((l) => l.found.some((h) => h.warn)) : []),
 		[hunks, file.key, file.newPath],
 	)
+
+	// Find in file (issue #241): every line is searched, collapsed ones too, and the one you land on is opened.
+	const findOpen = find !== null
+	const searchable = useMemo(() => (findOpen && hunks ? searchLines(hunks, gaps, fileLines) : []), [findOpen, hunks, gaps, fileLines])
+	const order = useMemo(() => new Map(searchable.map((l, i) => [l.key, i])), [searchable])
+	const found = useMemo(
+		() => (find ? findMatches(searchable, find.query, find.matchCase) : { matches: [], capped: false }),
+		[searchable, find],
+	)
+	const curIdx = cur ? found.matches.findIndex((x) => x.key === cur.key && x.start === cur.start) : -1
+	const rowAt = useMemo(() => new Map(rows.map((r, i) => [r.key, i])), [rows])
+
+	useEffect(() => {
+		if (find) lastFind = find
+	}, [find])
+
+	// The searched line at the top of the view, so a new search starts where you are reading, as a browser's does.
+	const topLine = (): number => {
+		const sc = scroller.current
+		if (!sc) return 0
+		const top = sc.getBoundingClientRect().top
+		const els = sc.querySelectorAll<HTMLElement>('[data-row]')
+		let lo = 0
+		let hi = els.length
+		while (lo < hi) {
+			const mid = (lo + hi) >> 1
+			if (els[mid].getBoundingClientRect().bottom <= top) lo = mid + 1
+			else hi = mid
+		}
+		const row = els[lo] ? rows[Number(els[lo].getAttribute('data-row'))] : undefined
+		return row ? (order.get(row.key) ?? 0) : searchable.length
+	}
+
+	const goTo = (i: number): void => {
+		const hit = found.matches[i]
+		setCur(hit ? { key: hit.key, start: hit.start } : null)
+		scrollToCur.current = !!hit
+	}
+
+	// A new query, or the case switch, keeps the current match while it still matches; else the next one from the view.
+	useEffect(() => {
+		if (find && curIdx < 0) goTo(firstFrom(found.matches, order, topLine()))
+	}, [found]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	const step = (dir: 1 | -1): void => {
+		const n = found.matches.length
+		if (!n) return
+		const from = firstFrom(found.matches, order, topLine())
+		const i = curIdx >= 0 ? (curIdx + dir + n) % n : dir === 1 ? from : (from - 1 + n) % n
+		goTo(i)
+		announce(countLabel(i, n, found.capped), 'result')
+	}
+
+	// A match in collapsed lines opens them, with a few lines around it. They stay open after the bar is closed.
+	useEffect(() => {
+		const hit = curIdx >= 0 ? found.matches[curIdx] : null
+		if (!hit || hit.gapLine === null || !fileLines || shown.has(hit.gapLine)) return
+		const at = hit.gapLine
+		setRevealed((s) => {
+			const n = new Set(s)
+			for (let i = Math.max(1, at - FIND_CONTEXT); i <= Math.min(fileLines.length, at + FIND_CONTEXT); i++) n.add(i)
+			return n
+		})
+	}, [cur, found]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Paint the matches on the lines that are shown, and bring the current one into view once its line is there. The
+	// ranges are rebuilt when the code's spans change (syntax colours arrive after the text).
+	useLayoutEffect(() => {
+		const sc = scroller.current
+		const ms = found.matches
+		if (!sc || !ms.length) return
+		const els = new Map<number, Element>()
+		for (const el of sc.querySelectorAll('[data-row]')) els.set(Number(el.getAttribute('data-row')), el)
+		const all: Array<AbstractRange> = []
+		let current: globalThis.Range | null = null
+		for (let i = 0; i < ms.length;) {
+			let j = i
+			while (j < ms.length && ms[j].key === ms[i].key) j++
+			const r = rowAt.get(ms[i].key)
+			const code = r === undefined ? null : els.get(r)?.querySelector('.code')
+			if (code) {
+				const got = textRanges(code, ms.slice(i, j))
+				all.push(...got)
+				if (curIdx >= i && curIdx < j) current = got[curIdx - i] ?? null
+			}
+			i = j
+		}
+		CSS.highlights.set(FIND, new Highlight(...all))
+		if (current) {
+			const h = new Highlight(current)
+			h.priority = 1
+			CSS.highlights.set(FIND_CURRENT, h)
+			if (scrollToCur.current) {
+				scrollToCur.current = false
+				const ln = sc.querySelector('.line .ln + .ln')
+				scrollToRange(sc, current, ln ? ln.getBoundingClientRect().right - sc.getBoundingClientRect().left : 0)
+			}
+		}
+		return () => {
+			CSS.highlights.delete(FIND)
+			CSS.highlights.delete(FIND_CURRENT)
+		}
+	}, [found, cur, curIdx, rowAt, oldTokens, newTokens])
+
+	const openFind = (): void => {
+		if (!find) {
+			findReturn.current = document.activeElement
+			setFind({ ...lastFind })
+		}
+		setFindFocus((n) => n + 1)
+	}
+	const closeFind = (): void => {
+		setFind(null)
+		setCur(null)
+		const back = findReturn.current
+		if (back instanceof HTMLElement && back.isConnected && back !== document.body) back.focus({ preventScroll: true })
+	}
+
+	// ⌘F/Ctrl+F opens the bar (or puts you back in it) wherever focus is, even while typing; the step shortcuts work
+	// while it is open. Only the code on screen answers: a view hidden behind another doesn't.
+	const findKeys = useRef<(e: KeyboardEvent) => void>(() => {})
+	findKeys.current = (e) => {
+		if (e.defaultPrevented || document.querySelector('.modal, .palette')) return
+		if (!scroller.current || scroller.current.getClientRects().length === 0) return
+		const run = (f: () => void): void => {
+			e.preventDefault()
+			f()
+		}
+		if (isKey(e, 'findInFile')) run(openFind)
+		else if (find && isKey(e, 'findNext')) run(() => step(1))
+		else if (find && isKey(e, 'findPrev')) run(() => step(-1))
+	}
+	useEffect(() => {
+		const on = (e: KeyboardEvent): void => findKeys.current(e)
+		window.addEventListener('keydown', on)
+		return () => window.removeEventListener('keydown', on)
+	}, [])
 
 	const activeDraft = p.drafts.find((d) => d.id === p.activeDraftId) ?? null
 	const activeRange: Range | null =
@@ -632,6 +795,18 @@ export function DiffView(p: Props) {
 					</label>
 				)}
 			</div>
+			{find && (
+				<FindBar
+					query={find.query}
+					matchCase={find.matchCase}
+					count={countLabel(curIdx, found.matches.length, found.capped)}
+					focusNonce={findFocus}
+					onQuery={(query) => setFind((f) => f && { ...f, query })}
+					onMatchCase={(matchCase) => setFind((f) => f && { ...f, matchCase })}
+					onStep={step}
+					onClose={closeFind}
+				/>
+			)}
 			{notice && <div className="notice">{notice}</div>}
 			{hidden.length > 0 && (
 				<div className="notice hidden-notice" role="note">
