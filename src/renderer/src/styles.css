@@ -5599,6 +5599,12 @@ textarea.style-edit {
 .publish-footer > .small:first-child {
 	min-width: 0;
 }
+.publish-footer-alt {
+	display: inline-flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+}
 .btn.primary.approve {
 	background: var(--ok);
 	border-color: var(--ok);

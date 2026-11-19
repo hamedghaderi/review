@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
 import { describeHiddenChars, type HiddenLine } from '../../shared/hiddenChars.ts'
-import type { AppError, CitationCheck, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
+import type {
+	AppError,
+	CitationCheck,
+	PreparedReview,
+	PublishedReview,
+	PublishOutcome,
+	PublishPlan,
+	ReviewEvent,
+} from '../../shared/types.ts'
 import { PUBLISH_BATCH } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
@@ -30,7 +38,7 @@ interface Props {
 	stillReviewing?: Array<string> // roles of team members the run didn't wait for that are still reviewing
 	onMaskComment?(commentId: string): Promise<void> // masks what looks private in a comment (see maskLeaks) and saves it
 	prepared?: PreparedReview | null // an automatic review left for you: its verdict and summary start the dialog
-	onSubmitted?(): void
+	onSubmitted?(review: PublishedReview): void // then the dialog closes
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -100,7 +108,6 @@ export function PublishDialog({
 	const [confirmSubmit, setConfirmSubmit] = useState(false)
 	const [showSent, setShowSent] = useState(false)
 	const [checkedAt, setCheckedAt] = useState<string | null>(null)
-	const [submitted, setSubmitted] = useState<string | null>(null)
 	const [ci, setCi] = useState<HeadChecks | null>(null)
 	const [ciError, setCiError] = useState<string | null>(null)
 	const dialog = useRef<HTMLDivElement>(null)
@@ -240,17 +247,12 @@ export function PublishDialog({
 			live = false
 		}
 	}, [reviewId])
-	const ciWarns = !!ci && (ci.failed.length > 0 || ci.pending.length > 0)
-	const approveWarning = [ciWarns ? ciWarning(ci!) : null, hidden.length ? hiddenWarning(hidden) : null].filter(Boolean).join(' ')
-
-	async function askToSubmit(): Promise<void> {
-		if (event === 'APPROVE') {
-			setRunning('Checking CI…')
-			await loadCi()
-			setRunning(null)
-		}
-		setConfirmSubmit(true)
-	}
+	// What an approval would go out over: CI that failed or hasn't finished, and characters that hide what the code does.
+	const warningFor = (c: HeadChecks | null): string =>
+		[c && (c.failed.length > 0 || c.pending.length > 0) ? ciWarning(c) : null, hidden.length ? hiddenWarning(hidden) : null]
+			.filter(Boolean)
+			.join(' ')
+	const approveWarning = warningFor(ci)
 
 	useEffect(() => {
 		dialog.current?.focus()
@@ -268,8 +270,10 @@ export function PublishDialog({
 
 	const toPublish = plan?.items.filter((i) => selected.has(i.commentId) && i.status !== 'published') ?? []
 
-	async function publish(): Promise<void> {
+	// Sends the ticked comments to your pending review. True when none failed (skipped ones are skipped on purpose).
+	async function addComments(): Promise<boolean> {
 		const items = toPublish
+		let ok = true
 		setRunning('Adding comments…')
 		setProgress({ done: 0, total: items.length, current: items[0]?.label ?? '' })
 		await beforePublish()
@@ -288,29 +292,58 @@ export function PublishDialog({
 				for (const i of batch) next.set(i.commentId, { commentId: i.commentId, status: 'failed', message: r.error.message, url: null })
 				setResults(new Map(next))
 				setError(r.error)
+				ok = false
 				break
 			}
 			for (const o of r.value) next.set(o.commentId, o)
+			if (r.value.some((o) => o.status === 'failed')) ok = false
 			setResults(new Map(next))
 		}
 		setProgress(null)
+		return ok
+	}
+
+	// Only to your pending review, to finish on GitHub (or later): nothing is submitted.
+	async function addOnly(): Promise<void> {
+		await addComments()
 		setRunning('Checking GitHub…')
 		await load(true)
 		setRunning(null)
 		setSelected(new Set())
 	}
 
-	async function submit(): Promise<void> {
+	/**
+	 * One click, as on GitHub (issue #243): the ticked comments go into your pending review, then it is submitted with
+	 * your summary and verdict, and the dialog closes. An approval is checked against CI first and asks once more only
+	 * when something stands against it. If a comment doesn't make it, nothing is submitted: the dialog stays, saying which.
+	 */
+	async function send(confirmed = false): Promise<void> {
+		if (event === 'APPROVE' && !confirmed) {
+			setRunning('Checking CI…')
+			const fresh = await loadCi()
+			setRunning(null)
+			if (warningFor(fresh)) return setConfirmSubmit(true)
+		}
+		setConfirmSubmit(false)
+		if (toPublish.length && !(await addComments())) {
+			setRunning('Checking GitHub…')
+			await load(true)
+			setRunning(null)
+			return
+		}
 		setRunning('Submitting review…')
 		const r = await window.review.submitReview(repoId, reviewId, event, summary)
+		if (!r.ok) {
+			setError(r.error)
+			await load(true)
+			setRunning(null)
+			return
+		}
 		setRunning(null)
-		setConfirmSubmit(false)
-		if (!r.ok) return setError(r.error)
-		setSubmitted(r.value.url)
-		onSubmitted?.()
 		setSummary('')
 		setDrafted(false)
-		await load(true)
+		onSubmitted?.(r.value)
+		onClose()
 	}
 
 	// What looks private in what is about to go out (issue #159): shown, maskable, and posted only once you say so. Keys
@@ -342,9 +375,12 @@ export function PublishDialog({
 
 	const unsent = plan?.items.filter((i) => i.status !== 'published') ?? []
 	const sent = plan?.items.filter((i) => i.status === 'published') ?? []
-	const canSubmit = !!plan && !running && !plan.blocked && !(plan.pending.kind === 'none' && event !== 'APPROVE' && !summary.trim())
-	// One main action at a time: send the selected comments first, then submit.
-	const addFirst = toPublish.length > 0
+	// Something to submit: a verdict that says something on its own (an approval), a summary, or comments.
+	const waiting = plan?.pending.kind !== 'none' && plan?.pending.usable ? plan.pending.comments : 0
+	const total = toPublish.length + waiting
+	const canSubmit = !!plan && !running && !plan.blocked && (event === 'APPROVE' || !!summary.trim() || total > 0)
+	const verdict = EVENTS.find((e) => e[0] === event)![1]
+	const sendLabel = total ? `${verdict} with ${total} comment${total === 1 ? '' : 's'}` : verdict
 	const addLabel = `${pendingOurs || plan?.pending.kind !== 'none' ? 'Add' : 'Start a pending review with'} ${toPublish.length} comment${toPublish.length === 1 ? '' : 's'}`
 
 	return (
@@ -384,8 +420,7 @@ export function PublishDialog({
 					{plan && (
 						<>
 							<p className="small muted">
-								Comments go into <strong>your pending review</strong> on GitHub. Nobody else sees them until you submit it. Your local
-								comments never change.
+								The ticked comments are posted with your review when you submit it. Your local comments never change.
 							</p>
 
 							<section className="publish-step" aria-labelledby="publish-step-comments">
@@ -557,14 +592,6 @@ export function PublishDialog({
 										Only you can see {plan.pending.comments === 1 ? 'it' : 'them'} until you submit the review below.
 									</div>
 								)}
-								{submitted && (
-									<p className="small ok-text">
-										Submitted.{' '}
-										<a href={submitted} target="_blank" rel="noreferrer">
-											View on GitHub ↗
-										</a>
-									</p>
-								)}
 								{outgoing.length > 0 && (
 									<div className="leak-check small">
 										<p className="warn-text">
@@ -729,20 +756,26 @@ export function PublishDialog({
 							<span className="small muted" role="status">
 								<span className="spinner small" aria-hidden /> {running}
 							</span>
-						) : confirmSubmit && event === 'APPROVE' && approveWarning ? (
+						) : confirmSubmit ? (
 							<span className="small warn-text" role="alert">
 								<strong>{approveWarning}</strong> Approve anyway? Everyone on the pull request will see it, and it can’t be unsent.
 							</span>
-						) : confirmSubmit ? (
-							<span className="small">
-								Submit as <strong>{EVENTS.find((e) => e[0] === event)![1]}</strong>
-								{plan.pending.kind !== 'none' ? ' with every comment in your pending review' : ''}? Everyone on the pull request will see
-								it, and it can’t be unsent.
-							</span>
 						) : (
-							<a className="small" href={`${plan.pr.url}/files`} target="_blank" rel="noreferrer">
-								Finish on GitHub ↗
-							</a>
+							<span className="publish-footer-alt small">
+								<a href={`${plan.pr.url}/files`} target="_blank" rel="noreferrer">
+									Finish on GitHub ↗
+								</a>
+								{toPublish.length > 0 && (
+									<button
+										className="link"
+										disabled={!!plan.blocked || !leaksOk}
+										onClick={() => void addOnly()}
+										title="Put the ticked comments in your pending review on GitHub without submitting it, to finish there or later. Only you can see them until then."
+									>
+										{addLabel} only
+									</button>
+								)}
+							</span>
 						)}
 						<span className="spacer" />
 						{confirmSubmit ? (
@@ -750,37 +783,25 @@ export function PublishDialog({
 								<button className="btn" onClick={() => setConfirmSubmit(false)} disabled={!!running}>
 									Cancel
 								</button>
-								<button className={`btn primary ${event.toLowerCase()}`} onClick={() => void submit()} disabled={!!running}>
-									{event === 'APPROVE' && approveWarning ? 'Approve anyway' : EVENTS.find((e) => e[0] === event)![1]}
+								<button className={`btn primary ${event.toLowerCase()}`} onClick={() => void send(true)} disabled={!!running}>
+									Approve anyway
 								</button>
 							</>
 						) : (
-							<>
-								<button
-									className={`btn ${addFirst ? '' : 'primary'}`}
-									disabled={!canSubmit || !leaksOk}
-									onClick={() => void askToSubmit()}
-									title={
-										!leaksOk
-											? 'Mask what looks private above, or tick that you checked it'
-											: plan.pending.kind === 'none' && event !== 'APPROVE' && !summary.trim()
-												? 'Write a summary, or add comments first'
-												: 'Submit your pending review'
-									}
-								>
-									Submit review…
-								</button>
-								{addFirst && (
-									<button
-										className="btn primary"
-										disabled={!!running || !!plan.blocked || !leaksOk}
-										onClick={() => void publish()}
-										title={leaksOk ? undefined : 'Mask what looks private above, or tick that you checked it'}
-									>
-										{addLabel}
-									</button>
-								)}
-							</>
+							<button
+								className={`btn primary ${event.toLowerCase()}`}
+								disabled={!canSubmit || !leaksOk}
+								onClick={() => void send()}
+								title={
+									!leaksOk
+										? 'Mask what looks private above, or tick that you checked it'
+										: !canSubmit && !running && !plan.blocked
+											? 'Write a summary, or tick comments to post'
+											: `Posts ${total ? `${total === 1 ? 'the comment' : `the ${total} comments`} and ` : ''}your review on the pull request. Everyone on it will see it.`
+								}
+							>
+								{sendLabel}
+							</button>
 						)}
 					</div>
 				)}
