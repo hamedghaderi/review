@@ -12,13 +12,11 @@
  * one), and each shortcut let a real note go unflagged. A security warning had better say too much, and Source shows
  * the comment as written to settle it. `&lt;!--` is never a note: it isn't one in the text the AI reads either.
  *
- * A note never closed counts where it starts a block (a line, also inside a `>` quote or a list item), since GitHub
- * then hides everything after it; and anywhere at the end of a body Review cut short, which may have cut a closed note
- * in two. Elsewhere inside a line an unclosed `<!--` is plain text.
+ * A note never closed counts too, from its `<!--` to the end, wherever it is: in a raw HTML block it hides everything
+ * after it even mid-line, and Review may have cut a long body inside a closed one. Where GitHub shows it as text
+ * instead, that's one more false alarm, which beats guessing where Markdown starts a block.
  */
-export function hiddenNotes(c: { body: string; bodyTruncated?: boolean; html?: string }): Array<string> {
+export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 	if (c.html === undefined) return []
-	const blockStart = '(?<=(?:^|\\n)[ \\t>*+\\-\\d.)]*)' // a line's start, after any quote and list markers
-	const notes = new RegExp(`<!--[\\s\\S]*?-->|${c.bodyTruncated ? '' : blockStart}<!--(?![\\s\\S]*?-->)[\\s\\S]*$`, 'g')
-	return c.body.match(notes) ?? []
+	return c.body.match(/<!--[\s\S]*?-->|<!--[\s\S]*$/g) ?? []
 }

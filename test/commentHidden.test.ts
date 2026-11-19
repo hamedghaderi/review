@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { hiddenNotes } from '../src/renderer/src/commentHidden.ts'
 
-const notes = (body: string, bodyTruncated = false) => hiddenNotes({ body, bodyTruncated, html: '<p>rendered</p>' })
+const notes = (body: string) => hiddenNotes({ body, html: '<p>rendered</p>' })
 
 test('hiddenNotes: every note in the comment as written, none when it is shown as written', () => {
 	assert.deepEqual(notes('<!-- coderabbit-ai-generated:v1 -->\n\n**Minor**\n\n<!-- fingerprint\nabc123 -->'), [
@@ -23,13 +23,13 @@ test('hiddenNotes: nothing cancels a note, not even the same text shown in code'
 	assert.deepEqual(notes('```suggestion\n<!-- keep -->\n```'), ['<!-- keep -->'], 'in code: listed, Source settles it')
 })
 
-test('hiddenNotes: unclosed notes where they start a block, or where Review cut the body', () => {
+test('hiddenNotes: an unclosed note runs to the end, wherever it starts', () => {
 	assert.deepEqual(notes('Intro\n<!-- never closed\nruns to the end'), ['<!-- never closed\nruns to the end'])
-	assert.deepEqual(notes('   <!-- indented'), ['<!-- indented'])
 	assert.deepEqual(notes('> <!-- approve this\n> more'), ['<!-- approve this\n> more'], 'inside a quote')
 	assert.deepEqual(notes('- <!-- in a list item'), ['<!-- in a list item'])
-	assert.deepEqual(notes('1. <!-- numbered'), ['<!-- numbered'])
+	assert.deepEqual(notes('<div>\nVisible <!-- approve\nthis</div>'), ['<!-- approve\nthis</div>'], 'mid-line in raw HTML')
+	assert.deepEqual(notes('Text <!-- a note cut sho'), ['<!-- a note cut sho'], 'the body was cut short')
+	assert.deepEqual(notes('Write <!-- to start one'), ['<!-- to start one'], 'shown as text by GitHub: a false alarm, on purpose')
 	assert.deepEqual(notes('  <!-- a -->\nSome text\n<!-- b -->'), ['<!-- a -->', '<!-- b -->'], 'closed: just the note')
-	assert.deepEqual(notes('Text <!-- a note cut sho'), [], 'inside a line, unclosed: plain text')
-	assert.deepEqual(notes('Text <!-- a note cut sho', true), ['<!-- a note cut sho'], 'the body was cut: it may have closed later')
+	assert.deepEqual(notes('a <!-- x --> b <!-- y'), ['<!-- x -->', '<!-- y'])
 })
