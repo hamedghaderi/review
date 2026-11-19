@@ -24,6 +24,21 @@ export const KEY_ACTIONS: ReadonlyArray<KeyAction> = [
 	{ id: 'settings', label: 'Open settings', group: 'General', defaults: same('Mod+,') },
 	{ id: 'quickOpen', label: 'Quick open', group: 'General', defaults: same('Mod+p'), note: 'Go to a pull request, branch or command.' },
 	{ id: 'search', label: 'Focus search', group: 'General', defaults: same('/'), note: 'The search box on screen.' },
+	{
+		id: 'findInFile',
+		label: 'Find in file',
+		group: 'General',
+		defaults: same('Mod+f'),
+		note: 'Searches the open file’s code, collapsed lines included.',
+	},
+	{
+		id: 'findNext',
+		label: 'Next match',
+		group: 'General',
+		defaults: { mac: ['Mod+g'], other: ['F3'] },
+		note: 'While Find in file is open.',
+	},
+	{ id: 'findPrev', label: 'Previous match', group: 'General', defaults: { mac: ['Mod+Shift+g'], other: ['Shift+F3'] } },
 	{ id: 'sidebar', label: 'Toggle sidebar', group: 'General', defaults: same('Mod+b'), menu: true },
 	{
 		id: 'paneNext',

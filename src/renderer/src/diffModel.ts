@@ -8,6 +8,10 @@ export type Row =
 	| { t: 'line'; key: string; line: DiffLine; block: number | null }
 	| { t: 'gap'; key: string; from: number; to: number | null; offset: number; edge: 'top' | 'mid' | 'bottom' }
 
+// A line row's key: an unchanged line from a gap by its new line number, a hunk's line by the hunk and its place in it.
+const ctxKey = (n: number): string => `c${n}`
+const hunkLineKey = (h: Hunk, j: number): string => `l${h.oldStart},${h.newStart},${j}`
+
 export interface Range {
 	side: Side
 	start: number
@@ -47,7 +51,7 @@ export function buildRows(
 		for (let n = g.from; n <= to; n++) {
 			if (revealed.has(n) && fileLines && n <= fileLines.length) {
 				flush(n - 1)
-				rows.push({ t: 'line', key: `c${n}`, line: { kind: 'ctx', oldNo: n + g.offset, newNo: n, text: fileLines[n - 1] }, block: null })
+				rows.push({ t: 'line', key: ctxKey(n), line: { kind: 'ctx', oldNo: n + g.offset, newNo: n, text: fileLines[n - 1] }, block: null })
 			} else {
 				lastHidden = n === to
 				if (runStart === null) runStart = n
@@ -66,12 +70,38 @@ export function buildRows(
 			const changed = line.kind !== 'ctx'
 			if (changed && !inBlock) blocks.push(rows.length)
 			inBlock = changed
-			rows.push({ t: 'line', key: `l${h.oldStart},${h.newStart},${j}`, line, block: changed ? blocks.length - 1 : null })
+			rows.push({ t: 'line', key: hunkLineKey(h, j), line, block: changed ? blocks.length - 1 : null })
 		})
 	})
 	const tail = gaps?.[hunks.length]
 	if (tail) pushGap(tail, hunks.length === 0 ? 'top' : 'bottom')
 	return { rows, blocks }
+}
+
+/** A line of the file's diff that a search looks through. `gapLine`: the new line number of an unchanged line that is collapsed until revealed. */
+export interface SearchLine {
+	key: string // the key of the line's row, once it is shown
+	text: string
+	gapLine: number | null
+}
+
+/**
+ * Every line of the diff in the order it reads, the unchanged lines in its gaps included (when the file's lines are
+ * loaded), keyed like buildRows keys their rows. What is revealed doesn't matter: a search finds collapsed lines too.
+ */
+export function searchLines(hunks: Array<Hunk>, gaps: Array<Gap> | null, fileLines: Array<string> | null): Array<SearchLine> {
+	const out: Array<SearchLine> = []
+	const gap = (g: Gap | undefined): void => {
+		if (!g || !fileLines) return
+		const to = Math.min(g.to ?? fileLines.length, fileLines.length)
+		for (let n = g.from; n <= to; n++) out.push({ key: ctxKey(n), text: fileLines[n - 1], gapLine: n })
+	}
+	hunks.forEach((h, i) => {
+		gap(gaps?.[i])
+		h.lines.forEach((l, j) => out.push({ key: hunkLineKey(h, j), text: l.text, gapLine: null }))
+	})
+	gap(gaps?.[hunks.length])
+	return out
 }
 
 export function lineNo(row: Row, side: Side): number | null {
