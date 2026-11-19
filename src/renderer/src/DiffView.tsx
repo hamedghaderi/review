@@ -18,6 +18,7 @@ import { ThreadCard, type DraftFn, type ReplyFn } from './Discussion.tsx'
 import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
 import { describeHiddenChars, hiddenInHunks } from '../../shared/hiddenChars.ts'
 import { CodeText } from './CodeText.tsx'
+import { scrollBehavior } from './motion.ts'
 import { sideLines } from './syntax.ts'
 import { useSyntax } from './useSyntax.ts'
 import { anchorRow, buildRows, computeGaps, excerpt, lineNo, linesToReveal, normalizeSpan, type Range, type Row } from './diffModel.ts'
@@ -88,6 +89,7 @@ export function DiffView(p: Props) {
 	const [extending, setExtending] = useState(false)
 	const [notice, setNotice] = useState<string | null>(null)
 	const [blockIdx, setBlockIdx] = useState(-1)
+	const [toFileComposer, setToFileComposer] = useState(0)
 	const scroller = useRef<HTMLDivElement>(null)
 	p.placeRef.current = () => scroller.current?.scrollTop ?? 0
 	// Removed lines are looked up at the base commit, everything else at the head commit.
@@ -234,6 +236,16 @@ export function DiffView(p: Props) {
 		handled.current = r.nonce
 		target?.scrollIntoView({ block: 'center' })
 	}, [p.reveal, rows, file.key, patch.state, gaps, lines])
+
+	// "Comment on file" opens its box at the top of the file, which may be far above where you are reading: bring it
+	// into view and put the cursor in it, also when that box was already open (the box itself doesn't refocus then).
+	useEffect(() => {
+		if (!toFileComposer || !p.activeDraftId) return
+		const box = scroller.current?.querySelector<HTMLElement>(`.file-items [data-item="${CSS.escape(p.activeDraftId)}"]`)
+		if (!box) return
+		box.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() })
+		box.querySelector('textarea')?.focus({ preventScroll: true })
+	}, [toFileComposer]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	const flash = (msg: string): void => {
 		setNotice(msg)
@@ -605,7 +617,13 @@ export function DiffView(p: Props) {
 						</button>
 					</span>
 				)}
-				<button className="btn small" onClick={() => startDraft(makeAnchor(null))}>
+				<button
+					className="btn small"
+					onClick={() => {
+						startDraft(makeAnchor(null))
+						setToFileComposer((n) => n + 1)
+					}}
+				>
 					Comment on file
 				</button>
 				{p.onToggleViewed && (
