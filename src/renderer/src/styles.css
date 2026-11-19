@@ -928,6 +928,24 @@ input[type='checkbox'] {
 }
 .eol {
 	color: var(--del-fg);
+	user-select: none; /* drawn, not part of the line: copying code leaves it out */
+}
+/* The bar under selected code (issue #245) */
+.diff-table {
+	position: relative;
+}
+.sel-bar {
+	position: absolute;
+	z-index: 4;
+	display: flex;
+	gap: 4px;
+	padding: 4px;
+	border: 1px solid var(--border-strong);
+	border-radius: 6px;
+	background: var(--panel);
+	box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+	font-family: var(--sans);
+	white-space: nowrap;
 }
 /* Hidden and direction-changing characters (issue #223): a labelled box, isolated so it can't reorder the line. */
 .hidden-char {

@@ -19,7 +19,7 @@ import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
 import { describeHiddenChars, hiddenInHunks } from '../../shared/hiddenChars.ts'
 import { CodeText } from './CodeText.tsx'
 import { scrollBehavior } from './motion.ts'
-import { sideLines } from './syntax.ts'
+import { languageFor, sideLines } from './syntax.ts'
 import { useSyntax } from './useSyntax.ts'
 import {
 	anchorRow,
@@ -30,6 +30,9 @@ import {
 	lineNo,
 	linesToReveal,
 	normalizeSpan,
+	rangeLabel,
+	snippet,
+	snippetLabel,
 	searchLines,
 	type Range,
 	type Row,
@@ -486,10 +489,62 @@ export function DiffView(p: Props) {
 		if (end > start && range.endOffset === 0) end-- // triple-click / drag to the start of the next line
 		const forward = sel.anchorNode === range.startContainer && sel.anchorOffset === range.startOffset
 		const r = forward ? normalizeSpan(rows, start, end) : normalizeSpan(rows, end, start)
-		if (!r) return
-		setPivot(r.start)
+		const table = (e.currentTarget as HTMLElement).getBoundingClientRect()
+		const last = [...range.getClientRects()].at(-1)
+		const sc = scroller.current
+		if (!r || !last || !sc) return
+		// Below where the selection ends, past the line numbers, and inside the visible width.
+		const left = Math.min(Math.max(last.right - table.left, 130), sc.scrollLeft + sc.clientWidth - 300)
+		setPicked({ range: r, top: last.bottom - table.top + 4, left: Math.max(130, left), copied: false })
+	}
+
+	// Selecting code only selects it (issue #245): a small bar offers a comment on those lines, or a copy with where
+	// they're from. It goes when the selection does.
+	const [picked, setPicked] = useState<{ range: Range; top: number; left: number; copied: boolean } | null>(null)
+	useEffect(() => {
+		if (!picked) return
+		const gone = (): void => {
+			const sel = window.getSelection()
+			if (!sel || sel.isCollapsed || !scroller.current?.contains(sel.anchorNode)) setPicked(null)
+		}
+		const esc = (e: KeyboardEvent): void => {
+			if (e.key === 'Escape') setPicked(null)
+		}
+		document.addEventListener('selectionchange', gone)
+		window.addEventListener('keydown', esc)
+		return () => {
+			document.removeEventListener('selectionchange', gone)
+			window.removeEventListener('keydown', esc)
+		}
+	}, [picked])
+	const commentOnPicked = (): void => {
+		if (!picked) return
+		setPicked(null)
+		setPivot(picked.range.start)
 		setExtending(false)
-		startDraft(makeAnchor(r))
+		startDraft(makeAnchor(picked.range))
+	}
+	const copyPicked = (): void => {
+		if (!picked) return
+		const r = picked.range
+		const path = (r.side === 'old' ? file.oldPath : file.newPath) ?? file.key
+		void navigator.clipboard
+			.writeText(
+				snippet(
+					rows,
+					r,
+					path,
+					languageFor(path, (n) => n),
+				),
+			)
+			.then(
+				() => {
+					announce(`Copied ${snippetLabel(r, path)}`, 'result')
+					setPicked((x) => x && { ...x, copied: true })
+					window.setTimeout(() => setPicked((x) => (x?.copied ? null : x)), 1200)
+				},
+				() => flash('Could not copy to the clipboard.'),
+			)
 	}
 
 	const expand = (row: Row & { t: 'gap' }, dir: 'up' | 'down' | 'all'): void => {
@@ -756,6 +811,27 @@ export function DiffView(p: Props) {
 					}}
 				>
 					{rows.map(renderRow)}
+					{picked && (
+						<div
+							className="sel-bar"
+							role="toolbar"
+							aria-label="Selected code"
+							style={{ top: picked.top, left: picked.left }}
+							onMouseDown={(e) => e.preventDefault()} // keeps the selection
+							onMouseUp={(e) => e.stopPropagation()}
+						>
+							<button className="btn small" onClick={commentOnPicked} title="Comment on these lines, or ask the AI about them">
+								Comment on {rangeLabel(picked.range)}
+							</button>
+							<button
+								className="btn small ghost"
+								onClick={copyPicked}
+								title="Copy the lines as a code block, with the file and line numbers above them"
+							>
+								{picked.copied ? 'Copied' : 'Copy with location'}
+							</button>
+						</div>
+					)}
 				</div>
 			</>
 		)
