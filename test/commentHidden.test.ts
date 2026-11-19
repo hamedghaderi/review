@@ -30,6 +30,11 @@ test('notesNotShown: counting, escaped examples, and notes never closed', () => 
 		'starting a line: hidden to the end',
 	)
 	assert.deepEqual(notesNotShown('   <!-- indented up to three', ''), ['<!-- indented up to three'])
+	assert.deepEqual(
+		notesNotShown('  <!-- a -->\nSome text\n<!-- b -->', ''),
+		['<!-- a -->', '<!-- b -->'],
+		'indented and closed: just the note',
+	)
 	assert.deepEqual(notesNotShown('Text <!-- a note cut sho', ''), [], 'inside a line, unclosed: plain text')
 	assert.deepEqual(notesNotShown('Write `<!--` to start one, then more text', '<!--'), [], 'in a code span: plain text')
 })

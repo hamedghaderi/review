@@ -16,7 +16,8 @@ export function notesNotShown(body: string, canShow: string): Array<string> {
 	const loose = (s: string) => s.replace(/\s+/g, ' ').trim()
 	const visible = loose(canShow)
 	const left = new Map<string, number>() // how many more times each note's text is shown
-	const notes = body.match(/(?<!\\)<!--[\s\S]*?-->|(?<=^|\n) {0,3}<!--[\s\S]*$/g) ?? [] // `\<!--` is escaped text
+	// Closed anywhere (`\<!--` is escaped text, not a note); unclosed only at the start of a line, with no `-->` after.
+	const notes = body.match(/(?<!\\)<!--[\s\S]*?-->|(?<=^|\n) {0,3}<!--(?![\s\S]*?-->)[\s\S]*$/g) ?? []
 	return notes
 		.map((note) => note.trimStart())
 		.filter((note) => {

@@ -17,7 +17,8 @@
 export function webUrl(href: string | null | undefined): string | null {
 	const raw = href?.trim()
 	const authority = raw ? /^https?:\/\/([^/?#\\]*)/i.exec(raw)?.[1] : undefined
-	if (authority === undefined || authority.includes('@') || /[\s%\p{Cc}]/u.test(authority)) return null
+	// No host as written (`https:///evil.example`): parsers skip the extra slash and find one further on.
+	if (!authority || authority.includes('@') || /[\s%\p{Cc}]/u.test(authority)) return null
 	let u: URL
 	try {
 		u = new URL(raw!)

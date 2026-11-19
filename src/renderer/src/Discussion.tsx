@@ -530,7 +530,7 @@ export function ThreadReplyBox({
 function ReadHere({ t, children }: { t: DiscussionThread; children: ReactNode }) {
 	const [open, setOpen] = useState(false)
 	return (
-		<div className="comment-item">
+		<div className="comment-item static">
 			{children}
 			<div className="read-here">
 				<button className="btn small ghost" onClick={() => setOpen((x) => !x)} aria-expanded={open}>

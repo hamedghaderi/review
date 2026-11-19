@@ -43,6 +43,8 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 	}
 	// A <picture>'s other files: its <img> stands for it below.
 	for (const s of root.querySelectorAll('picture > source')) s.remove()
+	// How many images each link held to begin with: one emptied by removing several icons still had something to say.
+	const held = new Map([...root.querySelectorAll('a')].map((a) => [a, a.querySelectorAll('img, video').length]))
 	for (const img of root.querySelectorAll('img')) {
 		const src = img.getAttribute('src') ?? ''
 		if (media && MEDIA.test(src)) {
@@ -62,8 +64,8 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 		// the author's link rather than dropping it with an icon.
 		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].some((s) => webUrl(s) === href)
 		if (decorative(img)) {
-			if (only && !toSelf)
-				box.replaceWith(`🔗 ${new URL(href!).hostname}`) // the link is all there is: keep it findable
+			// The link is all there is (it goes elsewhere, or held several icons): keep it findable.
+			if (only && (!toSelf || held.get(a!)! > 1)) box.replaceWith(`🔗 ${new URL(href!).hostname}`)
 			else (only ? a : box).remove()
 			continue
 		}
@@ -164,7 +166,8 @@ export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 	const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
 	// The only place a note as written can show: in code. (Not in an image's alt text, its 🖼 label: DOMPurify drops
 	// any attribute holding `-->`, so the label reads "image".)
-	const canShow = [...body.querySelectorAll('code, pre')].map((code) => code.textContent ?? '').join('\n')
+	// Each piece once: a <pre> holds its <code>, so not both. A suggested change's lines count as code too.
+	const canShow = [...body.querySelectorAll('pre, code:not(pre code), .blob-code-inner')].map((code) => code.textContent ?? '').join('\n')
 	const found = notesNotShown(c.body, canShow)
 	notes.set(c, { html: c.html, body: c.body, found })
 	return found
@@ -220,6 +223,7 @@ export function commentText(c: { body: string; html?: string }): string {
 			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too
 			block.after('\n')
 		}
+		const divider = !!body.querySelector('hr') // the one thing that shows with no words, so it needs a word here
 		const t = (body.textContent ?? '')
 			.split('\n')
 			.map((l) => l.trim().replace(/ {2,}/g, ' ')) // spaces met from two text nodes; code's are still stand-ins here
@@ -231,7 +235,8 @@ export function commentText(c: { body: string; html?: string }): string {
 					.replace(/\uE002([0-2])/g, (_, d: string) => String.fromCharCode(0xe000 + Number(d))),
 			)
 			.join('\n')
-		texts.set(c, { html: c.html, text: t })
-		return t || NOTHING_VISIBLE
+		const text = t || (divider ? 'Divider' : '')
+		texts.set(c, { html: c.html, text })
+		return text || NOTHING_VISIBLE
 	}
 }

@@ -1069,6 +1069,12 @@ a.ic-state:hover {
 .comment-item.outdated:focus-visible {
 	opacity: 1;
 }
+.comment-item.static {
+	cursor: default; /* only its buttons do anything */
+}
+.comment-item.static:hover {
+	border-color: var(--border);
+}
 .comment-item .read-here {
 	display: flex;
 	gap: 4px;

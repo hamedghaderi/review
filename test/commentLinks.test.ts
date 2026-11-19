@@ -62,5 +62,8 @@ test('DNS limits: labels up to 63 characters, names up to 253', () => {
 
 test('webUrl keeps percent escapes as written, since a signed link can depend on them', () => {
 	assert.equal(webUrl('https://example.com/a%2fb?sig=x%2b'), 'https://example.com/a%2fb?sig=x%2b')
-	assert.notEqual(webUrl('https://example.com/badge%2dpassed.svg'), webUrl('https://example.com/badge%2Dpassed.svg'))
+	assert.equal(webUrl('https://example.com/badge%2dpassed.svg'), 'https://example.com/badge%2dpassed.svg')
+	assert.equal(webUrl('https://example.com/badge%2Dpassed.svg'), 'https://example.com/badge%2Dpassed.svg')
+	assert.equal(webUrl('https:///evil.example/'), null, 'no host where one is written; a parser would find one further on')
+	assert.equal(webUrl('https://\\evil.example/'), null)
 })
