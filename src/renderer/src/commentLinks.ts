@@ -7,14 +7,12 @@
  * malformed (`https://`, a space in the host), or carrying a user name or password (`https://github.com@evil.example`
  * reads like GitHub but opens evil.example). The result is the parsed form, so what a link shows when you point at it
  * is what opens; its percent escapes are left as written, since a signed link can depend on them (see sameAddress).
- * `parse`: the URL parser. The app runs Chromium's, which accepts hosts Node's rejects; tests pass one that behaves
- * like Chromium's so the checks after parsing are covered too.
  */
-export function webUrl(href: string | null | undefined, parse: (s: string) => Parsed = (s) => new URL(s)): string | null {
+export function webUrl(href: string | null | undefined): string | null {
 	if (!href || !/^https?:\/\//i.test(href.trim())) return null
-	let u: Parsed
+	let u: URL
 	try {
-		u = parse(href.trim())
+		u = new URL(href.trim())
 	} catch {
 		return null
 	}
@@ -32,11 +30,9 @@ export function sameAddress(a: string | null, b: string | null): boolean {
  * A host name a browser can open (ASCII, so international names in their xn-- form) or an IP address. Checked on its
  * own because URL parsers differ: Chromium accepts `https://exa mple.com` as the host `exa%20mple.com`.
  */
-function webHost(hostname: string): boolean {
+export function webHost(hostname: string): boolean {
 	return HOST.test(hostname)
 }
-
-type Parsed = Pick<URL, 'protocol' | 'username' | 'password' | 'hostname' | 'href'>
 
 const LABEL = '[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?'
 const HOST = new RegExp(`^(?:${LABEL}\\.)*${LABEL}\\.?$|^\\[[0-9a-f:.]+\\]$`, 'i')

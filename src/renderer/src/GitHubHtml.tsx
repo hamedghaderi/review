@@ -43,7 +43,7 @@ export function GitHubHtml({
 		const frag = DOMPurify.sanitize(html, { ...sanitizeConfig(media), RETURN_DOM_FRAGMENT: true })
 		standIns(frag, document, media)
 		// Nothing left to see (a comment holding only a bot's icon): say so rather than show an empty box.
-		if (!frag.textContent?.trim() && !frag.querySelector('img, video'))
+		if (!frag.textContent?.trim() && !frag.querySelector(SHOWS_WITHOUT_TEXT))
 			el.replaceChildren(Object.assign(document.createElement('p'), { className: 'small muted desc-note', textContent: empty }))
 		else el.replaceChildren(frag)
 	}, [html, media, empty])
@@ -193,16 +193,21 @@ export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 // Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
 const CODE_SPACE = '\uE000'
 const CODE_BLANK = '\uE001'
+// Elements that show something with no text in them, so a comment holding one isn't empty.
+const SHOWS_WITHOUT_TEXT = 'img, video, hr, input'
+/** What a comment that shows nothing says, in the comment and its preview alike. */
+export const NOTHING_VISIBLE = 'No visible text.'
 
 /**
  * A comment as plain text, for one-line and clamped previews: the words of the comment exactly as GitHubHtml shows it
  * (same sanitising, same words for images and videos; no Markdown marks, tags or hidden `<!-- -->` notes), else the
  * body as written: rare (GitHub sent no HTML, or too much), so its Markdown isn't interpreted. Block elements end a
  * line and table cells are kept apart, even when GitHub put no whitespace between them; code keeps its indentation and
- * blank lines. Nothing here is attached to the page, so nothing loads.
+ * blank lines; a checklist item reads `[x]` or `[ ]`. A comment with nothing to read says NOTHING_VISIBLE, as the
+ * comment itself does. Nothing here is attached to the page, so nothing loads.
  */
 export function commentText(c: { body: string; html?: string }): string {
-	if (c.html === undefined) return c.body.trim()
+	if (c.html === undefined) return c.body.trim() || NOTHING_VISIBLE
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
@@ -213,6 +218,7 @@ export function commentText(c: { body: string; html?: string }): string {
 			d.replaceChildren(summary ?? 'Details')
 		}
 		standIns(body, body.ownerDocument, false)
+		for (const box of body.querySelectorAll('input[type="checkbox"]')) box.replaceWith(box.hasAttribute('checked') ? '[x] ' : '[ ] ')
 		// Code keeps its spacing and blank lines: written with stand-ins the steps below leave alone, put back at the end.
 		for (const code of body.querySelectorAll('pre, .blob-code-inner'))
 			code.textContent = code
@@ -233,12 +239,12 @@ export function commentText(c: { body: string; html?: string }): string {
 		}
 		t = (body.textContent ?? '')
 			.split('\n')
-			.map((l) => l.trim())
+			.map((l) => l.trim().replace(/ {2,}/g, ' ')) // spaces met from two text nodes; code's are still stand-ins here
 			.filter(Boolean)
 			.map((l) => l.replaceAll(CODE_SPACE, ' ').replaceAll(CODE_BLANK, ''))
 			.join('\n')
 		if (texts.size > 500) texts.delete(texts.keys().next().value!)
 		texts.set(c.html, t)
 	}
-	return t
+	return t || NOTHING_VISIBLE
 }

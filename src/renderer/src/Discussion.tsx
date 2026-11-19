@@ -15,7 +15,7 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
-import { commentText, GitHubHtml, hiddenNotes } from './GitHubHtml.tsx'
+import { commentText, GitHubHtml, hiddenNotes, NOTHING_VISIBLE } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
@@ -244,7 +244,7 @@ function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boole
 	if (c.html !== undefined)
 		return (
 			<>
-				<GitHubHtml html={c.html} empty="No visible text." className="gh-html" />
+				<GitHubHtml html={c.html} empty={NOTHING_VISIBLE} className="gh-html" />
 				<HiddenNotes notes={hiddenNotes(c)} />
 			</>
 		)
