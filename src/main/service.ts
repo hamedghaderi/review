@@ -284,8 +284,8 @@ export class ReviewService {
 		return this.requirePublisher(repoId).plan(repoId, reviewId)
 	}
 
-	publishComment(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip') {
-		return this.requirePublisher(repoId).publish(repoId, reviewId, commentId, outsideDiff)
+	publishComments(repoId: string, reviewId: string, commentIds: ReadonlyArray<string>, outsideDiff: 'file' | 'skip') {
+		return this.requirePublisher(repoId).publish(repoId, reviewId, commentIds, outsideDiff)
 	}
 
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string) {

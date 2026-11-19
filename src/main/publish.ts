@@ -1,6 +1,7 @@
 import type {
 	Hunk,
 	Publication,
+	PublishedComment,
 	PublishedReview,
 	PublishItem,
 	PublishOutcome,
@@ -10,29 +11,38 @@ import type {
 	ReviewComment,
 	ReviewEvent,
 } from '../shared/types.ts'
+import { PUBLISH_BATCH } from '../shared/types.ts'
 import { AppFail } from './git.ts'
-import { errorOf, type GitHubService, type ReviewState, type ThreadInput } from './github.ts'
+import { errorOf, type GitHubService, type ReviewState, type ReviewWrite, type ThreadInput } from './github.ts'
 import { placeComment } from './placement.ts'
 import type { ReviewStore } from './store.ts'
 
 /** Reads a file's diff hunks for the loaded comparison, or null when GitHub would not show a text diff either. */
 export type HunkSource = (reviewId: string, fileKey: string) => Promise<Array<Hunk> | null>
 
+/** Errors that would fail every other comment the same way: publishing stops on them instead of trying the rest. */
+const FATAL = new Set(['github-auth', 'github-forbidden', 'github-rate-limited', 'github-not-found', 'invalid-input'])
+
+/** An outcome, and whether the comment is worth sending again (its whole request failed, not GitHub's answer to it). */
+type Attempted = PublishOutcome & { retry: boolean }
+
 /**
- * Publishes a local PR review to GitHub as the viewer's pending review. Every write is preceded by a fresh read of
- * GitHub's state, runs one at a time, and is recorded as soon as it succeeds, so retries and restarts never post a
- * comment twice. Nothing becomes visible to others until the user submits the review.
+ * Publishes a local PR review to GitHub as the viewer's pending review. Every round of writes is preceded by a fresh
+ * read of GitHub's state, runs one at a time, and is recorded as soon as it succeeds, so retries and restarts never post
+ * a comment twice. Nothing becomes visible to others until the user submits the review.
  */
 export class Publisher {
 	private store: ReviewStore
 	private github: GitHubService
 	private hunks: HunkSource
 	private queue: Promise<unknown> = Promise.resolve()
+	private retryMs: number
 
-	constructor(store: ReviewStore, github: GitHubService, hunks: HunkSource) {
+	constructor(store: ReviewStore, github: GitHubService, hunks: HunkSource, opts: { retryMs?: number } = {}) {
 		this.store = store
 		this.github = github
 		this.hunks = hunks
+		this.retryMs = opts.retryMs ?? 2000
 	}
 
 	private serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -101,73 +111,157 @@ export class Publisher {
 		}
 	}
 
-	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome> {
+	/**
+	 * Sends these comments to your pending review, creating it first if needed. GitHub's state is read once for the lot
+	 * and the comments go in batches (see reviewWrites), each recorded as soon as GitHub answers. A batch whose request
+	 * failed as a whole (the network, a GitHub error) is tried once more after a short wait, starting again from a fresh
+	 * read, so a comment that did get through is adopted rather than posted twice. Errors that would fail every comment
+	 * the same way (access, rate limit) are thrown.
+	 */
+	publish(
+		repoId: string,
+		reviewId: string,
+		commentIds: ReadonlyArray<string>,
+		outsideDiff: 'file' | 'skip',
+	): Promise<Array<PublishOutcome>> {
 		return this.serial(async () => {
-			const state = await this.reconcile(repoId, reviewId)
-			const r = this.review(repoId, reviewId)
-			const c = r.comments.find((x) => x.id === commentId)
-			if (!c) throw new AppFail('not-found', 'That comment no longer exists.')
-			const item = await this.item(r, c)
-			const done = (status: PublishOutcome['status'], message: string | null, url: string | null = item.url): PublishOutcome => ({
-				commentId,
-				status,
-				message,
-				url,
+			const first = await this.attempt(repoId, reviewId, commentIds, outsideDiff)
+			const again = first.filter((o) => o.retry).map((o) => o.commentId)
+			let second = new Map<string, Attempted>()
+			if (again.length) {
+				await new Promise((r) => setTimeout(r, this.retryMs))
+				second = new Map((await this.attempt(repoId, reviewId, again, outsideDiff)).map((o) => [o.commentId, o]))
+			}
+			return first.map((o) => {
+				const { retry: _, ...out } = second.get(o.commentId) ?? o
+				return out
 			})
+		})
+	}
+
+	private async attempt(
+		repoId: string,
+		reviewId: string,
+		commentIds: ReadonlyArray<string>,
+		outsideDiff: 'file' | 'skip',
+	): Promise<Array<Attempted>> {
+		const state = await this.reconcile(repoId, reviewId)
+		const r = this.review(repoId, reviewId)
+		const out = new Map<string, Attempted>()
+		const done = (commentId: string, status: PublishOutcome['status'], message: string | null, url: string | null, retry = false) =>
+			out.set(commentId, { commentId, status, message, url, retry })
+		const pending = state.pending
+		// Pending comments already recorded, or adopted below, aren't adopted again.
+		const claimed = new Set(Object.values(r.publication?.comments ?? {}).map((p) => p.githubId))
+		const adopted: Array<{ commentId: string; githubId: string; url: string; body: string }> = []
+		const sends: Array<{ c: ReviewComment; write: 'thread' | 'update'; thread: ThreadInput; prev?: PublishedComment; file: boolean }> = []
+		for (const commentId of commentIds) {
+			const c = r.comments.find((x) => x.id === commentId)
+			if (!c) {
+				done(commentId, 'failed', 'That comment no longer exists.', null)
+				continue
+			}
+			const item = await this.item(r, c)
 			const prev = r.publication?.comments[commentId]
-			if (item.status === 'published') return done('skipped', 'Already on GitHub.')
+			if (item.status === 'published') {
+				done(commentId, 'skipped', 'Already on GitHub.', item.url)
+				continue
+			}
 			if (prev) {
 				const inPending = state.pending?.comments.some((x) => x.id === prev.githubId)
-				if (!inPending) return done('skipped', 'Already submitted on GitHub; edit it there.')
-				const u = await this.github.updateComment(prev.githubId, threadFor(item, c, 'file')!.body)
-				await this.record(repoId, reviewId, (p) => (p.comments[commentId] = { ...prev, body: c.body, url: u.url, at: now() }))
-				return done('updated', null, u.url)
+				if (!inPending) done(commentId, 'skipped', 'Already submitted on GitHub; edit it there.', item.url)
+				else sends.push({ c, write: 'update', thread: threadFor(item, c, 'file')!, prev, file: false })
+				continue
 			}
 			const thread = threadFor(item, c, outsideDiff)
-			if (!thread) return done('skipped', item.placement.kind === 'outside-diff' ? item.placement.reason : null)
-			const pending = state.pending
+			if (!thread) {
+				done(commentId, 'skipped', item.placement.kind === 'outside-diff' ? item.placement.reason : null, item.url)
+				continue
+			}
 			if (pending && pending.commit !== r.headSha)
 				throw new AppFail(
 					'github-failed',
 					`Your pending review on GitHub is for commit ${pending.commit.slice(0, 7)}, not this snapshot. Submit or delete it on GitHub first.`,
 				)
 			// A comment sent before a crash, but not recorded, is already in the pending review: adopt it instead of posting it twice.
-			const adopted = pending?.comments.find(
-				(x) =>
-					x.path === thread.path &&
-					x.body === thread.body &&
-					!Object.values(r.publication?.comments ?? {}).some((p) => p.githubId === x.id),
-			)
-			let reviewInfo: { id: string; url: string }
-			let comment: { id: string; url: string }
-			if (adopted && pending) {
-				reviewInfo = pending
-				comment = adopted
-			} else if (pending) {
-				reviewInfo = pending
-				comment = await this.github.addThread(pending.id, thread)
-			} else {
-				// Two steps, because addPullRequestReview's inline threads cannot be file-level (they have no subjectType).
-				// An empty pending review left by a failure in between is found and reused by the next attempt.
-				const res = await this.github.addReview(state.prId, r.headSha)
-				reviewInfo = res.review
-				await this.record(repoId, reviewId, (p) => {
-					if (!p.reviews.some((x) => x.id === reviewInfo.id))
-						p.reviews.push({ id: reviewInfo.id, url: reviewInfo.url, commit: r.headSha, state: 'pending', event: null, submittedAt: null })
-				})
-				comment = await this.github.addThread(reviewInfo.id, thread)
+			const found = pending?.comments.find((x) => x.path === thread.path && x.body === thread.body && !claimed.has(x.id))
+			if (found) {
+				claimed.add(found.id)
+				adopted.push({ commentId, githubId: found.id, url: found.url, body: c.body })
+				done(commentId, 'published', null, found.url)
+				continue
+			}
+			sends.push({ c, write: 'thread', thread, file: thread.subjectType === 'FILE' && item.placement.kind === 'outside-diff' })
+		}
+
+		let reviewInfo: { id: string; url: string } | null = pending
+		const ensureReview = (p: Publication, info: { id: string; url: string }): void => {
+			if (!p.reviews.some((x) => x.id === info.id))
+				p.reviews.push({ id: info.id, url: info.url, commit: r.headSha, state: 'pending', event: null, submittedAt: null })
+		}
+		if (adopted.length && pending)
+			await this.record(repoId, reviewId, (p) => {
+				ensureReview(p, pending)
+				for (const a of adopted)
+					p.comments[a.commentId] = { githubId: a.githubId, reviewId: pending.id, url: a.url, body: a.body, at: now() }
+			})
+
+		// A failure that would fail the rest the same way is thrown; any other leaves these comments to try again.
+		const failAll = (list: typeof sends, e: unknown): void => {
+			if (!(e instanceof AppFail) || FATAL.has(e.code)) throw e
+			for (const s of list) done(s.c.id, 'failed', e.message, null, true)
+		}
+		if (!reviewInfo && sends.some((s) => s.write === 'thread')) {
+			// Two steps, because addPullRequestReview's inline threads cannot be file-level (they have no subjectType).
+			// An empty pending review left by a failure in between is found and reused by the next attempt.
+			try {
+				const info = (await this.github.addReview(state.prId, r.headSha)).review
+				await this.record(repoId, reviewId, (p) => ensureReview(p, info))
+				reviewInfo = info
+			} catch (e) {
+				failAll(
+					sends.filter((s) => s.write === 'thread'),
+					e,
+				)
+			}
+		}
+		const ready = sends.filter((s) => s.write === 'update' || reviewInfo)
+		for (let i = 0; i < ready.length; i += PUBLISH_BATCH) {
+			const batch = ready.slice(i, i + PUBLISH_BATCH)
+			let results: Array<{ id: string; url: string } | AppFail>
+			try {
+				results = await this.github.reviewWrites(
+					batch.map((s): ReviewWrite =>
+						s.write === 'update'
+							? { kind: 'update', commentId: s.prev!.githubId, body: s.thread.body }
+							: { kind: 'thread', reviewId: reviewInfo!.id, thread: s.thread },
+					),
+				)
+			} catch (e) {
+				failAll(batch, e)
+				continue
 			}
 			await this.record(repoId, reviewId, (p) => {
-				if (!p.reviews.some((x) => x.id === reviewInfo.id))
-					p.reviews.push({ id: reviewInfo.id, url: reviewInfo.url, commit: r.headSha, state: 'pending', event: null, submittedAt: null })
-				p.comments[commentId] = { githubId: comment.id, reviewId: reviewInfo.id, url: comment.url, body: c.body, at: now() }
+				batch.forEach((s, j) => {
+					const res = results[j]
+					if (res instanceof AppFail) return
+					if (s.write === 'update') p.comments[s.c.id] = { ...s.prev!, body: s.c.body, url: res.url, at: now() }
+					else {
+						ensureReview(p, reviewInfo!)
+						p.comments[s.c.id] = { githubId: res.id, reviewId: reviewInfo!.id, url: res.url, body: s.c.body, at: now() }
+					}
+				})
 			})
-			return done(
-				'published',
-				thread.subjectType === 'FILE' && item.placement.kind === 'outside-diff' ? 'Posted as a file comment.' : null,
-				comment.url,
-			)
-		})
+			batch.forEach((s, j) => {
+				const res = results[j]
+				if (res instanceof AppFail) done(s.c.id, 'failed', res.message, null)
+				else if (s.write === 'update') done(s.c.id, 'updated', null, res.url)
+				else done(s.c.id, 'published', s.file ? 'Posted as a file comment.' : null, res.url)
+			})
+			const fatal = results.find((x): x is AppFail => x instanceof AppFail && FATAL.has(x.code))
+			if (fatal) throw fatal
+		}
+		return commentIds.map((id) => out.get(id)!)
 	}
 
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview> {

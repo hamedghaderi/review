@@ -431,14 +431,15 @@ function registerIpc(): void {
 
 	// Publishing to GitHub. Only explicit user actions reach these; automatic review (off by default) publishes from the main process.
 	handle(IPC.publishPlan, (repoId: unknown, reviewId: unknown) => service.publishPlan(str(repoId, 'repository'), comparisonId(reviewId)))
-	handle(IPC.publishComment, (repoId: unknown, reviewId: unknown, commentId: unknown, outside: unknown) =>
-		service.publishComment(
+	handle(IPC.publishComments, (repoId: unknown, reviewId: unknown, commentIds: unknown, outside: unknown) => {
+		if (!Array.isArray(commentIds) || commentIds.length > 500) throw new AppFail('invalid-input', 'Invalid comment ids.')
+		return service.publishComments(
 			str(repoId, 'repository'),
 			comparisonId(reviewId),
-			str(commentId, 'comment id', 128),
+			commentIds.map((id) => str(id, 'comment id', 128)),
 			outside === 'file' ? 'file' : 'skip',
-		),
-	)
+		)
+	})
 	handle(IPC.submitReview, (repoId: unknown, reviewId: unknown, event: unknown, body: unknown) =>
 		service.submitReview(str(repoId, 'repository'), comparisonId(reviewId), reviewEvent(event), reviewBody(body)),
 	)
@@ -887,7 +888,7 @@ app.whenReady().then(async () => {
 				if (r) r.prepared = prepared
 			}),
 		plan: (repoId, reviewId) => service.publishPlan(repoId, reviewId),
-		publish: (repoId, reviewId, commentId, outside) => service.publishComment(repoId, reviewId, commentId, outside),
+		publish: (repoId, reviewId, commentIds, outside) => service.publishComments(repoId, reviewId, commentIds, outside),
 		submit: (repoId, reviewId, event, body) => service.submitReview(repoId, reviewId, event, body),
 		checks: (repoId, reviewId) => service.headChecks(repoId, reviewId),
 		discussion: (repoId, reviewId) => service.prDiscussion(repoId, reviewId),
