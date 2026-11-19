@@ -73,6 +73,36 @@
 	}
 }
 
+/*
+ * Code coloured by language (issue #237): a theme without its own --syn-* colours uses these. [data-theme] gives a
+ * theme preview these too, not the window's theme's.
+ */
+:root,
+[data-theme] {
+	--syn-comment: #5e5e6c;
+	--syn-keyword: #a3238f;
+	--syn-string: #2a6e2f;
+	--syn-constant: #a14a00;
+	--syn-function: #3b4fc4;
+	--syn-type: #0b6e80;
+	--syn-tag: #b42318;
+	--syn-attr: #8a5300;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root,
+	[data-theme] {
+		--syn-comment: #a9aabb;
+		--syn-keyword: #d79cf5;
+		--syn-string: #a3d9a5;
+		--syn-constant: #f5a97f;
+		--syn-function: #8fb0ff;
+		--syn-type: #6fd0e0;
+		--syn-tag: #ff8f87;
+		--syn-attr: #e8c27a;
+	}
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -736,6 +766,137 @@ input[type='checkbox'] {
 .code::selection,
 .code *::selection {
 	background: var(--sel-bg);
+}
+.tk-comment {
+	color: var(--syn-comment);
+}
+.tk-keyword {
+	color: var(--syn-keyword);
+}
+.tk-string,
+.tk-regexp {
+	color: var(--syn-string);
+}
+.tk-constant,
+.tk-escape {
+	color: var(--syn-constant);
+}
+.tk-function {
+	color: var(--syn-function);
+}
+.tk-type {
+	color: var(--syn-type);
+}
+.tk-tag {
+	color: var(--syn-tag);
+}
+.tk-attr {
+	color: var(--syn-attr);
+}
+.tk-heading {
+	color: var(--syn-function);
+	font-weight: 600;
+}
+.tk-bold {
+	font-weight: 600;
+}
+.tk-italic {
+	font-style: italic;
+}
+.tk-link {
+	color: var(--syn-string);
+	text-decoration: underline;
+}
+.tk-inserted {
+	color: var(--add-fg);
+}
+.tk-deleted {
+	color: var(--del-fg);
+}
+
+/* A fenced code block in an AI answer, coloured like the diff. In Markdown it has .md-body's look. */
+.answer-text .code-block {
+	margin: 4px 0;
+	padding: 6px 8px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+	font: 12px / 1.5 var(--mono);
+	white-space: pre;
+	overflow-x: auto;
+	tab-size: 4;
+}
+.answer-text .code-block code {
+	font: inherit;
+	background: none;
+	padding: 0;
+}
+
+/*
+ * Code blocks in GitHub's HTML (comments, descriptions) come already split by GitHub into pl-* spans; these give them
+ * the theme's code colours. Turning colours off in Appearance turns these off too.
+ */
+.md-body .pl-c,
+.md-body .pl-sg {
+	color: var(--syn-comment);
+}
+.md-body .pl-k,
+.md-body .pl-pse,
+.md-body .pl-ml {
+	color: var(--syn-keyword);
+}
+.md-body .pl-s,
+.md-body .pl-pds,
+.md-body .pl-sr {
+	color: var(--syn-string);
+}
+.md-body .pl-c1,
+.md-body .pl-cce,
+.md-body .pl-s .pl-v {
+	color: var(--syn-constant);
+}
+.md-body .pl-e,
+.md-body .pl-en {
+	color: var(--syn-function);
+}
+.md-body .pl-v,
+.md-body .pl-smw {
+	color: var(--syn-type);
+}
+.md-body .pl-ent {
+	color: var(--syn-tag);
+}
+.md-body .pl-s .pl-s1,
+.md-body .pl-smi {
+	color: var(--text);
+}
+.md-body .pl-mh,
+.md-body .pl-mh .pl-en,
+.md-body .pl-ms {
+	color: var(--syn-function);
+	font-weight: 600;
+}
+.md-body .pl-mb {
+	font-weight: 600;
+}
+.md-body .pl-mi {
+	font-style: italic;
+}
+.md-body .pl-corl {
+	color: var(--syn-string);
+	text-decoration: underline;
+}
+.md-body .pl-mi1 {
+	color: var(--add-fg);
+}
+.md-body .pl-md {
+	color: var(--del-fg);
+}
+[data-syntax='off'] .md-body [class*='pl-'] {
+	color: inherit;
+	font-weight: inherit;
+	font-style: inherit;
+	text-decoration: inherit;
 }
 .line.add {
 	background: var(--add-bg);

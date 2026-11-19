@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
+import { CodeBlock } from './CodeText.tsx'
 
 /**
  * Markdown the AI wrote, shown with the GitHub look (`md-body`): headings, paragraphs, lists (nested by indent), quotes,
- * fenced code, rules, and inline code, bold, italics and web links. Nothing is parsed as HTML, so the text can never add
+ * fenced code (coloured by the language it names), rules, and inline code, bold, italics and web links. Nothing is parsed as HTML, so the text can never add
  * markup or run anything. A reference to one of `paths` (`src/a.ts` or `src/a.ts:12`) becomes a link that opens it.
  */
 export function Markdown({ text, paths, onOpenPath }: { text: string; paths?: ReadonlySet<string>; onOpenPath?(path: string): void }) {
@@ -16,7 +17,7 @@ interface Links {
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/
-const FENCE = /^\s*(```|~~~)/
+const FENCE = /^\s*(```|~~~)\s*([^\s`]*)/
 
 function blocks(lines: Array<string>, links: Links | undefined, key: string): Array<ReactNode> {
 	const out: Array<ReactNode> = []
@@ -35,11 +36,7 @@ function blocks(lines: Array<string>, links: Links | undefined, key: string): Ar
 			i++
 			while (i < lines.length && !lines[i].trim().startsWith(fence[1])) code.push(lines[i++])
 			i++
-			out.push(
-				<pre key={k}>
-					<code>{code.join('\n')}</code>
-				</pre>,
-			)
+			out.push(<CodeBlock key={k} lines={code} lang={fence[2] || null} path={null} />)
 			continue
 		}
 		const heading = /^(#{1,6})\s+(.*?)\s*#*$/.exec(line)

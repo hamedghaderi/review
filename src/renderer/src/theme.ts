@@ -1,8 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { DEFAULT_THEME, fontStack, parseTheme, type ThemeSettings } from '../../shared/theme.ts'
 
 // The last choice, kept here too so the first frame already has it; the main process holds the real one.
 const CACHE_KEY = 'theme'
+
+// Whether code is coloured by language, for the code views to follow as it changes.
+let syntax = DEFAULT_THEME.syntax
+const syntaxListeners = new Set<() => void>()
+const onSyntax = (f: () => void): (() => void) => {
+	syntaxListeners.add(f)
+	return () => syntaxListeners.delete(f)
+}
+
+/** Whether code is coloured by language (Settings · Appearance). */
+export function useSyntaxColours(): boolean {
+	return useSyncExternalStore(onSyntax, () => syntax)
+}
 
 function apply(t: ThemeSettings): void {
 	const root = document.documentElement
@@ -12,6 +25,13 @@ function apply(t: ThemeSettings): void {
 	root.style.setProperty('--sans', fontStack(t.uiFont, 'var(--sans-default)'))
 	root.style.setProperty('--code-size', `${t.codeSize}px`)
 	root.style.setProperty('--code-line', `${Math.round((t.codeSize * 5) / 3)}px`) // 20px at the default 12px
+	// GitHub's own colouring of code in comments (pl-* classes) follows the setting through CSS.
+	if (t.syntax) delete root.dataset.syntax
+	else root.dataset.syntax = 'off'
+	if (t.syntax !== syntax) {
+		syntax = t.syntax
+		for (const f of syntaxListeners) f()
+	}
 	try {
 		localStorage.setItem(CACHE_KEY, JSON.stringify(t))
 	} catch {

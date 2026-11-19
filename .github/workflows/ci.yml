@@ -19,6 +19,8 @@ jobs:
           check-latest: true
           cache: npm
       - run: npm ci
+      # Every installed package matches what its registry signed, and attestations that exist check out.
+      - run: npm audit signatures
       - run: npm run format:check
       - run: npm run typecheck
       # A virtual display for the test that runs code in Chromium (an Electron window).

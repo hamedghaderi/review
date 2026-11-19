@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnswerText } from './CodeText.tsx'
 import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { RefText, RefLinksProvider, useRefLinks, type RefTarget } from './RefText.tsx'
 import {
@@ -1802,7 +1803,7 @@ function FindingCard(p: CardProps) {
 					</dd>
 				</dl>
 			)}
-			{(!!f.thread?.length || asking) && <Thread messages={f.thread ?? []} pending={asking} />}
+			{(!!f.thread?.length || asking) && <Thread messages={f.thread ?? []} pending={asking} path={f.anchor.newPath ?? f.anchor.oldPath} />}
 			<AskBox key={f.id} focus={p.focusAsk} disabled={p.askDisabled} onBusy={setAsking} onAsk={p.onAsk} modelPicker={p.askModelPicker} />
 			<div className="finding-actions">
 				{state === 'open' && (
@@ -1905,7 +1906,7 @@ const VERDICT_TEXT: Record<'holds' | 'wrong' | 'unsure', { label: string; hint: 
 	unsure: { label: 'Unsure', hint: 'The supplied code was not enough to settle it' },
 }
 
-function Thread({ messages, pending }: { messages: Array<FindingMessage>; pending: boolean }) {
+function Thread({ messages, pending, path }: { messages: Array<FindingMessage>; pending: boolean; path: string | null }) {
 	useAnnounceWait(pending, 'Thinking…')
 	useAnnounceNew(
 		messages,
@@ -1947,7 +1948,7 @@ function Thread({ messages, pending }: { messages: Array<FindingMessage>; pendin
 							)}
 						</div>
 					)}
-					<span className="selectable">{m.text}</span>
+					<AnswerText text={m.text} path={path} />
 				</article>
 			))}
 			{pending && messages[messages.length - 1]?.role !== 'you' && <div className="thread-msg you muted">Sending…</div>}

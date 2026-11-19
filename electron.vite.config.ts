@@ -16,6 +16,8 @@ export default defineConfig({
 	renderer: {
 		root: resolve(__dirname, 'src/renderer'),
 		plugins: [react()],
+		// The syntax worker loads each language's grammar when first needed, which needs module workers.
+		worker: { format: 'es' },
 		define: { __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')).version) },
 	},
 })

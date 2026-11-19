@@ -69,8 +69,20 @@ export function AppearanceSettings() {
 				style={{ fontFamily: fontStack(theme.codeFont, 'var(--mono-default)'), fontSize: theme.codeSize }}
 				aria-label="Code font sample"
 			>
-				{'const ok = items.filter((x) => x.id !== 0) // 0O 1lI {}[]'}
+				{theme.syntax ? (
+					<>
+						<span className="tk-keyword">const</span> <span className="tk-constant">ok</span> = items.
+						<span className="tk-function">filter</span>
+						((x) =&gt; x.id !== <span className="tk-constant">0</span>) <span className="tk-comment">{'// 0O 1lI {}[]'}</span>
+					</>
+				) : (
+					'const ok = items.filter((x) => x.id !== 0) // 0O 1lI {}[]'
+				)}
 			</pre>
+			<label className="option">
+				<input type="checkbox" checked={theme.syntax} onChange={(e) => setTheme({ syntax: e.target.checked })} />
+				<span>Colour code by language</span>
+			</label>
 			<p className="muted small">
 				Choose Other… to type any font installed on this computer; one that isn’t installed falls back to the default. The interface size is
 				the same as View › Zoom (⌘+ and ⌘−).
@@ -86,8 +98,13 @@ export function AppearanceSettings() {
 						onClick={() => setTheme({ theme: t.id })}
 					>
 						<span className="theme-preview" data-theme={t.id} aria-hidden="true">
-							<span className="theme-line del">- return null</span>
-							<span className="theme-line add">+ return theme</span>
+							<span className="theme-line del">
+								- <span className={theme.syntax ? 'tk-keyword' : undefined}>return</span>{' '}
+								<span className={theme.syntax ? 'tk-constant' : undefined}>null</span>
+							</span>
+							<span className="theme-line add">
+								+ <span className={theme.syntax ? 'tk-keyword' : undefined}>return</span> theme
+							</span>
 							<span className="theme-chip">Publish</span>
 						</span>
 						<span className="theme-name">{t.label}</span>
