@@ -5559,10 +5559,15 @@ textarea.style-edit {
 }
 /* Text a GitHub comment hides (<!-- notes -->) but the AI reads, shown on request. */
 .hidden-notes {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
 	margin-top: 4px;
 	color: var(--text-2);
 }
 .hidden-notes-text {
+	flex-basis: 100%;
 	margin: 4px 0 0;
 	padding: 6px 8px;
 	max-height: 240px;

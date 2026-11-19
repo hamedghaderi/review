@@ -15,7 +15,8 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
-import { commentText, GitHubHtml, hiddenNotes, NOTHING_VISIBLE } from './GitHubHtml.tsx'
+import { commentText, hiddenNotes, NOTHING_VISIBLE } from './commentHtml.ts'
+import { GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
@@ -245,7 +246,7 @@ function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boole
 		return (
 			<>
 				<GitHubHtml html={c.html} empty={NOTHING_VISIBLE} className="gh-html" />
-				<HiddenNotes notes={hiddenNotes(c)} />
+				<CommentSource c={c} />
 			</>
 		)
 	return (
@@ -257,25 +258,49 @@ function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boole
 }
 
 /**
- * Says when a comment holds text GitHub doesn't show (`<!-- … -->` notes) that the AI reviewer still reads, and shows
- * it on request as plain text, so nothing can speak to the AI out of your sight.
+ * Under a comment shown from GitHub's HTML: what the rendering leaves out of what the AI reviewer reads. "Hidden text"
+ * appears when the comment has `<!-- -->` notes GitHub doesn't show; "Source" is always there, the comment as written,
+ * which is exactly what the AI gets (it also holds what no note check catches, like an unused link definition).
  */
-function HiddenNotes({ notes }: { notes: Array<string> }) {
-	const [open, setOpen] = useState(false)
-	if (!notes.length) return null
+function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?: string } }) {
+	const [view, setView] = useState<'notes' | 'source' | null>(null)
+	const notes = hiddenNotes(c)
+	const toggle = (v: 'notes' | 'source') => setView((x) => (x === v ? null : v))
 	return (
 		<div className="hidden-notes small">
+			{notes.length > 0 && (
+				<button
+					className="btn small ghost"
+					onClick={() => toggle('notes')}
+					aria-expanded={view === 'notes'}
+					title="Text in this comment that GitHub doesn't show (HTML comments). The AI reviewer reads it."
+				>
+					{view === 'notes' ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
+				</button>
+			)}
 			<button
 				className="btn small ghost"
-				onClick={() => setOpen((x) => !x)}
-				aria-expanded={open}
-				title="Text in this comment that GitHub doesn't show (HTML comments). The AI reviewer reads it."
+				onClick={() => toggle('source')}
+				aria-expanded={view === 'source'}
+				title="The comment as written, which is what the AI reviewer reads."
 			>
-				{open ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
+				{view === 'source' ? '▾' : '▸'} Source
 			</button>
-			{open && (
+			{view === 'notes' && (
 				<pre className="hidden-notes-text selectable">
-					{notes.map((n) => (n.endsWith('-->') ? n : `${n} …(cut off: the comment is longer than Review keeps)`)).join('\n\n')}
+					{notes
+						.map((n) =>
+							n.endsWith('-->')
+								? n
+								: `${n} …(${c.bodyTruncated ? 'cut off: the comment is longer than Review keeps' : 'never closed, so GitHub hides the rest'})`,
+						)
+						.join('\n\n')}
+				</pre>
+			)}
+			{view === 'source' && (
+				<pre className="hidden-notes-text selectable">
+					{c.body}
+					{c.bodyTruncated && '\n…(truncated: the comment is longer than Review keeps)'}
 				</pre>
 			)}
 		</div>

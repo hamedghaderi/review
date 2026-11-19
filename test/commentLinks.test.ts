@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { sameAddress, webHost, webUrl } from '../src/renderer/src/commentLinks.ts'
+import { webUrl } from '../src/renderer/src/commentLinks.ts'
 
 test('webUrl: only http(s) addresses a browser can open, in the form that opens', () => {
 	assert.equal(webUrl('https://github.com/o/r/pull/1'), 'https://github.com/o/r/pull/1')
@@ -37,31 +37,37 @@ test('webUrl: only http(s) addresses a browser can open, in the form that opens'
 		assert.equal(webUrl(bad), null, String(bad))
 })
 
-test('the host check: through webUrl for hosts Node lets through, directly for ones only Chromium does', () => {
-	// Node's parser accepts these, so webUrl rejecting them shows the host check runs.
-	for (const bad of ['-bad.example', 'bad-.example', 'a..b', '.example', 'ex"ample.com']) assert.equal(webUrl(`https://${bad}/`), null, bad)
-	// Chromium makes `exa%20mple.com` of `https://exa mple.com/`, which Node rejects before the check, so the rule is
-	// tested on its own; checked in Electron too when this was written.
-	for (const ok of ['github.com', 'a.b.example.', 'xn--bcher-kva.example', 'my_host.example', '127.0.0.1', '[::1]', '[2001:db8::1]'])
-		assert.equal(webHost(ok), true, ok)
-	for (const bad of [
-		'',
-		'exa%20mple.com',
-		'exa mple.com',
-		'-bad.example',
-		'bad-.example',
-		'a..b',
-		'.example',
-		'ex"ample.com',
-		'exa<mple.com',
+test('the host is checked as written, so Node and Chromium give the same answer', () => {
+	// Node's parser accepts every one of these (it decodes `%41`, drops the tab), so webUrl turning them down shows the
+	// check on the host as written runs, and that it refuses `%` and whitespace whatever a parser makes of them.
+	for (const bad of ['-bad.example', 'bad-.example', 'a..b', '.example', 'ex"ample.com', 'exa%41mple.com', 'exa\tmple.com'])
+		assert.equal(webUrl(`https://${bad}/`), null, JSON.stringify(bad))
+	for (const ok of [
+		'github.com',
+		'a.b.example.',
+		'xn--bcher-kva.example',
+		'bücher.example',
+		'my_host.example',
+		'127.0.0.1',
+		'[2001:db8::1]',
 	])
-		assert.equal(webHost(bad), false, bad)
+		assert.notEqual(webUrl(`https://${ok}/`), null, ok)
+	assert.notEqual(webUrl('https://github.com:8443/x'), null, 'a port')
+	assert.equal(webUrl('https://github.com:x/'), null, 'not a port')
 })
 
-test('webUrl keeps percent escapes as written; sameAddress compares them in either case', () => {
-	assert.equal(webUrl('https://example.com/a%2fb?sig=x%2b'), 'https://example.com/a%2fb?sig=x%2b', 'a signed link opens as written')
-	assert.equal(sameAddress('https://example.com/badge%2dpassed.svg', 'https://example.com/badge%2Dpassed.svg'), true)
-	assert.equal(sameAddress('https://example.com/a.svg', 'https://example.com/b.svg'), false)
-	assert.equal(sameAddress(null, 'https://example.com/a.svg'), false)
-	assert.equal(sameAddress(null, null), false, 'no address is never the same file')
+test('DNS limits: labels up to 63 characters, names up to 253', () => {
+	const label = (n: number) => 'a'.repeat(n)
+	assert.notEqual(webUrl(`https://${label(63)}.example/`), null)
+	assert.equal(webUrl(`https://${label(64)}.example/`), null)
+	const name = (total: number) => [label(63), label(63), label(63), label(total - 3 * 63 - 3)].join('.')
+	assert.equal(name(253).length, 253)
+	assert.notEqual(webUrl(`https://${name(253)}/`), null)
+	assert.notEqual(webUrl(`https://${name(253)}./`), null, 'a trailing dot is not counted')
+	assert.equal(webUrl(`https://${name(254)}/`), null)
+})
+
+test('webUrl keeps percent escapes as written, since a signed link can depend on them', () => {
+	assert.equal(webUrl('https://example.com/a%2fb?sig=x%2b'), 'https://example.com/a%2fb?sig=x%2b')
+	assert.notEqual(webUrl('https://example.com/badge%2dpassed.svg'), webUrl('https://example.com/badge%2Dpassed.svg'))
 })
