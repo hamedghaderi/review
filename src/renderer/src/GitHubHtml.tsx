@@ -54,24 +54,21 @@ export function GitHubHtml({
 				)
 				continue
 			}
-			const parent = img.parentElement
-			const wrapped = parent instanceof HTMLAnchorElement && parent.childNodes.length === 1
 			const text = imageText(img)
+			const box = img.parentElement?.tagName === 'PICTURE' ? img.parentElement : img
 			// A link from the image to somewhere else (a badge to its CI run, an icon to a report): keep that link, with
-			// words for the image. Only http(s) links still have an href here.
-			const href = wrapped ? parent.getAttribute('href') : null
-			if (href && href !== src && href !== img.getAttribute('data-canonical-src')) {
-				img.replaceWith(text ?? `🔗 ${hostOf(href)}`)
+			// words for the image.
+			if (linkElsewhere(img)) {
+				box.replaceWith(text!)
 				continue
 			}
 			// GitHub wraps images in a link to the full-size file; keep a single link, or none for an icon.
+			const wrapper = linkAround(img)
 			if (text === null) {
-				;(wrapped ? parent : img).remove()
+				;(wrapper ?? box).remove()
 				continue
 			}
-			const link = mediaLink(src, text, 'Images aren’t loaded in the app. Opens in your browser.')
-			if (wrapped) parent.replaceWith(link)
-			else img.replaceWith(link)
+			;(wrapper ?? box).replaceWith(mediaLink(src, text, 'Images aren’t loaded in the app. Opens in your browser.'))
 		}
 		for (const video of frag.querySelectorAll('video')) {
 			const sources = [video.getAttribute('src'), ...[...video.querySelectorAll('source')].map((s) => s.getAttribute('src'))]
@@ -106,9 +103,27 @@ export function GitHubHtml({
 
 const label = (alt: string | null | undefined, kind: 'image' | 'video') => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
 
-/** The words that stand for an image that isn't loaded, "🖼 alt", or null for an icon, which is left out. */
+/**
+ * The words that stand for an image that isn't loaded, the same in the comment and its preview: "🖼 alt"; for an icon,
+ * "🔗 host" when it links somewhere else, else null (left out).
+ */
 function imageText(img: Element): string | null {
-	return decorative(img) ? null : label(img.getAttribute('alt'), 'image')
+	if (!decorative(img)) return label(img.getAttribute('alt'), 'image')
+	const href = linkElsewhere(img)
+	return href ? `🔗 ${hostOf(href)}` : null
+}
+
+/** The link whose only content is this image (also inside a <picture>), if there is one. */
+function linkAround(img: Element): Element | null {
+	const a = img.closest('a')
+	return a && !a.textContent?.trim() && a.querySelectorAll('img').length === 1 ? a : null
+}
+
+/** Where the link around the image goes, when that's a web page other than the image itself. */
+function linkElsewhere(img: Element): string | null {
+	const href = linkAround(img)?.getAttribute('href') ?? ''
+	const self = [img.getAttribute('src'), img.getAttribute('data-canonical-src')]
+	return /^https?:\/\//i.test(href) && !self.includes(href) ? href : null
 }
 
 function hostOf(href: string): string {
@@ -177,7 +192,8 @@ const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
 /**
  * Markdown without the HTML comments that start a line, which GitHub hides (a bot's `<!-- generated -->` marker). A
- * `<!--` inside a sentence, a code span or a fenced code block is shown by GitHub, so it stays; so does one never closed.
+ * `<!--` inside a sentence, a code span, a fenced code block or an indented one (four spaces or a tab) is shown by
+ * GitHub, so it stays; so does one never closed.
  */
 function withoutNotes(body: string): string {
 	const lines = body.split('\n')
@@ -196,7 +212,8 @@ function withoutNotes(body: string): string {
 			out.push(line)
 			continue
 		}
-		if (!/^[ \t]*<!--/.test(line)) {
+		// Indented four spaces or a tab, it's a code block, which GitHub shows as written.
+		if (!/^ {0,3}<!--/.test(line)) {
 			out.push(line)
 			continue
 		}
