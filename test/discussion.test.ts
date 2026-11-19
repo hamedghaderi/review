@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { fromGraphql, fromRest, safeUrl, type Activity, type RawThread } from '../src/main/activity.ts'
+import { fromGraphql, fromRest, HTML_LIMIT, safeUrl, type Activity, type RawThread } from '../src/main/activity.ts'
 import { discussionOf, placeThreads } from '../src/main/discussion.ts'
 import { compareSnapshot } from '../src/main/git.ts'
 import { GitHubService, type TokenStore } from '../src/main/github.ts'
@@ -340,6 +340,102 @@ test('bots are recognised from GitHub’s actor type (GraphQL) or user type (RES
 		rest.conversation.map((c) => c.bot),
 		[true, undefined],
 	)
+})
+
+test('GitHub’s HTML comes along with the body, whole or not at all, from GraphQL and REST', () => {
+	const big = `<p>${'x'.repeat(HTML_LIMIT)}</p>`
+	const comment = (id: string, bodyHTML: string | null) => ({
+		id,
+		body: '**b**',
+		bodyHTML,
+		author: { login: 'coderabbitai', __typename: 'Bot' },
+		authorAssociation: 'NONE',
+		createdAt: null,
+		url: null,
+		state: 'SUBMITTED',
+	})
+	const g = fromGraphql([
+		{
+			headRefOid: 'h',
+			baseRefOid: 'b',
+			reviewThreads: {
+				totalCount: 1,
+				pageInfo: { hasNextPage: false, endCursor: null },
+				nodes: [
+					{
+						id: 'T1',
+						isResolved: false,
+						isOutdated: false,
+						resolvedBy: null,
+						path: 'f.txt',
+						line: 3,
+						startLine: null,
+						originalLine: 3,
+						originalStartLine: null,
+						diffSide: 'RIGHT',
+						subjectType: 'LINE',
+						comments: {
+							totalCount: 3,
+							nodes: [comment('C1', '<details><summary>Fix</summary><p>b</p></details>'), comment('C2', big), comment('C3', '  ')],
+						},
+					},
+				],
+			},
+			reviews: {
+				totalCount: 1,
+				nodes: [
+					{
+						id: 'R1',
+						author: { login: 'a' },
+						state: 'COMMENTED',
+						body: '**r**',
+						bodyHTML: '<p><strong>r</strong></p>',
+						submittedAt: null,
+						url: null,
+					},
+				],
+			},
+			comments: { totalCount: 1, nodes: [comment('I1', '<p><strong>b</strong></p>')] },
+		},
+	])
+	assert.deepEqual(
+		g.threads[0].comments.map((c) => c.html),
+		['<details><summary>Fix</summary><p>b</p></details>', undefined, undefined],
+		'too large or blank: plain text instead',
+	)
+	assert.equal(g.threads[0].comments[1].body, '**b**', 'the body as written stays for the AI')
+	assert.equal(g.reviews[0].html, '<p><strong>r</strong></p>')
+	assert.equal(g.conversation[0].html, '<p><strong>b</strong></p>')
+
+	const rest = fromRest(
+		{ headSha: 'h', baseSha: 'b' },
+		[
+			{
+				id: 1,
+				node_id: 'N1',
+				path: 'f.txt',
+				line: 3,
+				start_line: null,
+				original_line: 3,
+				original_start_line: null,
+				side: 'RIGHT',
+				diff_hunk: null,
+				original_commit_id: 'o',
+				user: { login: 'u' },
+				author_association: 'NONE',
+				body: '`x`',
+				body_html: '<p><code>x</code></p>',
+				created_at: null,
+				html_url: null,
+			},
+		],
+		false,
+		[{ node_id: 'R1', user: { login: 'u' }, state: 'COMMENTED', body: 'r', body_html: '<p>r</p>', submitted_at: null, html_url: null }],
+		[{ node_id: 'I1', user: { login: 'u' }, author_association: 'NONE', body: 'y', created_at: null, html_url: null }],
+	)
+	assert.equal(rest.threads[0].comments[0].html, '<p><code>x</code></p>')
+	assert.equal(rest.reviews[0].html, '<p>r</p>')
+	assert.equal(rest.conversation[0].html, undefined, 'no body_html: plain text')
 })
 
 test('"already discussed" matches placed threads on overlapping lines of the same side, file threads for file comments, never its own thread', () => {

@@ -15,6 +15,7 @@ import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
+import { commentText, GitHubHtml } from './GitHubHtml.tsx'
 import { useMentionCommand } from './Mention.tsx'
 import { useStored } from './useStored.ts'
 
@@ -235,7 +236,21 @@ function BotCheckNote({ check }: { check: BotThreadCheck }) {
 	)
 }
 
-/** One GitHub comment inside an inline card: author, time, text. Third-party text: plain text only. */
+/**
+ * A GitHub comment's text. Third-party: GitHub's HTML, sanitised again by GitHubHtml (bots like CodeRabbit write HTML
+ * and folded sections), else the body as written, as plain text. `className` styles the plain-text form.
+ */
+function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boolean; html?: string }; className: string }) {
+	if (c.html) return <GitHubHtml html={c.html} empty="" className="gh-html" />
+	return (
+		<div className={`${className} selectable`}>
+			{c.body}
+			{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
+		</div>
+	)
+}
+
+/** One GitHub comment inside an inline card: author, time, text. */
 export function InlineReply({ c }: { c: DiscussionComment }) {
 	return (
 		<div className="ic-reply">
@@ -249,10 +264,7 @@ export function InlineReply({ c }: { c: DiscussionComment }) {
 					</span>
 				)}
 			</div>
-			<div className="ic-body selectable">
-				{c.body}
-				{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
-			</div>
+			<CommentBody c={c} className="ic-body" />
 		</div>
 	)
 }
@@ -290,11 +302,7 @@ function CommentView({ c }: { c: DiscussionComment }) {
 				{c.pending && <span className="gh-pill">Pending · only you</span>}
 				{c.createdAt && <span className="muted">{new Date(c.createdAt).toLocaleString()}</span>}
 			</div>
-			{/* Third-party text: plain text only. */}
-			<div className="gh-comment-body selectable">
-				{c.body}
-				{c.bodyTruncated && <span className="muted"> …(truncated)</span>}
-			</div>
+			<CommentBody c={c} className="gh-comment-body" />
 		</div>
 	)
 }
@@ -498,7 +506,7 @@ export function ThreadCard({
 				<ThreadState t={t} />
 				{asked && <AsksYou />}
 				{from === 0 && <span className="ic-state accent">New since your review</span>}
-				{!open && root && <span className="ellipsis muted">{root.body.split('\n')[0]}</span>}
+				{!open && root && <span className="ellipsis muted">{commentText(root).split('\n')[0]}</span>}
 				{open && root?.createdAt && (
 					<span className="muted small" title={new Date(root.createdAt).toLocaleString()}>
 						{ago(root.createdAt)}
@@ -523,12 +531,7 @@ export function ThreadCard({
 						</div>
 					)}
 					{t.unplaced && t.diffHunk && <pre className="outdated-code">{hunkTail(t.diffHunk)}</pre>}
-					{root && (
-						<div className="ic-body selectable">
-							{root.body}
-							{root.bodyTruncated && <span className="muted"> …(truncated)</span>}
-						</div>
-					)}
+					{root && <CommentBody c={root} className="ic-body" />}
 					{check && <BotCheckNote check={check} />}
 					{replies.map((c, i) => (
 						<div key={c.id}>
@@ -759,11 +762,11 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 										{!t.placed && t.fileKey && <span className="gh-pill">Listed with the file</span>}
 									</div>
 									<div className="ci-body">
-										<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0]?.body}
+										<b>{t.comments[0]?.author ?? 'unknown user'}:</b> {t.comments[0] && commentText(t.comments[0])}
 									</div>
 									{last && (
 										<div className="ci-body ci-new">
-											<b>{last.author ?? 'unknown user'}:</b> {last.body}
+											<b>{last.author ?? 'unknown user'}:</b> {commentText(last)}
 										</div>
 									)}
 									{t.comments.length + t.commentsOmitted > 1 && (
@@ -796,7 +799,7 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 										</a>
 									)}
 								</div>
-								{r.body && <div className="gh-comment-body selectable">{r.body}</div>}
+								{r.body && <CommentBody c={r} className="gh-comment-body" />}
 							</div>
 						))}
 					</section>

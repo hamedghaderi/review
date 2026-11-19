@@ -7,11 +7,23 @@ const URI_WITH_MEDIA = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matri
 
 /**
  * HTML that GitHub rendered from Markdown, sanitised again here: no scripts, styles, forms or event handlers. Links
- * open in your browser and show where they go; images become links, since the window loads no remote images.
+ * open in your browser and show where they go; images become links, since the window loads no remote images, and
+ * images with an empty alt (decorative, like a bot's severity icon) are left out.
  * `media`: Review's own release notes, whose images and videos the main process serves as `review-media:` (see
  * ReleaseMedia); those are shown, and anything else is still a link. Never set for text written by other people.
+ * `className`: added to `md-body`, e.g. to fit it inside a comment card.
  */
-export function GitHubHtml({ html, empty, media = false }: { html: string; empty: string; media?: boolean }) {
+export function GitHubHtml({
+	html,
+	empty,
+	media = false,
+	className,
+}: {
+	html: string
+	empty: string
+	media?: boolean
+	className?: string
+}) {
 	const box = useRef<HTMLDivElement>(null)
 	useEffect(() => {
 		const el = box.current
@@ -40,6 +52,13 @@ export function GitHubHtml({ html, empty, media = false }: { html: string; empty
 				)
 				continue
 			}
+			// GitHub wraps images in a link to the full-size file; keep a single link, or none.
+			const parent = img.parentElement
+			const wrapped = parent instanceof HTMLAnchorElement && parent.childNodes.length === 1
+			if (img.getAttribute('alt')?.trim() === '') {
+				;(wrapped ? parent : img).remove()
+				continue
+			}
 			const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
 			link.textContent = label(img.getAttribute('alt'), 'image')
 			link.className = 'desc-image'
@@ -49,9 +68,7 @@ export function GitHubHtml({ html, empty, media = false }: { html: string; empty
 				link.rel = 'noreferrer noopener'
 				link.title = 'Images aren’t loaded in the app. Opens in your browser.'
 			}
-			// GitHub wraps images in a link to the full-size file; keep a single link.
-			const parent = img.parentElement
-			if (parent instanceof HTMLAnchorElement && parent.childNodes.length === 1) parent.replaceWith(link)
+			if (wrapped) parent.replaceWith(link)
 			else img.replaceWith(link)
 		}
 		for (const video of frag.querySelectorAll('video')) {
@@ -80,5 +97,28 @@ export function GitHubHtml({ html, empty, media = false }: { html: string; empty
 		el.replaceChildren(frag)
 	}, [html, media])
 	if (!html.trim()) return <p className="small muted desc-note">{empty}</p>
-	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}`} />
+	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}${className ? ` ${className}` : ''}`} />
+}
+
+const texts = new Map<string, string>()
+
+/**
+ * A comment as plain text, for one-line and clamped previews: the words of GitHub's HTML when there is some (no
+ * Markdown marks, tags or hidden `<!-- -->` notes), else the body as written without its HTML comments. The HTML is
+ * parsed in an inert document, so nothing in it loads or runs.
+ */
+export function commentText(c: { body: string; html?: string }): string {
+	if (!c.html) return c.body.replace(/<!--[\s\S]*?(?:-->|$)/g, '').trim()
+	let t = texts.get(c.html)
+	if (t === undefined) {
+		const doc = new DOMParser().parseFromString(c.html, 'text/html')
+		t = (doc.body.textContent ?? '')
+			.split('\n')
+			.map((l) => l.trim())
+			.filter(Boolean)
+			.join('\n')
+		if (texts.size > 500) texts.delete(texts.keys().next().value!)
+		texts.set(c.html, t)
+	}
+	return t
 }
