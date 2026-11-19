@@ -273,7 +273,11 @@ function HiddenNotes({ notes }: { notes: Array<string> }) {
 			>
 				{open ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
 			</button>
-			{open && <pre className="hidden-notes-text selectable">{notes.join('\n\n')}</pre>}
+			{open && (
+				<pre className="hidden-notes-text selectable">
+					{notes.map((n) => (n.endsWith('-->') ? n : `${n} …(cut off: the comment is longer than Review keeps)`)).join('\n\n')}
+				</pre>
+			)}
 		</div>
 	)
 }
@@ -494,6 +498,30 @@ export function ThreadReplyBox({
 }
 
 /** Replies a card leaves out, linked to GitHub. */
+/**
+ * A thread on a file that isn't in this snapshot, so it can't open in the code: its comments open here instead, in
+ * full (folded sections, hidden-text notes), rather than leaving only the preview.
+ */
+function ReadHere({ t, children }: { t: DiscussionThread; children: ReactNode }) {
+	const [open, setOpen] = useState(false)
+	return (
+		<div className="comment-item">
+			{children}
+			<button className="btn small ghost read-here" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
+				{open ? '▾ Hide comments' : '▸ Read here'}
+			</button>
+			{open && (
+				<div className="gh-thread">
+					{t.comments.map((c) => (
+						<CommentView key={c.id} c={c} />
+					))}
+					<MoreOnGitHub t={t} />
+				</div>
+			)}
+		</div>
+	)
+}
+
 export function MoreOnGitHub({ t }: { t: DiscussionThread }) {
 	if (!t.commentsOmitted) return null
 	return <div className="muted small">{count(t.commentsOmitted, 'more reply', 'more replies')} on GitHub.</div>
@@ -773,8 +801,8 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 							const from = firstNew(t.comments, mine)
 							const fresh = from > 0 ? t.comments.slice(from).filter((c) => c.author !== mine?.viewer) : []
 							const last = fresh[fresh.length - 1]
-							return (
-								<button key={t.id} className="comment-item" disabled={!t.fileKey} onClick={() => onOpen(t)}>
+							const row = (
+								<>
 									<div className="ci-loc">
 										<span className="mono ellipsis">{t.path}</span>
 										<span className="muted small nowrap">{placeLabel(t)}</span>
@@ -803,7 +831,16 @@ export function DiscussionPanel({ discussion: d, loading, files, onRefresh, onOp
 											{fresh.length ? `, ${fresh.length} new` : ''}
 										</div>
 									)}
+								</>
+							)
+							return t.fileKey ? (
+								<button key={t.id} className="comment-item" onClick={() => onOpen(t)}>
+									{row}
 								</button>
+							) : (
+								<ReadHere key={t.id} t={t}>
+									{row}
+								</ReadHere>
 							)
 						})}
 					</section>

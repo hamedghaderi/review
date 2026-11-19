@@ -178,13 +178,13 @@ const notes = new Map<string, Array<string>>()
  * note can't carry instructions to the AI unseen. Compared with all the text GitHub renders, folded sections and code
  * included. None when there's no HTML: then the comment is shown as written, notes and all.
  */
-export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
+export function hiddenNotes(c: { body: string; bodyTruncated?: boolean; html?: string }): Array<string> {
 	if (c.html === undefined || !c.body.includes('<!--')) return []
-	const key = `${c.html}\u0000${c.body}`
+	const key = `${c.html}\u0000${c.body}\u0000${!!c.bodyTruncated}`
 	let found = notes.get(key)
 	if (found === undefined) {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
-		found = notesNotShown(c.body, body.textContent ?? '')
+		found = notesNotShown(c.body, body.textContent ?? '', c.bodyTruncated)
 		if (notes.size > 500) notes.delete(notes.keys().next().value!)
 		notes.set(key, found)
 	}
@@ -193,8 +193,9 @@ export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 // Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
 const CODE_SPACE = '\uE000'
 const CODE_BLANK = '\uE001'
+const CODE_ESCAPE = '\uE002' // + 0, 1 or 2: one of these three as the comment itself wrote it
 // Elements that show something with no text in them, so a comment holding one isn't empty.
-const SHOWS_WITHOUT_TEXT = 'img, video, hr, input'
+const SHOWS_WITHOUT_TEXT = 'img, video, hr, input, details' // a <details> with no <summary> still reads "Details"
 /** What a comment that shows nothing says, in the comment and its preview alike. */
 export const NOTHING_VISIBLE = 'No visible text.'
 
@@ -219,6 +220,10 @@ export function commentText(c: { body: string; html?: string }): string {
 		}
 		standIns(body, body.ownerDocument, false)
 		for (const box of body.querySelectorAll('input[type="checkbox"]')) box.replaceWith(box.hasAttribute('checked') ? '[x] ' : '[ ] ')
+		// The comment's own private-use characters, escaped so they're never taken for the stand-ins below.
+		const own = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+		for (let n = own.nextNode(); n; n = own.nextNode())
+			n.nodeValue = n.nodeValue!.replace(/[\uE000-\uE002]/g, (ch) => `${CODE_ESCAPE}${ch.charCodeAt(0) - 0xe000}`)
 		// Code keeps its spacing and blank lines: written with stand-ins the steps below leave alone, put back at the end.
 		for (const code of body.querySelectorAll('pre, .blob-code-inner'))
 			code.textContent = code
@@ -241,7 +246,12 @@ export function commentText(c: { body: string; html?: string }): string {
 			.split('\n')
 			.map((l) => l.trim().replace(/ {2,}/g, ' ')) // spaces met from two text nodes; code's are still stand-ins here
 			.filter(Boolean)
-			.map((l) => l.replaceAll(CODE_SPACE, ' ').replaceAll(CODE_BLANK, ''))
+			.map((l) =>
+				l
+					.replaceAll(CODE_SPACE, ' ')
+					.replaceAll(CODE_BLANK, '')
+					.replace(/\uE002([0-2])/g, (_, d: string) => String.fromCharCode(0xe000 + Number(d))),
+			)
 			.join('\n')
 		if (texts.size > 500) texts.delete(texts.keys().next().value!)
 		texts.set(c.html, t)

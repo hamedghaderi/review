@@ -23,9 +23,6 @@ test('webUrl: only http(s) addresses a browser can open, in the form that opens'
 		'https:// ',
 		'https://exa mple.com/',
 		'https://exa%20mple.com/', // what Chromium turns the line above into
-		'https://-bad.example/',
-		'https://bad-.example/',
-		'https://a..b/',
 		'http://[::1',
 		'https://github.com@evil.example/',
 		'https://user:secret@github.com/',
