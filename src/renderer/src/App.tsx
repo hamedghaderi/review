@@ -2584,7 +2584,16 @@ export function App() {
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 						stillReviewing={stillReviewing}
 						prepared={review?.prepared ?? null}
-						onSubmitted={() => {
+						onSubmitted={(s) => {
+							// The dialog closes on submit (issue #243): this says it went.
+							const said =
+								s.event === 'APPROVE'
+									? 'Approved on GitHub.'
+									: s.event === 'REQUEST_CHANGES'
+										? 'Changes requested on GitHub.'
+										: 'Your review is on GitHub.'
+							setNotice(said)
+							announce(said, 'result')
 							const r = reviewRef.current
 							if (!r?.prepared) return
 							const next = { ...r, prepared: null }
