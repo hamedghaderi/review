@@ -224,6 +224,31 @@ export function jumpContext(gaps: ReadonlyArray<Gap>, fileLines: ReadonlyArray<s
 	return { side: 'new', ...blockSpan(fileLines, n) }
 }
 
+/**
+ * The lines of `r` that are shown in `rows`, as a fenced code block under their `path:line` (issue #245), to paste into
+ * a comment. Lines left out in between (collapsed ones) become "…". The fence is longer than any run of backticks in
+ * the code, so the block can't end early.
+ */
+export function snippet(rows: ReadonlyArray<Row>, r: Range, path: string, lang: string | null): string {
+	const lines: Array<string> = []
+	let prev: number | null = null
+	for (const row of rows) {
+		const n = lineNo(row, r.side)
+		if (row.t !== 'line' || n === null || n < r.start || n > r.end) continue
+		if (prev !== null && n > prev + 1) lines.push('…')
+		lines.push(row.line.text)
+		prev = n
+	}
+	const longest = Math.max(0, ...lines.flatMap((l) => (l.match(/`+/g) ?? []).map((m) => m.length)))
+	const fence = '`'.repeat(Math.max(3, longest + 1))
+	return `${snippetLabel(r, path)}\n${fence}${lang ?? ''}\n${lines.join('\n')}\n${fence}\n`
+}
+
+/** Where a snippet is from: "src/a.ts:21-25", and "(before the change)" for removed code. */
+export function snippetLabel(r: Range, path: string): string {
+	return `${path}:${r.start === r.end ? r.start : `${r.start}-${r.end}`}${r.side === 'old' ? ' (before the change)' : ''}`
+}
+
 export function rangeLabel(r: { start: number; end: number }): string {
 	return r.start === r.end ? `line ${r.start}` : `lines ${r.start}–${r.end}`
 }
