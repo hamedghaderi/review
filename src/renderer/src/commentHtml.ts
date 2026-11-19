@@ -41,12 +41,23 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 			a.setAttribute('title', href)
 		} else a.replaceWith(...a.childNodes) // in-page anchors, other schemes, malformed addresses: just their content
 	}
-	// A <picture>'s other files: its <img> stands for it below.
+	// A <picture>'s other files: its <img> stands for it below, linking to the first of them that's a web address when
+	// it has none of its own (its address only in `srcset`).
+	const fromSrcset = new Map<Element, string>()
+	for (const img of root.querySelectorAll('img')) {
+		if (webUrl(img.getAttribute('src'))) continue
+		const sets = [img, ...(img.parentElement?.tagName === 'PICTURE' ? img.parentElement.querySelectorAll('source') : [])]
+		const found = sets
+			.flatMap((el) => (el.getAttribute('srcset') ?? '').split(','))
+			.map((candidate) => webUrl(candidate.trim().split(/\s+/)[0]))
+			.find((url) => url !== null)
+		if (found) fromSrcset.set(img, found)
+	}
 	for (const s of root.querySelectorAll('picture > source')) s.remove()
 	// How many images each link held to begin with: one emptied by removing several icons still had something to say.
 	const held = new Map([...root.querySelectorAll('a')].map((a) => [a, a.querySelectorAll('img, video').length]))
 	for (const img of root.querySelectorAll('img')) {
-		const src = img.getAttribute('src') ?? ''
+		const src = fromSrcset.get(img) ?? img.getAttribute('src') ?? ''
 		if (media && MEDIA.test(src)) {
 			img.setAttribute('loading', 'lazy')
 			img.addEventListener('error', () =>
@@ -171,10 +182,13 @@ const BLOCKS =
 // holds. The HTML is kept with each one in case an object is reused for another comment.
 const texts = new WeakMap<object, { html: string; text: string }>()
 
-// Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
-const CODE_SPACE = '\uE000'
-const CODE_BLANK = '\uE001'
-const CODE_ESCAPE = '\uE002' // + 0, 1 or 2: one of these three as the comment itself wrote it
+// Code keeps its whitespace in a preview: each kind is written as a private-use character, which trimming and
+// whitespace collapsing leave alone, and put back at the end. The comment's own private-use characters in that range
+// are escaped first (CODE_ESCAPE + their offset), so they're never taken for one of these.
+const CODE_WHITESPACE: Record<string, string> = { ' ': '\uE000', '\t': '\uE001', '\u00a0': '\uE002' } // others: a space
+const CODE_BLANK = '\uE003' // a blank line in code
+const CODE_ESCAPE = '\uE004'
+const RESTORE: Record<string, string> = { '\uE000': ' ', '\uE001': '\t', '\uE002': '\u00a0', '\uE003': '' }
 
 /**
  * A comment as plain text, for one-line and clamped previews: the words of the comment exactly as GitHubHtml shows it
@@ -203,15 +217,17 @@ export function commentText(c: { body: string; html?: string }): string {
 		// The comment's own private-use characters, escaped so they're never taken for the stand-ins below.
 		const own = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = own.nextNode(); n; n = own.nextNode())
-			n.nodeValue = n.nodeValue!.replace(/[\uE000-\uE002]/g, (ch) => `${CODE_ESCAPE}${ch.charCodeAt(0) - 0xe000}`)
-		for (const br of body.querySelectorAll('pre br, .blob-code-inner br')) br.replaceWith('\n')
-		// Code keeps its spacing and blank lines: written with stand-ins the steps below leave alone, put back at the end.
-		for (const code of body.querySelectorAll('pre, .blob-code-inner'))
+			n.nodeValue = n.nodeValue!.replace(/[\uE000-\uE004]/g, (ch) => `${CODE_ESCAPE}${ch.charCodeAt(0) - 0xe000}`)
+		for (const code of body.querySelectorAll('pre, .blob-code-inner')) {
+			// Its lines as the comment shows them: a <br> or a block inside the code ends one.
+			for (const br of code.querySelectorAll('br')) br.replaceWith('\n')
+			for (const block of code.querySelectorAll(BLOCKS)) block.after('\n')
 			code.textContent = code
-				.textContent!.replace(/\n$/, '')
+				.textContent!.replace(/\n+$/, '')
 				.split('\n')
-				.map((l) => l.replace(/[ \t]/g, (c) => (c === '\t' ? CODE_SPACE.repeat(4) : CODE_SPACE)) || CODE_BLANK)
+				.map((l) => l.replace(/[^\S\n]/g, (ch) => CODE_WHITESPACE[ch] ?? CODE_WHITESPACE[' ']) || CODE_BLANK)
 				.join('\n')
+		}
 		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
 		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = walk.nextNode(); n; n = walk.nextNode())
@@ -236,12 +252,12 @@ export function commentText(c: { body: string; html?: string }): string {
 			.filter(Boolean)
 			.map((l) =>
 				l
-					.replaceAll(CODE_SPACE, ' ')
-					.replaceAll(CODE_BLANK, '')
-					.replace(/\uE002([0-2])/g, (_, d: string) => String.fromCharCode(0xe000 + Number(d))),
+					.replace(/[\uE000-\uE003]/g, (ch) => RESTORE[ch])
+					.replace(/\uE004([0-4])/g, (_, d: string) => String.fromCharCode(0xe000 + Number(d))),
 			)
 			.join('\n')
-		const text = t || (divider ? 'Divider' : '')
+		// Only whitespace left (code of nothing but spaces) reads as nothing, as the comment itself says.
+		const text = t.trim() ? t : divider ? 'Divider' : ''
 		texts.set(c, { html: c.html, text })
 		return text || NOTHING_VISIBLE
 	}

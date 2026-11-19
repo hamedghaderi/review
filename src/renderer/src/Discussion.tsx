@@ -259,8 +259,8 @@ function CommentBody({ c, className }: { c: { body: string; bodyTruncated: boole
 }
 
 /**
- * Under a comment shown from GitHub's HTML: what the rendering leaves out of what the AI reviewer reads. "Hidden text"
- * appears when the comment has `<!-- -->` notes GitHub doesn't show; "Source" is always there, the comment as written,
+ * Under a comment shown from GitHub's HTML: what the rendering may leave out of what the AI reviewer reads. "HTML notes"
+ * appears when the comment has `<!-- -->` notes (see hiddenNotes); "Source" is always there, the comment as written,
  * which is exactly what the AI gets (it also holds what no note check catches, like an unused link definition).
  */
 function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?: string } }) {
@@ -274,9 +274,9 @@ function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?
 					className="btn small ghost"
 					onClick={() => toggle('notes')}
 					aria-expanded={view === 'notes'}
-					title="HTML comments (<!-- -->) in this comment as written. GitHub hides them unless they're inside code; the AI reviewer reads them all."
+					title="HTML comments (<!-- -->) in this comment as written. GitHub hides them, except in code, so you may not have seen them; the AI reviewer reads them all."
 				>
-					{view === 'notes' ? '▾' : '▸'} Hidden text: {count(notes.length, 'note', 'notes')}
+					{view === 'notes' ? '▾' : '▸'} HTML notes: {notes.length}
 				</button>
 			)}
 			<button
@@ -291,9 +291,7 @@ function CommentSource({ c }: { c: { body: string; bodyTruncated: boolean; html?
 				<pre className="hidden-notes-text selectable">
 					{notes
 						.map((n) =>
-							n.endsWith('-->')
-								? n
-								: `${n} …(${c.bodyTruncated ? 'cut off: the comment is longer than Review keeps' : 'never closed, so GitHub hides the rest'})`,
+							n.endsWith('-->') ? n : `${n} …(${c.bodyTruncated ? 'cut off: the comment is longer than Review keeps' : 'no closing -->'})`,
 						)
 						.join('\n\n')}
 				</pre>

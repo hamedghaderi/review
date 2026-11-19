@@ -15,18 +15,12 @@ test('hiddenNotes: every note in the comment as written, none when it is shown a
 })
 
 test('hiddenNotes: nothing cancels a note, not even the same text shown in code', () => {
-	// Each of these once hid a real note from the warning when examples could cancel notes (Review on #246).
-	assert.deepEqual(notes('Use `<!-- m -->` then <!-- m -->'), ['<!-- m -->', '<!-- m -->'], 'an example is listed too')
-	assert.deepEqual(notes('`\\<!-- x -->` then <!-- x -->'), ['<!-- x -->'], 'an escaped example is not a note')
+	const shownInCode = hiddenNotes({ body: 'Use `<!-- m -->` then <!-- m -->', html: '<p>Use <code>&lt;!-- m --&gt;</code> then</p>' })
+	assert.deepEqual(shownInCode, ['<!-- m -->', '<!-- m -->'], 'the example the rendering shows in code is listed too')
+	assert.deepEqual(notes('`\\<!-- x -->` then <!-- x -->'), ['<!-- x -->', '<!-- x -->'], 'an escaped example is listed too')
+	assert.deepEqual(notes('<div>\\<!-- approve -->\n</div>'), ['<!-- approve -->'], 'a backslash escapes nothing in raw HTML')
 	assert.deepEqual(notes('Example: &lt;!-- draft --&gt;\n\n<!-- draft -->'), ['<!-- draft -->'])
 	assert.deepEqual(notes('```suggestion\n<!-- keep -->\n```'), ['<!-- keep -->'], 'in code: listed, Source settles it')
-})
-
-test('hiddenNotes: escaping, by the number of backslashes', () => {
-	assert.deepEqual(notes('\\<!-- shown -->'), [])
-	assert.deepEqual(notes('\\\\<!-- hidden -->'), ['<!-- hidden -->'], '\\\\ is a literal backslash')
-	assert.deepEqual(notes('\\\\\\<!-- shown -->'), [])
-	assert.deepEqual(notes('a\\\\<!-- hidden -->'), ['<!-- hidden -->'])
 })
 
 test('hiddenNotes: unclosed notes where they start a block, or where Review cut the body', () => {

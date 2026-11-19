@@ -97,11 +97,26 @@ test(
 			blankSummary: '<details><summary> </summary><p>folded</p></details>',
 			openNoSummary: '<details open><p>Fix this</p></details>',
 			itemParagraph: '<ol><li><p>First step</p><p>more</p></li></ol>',
+			whitespaceCode: '<pre><code>   \n\n  \n</code></pre>',
+			blocksInSuggestion: '<table><tr><td class="blob-code-inner blob-code-addition"><div>one</div><div>two</div></td></tr></table>',
+			tabsAndNbsp: '<pre><code>a\tx\nab\tx\n\u00a0\u00a0kept</code></pre>',
+			srcsetOnly: '<p><picture><source srcset="https://github.com/u/wide.png 2x"><img alt="diagram"></picture></p>',
+		}
+		// What standIns makes of it for the comment itself: the link, not only its words.
+		const rendered = {
+			srcsetLink:
+				'<p><picture><source srcset="https://github.com/u/wide.png 2x, https://github.com/u/x.png 1x"><img alt="diagram"></picture></p>',
 		}
 		const out = inChromium(`${await bundle('commentHtml.ts')}
 			;({
+				rendered: Object.fromEntries(Object.entries(${JSON.stringify(rendered)}).map(([k, html]) => {
+					const box = document.createElement('div')
+					box.innerHTML = html
+					App.standIns(box, document, false)
+					return [k, box.innerHTML]
+				})),
 				previews: Object.fromEntries(Object.entries(${JSON.stringify(previews)}).map(([k, html]) => [k, App.commentText({ body: '', html })])),
-			})`) as { previews: Record<string, string> }
+			})`) as { previews: Record<string, string>; rendered: Record<string, string> }
 		assert.deepEqual(out.previews, {
 			divider: 'Divider',
 			iconAndDivider: 'Divider',
@@ -112,6 +127,11 @@ test(
 			blankSummary: 'Details',
 			openNoSummary: 'Details\nFix this',
 			itemParagraph: '1. First step\nmore',
+			whitespaceCode: 'No visible text.',
+			blocksInSuggestion: '+ one\ntwo',
+			tabsAndNbsp: 'a\tx\nab\tx\n\u00a0\u00a0kept',
+			srcsetOnly: '🖼 diagram',
 		})
+		assert.match(out.rendered.srcsetLink, /<a [^>]*href="https:\/\/github\.com\/u\/wide\.png"[^>]*>🖼 diagram<\/a>/)
 	},
 )
