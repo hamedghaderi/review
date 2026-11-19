@@ -57,7 +57,7 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 			a.setAttribute('target', '_blank')
 			a.setAttribute('rel', 'noreferrer noopener')
 			a.setAttribute('title', href)
-		} else a.removeAttribute('href') // in-page anchors, other schemes, malformed addresses: text only
+		} else a.replaceWith(...a.childNodes) // in-page anchors, other schemes, malformed addresses: just their content
 	}
 	// A <picture>'s other files: its <img> stands for it below.
 	for (const s of root.querySelectorAll('picture > source')) s.remove()
@@ -74,7 +74,7 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		const a = img.closest('a')
 		// The link holds nothing but this image. A link shared with text or other badges stays as it is.
 		const only = !!a && !a.textContent?.trim() && a.querySelectorAll('img, video').length === 1
-		const href = a?.getAttribute('href') ?? null // already checked above
+		const href = a?.getAttribute('href') ?? null // checked above: links left standing go somewhere real
 		// GitHub links an image to its own full-size file; anywhere else (a CI run, a report) is the author's link.
 		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].map(webUrl).includes(href)
 		if (decorative(img)) {
@@ -158,6 +158,9 @@ export function commentText(c: { body: string; html?: string }): string {
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
+		// A closed <details> shows only its summary, so that's all the preview reads of it.
+		for (const d of body.querySelectorAll('details:not([open])'))
+			for (const child of [...d.childNodes]) if (child.nodeName !== 'SUMMARY') child.remove()
 		standIns(body, body.ownerDocument, false)
 		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
 		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
@@ -165,7 +168,10 @@ export function commentText(c: { body: string; html?: string }): string {
 			if (!n.parentElement?.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)')) cell.before(' · ')
-		for (const block of body.querySelectorAll(BLOCKS)) block.after('\n')
+		for (const block of body.querySelectorAll(BLOCKS)) {
+			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too
+			block.after('\n')
+		}
 		t = (body.textContent ?? '')
 			.split('\n')
 			.map((l) => l.trim())

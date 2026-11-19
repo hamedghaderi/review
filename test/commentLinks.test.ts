@@ -72,6 +72,17 @@ test('withoutNotes: hides the HTML comments GitHub hides, keeps the ones it show
 		'```js\n<!-- code -->\n``` not a close\n<!-- still code -->\n```\nEnd',
 		'a fence closes only on a line of its own',
 	)
+	assert.equal(withoutNotes('Done <!-- bot metadata\nmore -->\nNext'), 'Done \nNext', 'a note that starts after text can run over lines')
+	assert.equal(withoutNotes('Done <!-- a\nb\nc --> kept\nNext'), 'Done \n kept\nNext', 'text after its --> stays')
+	assert.equal(withoutNotes('Done <!-- never closed\nNext'), 'Done <!-- never closed\nNext')
+	assert.equal(withoutNotes('```\r\n<!-- code -->\r\n```\r\n<!-- note -->\r\nEnd'), '```\n<!-- code -->\n```\nEnd', 'Windows line endings')
+	assert.equal(
+		withoutNotes('> ```html\n> <!-- quoted code -->\n> ```\n<!-- note -->\nEnd'),
+		'> ```html\n> <!-- quoted code -->\n> ```\nEnd',
+		'a fence in a quote',
+	)
+	assert.equal(withoutNotes('>     <!-- quoted indented code -->'), '>     <!-- quoted indented code -->')
+	assert.equal(withoutNotes('> <!-- a quoted note -->\n> Shown'), '> \n> Shown', 'a note in a quote still hides')
 	assert.equal(withoutNotes('``` a`b\n<!-- a note -->\nEnd'), '``` a`b\nEnd', 'backticks after the fence: not a fence, so the note hides')
 
 	const kept = [

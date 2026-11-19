@@ -441,12 +441,38 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 		],
 		false,
 		[{ node_id: 'R1', user: { login: 'u' }, state: 'COMMENTED', body: 'r', body_html: '<p>r</p>', submitted_at: null, html_url: null }],
-		[{ node_id: 'I1', user: { login: 'u' }, author_association: 'NONE', body: 'y', created_at: null, html_url: null }],
+		[
+			{ node_id: 'I1', user: { login: 'u' }, author_association: 'NONE', body: 'y', created_at: null, html_url: null },
+			...(
+				[
+					['I2', fits],
+					['I3', over],
+					['I4', '  '],
+				] as const
+			).map(([node_id, body_html]) => ({
+				node_id,
+				user: { login: 'u' },
+				author_association: 'NONE',
+				body: 'z',
+				body_html,
+				created_at: null,
+				html_url: null,
+			})),
+		],
 	)
 	assert.equal(rest.threads[0].comments[0].html, '<p><code>x</code></p>')
 	assert.equal(rest.threads[0].comments[0].body, '`x`')
 	assert.equal(rest.reviews[0].html, '<p>r</p>')
-	assert.equal(rest.conversation[0].html, undefined, 'no body_html: plain text')
+	assert.deepEqual(
+		rest.conversation.map((c) => [c.html, c.body]),
+		[
+			[undefined, 'y'],
+			[fits, 'z'],
+			[undefined, 'z'],
+			[undefined, 'z'],
+		],
+		'REST: no body_html, over 200,000 characters or blank: plain text, the body as written kept',
+	)
 })
 
 test('"already discussed" matches placed threads on overlapping lines of the same side, file threads for file comments, never its own thread', () => {

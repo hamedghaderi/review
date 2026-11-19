@@ -33,64 +33,68 @@ const LABEL = '[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?'
 const HOST = new RegExp(`^(?:${LABEL}\\.)*${LABEL}\\.?$|^\\[[0-9a-f:.]+\\]$`, 'i')
 
 // A fence opens with three or more backticks (no backtick after them) or tildes, and closes with at least as many of
-// the same character and nothing else on the line.
+// the same character and nothing else on the line. Either can sit inside a `>` quote.
 const OPEN_FENCE = /^ {0,3}(?:(`{3,})[^`]*|(~{3,}).*)$/
 const CLOSE_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
+const QUOTE = /^(?: {0,3}>[ \t]?)+/
+const INDENTED = /^(?: {4}|\t| {1,3}\t)/ // an indented code block
 
 /**
- * Markdown without the HTML comments GitHub hides: one starting a line (a bot's `<!-- generated -->` marker, possibly
- * over several lines) and closed ones inside a line (`Done <!-- bot metadata -->`). A `<!--` inside a code span, a
- * fenced code block or an indented one (four spaces or a tab), or escaped as `\<!--`, is shown by GitHub, so it
- * stays; so does one never closed.
+ * Markdown without the HTML comments GitHub hides, wherever they start and however many lines they run over (a bot's
+ * `<!-- generated -->` marker, `Done <!-- bot metadata -->`); text after a note's `-->` stays. A `<!--` inside a code
+ * span, a fenced or indented code block (also in a quote), or escaped as `\<!--`, is shown by GitHub, so it stays; so
+ * does one never closed.
  */
 export function withoutNotes(body: string): string {
-	const lines = body.split('\n')
+	const lines = body.replace(/\r\n?/g, '\n').split('\n')
+	let lastClose = -1 // the last line holding a `-->`: a note opened before it closes
+	for (let i = lines.length - 1; i >= 0 && lastClose < 0; i--) if (lines[i].includes('-->')) lastClose = i
 	const out: Array<string> = []
 	let fence: string | null = null
+	let note = false // inside a note opened on an earlier line
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]
-		if (fence) {
-			const close = CLOSE_FENCE.exec(line)?.[1]
-			if (close && close[0] === fence[0] && close.length >= fence.length) fence = null
-			out.push(line)
-			continue
+		if (!note) {
+			const content = line.replace(QUOTE, '')
+			if (fence) {
+				const close = CLOSE_FENCE.exec(content)?.[1]
+				if (close && close[0] === fence[0] && close.length >= fence.length) fence = null
+				out.push(line)
+				continue
+			}
+			const open = OPEN_FENCE.exec(content)
+			if (open || INDENTED.test(content)) {
+				fence = open ? (open[1] ?? open[2]) : null
+				out.push(line)
+				continue
+			}
 		}
-		const open = OPEN_FENCE.exec(line)
-		if (open) {
-			fence = open[1] ?? open[2]
-			out.push(line)
-			continue
-		}
-		// Indented four spaces or a tab, it's a code block, which GitHub shows as written.
-		if (/^(?: {4}|\t| {1,3}\t)/.test(line)) {
-			out.push(line)
-			continue
-		}
-		if (!/^ {0,3}<!--/.test(line)) {
-			out.push(withoutInlineNotes(line))
-			continue
-		}
-		const from = (j: number) => (j === i ? line.indexOf('<!--') + 4 : 0) // `<!-->` doesn't close itself
-		let end = i
-		while (end < lines.length && lines[end].indexOf('-->', from(end)) < 0) end++
-		if (end === lines.length) {
-			out.push(withoutInlineNotes(line)) // never closed: GitHub shows it as text
-			continue
-		}
-		const rest = withoutInlineNotes(lines[end].slice(lines[end].indexOf('-->', from(end)) + 3))
-		if (rest.trim()) out.push(rest)
-		i = end
+		const scanned = scanLine(line, note, i < lastClose)
+		note = scanned.note
+		// A line that held only notes goes; one that never had any stays as it was, blank or not.
+		if (!scanned.changed || scanned.text.trim()) out.push(scanned.text)
 	}
 	return out.join('\n')
 }
 
-/** One line without its closed `<!-- … -->` notes, leaving code spans and escaped `\<` as written. */
-function withoutInlineNotes(line: string): string {
-	let out = ''
+/**
+ * One line without its notes, leaving code spans and escaped characters as written. `note`: the line starts inside a
+ * note; `closesLater`: a `-->` follows on a later line, so a note left open here closes there.
+ */
+function scanLine(line: string, note: boolean, closesLater: boolean): { text: string; note: boolean; changed: boolean } {
+	let text = ''
+	let changed = note
 	let i = 0
 	while (i < line.length) {
+		if (note) {
+			const end = line.indexOf('-->', i)
+			if (end < 0) return { text, note: true, changed: true }
+			note = false
+			i = end + 3
+			continue
+		}
 		if (line[i] === '\\') {
-			out += line.slice(i, i + 2)
+			text += line.slice(i, i + 2)
 			i += 2
 			continue
 		}
@@ -98,20 +102,19 @@ function withoutInlineNotes(line: string): string {
 			const run = /^`+/.exec(line.slice(i))![0]
 			const close = closingRun(line, i + run.length, run.length)
 			const to = close < 0 ? i + run.length : close + run.length // no closing run: the backticks are text
-			out += line.slice(i, to)
+			text += line.slice(i, to)
 			i = to
 			continue
 		}
-		if (line.startsWith('<!--', i)) {
-			const end = line.indexOf('-->', i + 4)
-			if (end >= 0) {
-				i = end + 3
-				continue
-			}
+		if (line.startsWith('<!--', i) && (line.indexOf('-->', i + 4) >= 0 || closesLater)) {
+			note = true
+			changed = true
+			i += 4 // so `<!-->` doesn't close itself
+			continue
 		}
-		out += line[i++]
+		text += line[i++]
 	}
-	return out
+	return { text, note, changed }
 }
 
 /** Where a run of exactly `n` backticks starts at or after `from`, which closes a code span; -1 if none. */
