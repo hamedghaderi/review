@@ -1,10 +1,17 @@
-import DOMPurify from 'dompurify'
+import DOMPurify, { type Config } from 'dompurify'
 import { useEffect, useRef } from 'react'
 import { webUrl, withoutNotes } from './commentLinks.ts'
 
 const MEDIA = /^review-media:\/\/media\/[0-9a-f]{32}$/
 // DOMPurify's own list of safe link schemes, plus the one release-note media is served from.
 const URI_WITH_MEDIA = /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|review-media):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i
+
+const sanitizeConfig = (media: boolean): Config => ({
+	USE_PROFILES: { html: true },
+	// Videos are kept here only so standIns can turn them into links; none from outside the app plays.
+	FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'audio'],
+	...(media ? { ALLOWED_URI_REGEXP: URI_WITH_MEDIA } : {}),
+})
 
 /**
  * HTML that GitHub rendered from Markdown, sanitised again here: no scripts, styles, forms or event handlers. Links
@@ -29,118 +36,99 @@ export function GitHubHtml({
 	useEffect(() => {
 		const el = box.current
 		if (!el) return
-		const frag = DOMPurify.sanitize(html, {
-			USE_PROFILES: { html: true },
-			// Videos are kept here only so the loop below can turn them into links; none from outside the app plays.
-			FORBID_TAGS: ['style', 'form', 'button', 'textarea', 'select', 'iframe', 'audio'],
-			...(media ? { ALLOWED_URI_REGEXP: URI_WITH_MEDIA } : {}),
-			RETURN_DOM_FRAGMENT: true,
-		})
-		for (const a of frag.querySelectorAll('a')) {
-			const href = webUrl(a.getAttribute('href'))
-			if (href) {
-				a.setAttribute('href', href) // the parsed form, which is what the title shows and what opens
-				a.setAttribute('target', '_blank')
-				a.setAttribute('rel', 'noreferrer noopener')
-				a.setAttribute('title', href)
-			} else a.removeAttribute('href') // in-page anchors, other schemes, malformed addresses: text only
-		}
-		// A <picture>'s other files: its <img> stands for it below.
-		for (const s of frag.querySelectorAll('picture > source')) s.remove()
-		for (const img of frag.querySelectorAll('img')) {
-			const src = img.getAttribute('src') ?? ''
-			if (media && MEDIA.test(src)) {
-				img.setAttribute('loading', 'lazy')
-				img.addEventListener('error', () =>
-					img.replaceWith(Object.assign(document.createElement('span'), { textContent: label(img.alt, 'image') })),
-				)
-				continue
-			}
-			const text = imageText(img)
-			const box = img.parentElement?.tagName === 'PICTURE' ? img.parentElement : img
-			// A link from the image to somewhere else (a badge to its CI run, an icon to a report): keep that link, with
-			// words for the image.
-			if (linkElsewhere(img)) {
-				box.replaceWith(text!)
-				continue
-			}
-			// GitHub wraps images in a link to the full-size file; keep a single link, or none for an icon.
-			const wrapper = linkAround(img)
-			if (text === null) {
-				;(wrapper ?? box).remove()
-				continue
-			}
-			;(wrapper ?? box).replaceWith(mediaLink(src, text, 'Images aren’t loaded in the app. Opens in your browser.'))
-		}
-		for (const video of frag.querySelectorAll('video')) {
-			const sources = [video.getAttribute('src'), ...[...video.querySelectorAll('source')].map((s) => s.getAttribute('src'))]
-			const own = media ? sources.filter((s): s is string => !!s && MEDIA.test(s)) : []
-			// Only the release's own files play; a video from anywhere else isn't loaded, only linked (an attachment
-			// GitHub shows inline would otherwise vanish from the comment).
-			if (!own.length) {
-				const web = sources.map(webUrl).find((s) => s !== null) ?? null
-				video.replaceWith(mediaLink(web, label(null, 'video'), 'Videos aren’t played in the app. Opens in your browser.'))
-				continue
-			}
-			for (const s of video.querySelectorAll('source')) if (!MEDIA.test(s.getAttribute('src') ?? '')) s.remove()
-			if (video.getAttribute('src') && !MEDIA.test(video.getAttribute('src')!)) video.removeAttribute('src')
-			video.removeAttribute('autoplay')
-			video.removeAttribute('loop')
-			video.removeAttribute('muted') // GitHub mutes uploads; nothing plays until you press play
-			video.setAttribute('controls', '')
-			video.setAttribute('preload', 'metadata')
-			video.setAttribute('playsinline', '')
-			video.addEventListener(
-				'error',
-				() => video.replaceWith(Object.assign(document.createElement('span'), { textContent: label(null, 'video') })),
-				true,
-			)
-		}
-		for (const input of frag.querySelectorAll('input')) input.setAttribute('disabled', '')
+		const frag = DOMPurify.sanitize(html, { ...sanitizeConfig(media), RETURN_DOM_FRAGMENT: true })
+		standIns(frag, document, media)
 		el.replaceChildren(frag)
 	}, [html, media])
 	if (!html.trim()) return <p className="small muted desc-note">{empty}</p>
 	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}${className ? ` ${className}` : ''}`} />
 }
 
+/**
+ * Prepares sanitised HTML for showing, in place: links only to addresses a browser can open, and words or links in
+ * place of the images and videos the app doesn't load. The comment and its preview (commentText) both go through
+ * here, so a preview reads exactly like the comment. `doc` makes the new elements.
+ */
+function standIns(root: ParentNode, doc: Document, media: boolean): void {
+	for (const a of root.querySelectorAll('a')) {
+		const href = webUrl(a.getAttribute('href'))
+		if (href) {
+			a.setAttribute('href', href) // the parsed form, which is what the title shows and what opens
+			a.setAttribute('target', '_blank')
+			a.setAttribute('rel', 'noreferrer noopener')
+			a.setAttribute('title', href)
+		} else a.removeAttribute('href') // in-page anchors, other schemes, malformed addresses: text only
+	}
+	// A <picture>'s other files: its <img> stands for it below.
+	for (const s of root.querySelectorAll('picture > source')) s.remove()
+	for (const img of root.querySelectorAll('img')) {
+		const src = img.getAttribute('src') ?? ''
+		if (media && MEDIA.test(src)) {
+			img.setAttribute('loading', 'lazy')
+			img.addEventListener('error', () =>
+				img.replaceWith(Object.assign(doc.createElement('span'), { textContent: label(img.getAttribute('alt'), 'image') })),
+			)
+			continue
+		}
+		const box = img.parentElement?.tagName === 'PICTURE' ? img.parentElement : img
+		const a = img.closest('a')
+		// The link holds nothing but this image. A link shared with text or other badges stays as it is.
+		const only = !!a && !a.textContent?.trim() && a.querySelectorAll('img, video').length === 1
+		const href = a?.getAttribute('href') ?? null // already checked above
+		// GitHub links an image to its own full-size file; anywhere else (a CI run, a report) is the author's link.
+		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].map(webUrl).includes(href)
+		if (decorative(img)) {
+			if (only && !toSelf)
+				box.replaceWith(`🔗 ${new URL(href!).hostname}`) // the link is all there is: keep it findable
+			else (only ? a : box).remove()
+			continue
+		}
+		const text = label(img.getAttribute('alt'), 'image')
+		// Inside a link: words in its place, never a link inside a link.
+		if (a && !(only && toSelf)) box.replaceWith(text)
+		else (a ?? box).replaceWith(mediaLink(doc, src, text, 'Images aren’t loaded in the app. Opens in your browser.'))
+	}
+	for (const video of root.querySelectorAll('video')) {
+		const sources = [video.getAttribute('src'), ...[...video.querySelectorAll('source')].map((s) => s.getAttribute('src'))]
+		const own = media ? sources.filter((s): s is string => !!s && MEDIA.test(s)) : []
+		// Only the release's own files play; a video from anywhere else isn't loaded, only linked (an attachment
+		// GitHub shows inline would otherwise vanish from the comment).
+		if (!own.length) {
+			const web = sources.map(webUrl).find((s) => s !== null) ?? null
+			const text = label(null, 'video')
+			video.replaceWith(video.closest('a') ? text : mediaLink(doc, web, text, 'Videos aren’t played in the app. Opens in your browser.'))
+			continue
+		}
+		for (const s of video.querySelectorAll('source')) if (!MEDIA.test(s.getAttribute('src') ?? '')) s.remove()
+		if (video.getAttribute('src') && !MEDIA.test(video.getAttribute('src')!)) video.removeAttribute('src')
+		video.removeAttribute('autoplay')
+		video.removeAttribute('loop')
+		video.removeAttribute('muted') // GitHub mutes uploads; nothing plays until you press play
+		video.setAttribute('controls', '')
+		video.setAttribute('preload', 'metadata')
+		video.setAttribute('playsinline', '')
+		video.addEventListener(
+			'error',
+			() => video.replaceWith(Object.assign(doc.createElement('span'), { textContent: label(null, 'video') })),
+			true,
+		)
+	}
+	for (const input of root.querySelectorAll('input')) input.setAttribute('disabled', '')
+}
+
 const label = (alt: string | null | undefined, kind: 'image' | 'video') => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
 
-/**
- * The words that stand for an image that isn't loaded, the same in the comment and its preview: "🖼 alt"; for an icon,
- * "🔗 host" when it links somewhere else, else null (left out).
- */
-function imageText(img: Element): string | null {
-	if (!decorative(img)) return label(img.getAttribute('alt'), 'image')
-	const href = linkElsewhere(img)
-	return href ? `🔗 ${hostOf(href)}` : null
-}
-
-/** The link whose only content is this image (also inside a <picture>), if there is one. */
-function linkAround(img: Element): Element | null {
-	const a = img.closest('a')
-	return a && !a.textContent?.trim() && a.querySelectorAll('img').length === 1 ? a : null
-}
-
-/** Where the link around the image goes (see webUrl), when that's a web page other than the image itself. */
-function linkElsewhere(img: Element): string | null {
-	const href = webUrl(linkAround(img)?.getAttribute('href'))
-	const self = [img.getAttribute('src'), img.getAttribute('data-canonical-src')].map(webUrl)
-	return href && !self.includes(href) ? href : null
-}
-
-const hostOf = (href: string) => new URL(href).hostname // href passed webUrl, so it parses
-
 /** A link to an image or video that isn't loaded in the app, or plain text when `src` isn't a web address (see webUrl). */
-function mediaLink(src: string | null, text: string, title: string): HTMLElement {
+function mediaLink(doc: Document, src: string | null, text: string, title: string): HTMLElement {
 	const url = webUrl(src)
-	const link = document.createElement(url ? 'a' : 'span')
+	const link = doc.createElement(url ? 'a' : 'span')
 	link.textContent = text
 	link.className = 'desc-image'
-	if (url && link instanceof HTMLAnchorElement) {
-		link.href = url
-		link.target = '_blank'
-		link.rel = 'noreferrer noopener'
-		link.title = `${title}\n${url}`
+	if (url) {
+		link.setAttribute('href', url)
+		link.setAttribute('target', '_blank')
+		link.setAttribute('rel', 'noreferrer noopener')
+		link.setAttribute('title', `${title}\n${url}`)
 	}
 	return link
 }
@@ -160,21 +148,25 @@ const BLOCKS =
 const texts = new Map<string, string>()
 
 /**
- * A comment as plain text, for one-line and clamped previews: the words of GitHub's HTML when there is some (no
- * Markdown marks, tags or hidden `<!-- -->` notes; images and videos as the same words the comment shows), else the
- * body as written without its hidden notes (see withoutNotes). Block elements end a line even when GitHub put no
- * newline between them. The HTML is parsed in an inert document, so nothing in it loads or runs.
+ * A comment as plain text, for one-line and clamped previews: the words of the comment exactly as GitHubHtml shows it
+ * (same sanitising, same words for images and videos; no Markdown marks, tags or hidden `<!-- -->` notes), else the
+ * body as written without its hidden notes (see withoutNotes). Block elements end a line and table cells are kept
+ * apart, even when GitHub put no whitespace between them. Nothing here is attached to the page, so nothing loads.
  */
 export function commentText(c: { body: string; html?: string }): string {
 	if (!c.html) return withoutNotes(c.body).trim()
 	let t = texts.get(c.html)
 	if (t === undefined) {
-		const doc = new DOMParser().parseFromString(c.html, 'text/html')
-		for (const img of doc.body.querySelectorAll('img')) img.replaceWith(imageText(img) ?? '')
-		for (const video of doc.body.querySelectorAll('video')) video.replaceWith(label(null, 'video'))
-		for (const br of doc.body.querySelectorAll('br')) br.replaceWith('\n')
-		for (const block of doc.body.querySelectorAll(BLOCKS)) block.after('\n')
-		t = (doc.body.textContent ?? '')
+		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
+		standIns(body, body.ownerDocument, false)
+		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
+		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+		for (let n = walk.nextNode(); n; n = walk.nextNode())
+			if (!n.parentElement?.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
+		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
+		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)')) cell.before(' · ')
+		for (const block of body.querySelectorAll(BLOCKS)) block.after('\n')
+		t = (body.textContent ?? '')
 			.split('\n')
 			.map((l) => l.trim())
 			.filter(Boolean)

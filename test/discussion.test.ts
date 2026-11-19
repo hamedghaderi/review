@@ -397,7 +397,7 @@ test('GitHub’s HTML comes along with the body, whole or not at all, from Graph
 						body: '**r**',
 						bodyHTML: '<p><strong>r</strong></p>',
 						submittedAt: null,
-						url: null,
+						url: 'https://github.com/o/r/pull/1#pullrequestreview-1',
 					},
 				],
 			},
