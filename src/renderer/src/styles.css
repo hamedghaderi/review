@@ -1070,6 +1070,8 @@ a.ic-state:hover {
 	opacity: 1;
 }
 .comment-item .read-here {
+	display: flex;
+	gap: 4px;
 	align-self: flex-start;
 }
 .comment-item:disabled {

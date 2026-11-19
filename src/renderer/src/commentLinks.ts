@@ -9,40 +9,33 @@
  * so what a link shows when you point at it is what opens; percent escapes are left as written, since a signed link
  * can depend on them.
  *
- * The host is checked as written, before any URL parser sees it: parsers differ (Chromium's, in the app, accepts
- * `exa mple.com` as the host `exa%20mple.com`; Node's, in the tests, rejects it), so a check on their output would
- * behave differently in the app than in the tests. This one is the same string logic in both.
+ * Checked in two steps. Before any URL parser sees it, the host as written may hold no whitespace, `%` or control
+ * characters: that's where parsers differ (Chromium, in the app, takes `exa mple.com` as the host `exa%20mple.com`;
+ * Node, in the tests, refuses it), and a string check gives the same answer in both. After parsing, the host's ASCII
+ * form (international names as `xn--…`, as both parsers write them) must be a well-formed DNS name or an IP address.
  */
 export function webUrl(href: string | null | undefined): string | null {
 	const raw = href?.trim()
 	const authority = raw ? /^https?:\/\/([^/?#\\]*)/i.exec(raw)?.[1] : undefined
-	if (authority === undefined || !hostAsWritten(authority)) return null
+	if (authority === undefined || authority.includes('@') || /[\s%\p{Cc}]/u.test(authority)) return null
 	let u: URL
 	try {
 		u = new URL(raw!)
 	} catch {
 		return null
 	}
-	if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password || !dnsSized(u.hostname)) return null
+	if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password || !dnsName(u.hostname)) return null
 	return u.href
 }
 
+const LABEL = /^[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?$/i
+
 /**
- * The part between `//` and the path, as written: no user name or password, then an IP address in brackets or a host
- * name (labels of letters in any script, digits, `_` and inner `-`, separated by single dots), then an optional port.
+ * A host name in ASCII (international ones in their xn-- form) or an IP address: labels of letters, digits, `_` and
+ * inner `-`, separated by single dots, at most 63 characters each and 253 in all (a trailing dot not counted).
  */
-function hostAsWritten(authority: string): boolean {
-	if (authority.includes('@')) return false
-	const m = /^(\[[0-9a-f:.]+\]|[^:]*)(?::\d*)?$/i.exec(authority)
-	return !!m && (m[1].startsWith('[') || HOST.test(m[1]))
-}
-
-const LABEL = '[\\p{L}\\p{N}_](?:[\\p{L}\\p{M}\\p{N}_-]*[\\p{L}\\p{M}\\p{N}_])?'
-const HOST = new RegExp(`^(?:${LABEL}\\.)*${LABEL}\\.?$`, 'u')
-
-/** Within DNS's limits, on the parsed (ASCII) name: labels of at most 63 characters, at most 253 in all. */
-function dnsSized(hostname: string): boolean {
-	if (hostname.startsWith('[')) return true
-	const name = hostname.replace(/\.$/, '') // a trailing dot doesn't count
-	return name.length <= 253 && name.split('.').every((label) => label.length > 0 && label.length <= 63)
+function dnsName(hostname: string): boolean {
+	if (/^\[[0-9a-f:.]+\]$/i.test(hostname)) return true
+	const name = hostname.replace(/\.$/, '')
+	return name.length <= 253 && name.split('.').every((label) => label.length <= 63 && LABEL.test(label))
 }

@@ -532,9 +532,16 @@ function ReadHere({ t, children }: { t: DiscussionThread; children: ReactNode })
 	return (
 		<div className="comment-item">
 			{children}
-			<button className="btn small ghost read-here" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
-				{open ? '▾ Hide comments' : '▸ Read here'}
-			</button>
+			<div className="read-here">
+				<button className="btn small ghost" onClick={() => setOpen((x) => !x)} aria-expanded={open}>
+					{open ? '▾ Hide comments' : '▸ Read here'}
+				</button>
+				{t.url && (
+					<a className="btn small ghost" href={t.url} target="_blank" rel="noreferrer" title="Open on GitHub">
+						↗ GitHub
+					</a>
+				)}
+			</div>
 			{open && (
 				<div className="gh-thread">
 					{t.comments.map((c) => (

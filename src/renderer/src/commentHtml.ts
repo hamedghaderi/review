@@ -162,7 +162,10 @@ export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 	const cached = notes.get(c)
 	if (cached && cached.html === c.html && cached.body === c.body) return cached.found
 	const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
-	const found = notesNotShown(c.body, body.textContent ?? '')
+	// The only place a note as written can show: in code. (Not in an image's alt text, its 🖼 label: DOMPurify drops
+	// any attribute holding `-->`, so the label reads "image".)
+	const canShow = [...body.querySelectorAll('code, pre')].map((code) => code.textContent ?? '').join('\n')
+	const found = notesNotShown(c.body, canShow)
 	notes.set(c, { html: c.html, body: c.body, found })
 	return found
 }
@@ -187,9 +190,10 @@ export function commentText(c: { body: string; html?: string }): string {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
 		// A closed <details> shows only its summary, so that's all the preview reads of it.
 		// Without a <summary>, the browser labels it "Details".
-		for (const d of body.querySelectorAll('details:not([open])')) {
+		for (const d of body.querySelectorAll('details')) {
 			const summary = [...d.children].find((child) => child.nodeName === 'SUMMARY')
-			d.replaceChildren(summary ?? 'Details')
+			if (!d.hasAttribute('open')) d.replaceChildren(summary ?? 'Details')
+			else if (!summary) d.prepend('Details') // open, it still shows the browser's label
 		}
 		standIns(body, body.ownerDocument, false)
 		for (const box of body.querySelectorAll('input[type="checkbox"]')) box.replaceWith(box.hasAttribute('checked') ? '[x] ' : '[ ] ')
@@ -208,7 +212,7 @@ export function commentText(c: { body: string; html?: string }): string {
 		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
 		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = walk.nextNode(); n; n = walk.nextNode())
-			if (!n.parentElement!.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
+			if (!n.parentElement!.closest('pre, .blob-code-inner')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)'))
 			if (cell.previousElementSibling!.textContent!.trim()) cell.before(' · ') // not after an empty cell, like a line number

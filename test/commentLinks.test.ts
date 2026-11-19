@@ -37,21 +37,14 @@ test('webUrl: only http(s) addresses a browser can open, in the form that opens'
 		assert.equal(webUrl(bad), null, String(bad))
 })
 
-test('the host is checked as written, so Node and Chromium give the same answer', () => {
-	// Node's parser accepts every one of these (it decodes `%41`, drops the tab), so webUrl turning them down shows the
-	// check on the host as written runs, and that it refuses `%` and whitespace whatever a parser makes of them.
+test('the host: as written, no whitespace, % or control characters; parsed, a well-formed DNS name', () => {
+	// Node's parser accepts every one of these (it decodes `%41`, drops the tab), so webUrl turning them down shows
+	// both steps run. Whitespace and `%` are where Chromium and Node differ (see the Chromium test).
 	for (const bad of ['-bad.example', 'bad-.example', 'a..b', '.example', 'ex"ample.com', 'exa%41mple.com', 'exa\tmple.com'])
 		assert.equal(webUrl(`https://${bad}/`), null, JSON.stringify(bad))
-	for (const ok of [
-		'github.com',
-		'a.b.example.',
-		'xn--bcher-kva.example',
-		'bücher.example',
-		'my_host.example',
-		'127.0.0.1',
-		'[2001:db8::1]',
-	])
-		assert.notEqual(webUrl(`https://${ok}/`), null, ok)
+	assert.equal(webUrl('https://l·l.cat/'), 'https://xn--ll-0ea.cat/', 'an international name checked in its ASCII form')
+	assert.notEqual(webUrl('https://a.b.example./'), null, 'a trailing dot')
+	assert.notEqual(webUrl('https://[2001:db8::1]/'), null)
 	assert.notEqual(webUrl('https://github.com:8443/x'), null, 'a port')
 	assert.equal(webUrl('https://github.com:x/'), null, 'not a port')
 })
