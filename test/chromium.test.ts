@@ -106,6 +106,7 @@ test(
 		const rendered = {
 			srcsetLink:
 				'<p><picture><source srcset="https://github.com/u/wide.png 2x, https://github.com/u/x.png 1x"><img alt="diagram"></picture></p>',
+			srcsetComma: '<p><picture><source srcset="https://example.com/plots/a,b.png 2x"><img alt="plot"></picture></p>',
 		}
 		const out = inChromium(`${await bundle('commentHtml.ts')}
 			;({
@@ -132,6 +133,7 @@ test(
 			tabsAndNbsp: 'a\tx\nab\tx\n\u00a0\u00a0kept',
 			srcsetOnly: '🖼 diagram',
 		})
+		assert.match(out.rendered.srcsetComma, /href="https:\/\/example\.com\/plots\/a,b\.png"/)
 		assert.match(out.rendered.srcsetLink, /<a [^>]*href="https:\/\/github\.com\/u\/wide\.png"[^>]*>🖼 diagram<\/a>/)
 	},
 )

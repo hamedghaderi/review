@@ -40,3 +40,31 @@ function dnsName(hostname: string): boolean {
 	const name = hostname.replace(/\.$/, '')
 	return name.length <= 253 && name.split('.').every((label) => label.length <= 63 && LABEL.test(label))
 }
+
+/**
+ * The addresses in an image's `srcset`, the way browsers read it (HTML's "parse a srcset attribute"): candidates are
+ * separated by commas, but a comma inside an address is part of it (`/plots/a,b.png 2x`). An address runs to the next
+ * whitespace, losing any commas it ends with; its descriptors run to the next comma outside parentheses.
+ */
+export function srcsetUrls(srcset: string): Array<string> {
+	const out: Array<string> = []
+	let i = 0
+	while (i < srcset.length) {
+		while (i < srcset.length && /[\s,]/.test(srcset[i])) i++
+		const start = i
+		while (i < srcset.length && !/\s/.test(srcset[i])) i++
+		const token = srcset.slice(start, i)
+		const url = token.replace(/,+$/, '')
+		if (url === token) {
+			let depth = 0
+			for (; i < srcset.length; i++) {
+				const ch = srcset[i]
+				if (ch === '(') depth++
+				else if (ch === ')') depth = Math.max(0, depth - 1)
+				else if (ch === ',' && depth === 0) break
+			}
+		}
+		if (url) out.push(url)
+	}
+	return out
+}

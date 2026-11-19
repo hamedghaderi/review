@@ -1,5 +1,5 @@
 import DOMPurify, { type Config } from 'dompurify'
-import { webUrl } from './commentLinks.ts'
+import { srcsetUrls, webUrl } from './commentLinks.ts'
 
 /**
  * GitHub's HTML for a comment, made safe and readable: the sanitising and stand-ins GitHubHtml shows it with, and the
@@ -48,8 +48,8 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 		if (webUrl(img.getAttribute('src'))) continue
 		const sets = [img, ...(img.parentElement?.tagName === 'PICTURE' ? img.parentElement.querySelectorAll('source') : [])]
 		const found = sets
-			.flatMap((el) => (el.getAttribute('srcset') ?? '').split(','))
-			.map((candidate) => webUrl(candidate.trim().split(/\s+/)[0]))
+			.flatMap((el) => srcsetUrls(el.getAttribute('srcset') ?? ''))
+			.map((url) => webUrl(url))
 			.find((url) => url !== null)
 		if (found) fromSrcset.set(img, found)
 	}
