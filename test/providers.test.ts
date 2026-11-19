@@ -718,6 +718,18 @@ function reviewFor(c: Comparison): Review {
 	}
 }
 
+/**
+ * A fake provider that answers only once `open` is called, so a test can disconnect mid-run without racing a timer:
+ * on a slow machine a fixed delay can run out before the test gets to the disconnect, and the run then completes.
+ */
+function heldProvider(model = 'fixture-v1') {
+	const inner = createFakeProvider({ model })
+	let open!: () => void
+	const held = new Promise<void>((r) => (open = r))
+	const provider = { ...inner, review: async (...args: Parameters<typeof inner.review>) => (await held, inner.review(...args)) }
+	return { provider, open }
+}
+
 async function reviewSetup(lines = 20) {
 	const dir = tmp()
 	const fx = fixtureComparison(lines)
@@ -778,7 +790,7 @@ test('the run keeps its captured provider; picker changes apply to the next run;
 	const { store, access, comparison, dir } = await reviewSetup()
 	const { connections } = await services(dir)
 	const a = await connections.create({ kind: 'fixture', label: 'A' })
-	const slow = createFakeProvider({ delayMs: 300, model: 'fixture-v1' })
+	const { provider: slow, open } = heldProvider('fixture-v1')
 	const used: Array<string> = []
 	const ai = new AiController(
 		store,
@@ -794,6 +806,7 @@ test('the run keeps its captured provider; picker changes apply to the next run;
 	await connections.addModel(a.id, 'other-model')
 	await connections.select({ connectionId: a.id, modelId: 'other-model' }) // picker change mid-run
 	await connections.remove(a.id) // disconnect mid-run
+	open() // only now can the provider answer, too late to count
 	for (let i = 0; i < 50 && ai.runsFor('/repo', comparison.id).some((r) => r.status === 'running'); i++)
 		await new Promise((r) => setTimeout(r, 20))
 	await store.flush()
@@ -993,7 +1006,7 @@ test('review teams: saved with settings, validated, selected, run through the co
 	assert.equal(again.connections.view().teams[0].members.length, 2)
 
 	const captured: Array<string> = []
-	const slow = createFakeProvider({ delayMs: 300 })
+	const { provider: slow, open } = heldProvider()
 	const ai = new AiController(
 		store,
 		async (sel) => {
@@ -1010,6 +1023,7 @@ test('review teams: saved with settings, validated, selected, run through the co
 	assert.deepEqual(captured, [b.id, a.id], 'every member’s credential is captured before anything is sent')
 	assert.equal(started.team!.name, 'Default team')
 	await connections.remove(b.id) // a member's provider disconnects mid-run
+	open()
 	for (let i = 0; i < 50 && ai.runsFor('/repo', comparison.id).some((r) => r.status === 'running'); i++)
 		await new Promise((r) => setTimeout(r, 20))
 	await store.flush()
