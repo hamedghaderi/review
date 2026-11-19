@@ -26,6 +26,7 @@ import {
 	buildRows,
 	computeGaps,
 	excerpt,
+	jumpContext,
 	lineNo,
 	linesToReveal,
 	normalizeSpan,
@@ -157,11 +158,15 @@ export function DiffView(p: Props) {
 	const shown = useMemo(() => {
 		if (!gaps || !fileLines) return revealed
 		const s = new Set(revealed)
+		// A line you jumped to opens with what it opens, not alone (issue #244).
+		const ja = p.reveal?.mark && p.reveal.fileKey === file.key ? p.reveal.anchor : null
+		const jr = ja?.side && ja.startLine ? jumpContext(gaps, fileLines, ja.side, ja.startLine) : null
+		const jump = jr && { side: jr.side, startLine: jr.start, endLine: jr.end }
 		const ranges: Array<{ side: Side | null; startLine: number | null; endLine: number | null }> = [
 			...p.comments.map((c) => c.anchor),
 			...p.drafts.map((d) => d.anchor),
 			...(p.highlight ? [p.highlight] : []),
-			...(p.reveal?.mark && p.reveal.fileKey === file.key && p.reveal.anchor ? [p.reveal.anchor] : []),
+			...(jump ? [jump] : []),
 			...p.threads.flatMap((t) => (t.placed ? [{ side: t.side, ...t.placed }] : [])),
 		]
 		for (const a of ranges) {
@@ -397,7 +402,11 @@ export function DiffView(p: Props) {
 		}
 		if (!target && r.itemId) target = scroller.current?.querySelector(`[data-item="${CSS.escape(r.itemId)}"]`) ?? null
 		handled.current = r.nonce
-		target?.scrollIntoView({ block: 'center' })
+		const sc = scroller.current
+		if (r.mark && target instanceof HTMLElement && sc) {
+			// A jump opens the block below the line (issue #244): put the line near the top, a few lines down, so it shows.
+			sc.scrollTop += target.getBoundingClientRect().top - sc.getBoundingClientRect().top - 3 * target.offsetHeight
+		} else target?.scrollIntoView({ block: 'center' })
 	}, [p.reveal, rows, file.key, patch.state, gaps, lines])
 
 	// "Comment on file" opens its box at the top of the file, which may be far above where you are reading: bring it
