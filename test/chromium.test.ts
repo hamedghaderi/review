@@ -101,6 +101,8 @@ test(
 			blocksInSuggestion: '<table><tr><td class="blob-code-inner blob-code-addition"><div>one</div><div>two</div></td></tr></table>',
 			tabsAndNbsp: '<pre><code>a\tx\nab\tx\n\u00a0\u00a0kept</code></pre>',
 			srcsetOnly: '<p><picture><source srcset="https://github.com/u/wide.png 2x"><img alt="diagram"></picture></p>',
+			trailingBlank: '<pre><code>a\n\n</code></pre><p>After</p>',
+			nestedBlocks: '<table><tr><td class="blob-code-inner blob-code-addition"><div><div>one</div></div><div>two</div></td></tr></table>',
 		}
 		// What standIns makes of it for the comment itself: the link, not only its words.
 		const rendered = {
@@ -132,6 +134,8 @@ test(
 			blocksInSuggestion: '+ one\ntwo',
 			tabsAndNbsp: 'a\tx\nab\tx\n\u00a0\u00a0kept',
 			srcsetOnly: '🖼 diagram',
+			trailingBlank: 'a\n\nAfter',
+			nestedBlocks: '+ one\ntwo',
 		})
 		assert.match(out.rendered.srcsetComma, /href="https:\/\/example\.com\/plots\/a,b\.png"/)
 		assert.match(out.rendered.srcsetLink, /<a [^>]*href="https:\/\/github\.com\/u\/wide\.png"[^>]*>🖼 diagram<\/a>/)

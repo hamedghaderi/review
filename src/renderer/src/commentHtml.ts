@@ -219,11 +219,12 @@ export function commentText(c: { body: string; html?: string }): string {
 		for (let n = own.nextNode(); n; n = own.nextNode())
 			n.nodeValue = n.nodeValue!.replace(/[\uE000-\uE004]/g, (ch) => `${CODE_ESCAPE}${ch.charCodeAt(0) - 0xe000}`)
 		for (const code of body.querySelectorAll('pre, .blob-code-inner')) {
-			// Its lines as the comment shows them: a <br> or a block inside the code ends one.
+			// Its lines as the comment shows them: a <br> ends one, and so does a block inside the code when something
+			// follows it. Only the code's final line ending goes; a blank line the author left at the end stays.
 			for (const br of code.querySelectorAll('br')) br.replaceWith('\n')
-			for (const block of code.querySelectorAll(BLOCKS)) block.after('\n')
+			for (const block of code.querySelectorAll(BLOCKS)) if (block.nextSibling) block.after('\n')
 			code.textContent = code
-				.textContent!.replace(/\n+$/, '')
+				.textContent!.replace(/\n$/, '')
 				.split('\n')
 				.map((l) => l.replace(/[^\S\n]/g, (ch) => CODE_WHITESPACE[ch] ?? CODE_WHITESPACE[' ']) || CODE_BLANK)
 				.join('\n')
