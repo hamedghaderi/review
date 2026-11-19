@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -25,12 +25,16 @@ async function bundle(module: string): Promise<string> {
  * Runs code in Chromium (a hidden Electron window, with its own throwaway data folder) and returns what it evaluates
  * to. For checks whose answer depends on the browser engine, which Node's tests can't show.
  */
-function inChromium(code: string): unknown {
+function inChromium(code: string, page?: { html: string; files: Record<string, string> }): unknown {
 	const dir = mkdtempSync(join(tmpdir(), 'review-chromium-'))
 	try {
 		const main = join(dir, 'main.cjs')
 		const script = join(dir, 'code.js')
 		writeFileSync(script, code)
+		if (page) {
+			writeFileSync(join(dir, 'page.html'), page.html)
+			for (const [name, text] of Object.entries(page.files)) writeFileSync(join(dir, name), text)
+		}
 		writeFileSync(
 			main,
 			`const { app, BrowserWindow } = require('electron')
@@ -38,7 +42,7 @@ const fs = require('fs')
 app.setPath('userData', ${JSON.stringify(join(dir, 'data'))})
 app.whenReady().then(async () => {
 	const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } })
-	await w.loadURL('about:blank')
+	await ${page ? `w.loadFile(${JSON.stringify(join(dir, 'page.html'))})` : "w.loadURL('about:blank')"}
 	const out = await w.webContents.executeJavaScript(fs.readFileSync(${JSON.stringify(script)}, 'utf8'))
 	process.stdout.write('RESULT ' + JSON.stringify(out) + '\\n')
 	app.quit()
@@ -139,5 +143,45 @@ test(
 		})
 		assert.match(out.rendered.srcsetComma, /href="https:\/\/example\.com\/plots\/a,b\.png"/)
 		assert.match(out.rendered.srcsetLink, /<a [^>]*href="https:\/\/github\.com\/u\/wide\.png"[^>]*>🖼 diagram<\/a>/)
+	},
+)
+
+test(
+	"the syntax worker runs under the page's security policy, and no worker starts outside it",
+	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
+	async () => {
+		// The app's own policy, on a file:// page as the app is.
+		const index = readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8')
+		const csp = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(index)?.[1]
+		assert.ok(csp?.includes('worker-src blob:'), csp)
+		// Each of these works in a worker with no policy (a worker loaded straight from file://).
+		const probe = `postMessage('hello')
+const r = {}
+const tryIt = async (k, f) => { try { await f(); r[k] = 'allowed' } catch { r[k] = 'refused' } }
+await tryIt('eval', () => new Function('return 1')())
+await tryIt('import', () => import('data:text/javascript,export default 1'))
+await tryIt('fetch', () => fetch('data:,x'))
+addEventListener('message', (e) => postMessage({ ...r, echo: e.data }))`
+		const out = inChromium(
+			`new Promise((done) => {
+				const probe = new URL('probe.js', location.href).href
+				const w = App.sandboxedWorker(probe)
+				w.postMessage('sent before it loaded')
+				w.onmessage = (e) => {
+					if (e.data === 'hello') return
+					let direct
+					try { direct = new Worker(probe, { type: 'module' }); direct.onerror = () => done({ ...e.data, direct: 'refused' }) } catch { done({ ...e.data, direct: 'refused' }) }
+					if (direct) direct.onmessage = () => done({ ...e.data, direct: 'started' })
+					setTimeout(() => done({ ...e.data, direct: 'no answer' }), 3000)
+				}
+				w.onerror = () => done('the sandboxed worker failed to start')
+				setTimeout(() => done('timeout'), 10000)
+			})`,
+			{
+				html: `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><script src="app.js"></script>`,
+				files: { 'app.js': await bundle('sandboxedWorker.ts'), 'probe.js': probe },
+			},
+		)
+		assert.deepEqual(out, { eval: 'refused', import: 'refused', fetch: 'refused', echo: 'sent before it loaded', direct: 'refused' })
 	},
 )

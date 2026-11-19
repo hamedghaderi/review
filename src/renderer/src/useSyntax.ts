@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { LineTokens } from './syntax.ts'
+import { sandboxedWorker } from './sandboxedWorker.ts'
+import syntaxWorker from './syntax.worker.ts?worker&url'
 import { useSyntaxColours } from './theme.ts'
 
 type Tokens = Array<LineTokens> | null
@@ -15,7 +17,8 @@ const CACHE_SIZE = 12
 function start(): Worker | null {
 	if (worker !== undefined) return worker
 	try {
-		worker = new Worker(new URL('./syntax.worker.ts', import.meta.url), { type: 'module' })
+		// Under the page's security policy, so a grammar can't reach the network or eval strings (see sandboxedWorker).
+		worker = sandboxedWorker(new URL(syntaxWorker, document.baseURI).href)
 		worker.onmessage = (e: MessageEvent<{ id: number; tokens: Tokens }>) => {
 			waiting.get(e.data.id)?.(e.data.tokens)
 			waiting.delete(e.data.id)
