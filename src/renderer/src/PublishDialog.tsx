@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
 import { describeHiddenChars, type HiddenLine } from '../../shared/hiddenChars.ts'
 import type { AppError, CitationCheck, PreparedReview, PublishOutcome, PublishPlan, ReviewEvent } from '../../shared/types.ts'
+import { PUBLISH_BATCH } from '../../shared/types.ts'
 import type { BlockingSummary } from '../../shared/findings.ts'
 import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 
@@ -273,16 +274,24 @@ export function PublishDialog({
 		setProgress({ done: 0, total: items.length, current: items[0]?.label ?? '' })
 		await beforePublish()
 		const next = new Map(results)
-		for (const [n, item] of items.entries()) {
-			setProgress({ done: n, total: items.length, current: item.label })
-			const r = await window.review.publishComment(repoId, reviewId, item.commentId, outside)
-			next.set(item.commentId, r.ok ? r.value : { commentId: item.commentId, status: 'failed', message: r.error.message, url: null })
-			setResults(new Map(next))
-			// Stop on errors that will fail every remaining comment the same way.
-			if (!r.ok && ['github-auth', 'github-forbidden', 'github-rate-limited', 'offline'].includes(r.error.code)) {
+		// A batch at a time (issue #242), so the bar moves; the main process stops on errors that would fail the rest.
+		for (let n = 0; n < items.length; n += PUBLISH_BATCH) {
+			const batch = items.slice(n, n + PUBLISH_BATCH)
+			setProgress({ done: n, total: items.length, current: batch.map((i) => i.label).join(', ') })
+			const r = await window.review.publishComments(
+				repoId,
+				reviewId,
+				batch.map((i) => i.commentId),
+				outside,
+			)
+			if (!r.ok) {
+				for (const i of batch) next.set(i.commentId, { commentId: i.commentId, status: 'failed', message: r.error.message, url: null })
+				setResults(new Map(next))
 				setError(r.error)
 				break
 			}
+			for (const o of r.value) next.set(o.commentId, o)
+			setResults(new Map(next))
 		}
 		setProgress(null)
 		setRunning('Checking GitHub…')
@@ -412,21 +421,28 @@ export function PublishDialog({
 									<div className="publish-progress" role="status" aria-live="polite">
 										<div className="publish-progress-line small">
 											<span>
-												Adding comment {Math.min(progress.done + 1, progress.total)} of {progress.total} to your pending review…
+												{progress.total <= PUBLISH_BATCH
+													? `Adding ${progress.total === 1 ? 'the comment' : `${progress.total} comments`} to your pending review…`
+													: `Adding comments ${progress.done + 1}–${Math.min(progress.done + PUBLISH_BATCH, progress.total)} of ${progress.total} to your pending review…`}
 											</span>
 											<span className="spacer" />
-											<span className="muted">{Math.round((100 * progress.done) / progress.total)}%</span>
+											{progress.total > PUBLISH_BATCH && (
+												<span className="muted">{Math.round((100 * progress.done) / progress.total)}%</span>
+											)}
 										</div>
-										<div
-											className="publish-progress-bar"
-											role="progressbar"
-											aria-label="Comments added"
-											aria-valuemin={0}
-											aria-valuemax={progress.total}
-											aria-valuenow={progress.done}
-										>
-											<span style={{ width: `${(100 * progress.done) / progress.total}%` }} />
-										</div>
+										{/* One batch has no steps to show: the bar would sit at 0% until it's done. */}
+										{progress.total > PUBLISH_BATCH && (
+											<div
+												className="publish-progress-bar"
+												role="progressbar"
+												aria-label="Comments added"
+												aria-valuemin={0}
+												aria-valuemax={progress.total}
+												aria-valuenow={progress.done}
+											>
+												<span style={{ width: `${(100 * progress.done) / progress.total}%` }} />
+											</div>
+										)}
 										<span className="small muted mono ellipsis">{progress.current}</span>
 										<span className="small muted">Keep this window open until it finishes.</span>
 									</div>

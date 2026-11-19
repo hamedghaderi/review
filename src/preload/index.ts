@@ -87,7 +87,8 @@ const api: ReviewApi = {
 	myReviews: (repoId) => ipcRenderer.invoke(IPC.myReviews, repoId),
 	branchPr: (repoId, head) => ipcRenderer.invoke(IPC.branchPr, repoId, head),
 	publishPlan: (repoId, reviewId) => ipcRenderer.invoke(IPC.publishPlan, repoId, reviewId),
-	publishComment: (repoId, reviewId, commentId, outside) => ipcRenderer.invoke(IPC.publishComment, repoId, reviewId, commentId, outside),
+	publishComments: (repoId, reviewId, commentIds, outside) =>
+		ipcRenderer.invoke(IPC.publishComments, repoId, reviewId, commentIds, outside),
 	submitReview: (repoId, reviewId, event, body) => ipcRenderer.invoke(IPC.submitReview, repoId, reviewId, event, body),
 	prDiscussion: (repoId, reviewId) => ipcRenderer.invoke(IPC.prDiscussion, repoId, reviewId),
 	baseDrift: (repoId, reviewId) => ipcRenderer.invoke(IPC.baseDrift, repoId, reviewId),

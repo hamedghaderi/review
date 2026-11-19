@@ -926,6 +926,9 @@ export interface PublishOutcome {
 	url: string | null
 }
 
+/** Comments sent to GitHub in one request (issue #242). Small enough that a batch finishes well within a request's timeout. */
+export const PUBLISH_BATCH = 10
+
 // blocking / should_fix / pre_existing since prompt reviewer-2026-10-01, the other levels since reviewer-2026-10-02;
 // high / medium / low on older runs.
 export type Severity = FindingLevel | 'high' | 'medium' | 'low'
@@ -2156,7 +2159,7 @@ export const IPC = {
 	cancelOpen: 'compare:cancel',
 	branchPr: 'gh:branch-pr',
 	publishPlan: 'publish:plan',
-	publishComment: 'publish:comment',
+	publishComments: 'publish:comments',
 	submitReview: 'publish:submit',
 	prDiscussion: 'gh:discussion',
 	baseDrift: 'gh:base-drift',
@@ -2362,7 +2365,12 @@ export interface ReviewApi {
 	/** What publishing the open PR review would do. Reconciles with GitHub; never writes to it. */
 	publishPlan(repoId: string, reviewId: string): Promise<Result<PublishPlan>>
 	/** Adds (or updates) one comment in the viewer's pending GitHub review, creating the pending review if needed. */
-	publishComment(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<Result<PublishOutcome>>
+	publishComments(
+		repoId: string,
+		reviewId: string,
+		commentIds: Array<string>,
+		outsideDiff: 'file' | 'skip',
+	): Promise<Result<Array<PublishOutcome>>>
 	submitReview(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<Result<PublishedReview>>
 	/** The open PR review's existing threads, reviews and conversation on GitHub, placed on this snapshot. Read-only. */
 	prDiscussion(repoId: string, reviewId: string): Promise<Result<Discussion>>

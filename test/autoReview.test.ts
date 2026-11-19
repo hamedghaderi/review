@@ -169,10 +169,11 @@ async function setup(over: Partial<AutoReviewDeps> = {}, findings: Array<Finding
 			return findings.map((f) => `c-${f.id}`)
 		},
 		plan: async () => plan(),
-		publish: async (_r, _id, commentId) => {
-			calls.push(`publish ${commentId}`)
-			return { commentId, status: 'published', message: null, url: 'x' }
-		},
+		publish: async (_r, _id, commentIds) =>
+			commentIds.map((commentId) => {
+				calls.push(`publish ${commentId}`)
+				return { commentId, status: 'published' as const, message: null, url: 'x' }
+			}),
 		submit: async (_r, _id, ev: ReviewEvent) => {
 			calls.push(`submit ${ev}`)
 			return { id: 'rv', url: 'https://github.com/review', commit: 'h1', state: 'submitted', event: ev, submittedAt: 't' }

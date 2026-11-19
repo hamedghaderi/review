@@ -137,11 +137,24 @@ function schemaError(type: string, input: Record<string, unknown>, path = ''): s
 	return null
 }
 
-async function mockGitHub(opts: { headSha?: string; failThreadAfter?: number; forbidWrites?: boolean } = {}) {
+async function mockGitHub(
+	opts: {
+		headSha?: string
+		failThreadAfter?: number // later threads are refused one by one, the way GitHub refuses a line outside the diff
+		forbidThreadAfter?: number // later threads are refused for lack of access
+		failRequests?: number // this many batch requests fail as a whole (a 502) before any write is made
+		loseResponses?: number // this many batch requests are made, but their answer never arrives (a 502 after the writes)
+		forbidWrites?: boolean
+	} = {},
+) {
 	const reviews: Array<MockReview> = []
 	const writes: Array<{ op: string; input: Record<string, unknown> }> = []
+	const batches: Array<number> = [] // writes per batch request that reached GitHub
+	let reads = 0
 	let seq = 0
 	let threadsAdded = 0
+	let failRequests = opts.failRequests ?? 0
+	let loseResponses = opts.loseResponses ?? 0
 	const state = { headSha: opts.headSha ?? HEAD }
 	const reviewJson = (r: MockReview) => ({
 		id: r.id,
@@ -175,15 +188,56 @@ async function mockGitHub(opts: { headSha?: string; failThreadAfter?: number; fo
 			const isWrite = query.trimStart().startsWith('mutation')
 			if (isWrite && opts.forbidWrites)
 				return send({ data: null, errors: [{ type: 'FORBIDDEN', message: 'Resource not accessible by personal access token' }] })
-			if (query.includes('addPullRequestReviewThread')) {
-				if (opts.failThreadAfter !== undefined && threadsAdded >= opts.failThreadAfter)
-					return send({ data: null, errors: [{ message: 'Something went wrong' }] })
-				threadsAdded++
-				writes.push({ op: 'thread', input })
-				const r = reviews.find((x) => x.id === input.pullRequestReviewId && x.state === 'PENDING')!
-				const c = comment(input)
-				r.comments.push(c)
-				return send({ data: { addPullRequestReviewThread: { thread: { comments: { nodes: [{ id: c.id, url: `u/${c.id}` }] } } } } })
+			// Threads and edits come batched: one aliased mutation per write, run in order, each failing on its own.
+			const batch = [...query.matchAll(/(w\d+): (addPullRequestReviewThread|updatePullRequestReviewComment)\(input: \$(i\d+)\)/g)]
+			if (batch.length) {
+				if (failRequests > 0) {
+					failRequests--
+					res.writeHead(502, { 'content-type': 'application/json' })
+					return res.end(JSON.stringify({ message: 'Bad Gateway' }))
+				}
+				for (const [, , op, v] of batch) {
+					const bad = schemaError(
+						op === 'addPullRequestReviewThread' ? 'AddPullRequestReviewThreadInput' : 'UpdatePullRequestReviewCommentInput',
+						variables[v],
+					)
+					if (bad) return send({ errors: [{ message: bad }] })
+				}
+				batches.push(batch.length)
+				const data: Record<string, unknown> = {}
+				const errors: Array<{ type?: string; message: string; path: Array<string> }> = []
+				for (const [, alias, op, v] of batch) {
+					const input = variables[v] as Record<string, any>
+					if (op === 'updatePullRequestReviewComment') {
+						writes.push({ op: 'update', input })
+						const c = reviews.flatMap((r) => r.comments).find((x) => x.id === input.pullRequestReviewCommentId)!
+						c.body = input.body
+						data[alias] = { pullRequestReviewComment: { id: c.id, url: `u/${c.id}` } }
+						continue
+					}
+					if (opts.forbidThreadAfter !== undefined && threadsAdded >= opts.forbidThreadAfter) {
+						data[alias] = null
+						errors.push({ type: 'FORBIDDEN', message: 'Resource not accessible by personal access token', path: [alias] })
+						continue
+					}
+					if (opts.failThreadAfter !== undefined && threadsAdded >= opts.failThreadAfter) {
+						data[alias] = null
+						errors.push({ message: 'Something went wrong', path: [alias] })
+						continue
+					}
+					threadsAdded++
+					writes.push({ op: 'thread', input })
+					const r = reviews.find((x) => x.id === input.pullRequestReviewId && x.state === 'PENDING')!
+					const c = comment(input)
+					r.comments.push(c)
+					data[alias] = { thread: { comments: { nodes: [{ id: c.id, url: `u/${c.id}` }] } } }
+				}
+				if (loseResponses > 0) {
+					loseResponses--
+					res.writeHead(502, { 'content-type': 'application/json' })
+					return res.end(JSON.stringify({ message: 'Bad Gateway' }))
+				}
+				return send({ data, ...(errors.length ? { errors } : {}) })
 			}
 			if (query.includes('addPullRequestReview(')) {
 				writes.push({ op: 'review', input })
@@ -210,12 +264,6 @@ async function mockGitHub(opts: { headSha?: string; failThreadAfter?: number; fo
 					},
 				})
 			}
-			if (query.includes('updatePullRequestReviewComment')) {
-				writes.push({ op: 'update', input })
-				const c = reviews.flatMap((r) => r.comments).find((x) => x.id === input.pullRequestReviewCommentId)!
-				c.body = input.body
-				return send({ data: { updatePullRequestReviewComment: { pullRequestReviewComment: { id: c.id, url: `u/${c.id}` } } } })
-			}
 			if (query.includes('submitPullRequestReview')) {
 				writes.push({ op: 'submit', input })
 				const r = reviews.find((x) => x.id === input.pullRequestReviewId)!
@@ -226,6 +274,7 @@ async function mockGitHub(opts: { headSha?: string; failThreadAfter?: number; fo
 				})
 			}
 			// Review state query.
+			reads++
 			const ids = variables.ids as Array<string>
 			const nodes = ids.map((id) => {
 				const r = reviews.find((x) => x.id === id)
@@ -250,7 +299,7 @@ async function mockGitHub(opts: { headSha?: string; failThreadAfter?: number; fo
 	})
 	await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
 	const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
-	return { base, reviews, writes, state, close: () => new Promise<void>((r) => server.close(() => r())) }
+	return { base, reviews, writes, batches, reads: () => reads, state, close: () => new Promise<void>((r) => server.close(() => r())) }
 }
 
 function tokens(): TokenStore {
@@ -306,16 +355,18 @@ async function setup(mockOpts: Parameters<typeof mockGitHub>[0] = {}, comments: 
 		d.repos['/r'] = { repoId: '/r', root: '/r', selectedBase: null, activeReviewId: id, reviews: { [id]: review }, aiRuns: {} }
 	})
 	const gh = new GitHubService(tokens(), { base: mock.base })
-	const pub = new Publisher(store, gh, async () => HUNKS)
+	const pub = new Publisher(store, gh, async () => HUNKS, { retryMs: 10 })
+	// One comment at a time, as most tests here send them.
+	const one = async (commentId: string, outside: 'file' | 'skip' = 'skip') => (await pub.publish('/r', id, [commentId], outside))[0]
 	const setComments = (c: Array<ReviewComment>) =>
 		store.update((d) => {
 			d.repos['/r'].reviews[id].comments = c
 		})
-	return { mock, store, id, pub, setComments }
+	return { mock, store, id, pub, one, setComments }
 }
 
 test('publishing creates one pending review on the snapshot commit, adds threads to it, and never duplicates', async () => {
-	const { mock, store, id, pub } = await setup({}, [
+	const { mock, store, id, pub, one } = await setup({}, [
 		comment('c1', 'line comment'),
 		comment('c2', 'range', { startLine: 11, endLine: 15 }),
 		comment('c3', 'about the file', { side: null, startLine: null, endLine: null }),
@@ -336,8 +387,8 @@ test('publishing creates one pending review on the snapshot commit, adds threads
 				['c5', 'new', 'line'],
 			],
 		)
-		for (const c of ['c1', 'c2', 'c3', 'c5']) assert.equal((await pub.publish('/r', id, c, 'skip')).status, 'published')
-		assert.equal((await pub.publish('/r', id, 'c4', 'skip')).status, 'skipped')
+		for (const c of ['c1', 'c2', 'c3', 'c5']) assert.equal((await one(c, 'skip')).status, 'published')
+		assert.equal((await one('c4', 'skip')).status, 'skipped')
 		assert.equal(mock.reviews.length, 1, 'one pending review')
 		const r = mock.reviews[0]
 		assert.equal(r.state, 'PENDING', 'nothing is visible to others yet')
@@ -353,10 +404,10 @@ test('publishing creates one pending review on the snapshot commit, adds threads
 		)
 		// Publishing again is a no-op.
 		const before = mock.writes.length
-		assert.equal((await pub.publish('/r', id, 'c1', 'skip')).status, 'skipped')
+		assert.equal((await one('c1', 'skip')).status, 'skipped')
 		assert.equal(mock.writes.length, before)
 		// Outside-diff as a file comment keeps the line reference.
-		assert.equal((await pub.publish('/r', id, 'c4', 'file')).status, 'published')
+		assert.equal((await one('c4', 'file')).status, 'published')
 		assert.match(r.comments.at(-1)!.body, /^\*\*lines 20–21:\*\* expanded context$/)
 		assert.equal(r.comments.at(-1)!.subjectType, 'FILE')
 		const after = await pub.plan('/r', id)
@@ -369,18 +420,18 @@ test('publishing creates one pending review on the snapshot commit, adds threads
 })
 
 test('edits update the pending comment; comments deleted on GitHub become publishable again; submit makes it public', async () => {
-	const { mock, store, id, pub, setComments } = await setup({}, [comment('c1', 'first')])
+	const { mock, store, id, pub, one, setComments } = await setup({}, [comment('c1', 'first')])
 	try {
-		await pub.publish('/r', id, 'c1', 'skip')
+		await one('c1', 'skip')
 		await setComments([comment('c1', 'first, edited')])
 		assert.equal((await pub.plan('/r', id)).items[0].status, 'changed')
-		assert.equal((await pub.publish('/r', id, 'c1', 'skip')).status, 'updated')
+		assert.equal((await one('c1', 'skip')).status, 'updated')
 		assert.equal(mock.reviews[0].comments[0].body, 'first, edited')
 		assert.equal(mock.reviews[0].comments.length, 1)
 
 		mock.reviews[0].comments = [] // deleted on GitHub
 		assert.equal((await pub.plan('/r', id)).items[0].status, 'new')
-		await pub.publish('/r', id, 'c1', 'skip')
+		await one('c1', 'skip')
 		assert.equal(mock.reviews[0].comments.length, 1)
 
 		const prepared = { event: 'REQUEST_CHANGES' as const, body: 'b', head: 'h', at: 't', runId: 'r', reviewer: 'm', comments: 1 }
@@ -395,23 +446,23 @@ test('edits update the pending comment; comments deleted on GitHub become publis
 		assert.equal(plan.pending.kind, 'none')
 		// Submitted comments cannot be edited through a pending review.
 		await setComments([comment('c1', 'edited after submit')])
-		assert.equal((await pub.publish('/r', id, 'c1', 'skip')).status, 'skipped')
+		assert.equal((await one('c1', 'skip')).status, 'skipped')
 	} finally {
 		await mock.close()
 	}
 })
 
 test('a comment sent before a crash but not recorded is adopted, not posted twice', async () => {
-	const { mock, store, id, pub } = await setup({}, [comment('c1', 'one'), comment('c2', 'two')])
+	const { mock, store, id, pub, one } = await setup({}, [comment('c1', 'one'), comment('c2', 'two')])
 	try {
-		await pub.publish('/r', id, 'c1', 'skip')
-		await pub.publish('/r', id, 'c2', 'skip')
+		await one('c1', 'skip')
+		await one('c2', 'skip')
 		// Simulate losing the record of c2 (the app died between GitHub's response and the store write).
 		await store.update((d) => {
 			delete d.repos['/r'].reviews[id].publication!.comments.c2
 		})
 		const writes = mock.writes.length
-		assert.equal((await pub.publish('/r', id, 'c2', 'skip')).status, 'published')
+		assert.equal((await one('c2', 'skip')).status, 'published')
 		assert.equal(mock.writes.length, writes, 'no new write')
 		assert.equal(mock.reviews[0].comments.length, 2)
 	} finally {
@@ -426,7 +477,7 @@ test('an existing pending review on another commit blocks publishing; one starte
 		const plan = await other.pub.plan('/r', other.id)
 		assert.equal(plan.pending.kind, 'other')
 		assert.match(plan.blocked!.message, /one pending review per pull request/)
-		await assert.rejects(other.pub.publish('/r', other.id, 'c1', 'skip'), /not this snapshot/)
+		await assert.rejects(other.one('c1', 'skip'), /not this snapshot/)
 		assert.equal(other.mock.writes.length, 0)
 	} finally {
 		await other.mock.close()
@@ -445,7 +496,7 @@ test('an existing pending review on another commit blocks publishing; one starte
 		assert.equal(plan.headMoved, true, 'PR has newer commits than the snapshot')
 		assert.equal(plan.pending.kind, 'other')
 		assert.equal(plan.blocked, null)
-		await same.pub.publish('/r', same.id, 'c1', 'skip')
+		await same.one('c1', 'skip')
 		assert.deepEqual(
 			same.mock.writes.map((w) => w.op),
 			['thread'],
@@ -465,7 +516,7 @@ test('an existing pending review on another commit blocks publishing; one starte
 test('failures are explicit: missing write permission, mid-batch errors, empty submissions, non-PR reviews', async () => {
 	const ro = await setup({ forbidWrites: true }, [comment('c1', 'x')])
 	try {
-		await assert.rejects(ro.pub.publish('/r', ro.id, 'c1', 'skip'), (e: { code: string; message: string }) => {
+		await assert.rejects(ro.one('c1', 'skip'), (e: { code: string; message: string }) => {
 			assert.equal(e.code, 'github-forbidden')
 			assert.match(e.message, /Read and write/)
 			return true
@@ -476,8 +527,12 @@ test('failures are explicit: missing write permission, mid-batch errors, empty s
 	}
 	const flaky = await setup({ failThreadAfter: 1 }, [comment('c1', 'one'), comment('c2', 'two')])
 	try {
-		await flaky.pub.publish('/r', flaky.id, 'c1', 'skip')
-		await assert.rejects(flaky.pub.publish('/r', flaky.id, 'c2', 'skip'), { code: 'github-failed' })
+		await flaky.one('c1', 'skip')
+		const writes = flaky.mock.batches.length
+		const refused = await flaky.one('c2', 'skip')
+		assert.equal(refused.status, 'failed')
+		assert.match(refused.message!, /Something went wrong/)
+		assert.equal(flaky.mock.batches.length, writes + 1, 'GitHub refused that comment itself: not tried again')
 		const plan = await flaky.pub.plan('/r', flaky.id)
 		assert.deepEqual(
 			plan.items.map((i) => i.status),
@@ -507,7 +562,7 @@ test('failures are explicit: missing write permission, mid-batch errors, empty s
 test('a failure after creating the pending review reuses that empty review on retry', async () => {
 	const t = await setup({ failThreadAfter: 0 }, [comment('c1', 'file note', { side: null, startLine: null, endLine: null })])
 	try {
-		await assert.rejects(t.pub.publish('/r', t.id, 'c1', 'skip'), { code: 'github-failed' })
+		assert.equal((await t.one('c1', 'skip')).status, 'failed')
 		assert.equal(t.mock.reviews.length, 1, 'the empty pending review exists on GitHub')
 		assert.equal(t.mock.reviews[0].comments.length, 0)
 		assert.equal((await t.pub.plan('/r', t.id)).pending.kind, 'ours', 'and is recorded as this app’s')
@@ -516,10 +571,100 @@ test('a failure after creating the pending review reuses that empty review on re
 	}
 })
 
+test('many comments: one read and one request per ten, in the order given', async () => {
+	const many = Array.from({ length: 12 }, (_, i) => comment(`c${i + 1}`, `note ${i + 1}`))
+	const t = await setup({}, many)
+	try {
+		const out = await t.pub.publish(
+			'/r',
+			t.id,
+			many.map((c) => c.id),
+			'skip',
+		)
+		assert.deepEqual(
+			out.map((o) => [o.commentId, o.status]),
+			many.map((c) => [c.id, 'published']),
+		)
+		assert.equal(t.mock.reads(), 1, 'GitHub is read once for the lot')
+		assert.deepEqual(t.mock.batches, [10, 2])
+		assert.deepEqual(
+			t.mock.reviews[0].comments.map((c) => c.body),
+			many.map((c) => c.body),
+		)
+		assert.equal(Object.keys(t.store.read().repos['/r'].reviews[t.id].publication!.comments).length, 12)
+		// New comments and edits go in the same batch.
+		await t.setComments([...many.slice(0, 11), { ...many[11], body: 'note 12, edited' }, comment('c13', 'thirteen')])
+		const next = await t.pub.publish('/r', t.id, ['c12', 'c13'], 'skip')
+		assert.deepEqual(
+			next.map((o) => o.status),
+			['updated', 'published'],
+		)
+		assert.deepEqual(t.mock.batches, [10, 2, 2])
+		assert.equal(t.mock.reviews[0].comments[11].body, 'note 12, edited')
+	} finally {
+		await t.mock.close()
+	}
+})
+
+test('a batch whose request failed is tried once more, and a write that got through is adopted, not posted twice', async () => {
+	const cs = [comment('c1', 'one'), comment('c2', 'two'), comment('c3', 'three')]
+	const failed = await setup({ failRequests: 1 }, cs)
+	try {
+		const out = await failed.pub.publish('/r', failed.id, ['c1', 'c2', 'c3'], 'skip')
+		assert.deepEqual(
+			out.map((o) => o.status),
+			['published', 'published', 'published'],
+		)
+		assert.equal(failed.mock.reviews[0].comments.length, 3)
+	} finally {
+		await failed.mock.close()
+	}
+	const lost = await setup({ loseResponses: 1 }, cs)
+	try {
+		const out = await lost.pub.publish('/r', lost.id, ['c1', 'c2', 'c3'], 'skip')
+		assert.deepEqual(
+			out.map((o) => o.status),
+			['published', 'published', 'published'],
+		)
+		assert.equal(lost.mock.reviews[0].comments.length, 3, 'the retry found them in the pending review')
+		assert.deepEqual(lost.mock.batches, [3], 'and sent nothing again')
+	} finally {
+		await lost.mock.close()
+	}
+	const down = await setup({ failRequests: 2 }, cs)
+	try {
+		const out = await down.pub.publish('/r', down.id, ['c1', 'c2'], 'skip')
+		assert.deepEqual(
+			out.map((o) => [o.status, o.message]),
+			[
+				['failed', 'GitHub returned 502: Bad Gateway.'],
+				['failed', 'GitHub returned 502: Bad Gateway.'],
+			],
+			'only once more',
+		)
+	} finally {
+		await down.mock.close()
+	}
+})
+
+test('access refused partway stops publishing, and what got through stays recorded', async () => {
+	const cs = [comment('c1', 'one'), comment('c2', 'two'), comment('c3', 'three')]
+	const t = await setup({ forbidThreadAfter: 1 }, cs)
+	try {
+		await assert.rejects(t.pub.publish('/r', t.id, ['c1', 'c2', 'c3'], 'skip'), { code: 'github-forbidden' })
+		assert.deepEqual(
+			(await t.pub.plan('/r', t.id)).items.map((i) => i.status),
+			['published', 'new', 'new'],
+		)
+	} finally {
+		await t.mock.close()
+	}
+})
+
 test('file-level comments go into the pending review as FILE threads, never inline in addPullRequestReview', async () => {
 	const t = await setup({}, [comment('c1', 'about the file', { side: null, startLine: null, endLine: null })])
 	try {
-		assert.equal((await t.pub.publish('/r', t.id, 'c1', 'skip')).status, 'published')
+		assert.equal((await t.one('c1', 'skip')).status, 'published')
 		assert.deepEqual(
 			t.mock.writes.map((w) => w.op),
 			['review', 'thread'],
@@ -572,10 +717,10 @@ test('carried comments: one published from an earlier snapshot is not posted aga
 			],
 		)
 		assert.equal(plan.items[0].url, 'https://github.com/octo/app/pull/7#discussion_r1')
-		assert.equal((await t.pub.publish('/r', t.id, 'c1', 'file')).status, 'skipped')
-		assert.equal((await t.pub.publish('/r', t.id, 'c2', 'skip')).status, 'skipped')
+		assert.equal((await t.one('c1', 'file')).status, 'skipped')
+		assert.equal((await t.one('c2', 'skip')).status, 'skipped')
 		assert.equal(t.mock.writes.length, 0)
-		assert.equal((await t.pub.publish('/r', t.id, 'c2', 'file')).status, 'published')
+		assert.equal((await t.one('c2', 'file')).status, 'published')
 		const posted = t.mock.reviews[0].comments[0]
 		assert.equal(posted.subjectType, 'FILE')
 		assert.equal(posted.body, `**lines 13–14 at ${NEWER.slice(0, 7)}:** outdated`, 'names the lines and the commit they were on')

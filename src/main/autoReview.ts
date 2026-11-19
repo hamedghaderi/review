@@ -272,7 +272,7 @@ export interface AutoReviewDeps {
 	/** Keeps a prepared review on the stored review, for the banner that offers it. */
 	prepare?(repoId: string, reviewId: string, prepared: PreparedReview): Promise<void>
 	plan(repoId: string, reviewId: string): Promise<PublishPlan>
-	publish(repoId: string, reviewId: string, commentId: string, outsideDiff: 'file' | 'skip'): Promise<PublishOutcome>
+	publish(repoId: string, reviewId: string, commentIds: Array<string>, outsideDiff: 'file' | 'skip'): Promise<Array<PublishOutcome>>
 	submit(repoId: string, reviewId: string, event: ReviewEvent, body: string): Promise<PublishedReview>
 	/** The pull request's threads and reviews, as GitHub reports them now. */
 	discussion?(repoId: string, reviewId: string): Promise<Discussion>
@@ -492,11 +492,10 @@ export class AutoReviewer {
 			if (ids.length) this.d.reviewChanged(e.repoId, c.id)
 			// Prepared, the comments wait in the app for you; they count as posted for the verdict, since you'll post them.
 			if (!submitting) posted = ids.length
-			else
-				for (const id of ids) {
-					const out = await this.d.publish(e.repoId, c.id, id, 'file')
-					if (out.status === 'published' || out.status === 'updated') posted++
-				}
+			else if (ids.length)
+				posted = (await this.d.publish(e.repoId, c.id, ids, 'file')).filter(
+					(o) => o.status === 'published' || o.status === 'updated',
+				).length
 			const stored = this.d.store.read().repos[e.repoId]?.reviews[c.id]
 			if (!stored) throw new AppFail('not-found', 'The review was removed while it was being posted.')
 			const who = { reviewer, viewer: this.d.viewer(), prepared: !submitting }

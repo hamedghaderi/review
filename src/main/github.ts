@@ -1022,7 +1022,11 @@ export class GitHubService {
 		query: string,
 		variables: Record<string, unknown>,
 		signal?: AbortSignal,
-		options: { write?: boolean; ignore?: (path: Array<string | number>) => boolean } = {},
+		options: {
+			write?: boolean
+			ignore?: (path: Array<string | number>) => boolean
+			ignored?: Array<GqlError> // collects the errors `ignore` let through, for callers that judge them one by one
+		} = {},
 	): Promise<T> {
 		if (options.write) await this.paceWrites()
 		const res = await this.request(
@@ -1032,21 +1036,15 @@ export class GitHubService {
 		)
 		const body = (await res.json()) as {
 			data?: T & { rateLimit?: { remaining: number; limit: number; resetAt: string } }
-			errors?: Array<{ type?: string; message: string; path?: Array<string | number> }>
+			errors?: Array<GqlError>
 		}
 		if (body.data?.rateLimit) this.rate = body.data.rateLimit
-		const err = body.errors?.find((e) => !(body.data && e.path && options.ignore?.(e.path)))
+		const skip = (e: GqlError): boolean => !!(body.data && e.path && options.ignore?.(e.path))
+		options.ignored?.push(...(body.errors ?? []).filter(skip))
+		const err = body.errors?.find((e) => !skip(e))
 		if (err) {
-			if (err.type === 'RATE_LIMITED') throw new AppFail('github-rate-limited', `GitHub rate limit reached: ${err.message}`)
-			if (err.type === 'FORBIDDEN' || err.type === 'INSUFFICIENT_SCOPES')
-				throw new AppFail(
-					'github-forbidden',
-					options.write
-						? `The GitHub token cannot write to this pull request (${err.message}). Publishing needs a token with “Pull requests: Read and write” for this repository.`
-						: `The GitHub token cannot read this: ${err.message}`,
-				)
-			if (err.type === 'NOT_FOUND') throw new AppFail('github-not-found', err.message)
-			if (options.write || !body.data) throw new AppFail('github-failed', `GitHub: ${err.message}`)
+			const fail = gqlFail(err, !!options.write)
+			if (fail.code !== 'github-failed' || options.write || !body.data) throw fail
 		}
 		if (!body.data) throw new AppFail('github-failed', 'GitHub returned an empty response.')
 		return body.data
@@ -1296,7 +1294,7 @@ fragment LinkedIssue on Issue {
 
 	/**
 	 * Creates the viewer's empty pending review on `commit`, or a submitted review when `event` is set. Comments are
-	 * added afterwards with `addThread`: `DraftPullRequestReviewThread` (the inline form) has no `subjectType`, so it
+	 * added afterwards with `reviewWrites`: `DraftPullRequestReviewThread` (the inline form) has no `subjectType`, so it
 	 * cannot carry file-level comments.
 	 */
 	async addReview(
@@ -1313,23 +1311,41 @@ fragment LinkedIssue on Issue {
 		return { review: d.addPullRequestReview.pullRequestReview }
 	}
 
-	async addThread(reviewId: string, thread: ThreadInput): Promise<{ id: string; url: string }> {
-		const d = await this.graphql<{
-			addPullRequestReviewThread: { thread: { comments: { nodes: Array<{ id: string; url: string }> } } | null }
-		}>(ADD_THREAD_MUTATION, { input: { pullRequestReviewId: reviewId, ...thread } }, undefined, { write: true })
-		const c = d.addPullRequestReviewThread.thread?.comments.nodes[0]
-		if (!c) throw new AppFail('github-failed', 'GitHub did not create the comment.')
-		return c
-	}
-
-	async updateComment(commentId: string, body: string): Promise<{ id: string; url: string }> {
-		const d = await this.graphql<{ updatePullRequestReviewComment: { pullRequestReviewComment: { id: string; url: string } } }>(
-			UPDATE_COMMENT_MUTATION,
-			{ input: { pullRequestReviewCommentId: commentId, body } },
-			undefined,
-			{ write: true },
+	/**
+	 * Several new threads and comment edits in one request (issue #242): each is its own mutation in one document, which
+	 * GitHub runs one after another, so a batch costs one paced write instead of one per comment. Each write succeeds or
+	 * fails on its own; the results are in the order given. A failure of the whole request throws.
+	 */
+	async reviewWrites(writes: ReadonlyArray<ReviewWrite>): Promise<Array<{ id: string; url: string } | AppFail>> {
+		if (!writes.length) return []
+		const vars = writes.map((w, i) =>
+			w.kind === 'thread' ? `$i${i}: AddPullRequestReviewThreadInput!` : `$i${i}: UpdatePullRequestReviewCommentInput!`,
 		)
-		return d.updatePullRequestReviewComment.pullRequestReviewComment
+		const fields = writes.map((w, i) =>
+			w.kind === 'thread'
+				? `w${i}: addPullRequestReviewThread(input: $i${i}) { thread { comments(first: 1) { nodes { id url } } } }`
+				: `w${i}: updatePullRequestReviewComment(input: $i${i}) { pullRequestReviewComment { id url } }`,
+		)
+		const variables = Object.fromEntries(
+			writes.map((w, i) => [
+				`i${i}`,
+				w.kind === 'thread' ? { pullRequestReviewId: w.reviewId, ...w.thread } : { pullRequestReviewCommentId: w.commentId, body: w.body },
+			]),
+		)
+		const ignored: Array<GqlError> = []
+		const d = await this.graphql<Record<string, GqlWriteResult | null>>(
+			`mutation(${vars.join(', ')}) {\n  ${fields.join('\n  ')}\n}`,
+			variables,
+			undefined,
+			{ write: true, ignore: (path) => /^w\d+$/.test(String(path[0])), ignored },
+		)
+		return writes.map((w, i) => {
+			const err = ignored.find((e) => e.path?.[0] === `w${i}`)
+			if (err) return gqlFail(err, true)
+			const r = d[`w${i}`]
+			const c = w.kind === 'thread' ? r?.thread?.comments.nodes[0] : r?.pullRequestReviewComment
+			return c ?? new AppFail('github-failed', 'GitHub did not create the comment.')
+		})
 	}
 
 	/**
@@ -1442,6 +1458,14 @@ export interface ThreadInput {
 	startSide?: 'LEFT' | 'RIGHT'
 }
 
+/** A write to the pending review: a new thread on it, or a new body for one of its comments. */
+export type ReviewWrite = { kind: 'thread'; reviewId: string; thread: ThreadInput } | { kind: 'update'; commentId: string; body: string }
+
+interface GqlWriteResult {
+	thread?: { comments: { nodes: Array<{ id: string; url: string }> } } | null
+	pullRequestReviewComment?: { id: string; url: string } | null
+}
+
 export interface ReviewState {
 	viewer: string
 	prId: string
@@ -1541,14 +1565,6 @@ const ADD_REVIEW_MUTATION = `mutation($input: AddPullRequestReviewInput!) {
   addPullRequestReview(input: $input) { pullRequestReview { id url } }
 }`
 
-const ADD_THREAD_MUTATION = `mutation($input: AddPullRequestReviewThreadInput!) {
-  addPullRequestReviewThread(input: $input) { thread { comments(first: 1) { nodes { id url } } } }
-}`
-
-const UPDATE_COMMENT_MUTATION = `mutation($input: UpdatePullRequestReviewCommentInput!) {
-  updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id url } }
-}`
-
 const BASE_CHANGES_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) {
     baseRefName
@@ -1605,6 +1621,26 @@ const REPLY_MUTATION = `mutation($input: AddPullRequestReviewThreadReplyInput!) 
 const RESOLVE_MUTATION = `mutation($input: ResolveReviewThreadInput!) {
   resolveReviewThread(input: $input) { thread { id } }
 }`
+
+interface GqlError {
+	type?: string
+	message: string
+	path?: Array<string | number>
+}
+
+/** What a GraphQL error means for the app. */
+function gqlFail(err: GqlError, write: boolean): AppFail {
+	if (err.type === 'RATE_LIMITED') return new AppFail('github-rate-limited', `GitHub rate limit reached: ${err.message}`)
+	if (err.type === 'FORBIDDEN' || err.type === 'INSUFFICIENT_SCOPES')
+		return new AppFail(
+			'github-forbidden',
+			write
+				? `The GitHub token cannot write to this pull request (${err.message}). Publishing needs a token with “Pull requests: Read and write” for this repository.`
+				: `The GitHub token cannot read this: ${err.message}`,
+		)
+	if (err.type === 'NOT_FOUND') return new AppFail('github-not-found', err.message)
+	return new AppFail('github-failed', `GitHub: ${err.message}`)
+}
 
 function checkRepo(repo: string): void {
 	if (!REPO_RE.test(repo)) throw new AppFail('invalid-input', 'Invalid GitHub repository.')
