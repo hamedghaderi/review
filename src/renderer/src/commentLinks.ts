@@ -32,7 +32,7 @@ export function sameAddress(a: string | null, b: string | null): boolean {
  * A host name a browser can open (ASCII, so international names in their xn-- form) or an IP address. Checked on its
  * own because URL parsers differ: Chromium accepts `https://exa mple.com` as the host `exa%20mple.com`.
  */
-export function webHost(hostname: string): boolean {
+function webHost(hostname: string): boolean {
 	return HOST.test(hostname)
 }
 

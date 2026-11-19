@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { sameAddress, webHost, webUrl } from '../src/renderer/src/commentLinks.ts'
+import { sameAddress, webUrl } from '../src/renderer/src/commentLinks.ts'
 
 test('webUrl: only http(s) addresses a browser can open, in the form that opens', () => {
 	assert.equal(webUrl('https://github.com/o/r/pull/1'), 'https://github.com/o/r/pull/1')
@@ -40,9 +40,11 @@ test('webUrl: only http(s) addresses a browser can open, in the form that opens'
 		assert.equal(webUrl(bad), null, String(bad))
 })
 
-test('webHost: the host check itself, which Node never reaches for hosts its own parser rejects', () => {
+test('webUrl: the host check, reached through a parser that hands back any host as it is', () => {
+	// Node's parser rejects most of the bad hosts below before the check runs; a lenient one like Chromium's may not.
+	const reporting = (hostname: string) => () => ({ protocol: 'https:', username: '', password: '', hostname, href: `https://${hostname}/` })
 	for (const ok of ['github.com', 'a.b.example.', 'xn--bcher-kva.example', 'my_host.example', '127.0.0.1', '[::1]', '[2001:db8::1]'])
-		assert.equal(webHost(ok), true, ok)
+		assert.equal(webUrl('https://placeholder.example/', reporting(ok)), `https://${ok}/`, ok)
 	// `exa%20mple.com` is what Chromium makes of `https://exa mple.com`; the others are hosts no browser opens.
 	for (const bad of [
 		'',
@@ -55,7 +57,7 @@ test('webHost: the host check itself, which Node never reaches for hosts its own
 		'ex"ample.com',
 		'exa<mple.com',
 	])
-		assert.equal(webHost(bad), false, bad)
+		assert.equal(webUrl('https://placeholder.example/', reporting(bad)), null, bad)
 })
 
 test('webUrl keeps percent escapes as written; sameAddress compares them in either case', () => {

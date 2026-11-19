@@ -38,8 +38,11 @@ export function GitHubHtml({
 		if (!el) return
 		const frag = DOMPurify.sanitize(html, { ...sanitizeConfig(media), RETURN_DOM_FRAGMENT: true })
 		standIns(frag, document, media)
-		el.replaceChildren(frag)
-	}, [html, media])
+		// Nothing left to see (a comment holding only a bot's icon): say so rather than show an empty box.
+		if (!frag.textContent?.trim() && !frag.querySelector('img, video'))
+			el.replaceChildren(Object.assign(document.createElement('p'), { className: 'small muted desc-note', textContent: empty }))
+		else el.replaceChildren(frag)
+	}, [html, media, empty])
 	if (!html.trim()) return <p className="small muted desc-note">{empty}</p>
 	return <div ref={box} className={`md-body selectable${media ? ' with-media' : ''}${className ? ` ${className}` : ''}`} />
 }
@@ -86,7 +89,9 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		const text = label(img.getAttribute('alt'), 'image')
 		// Inside a link: words in its place, never a link inside a link.
 		if (a && !(only && toSelf)) box.replaceWith(text)
-		else (a ?? box).replaceWith(mediaLink(doc, src, text, 'Images aren’t loaded in the app. Opens in your browser.'))
+		// The author's link to the image opens as they wrote it (a signed address can depend on its exact spelling);
+		// without one, the image's own address.
+		else (a ?? box).replaceWith(mediaLink(doc, href ?? src, text, 'Images aren’t loaded in the app. Opens in your browser.'))
 	}
 	for (const video of root.querySelectorAll('video')) {
 		const sources = [video.getAttribute('src'), ...[...video.querySelectorAll('source')].map((s) => s.getAttribute('src'))]
@@ -141,28 +146,37 @@ function mediaLink(doc: Document, src: string | null, text: string, title: strin
 }
 
 /**
- * An icon, not content: an empty alt and a declared size no bigger than an icon's (CodeRabbit's are 16 or 20px). A
- * plain `![](screenshot.png)` also has an empty alt but no size, so it stays as a link; so does an image whose size
- * isn't a whole number of pixels (`-1`, `auto`), which says nothing about it being small.
+ * An icon, not content: an empty alt and a declared size no bigger than an icon's (CodeRabbit's are 16 or 20px). One
+ * declared side is enough when the other is left out, as for a square icon given only `width="16"`; an empty alt
+ * already says the image adds nothing to the text. A plain `![](screenshot.png)` has an empty alt but no size, so it
+ * stays as a link; so does an image with a size that isn't a whole number of pixels (`-1`, `auto`), which says nothing
+ * about it being small.
  */
 function decorative(img: Element): boolean {
-	const size = (a: string) => {
-		const v = img.getAttribute(a)?.trim() ?? ''
-		return /^\d+(?:px)?$/i.test(v) ? parseInt(v, 10) : NaN
-	}
-	return img.getAttribute('alt')?.trim() === '' && size('width') <= ICON_PX && size('height') <= ICON_PX
+	if (img.getAttribute('alt')?.trim() !== '') return false
+	const sides = ['width', 'height'].map((a) => img.getAttribute(a)?.trim() ?? null)
+	const sizes = sides.filter((v): v is string => v !== null && v !== '')
+	return (
+		sizes.length > 0 &&
+		sides.every((v) => v === null || v === '' || /^\d+(?:px)?$/i.test(v)) &&
+		sizes.every((v) => parseInt(v, 10) <= ICON_PX)
+	)
 }
 
 const ICON_PX = 32
 const BLOCKS =
 	'address,article,aside,blockquote,dd,details,div,dl,dt,figcaption,figure,h1,h2,h3,h4,h5,h6,hr,li,ol,p,pre,section,summary,table,tr,ul'
 const texts = new Map<string, string>()
+// Private-use characters, which trimming and whitespace collapsing don't touch: a space in code, a blank line in code.
+const CODE_SPACE = '\uE000'
+const CODE_BLANK = '\uE001'
 
 /**
  * A comment as plain text, for one-line and clamped previews: the words of the comment exactly as GitHubHtml shows it
  * (same sanitising, same words for images and videos; no Markdown marks, tags or hidden `<!-- -->` notes), else the
- * body as written: rare (GitHub sent no HTML, or too much), so its Markdown isn't interpreted. Block elements end a line and table cells are kept
- * apart, even when GitHub put no whitespace between them. Nothing here is attached to the page, so nothing loads.
+ * body as written: rare (GitHub sent no HTML, or too much), so its Markdown isn't interpreted. Block elements end a
+ * line and table cells are kept apart, even when GitHub put no whitespace between them; code keeps its indentation and
+ * blank lines. Nothing here is attached to the page, so nothing loads.
  */
 export function commentText(c: { body: string; html?: string }): string {
 	if (c.html === undefined) return c.body.trim()
@@ -176,13 +190,20 @@ export function commentText(c: { body: string; html?: string }): string {
 			d.replaceChildren(summary ?? 'Details')
 		}
 		standIns(body, body.ownerDocument, false)
+		// Code keeps its spacing and blank lines: written with stand-ins the steps below leave alone, put back at the end.
+		for (const code of body.querySelectorAll('pre, .blob-code-inner'))
+			code.textContent = code
+				.textContent!.replace(/\n$/, '')
+				.split('\n')
+				.map((l) => l.replace(/[ \t]/g, (c) => (c === '\t' ? CODE_SPACE.repeat(4) : CODE_SPACE)) || CODE_BLANK)
+				.join('\n')
 		// Line breaks in the HTML source are spaces on screen (outside code blocks); only the ones added below end a line.
 		const walk = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT)
 		for (let n = walk.nextNode(); n; n = walk.nextNode())
-			if (!n.parentElement?.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
+			if (!n.parentElement!.closest('pre')) n.nodeValue = n.nodeValue!.replace(/\s+/g, ' ')
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)'))
-			if (cell.previousElementSibling?.textContent?.trim()) cell.before(' · ') // not after an empty cell, like a line number
+			if (cell.previousElementSibling!.textContent!.trim()) cell.before(' · ') // not after an empty cell, like a line number
 		for (const block of body.querySelectorAll(BLOCKS)) {
 			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too
 			block.after('\n')
@@ -191,6 +212,7 @@ export function commentText(c: { body: string; html?: string }): string {
 			.split('\n')
 			.map((l) => l.trim())
 			.filter(Boolean)
+			.map((l) => l.replaceAll(CODE_SPACE, ' ').replaceAll(CODE_BLANK, ''))
 			.join('\n')
 		if (texts.size > 500) texts.delete(texts.keys().next().value!)
 		texts.set(c.html, t)
