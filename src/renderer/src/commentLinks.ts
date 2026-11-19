@@ -5,8 +5,8 @@
 /**
  * `href` as the http(s) address it really opens, or null when it isn't one a browser can open: not http(s), no host,
  * malformed (`https://`, a space in the host), or carrying a user name or password (`https://github.com@evil.example`
- * reads like GitHub but opens evil.example). The result is the parsed form with percent escapes in capitals, so what a
- * link shows when you point at it is what opens, and two spellings of one address compare equal.
+ * reads like GitHub but opens evil.example). The result is the parsed form, so what a link shows when you point at it
+ * is what opens; its percent escapes are left as written, since a signed link can depend on them (see sameAddress).
  * `parse`: the URL parser. The app runs Chromium's, which accepts hosts Node's rejects; tests pass one that behaves
  * like Chromium's so the checks after parsing are covered too.
  */
@@ -19,7 +19,13 @@ export function webUrl(href: string | null | undefined, parse: (s: string) => Pa
 		return null
 	}
 	if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password || !webHost(u.hostname)) return null
-	return u.href.replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase())
+	return u.href
+}
+
+/** Two addresses from webUrl name the same file, also when one writes a percent escape in capitals (`%2D`, `%2d`). */
+export function sameAddress(a: string | null, b: string | null): boolean {
+	const key = (s: string) => s.replace(/%[0-9a-f]{2}/gi, (escape) => escape.toUpperCase())
+	return a !== null && b !== null && key(a) === key(b)
 }
 
 /**

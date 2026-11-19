@@ -1,7 +1,6 @@
 import DOMPurify, { type Config } from 'dompurify'
 import { useEffect, useRef } from 'react'
-import { webUrl } from './commentLinks.ts'
-import { withoutNotes } from './commentNotes.ts'
+import { sameAddress, webUrl } from './commentLinks.ts'
 
 const MEDIA = /^review-media:\/\/media\/[0-9a-f]{32}$/
 // DOMPurify's own list of safe link schemes, plus the one release-note media is served from.
@@ -77,7 +76,7 @@ function standIns(root: ParentNode, doc: Document, media: boolean): void {
 		const only = !!a && !a.textContent?.trim() && a.querySelectorAll('img, video').length === 1
 		const href = a?.getAttribute('href') ?? null // checked above: links left standing go somewhere real
 		// GitHub links an image to its own full-size file; anywhere else (a CI run, a report) is the author's link.
-		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].map((s) => webUrl(s)).includes(href)
+		const toSelf = !href || [src, img.getAttribute('data-canonical-src')].some((s) => sameAddress(webUrl(s), href))
 		if (decorative(img)) {
 			if (only && !toSelf)
 				box.replaceWith(`🔗 ${new URL(href!).hostname}`) // the link is all there is: keep it findable
@@ -143,10 +142,14 @@ function mediaLink(doc: Document, src: string | null, text: string, title: strin
 
 /**
  * An icon, not content: an empty alt and a declared size no bigger than an icon's (CodeRabbit's are 16 or 20px). A
- * plain `![](screenshot.png)` also has an empty alt but no size, so it stays as a link.
+ * plain `![](screenshot.png)` also has an empty alt but no size, so it stays as a link; so does an image whose size
+ * isn't a whole number of pixels (`-1`, `auto`), which says nothing about it being small.
  */
 function decorative(img: Element): boolean {
-	const size = (a: string) => Number(img.getAttribute(a) || NaN)
+	const size = (a: string) => {
+		const v = img.getAttribute(a)?.trim() ?? ''
+		return /^\d+(?:px)?$/i.test(v) ? parseInt(v, 10) : NaN
+	}
 	return img.getAttribute('alt')?.trim() === '' && size('width') <= ICON_PX && size('height') <= ICON_PX
 }
 
@@ -158,11 +161,11 @@ const texts = new Map<string, string>()
 /**
  * A comment as plain text, for one-line and clamped previews: the words of the comment exactly as GitHubHtml shows it
  * (same sanitising, same words for images and videos; no Markdown marks, tags or hidden `<!-- -->` notes), else the
- * body as written without its hidden notes (see withoutNotes). Block elements end a line and table cells are kept
+ * body as written: rare (GitHub sent no HTML, or too much), so its Markdown isn't interpreted. Block elements end a line and table cells are kept
  * apart, even when GitHub put no whitespace between them. Nothing here is attached to the page, so nothing loads.
  */
 export function commentText(c: { body: string; html?: string }): string {
-	if (c.html === undefined) return withoutNotes(c.body).trim()
+	if (c.html === undefined) return c.body.trim()
 	let t = texts.get(c.html)
 	if (t === undefined) {
 		const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement

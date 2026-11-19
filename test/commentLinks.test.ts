@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { webHost, webUrl } from '../src/renderer/src/commentLinks.ts'
+import { sameAddress, webHost, webUrl } from '../src/renderer/src/commentLinks.ts'
 
 test('webUrl: only http(s) addresses a browser can open, in the form that opens', () => {
 	assert.equal(webUrl('https://github.com/o/r/pull/1'), 'https://github.com/o/r/pull/1')
@@ -58,9 +58,12 @@ test('webHost: the host check itself, which Node never reaches for hosts its own
 		assert.equal(webHost(bad), false, bad)
 })
 
-test('webUrl: percent escapes compare equal whatever their case', () => {
-	assert.equal(webUrl('https://example.com/badge%2dpassed.svg'), 'https://example.com/badge%2Dpassed.svg')
-	assert.equal(webUrl('https://example.com/badge%2dpassed.svg'), webUrl('https://example.com/badge%2Dpassed.svg'))
+test('webUrl keeps percent escapes as written; sameAddress compares them in either case', () => {
+	assert.equal(webUrl('https://example.com/a%2fb?sig=x%2b'), 'https://example.com/a%2fb?sig=x%2b', 'a signed link opens as written')
+	assert.equal(sameAddress('https://example.com/badge%2dpassed.svg', 'https://example.com/badge%2Dpassed.svg'), true)
+	assert.equal(sameAddress('https://example.com/a.svg', 'https://example.com/b.svg'), false)
+	assert.equal(sameAddress(null, 'https://example.com/a.svg'), false)
+	assert.equal(sameAddress(null, null), false, 'no address is never the same file')
 })
 
 test('webUrl: the checks after parsing hold with a parser as lenient as Chromium’s', () => {
@@ -68,8 +71,8 @@ test('webUrl: the checks after parsing hold with a parser as lenient as Chromium
 	const chromiumLike = (s: string) =>
 		/exa( |%20)mple/.test(s)
 			? { protocol: 'https:', username: '', password: '', hostname: 'exa%20mple.com', href: 'https://exa%20mple.com/' }
-			: new URL(s)
+			: new URL('https://from-the-stand-in.example/')
+	assert.equal(webUrl('https://github.com/x', chromiumLike), 'https://from-the-stand-in.example/', 'the stand-in is what parses')
 	assert.equal(webUrl('https://exa mple.com/', chromiumLike), null)
 	assert.equal(webUrl('https://exa%20mple.com/', chromiumLike), null)
-	assert.equal(webUrl('https://github.com/x', chromiumLike), 'https://github.com/x', 'the stand-in parser itself works')
 })
