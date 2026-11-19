@@ -17,6 +17,7 @@ import {
 } from './Discussion.tsx'
 import { useGifCommand } from './GifPicker.tsx'
 import { useMentionCommand } from './Mention.tsx'
+import { tabKey } from './tabKey.ts'
 import { asksYou } from './discussed.ts'
 import { rangeLabel } from './diffModel.ts'
 import { RichText } from './RichText.tsx'
@@ -131,7 +132,7 @@ export function Composer({
 					rows={3}
 					onChange={(e) => onChange(e.target.value)}
 					onKeyDown={(e) => {
-						if (gif.onKeyDown(e) || mention.onKeyDown(e)) return
+						if (gif.onKeyDown(e) || mention.onKeyDown(e) || tabKey(e)) return
 						if (e.key === 'Enter' && e.altKey && onAskCode) {
 							e.preventDefault()
 							if (draft.body.trim() && !askCodeDisabled) onAskCode()
@@ -148,7 +149,7 @@ export function Composer({
 				{mention.panel}
 			</div>
 			<div className="composer-actions">
-				<span className="muted small">⌘↵ to {editing ? 'update' : 'add'} · Esc to close</span>
+				<span className="muted small">⌘↵ to {editing ? 'update' : 'add'} · Esc to close · Tab indents</span>
 				<span className="spacer" />
 				{onAskAi && <AskAiButton onClick={onAskAi} />}
 				<button className="btn small ghost" onClick={onDiscard}>
@@ -351,6 +352,7 @@ export function QuestionCard({ question: q, pending, disabled, modelPicker, onAs
 								placeholder="Ask a follow-up (⌘↵ to send)"
 								onChange={(e) => setText(e.target.value)}
 								onKeyDown={(e) => {
+									if (tabKey(e)) return
 									if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 										e.preventDefault()
 										void send()

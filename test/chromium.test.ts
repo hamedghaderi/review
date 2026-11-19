@@ -185,3 +185,58 @@ addEventListener('message', (e) => postMessage({ ...r, echo: e.data }))`
 		assert.deepEqual(out, { eval: 'refused', import: 'refused', fetch: 'refused', echo: 'sent before it loaded', direct: 'refused' })
 	},
 )
+
+test(
+	'Tab in a text box in Chromium: typed through the browser, so the box hears it and one ⌘Z undoes it',
+	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
+	async () => {
+		const out = inChromium(`${await bundle('tabKey.ts')}
+			;(() => {
+				const box = document.createElement('textarea')
+				document.body.append(box)
+				box.focus()
+				let heard = false
+				box.addEventListener('input', () => { heard = true })
+				const press = (text, start, end, shiftKey = false) => {
+					box.value = text
+					box.setSelectionRange(start, end)
+					heard = false
+					let prevented = false
+					const handled = App.tabKey({
+						key: 'Tab', shiftKey, ctrlKey: false, metaKey: false, altKey: false, nativeEvent: { isComposing: false },
+						currentTarget: box, preventDefault: () => { prevented = true },
+					})
+					const after = { handled, prevented, heard, value: box.value, sel: [box.selectionStart, box.selectionEnd] }
+					document.execCommand('undo')
+					return { ...after, undone: box.value }
+				}
+				const r = {
+					empty: press('', 0, 0),
+					typed: press('def f():\\n\\nx', 9, 9),
+					indented: press('a\\nb', 0, 3),
+					outdented: press('\\ta\\n\\tb', 0, 5, true),
+					nothing: press('a\\nb', 0, 3, true),
+				}
+				box.readOnly = true
+				r.readOnly = press('a', 1, 1)
+				return r
+			})()`) as Record<string, unknown>
+		const no = (value: string, sel: [number, number]) => ({ handled: false, prevented: false, heard: false, value, sel, undone: value })
+		const yes = (value: string, sel: [number, number], undone: string) => ({
+			handled: true,
+			prevented: true,
+			heard: true,
+			value,
+			sel,
+			undone,
+		})
+		assert.deepEqual(out, {
+			empty: no('', [0, 0]),
+			typed: yes('def f():\n\t\nx', [10, 10], 'def f():\n\nx'),
+			indented: yes('\ta\n\tb', [0, 5], 'a\nb'),
+			outdented: yes('a\nb', [0, 3], '\ta\n\tb'),
+			nothing: no('a\nb', [0, 3]),
+			readOnly: no('a', [1, 1]),
+		})
+	},
+)

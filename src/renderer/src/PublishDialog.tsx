@@ -12,6 +12,7 @@ import { announce } from './announce.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
 import { useMentionCommand } from './Mention.tsx'
+import { tabKey } from './tabKey.ts'
 import { insertGif } from '../../shared/gif.ts'
 import { plainPreview } from './reviewOps.ts'
 
@@ -658,7 +659,7 @@ export function PublishDialog({
 											setSummary(e.target.value)
 											if (!e.target.value.trim()) setDrafted(false) // emptied: what you type next is yours
 										}}
-										onKeyDown={(e) => void (gifCommand.onKeyDown(e) || mention.onKeyDown(e))}
+										onKeyDown={(e) => void (gifCommand.onKeyDown(e) || mention.onKeyDown(e) || tabKey(e))}
 										rows={drafted ? 6 : 4}
 										readOnly={drafting || rewriting}
 										disabled={!!running}
