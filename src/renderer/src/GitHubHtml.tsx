@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { useEffect, useRef } from 'react'
+import { webUrl, withoutNotes } from './commentLinks.ts'
 
 const MEDIA = /^review-media:\/\/media\/[0-9a-f]{32}$/
 // DOMPurify's own list of safe link schemes, plus the one release-note media is served from.
@@ -36,12 +37,13 @@ export function GitHubHtml({
 			RETURN_DOM_FRAGMENT: true,
 		})
 		for (const a of frag.querySelectorAll('a')) {
-			const href = a.getAttribute('href') ?? ''
-			if (/^https?:\/\//i.test(href)) {
+			const href = webUrl(a.getAttribute('href'))
+			if (href) {
+				a.setAttribute('href', href) // the parsed form, which is what the title shows and what opens
 				a.setAttribute('target', '_blank')
 				a.setAttribute('rel', 'noreferrer noopener')
 				a.setAttribute('title', href)
-			} else a.removeAttribute('href') // in-page anchors and other schemes: text only
+			} else a.removeAttribute('href') // in-page anchors, other schemes, malformed addresses: text only
 		}
 		// A <picture>'s other files: its <img> stands for it below.
 		for (const s of frag.querySelectorAll('picture > source')) s.remove()
@@ -76,7 +78,7 @@ export function GitHubHtml({
 			// Only the release's own files play; a video from anywhere else isn't loaded, only linked (an attachment
 			// GitHub shows inline would otherwise vanish from the comment).
 			if (!own.length) {
-				const web = sources.find((s): s is string => !!s && /^https?:\/\//i.test(s)) ?? ''
+				const web = sources.map(webUrl).find((s) => s !== null) ?? null
 				video.replaceWith(mediaLink(web, label(null, 'video'), 'Videos aren’t played in the app. Opens in your browser.'))
 				continue
 			}
@@ -119,31 +121,26 @@ function linkAround(img: Element): Element | null {
 	return a && !a.textContent?.trim() && a.querySelectorAll('img').length === 1 ? a : null
 }
 
-/** Where the link around the image goes, when that's a web page other than the image itself. */
+/** Where the link around the image goes (see webUrl), when that's a web page other than the image itself. */
 function linkElsewhere(img: Element): string | null {
-	const href = linkAround(img)?.getAttribute('href') ?? ''
-	const self = [img.getAttribute('src'), img.getAttribute('data-canonical-src')]
-	return /^https?:\/\//i.test(href) && !self.includes(href) ? href : null
+	const href = webUrl(linkAround(img)?.getAttribute('href'))
+	const self = [img.getAttribute('src'), img.getAttribute('data-canonical-src')].map(webUrl)
+	return href && !self.includes(href) ? href : null
 }
 
-function hostOf(href: string): string {
-	try {
-		return new URL(href).hostname
-	} catch {
-		return 'link'
-	}
-}
+const hostOf = (href: string) => new URL(href).hostname // href passed webUrl, so it parses
 
-/** A link to an image or video that isn't loaded in the app, or plain text when its address isn't a web one. */
-function mediaLink(src: string, text: string, title: string): HTMLElement {
-	const link = document.createElement(/^https?:\/\//i.test(src) ? 'a' : 'span')
+/** A link to an image or video that isn't loaded in the app, or plain text when `src` isn't a web address (see webUrl). */
+function mediaLink(src: string | null, text: string, title: string): HTMLElement {
+	const url = webUrl(src)
+	const link = document.createElement(url ? 'a' : 'span')
 	link.textContent = text
 	link.className = 'desc-image'
-	if (link instanceof HTMLAnchorElement) {
-		link.href = src
+	if (url && link instanceof HTMLAnchorElement) {
+		link.href = url
 		link.target = '_blank'
 		link.rel = 'noreferrer noopener'
-		link.title = title
+		link.title = `${title}\n${url}`
 	}
 	return link
 }
@@ -186,47 +183,4 @@ export function commentText(c: { body: string; html?: string }): string {
 		texts.set(c.html, t)
 	}
 	return t
-}
-
-const FENCE = /^ {0,3}(`{3,}|~{3,})/
-
-/**
- * Markdown without the HTML comments that start a line, which GitHub hides (a bot's `<!-- generated -->` marker). A
- * `<!--` inside a sentence, a code span, a fenced code block or an indented one (four spaces or a tab) is shown by
- * GitHub, so it stays; so does one never closed.
- */
-function withoutNotes(body: string): string {
-	const lines = body.split('\n')
-	const out: Array<string> = []
-	let fence: string | null = null
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]
-		const f = FENCE.exec(line)?.[1]
-		if (fence) {
-			if (f && f[0] === fence[0] && f.length >= fence.length) fence = null
-			out.push(line)
-			continue
-		}
-		if (f) {
-			fence = f
-			out.push(line)
-			continue
-		}
-		// Indented four spaces or a tab, it's a code block, which GitHub shows as written.
-		if (!/^ {0,3}<!--/.test(line)) {
-			out.push(line)
-			continue
-		}
-		const from = (j: number) => (j === i ? line.indexOf('<!--') + 4 : 0) // `<!-->` doesn't close itself
-		let end = i
-		while (end < lines.length && lines[end].indexOf('-->', from(end)) < 0) end++
-		if (end === lines.length) {
-			out.push(line) // never closed: GitHub shows it as text
-			continue
-		}
-		const rest = lines[end].slice(lines[end].indexOf('-->', from(end)) + 3)
-		if (rest.trim()) out.push(rest)
-		i = end
-	}
-	return out.join('\n')
 }
