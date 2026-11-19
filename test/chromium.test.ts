@@ -100,18 +100,48 @@ test(
 				html: '<div class="js-suggested-changes-blob"><table><tr><td class="blob-num"></td><td class="blob-code-inner blob-code-addition">&lt;!-- keep --&gt;</td></tr></table></div>',
 			},
 			codeSpan: { body: 'Use `<!-- x -->` here', html: '<p>Use <code>&lt;!-- x --&gt;</code> here</p>' },
+			// A removed line comes from the file, not the comment: it doesn't show the comment's own note.
+			deletion: {
+				body: '<!-- m -->\n```suggestion\nnew\n```',
+				html: '<table><tr><td class="blob-code-inner blob-code-deletion">&lt;!-- m --&gt;</td></tr><tr><td class="blob-code-inner blob-code-addition">new</td></tr></table>',
+			},
+			// GitHub keeps the alt text, but DOMPurify drops an attribute holding `-->`: the label reads "image".
+			altText: {
+				body: '![<!-- diagram -->](https://github.com/u/d.png)',
+				html: '<p><img src="https://github.com/u/d.png" alt="<!-- diagram -->"></p>',
+			},
 		}
 		const previews = {
 			divider: '<hr>',
 			iconAndDivider: `<p>${icon('https://camo.githubusercontent.com/i')}</p><hr>`,
 			twoIconsOneLink: `<p><a href="https://example.com/i.png">${icon('https://example.com/i.png')}${icon('https://example.com/i.png')}</a></p>`,
+			altText: '<p><img src="https://github.com/u/d.png" alt="<!-- diagram -->"></p>',
+			numbered: '<ol start="3"><li>Build</li><li>Repeat step 3</li></ol>',
+			wrappedSuggestion:
+				'<table><tr><td class="blob-num"></td><td class="blob-code-inner blob-code-addition"><div>return 1</div></td></tr></table>',
+			blankSummary: '<details><summary> </summary><p>folded</p></details>',
 		}
 		const out = inChromium(`${await bundle('commentHtml.ts')}
 			;({
 				hidden: Object.fromEntries(Object.entries(${JSON.stringify(hidden)}).map(([k, c]) => [k, App.hiddenNotes(c)])),
 				previews: Object.fromEntries(Object.entries(${JSON.stringify(previews)}).map(([k, html]) => [k, App.commentText({ body: '', html })])),
 			})`) as { hidden: Record<string, Array<string>>; previews: Record<string, string> }
-		assert.deepEqual(out.hidden, { escaped: ['<!-- draft -->'], preCode: ['<!-- m -->'], suggestion: [], codeSpan: [] })
-		assert.deepEqual(out.previews, { divider: 'Divider', iconAndDivider: 'Divider', twoIconsOneLink: '🔗 example.com' })
+		assert.deepEqual(out.hidden, {
+			escaped: ['<!-- draft -->'],
+			preCode: ['<!-- m -->'],
+			suggestion: [],
+			codeSpan: [],
+			deletion: ['<!-- m -->'],
+			altText: ['<!-- diagram -->'],
+		})
+		assert.deepEqual(out.previews, {
+			divider: 'Divider',
+			iconAndDivider: 'Divider',
+			twoIconsOneLink: '🔗 example.com',
+			altText: '🖼 image',
+			numbered: '3. Build\n4. Repeat step 3',
+			wrappedSuggestion: '+ return 1',
+			blankSummary: 'Details',
+		})
 	},
 )

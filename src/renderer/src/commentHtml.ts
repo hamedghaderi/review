@@ -102,13 +102,26 @@ export function standIns(root: ParentNode, doc: Document, media: boolean): void 
 		)
 	}
 	for (const input of root.querySelectorAll('input')) input.setAttribute('disabled', '')
-	// A suggested change's removed and added lines: the - and + as text, so the preview has them too.
+	// A suggested change's removed and added lines: the - and + as text, so the preview has them too; inside the code
+	// itself when the cell wraps it in a block, so the preview keeps them on one line.
 	for (const [cls, mark] of [
 		['blob-code-deletion', '-'],
 		['blob-code-addition', '+'],
 	] as const)
-		for (const cell of root.querySelectorAll(`.${cls}`))
-			cell.prepend(Object.assign(doc.createElement('span'), { className: 'blob-marker', textContent: `${mark} ` }))
+		for (const cell of root.querySelectorAll(`.${cls}`)) {
+			let target: Element = cell
+			while (target.firstElementChild?.matches(BLOCKS) && !textBefore(target.firstElementChild)) target = target.firstElementChild
+			target.prepend(Object.assign(doc.createElement('span'), { className: 'blob-marker', textContent: `${mark} ` }))
+		}
+	// A <summary> with nothing to read still opens its section: give it the browser's own label, as when it's missing.
+	for (const summary of root.querySelectorAll('summary'))
+		if (!summary.textContent?.trim() && !summary.querySelector(SHOWS_WITHOUT_TEXT)) summary.textContent = 'Details'
+}
+
+/** Whether any text comes before `el` within its parent. */
+function textBefore(el: Element): boolean {
+	for (let n = el.previousSibling; n; n = n.previousSibling) if (n.textContent?.trim()) return true
+	return false
 }
 
 const label = (alt: string | null | undefined, kind: 'image' | 'video') => `${kind === 'video' ? '▶' : '🖼'} ${alt?.trim() || kind}`
@@ -166,8 +179,11 @@ export function hiddenNotes(c: { body: string; html?: string }): Array<string> {
 	const body = DOMPurify.sanitize(c.html, { ...sanitizeConfig(false), RETURN_DOM: true }) as HTMLElement
 	// The only place a note as written can show: in code. (Not in an image's alt text, its 🖼 label: DOMPurify drops
 	// any attribute holding `-->`, so the label reads "image".)
-	// Each piece once: a <pre> holds its <code>, so not both. A suggested change's lines count as code too.
-	const canShow = [...body.querySelectorAll('pre, code:not(pre code), .blob-code-inner')].map((code) => code.textContent ?? '').join('\n')
+	// Each piece once: a <pre> holds its <code>, so not both. A suggested change's added lines count as code too; its
+	// removed lines come from the file, not the comment, so they show nothing the comment wrote.
+	const canShow = [...body.querySelectorAll('pre, code:not(pre code), .blob-code-inner:not(.blob-code-deletion)')]
+		.map((code) => code.textContent ?? '')
+		.join('\n')
 	const found = notesNotShown(c.body, canShow)
 	notes.set(c, { html: c.html, body: c.body, found })
 	return found
@@ -219,6 +235,11 @@ export function commentText(c: { body: string; html?: string }): string {
 		for (const br of body.querySelectorAll('br')) br.replaceWith('\n')
 		for (const cell of body.querySelectorAll(':is(td, th) + :is(td, th)'))
 			if (cell.previousElementSibling!.textContent!.trim()) cell.before(' · ') // not after an empty cell, like a line number
+		// A numbered list keeps its numbers, from where it starts.
+		for (const ol of body.querySelectorAll('ol')) {
+			const start = Number.parseInt(ol.getAttribute('start') ?? '1', 10)
+			;[...ol.children].filter((li) => li.nodeName === 'LI').forEach((li, i) => li.prepend(`${(Number.isNaN(start) ? 1 : start) + i}. `))
+		}
 		for (const block of body.querySelectorAll(BLOCKS)) {
 			block.before('\n') // text right before a nested block (`Intro<div>Details</div>`) ends its line too
 			block.after('\n')

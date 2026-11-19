@@ -6,22 +6,24 @@
 /**
  * The `<!-- … -->` notes in `body` (the Markdown as written, which the AI reads) that GitHub doesn't show. GitHub only
  * ever shows a note as written inside code, so `canShow` is the text of the rendering's code: a note found there is
- * shown, once for each time it appears (a marker shown once in code and used once as a note is
- * one hidden note). An example written escaped (`&lt;!--`, `\<!--`) reads the same on screen but isn't a note, so it
- * can't cancel one. Whitespace is compared loosely, as rendering collapses it.
+ * shown, once for each time it appears (a marker shown once in code and used once as a note is one hidden note). An
+ * example written escaped (`&lt;!--`, or `\<!--` after an odd run of backslashes; `\\` is just a backslash) reads the
+ * same on screen but isn't a note, so it can't cancel one. Whitespace is compared loosely, as rendering collapses it.
  * A `<!--` never closed counts when it starts a line: GitHub then hides everything after it (and Review may have cut
- * a long body inside a note). Inside a line it's plain text.
+ * a long body inside a note). Inside a line it's plain text. Its opening line stands for it when looking in code, so
+ * an example in a code block (`<!--` alone on a line) isn't taken for a note hiding the rest of the comment.
  */
 export function notesNotShown(body: string, canShow: string): Array<string> {
 	const loose = (s: string) => s.replace(/\s+/g, ' ').trim()
 	const visible = loose(canShow)
 	const left = new Map<string, number>() // how many more times each note's text is shown
-	// Closed anywhere (`\<!--` is escaped text, not a note); unclosed only at the start of a line, with no `-->` after.
-	const notes = body.match(/(?<!\\)<!--[\s\S]*?-->|(?<=^|\n) {0,3}<!--(?![\s\S]*?-->)[\s\S]*$/g) ?? []
+	// Closed anywhere not escaped (after an even run of backslashes, none included); unclosed only at the start of a
+	// line, with no `-->` after.
+	const notes = body.match(/(?<=(?:^|[^\\])(?:\\\\)*)<!--[\s\S]*?-->|(?<=^|\n) {0,3}<!--(?![\s\S]*?-->)[\s\S]*$/g) ?? []
 	return notes
 		.map((note) => note.trimStart())
 		.filter((note) => {
-			const key = loose(note)
+			const key = loose(note.endsWith('-->') ? note : note.split('\n')[0])
 			if (!left.has(key)) left.set(key, visible.split(key).length - 1)
 			const n = left.get(key)!
 			left.set(key, n - 1)
