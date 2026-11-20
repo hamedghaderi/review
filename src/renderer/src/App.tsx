@@ -101,6 +101,7 @@ import { ExplainChange } from './ExplainChange.tsx'
 import { EmptyFigure } from './EmptyFigure.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
 import { TabStrip } from './TabStrip.tsx'
+import { BranchRef } from './BranchRef.tsx'
 import type { NotesRange } from '../../shared/releases.ts'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
 import { canMarkSeen, homeCount, type HomePr } from '../../shared/inbox.ts'
@@ -2716,12 +2717,15 @@ function TargetLabel({ comparison: c, author }: { comparison: Comparison; author
 							by @{author}
 						</span>
 					)}
+					<BranchRef name={c.headRef ?? c.pr.headLabel} />
 				</>
+			) : c.headRef ? (
+				<BranchRef name={c.headRef} />
 			) : (
-				<span className="mono ellipsis">{c.headRef ?? short(c.headSha)}</span>
+				<span className="mono ellipsis">{short(c.headSha)}</span>
 			)}
 			<span className="muted">→</span>
-			<span className="mono small base-ref ellipsis" title={`Into ${refName(c.baseRef)}`}>
+			<span className="mono small base-ref ellipsis selectable" title={`Into ${refName(c.baseRef)}`}>
 				{refName(c.baseRef)}
 			</span>
 		</span>
