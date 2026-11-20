@@ -1,0 +1,40 @@
+# Review
+
+> Review is a free, open-source (MIT) desktop app for reviewing Git branches and GitHub pull requests on your own machine, for macOS, Windows and Linux. You comment on any line, comments stay on your computer until you publish them to GitHub, and you can add an AI reviewer that uses your own model, or use no AI at all.
+
+Key facts:
+
+- Reviews read diffs straight from your local Git, and compare from the merge base, so the diff doesn't move when someone pushes.
+- Comments save locally as you type. Publishing puts them in your pending review on GitHub; nothing is submitted until you choose to.
+- AI review is optional and off until you use it. Providers: OpenAI, Anthropic, Google Gemini, OpenRouter, any OpenAI-compatible endpoint, and local models in Ollama or LM Studio. API keys are encrypted with the system keychain.
+- AI reviewers can call your MCP servers for context the repository doesn't have, like the ticket behind a change.
+- Go to definition and find uses work inside the diff (⌘/Ctrl-click, Shift-click).
+- Needs Git installed. Installers are not code-signed yet, so macOS and Windows ask once on first open.
+- Install on macOS with Homebrew: `brew install hamedghaderi/tap/review`
+
+## Docs
+
+- [User guide](https://raw.githubusercontent.com/hamedghaderi/review/main/docs/guide.md): browsing branches and pull requests, publishing to GitHub, AI review, providers, review teams, MCP servers, limits
+- [README](https://raw.githubusercontent.com/hamedghaderi/review/main/README.md): features, install, build from source
+- [Architecture](https://raw.githubusercontent.com/hamedghaderi/review/main/docs/architecture.md): how AI review works, code layout, how reviews are stored
+
+## Download
+
+- [Latest release](https://github.com/hamedghaderi/review/releases/latest): installers for every platform, with release notes
+- [macOS, Apple silicon](https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-arm64.dmg)
+- [macOS, Intel](https://github.com/hamedghaderi/review/releases/latest/download/Review-mac-x64.dmg)
+- [Windows 10 and 11](https://github.com/hamedghaderi/review/releases/latest/download/Review-windows-setup.exe)
+- [Linux x64 AppImage](https://github.com/hamedghaderi/review/releases/latest/download/Review-linux-x86_64.AppImage)
+
+## Open pull requests from GitHub
+
+- [Open in Review for Chrome](https://chromewebstore.google.com/detail/open-in-review/ohjjaigipbemjikpgehibpjddclfdjjb): a keyboard shortcut on a GitHub pull request opens it in the app
+- [Open in Review for Firefox](https://addons.mozilla.org/firefox/addon/open-in-review/): the same extension for Firefox
+- [Privacy](https://review-code.dev/privacy.html): what the extension, the userscript and the hand-off page do with your data (they send nothing anywhere)
+
+## Optional
+
+- [Source code](https://github.com/hamedghaderi/review)
+- [Issues](https://github.com/hamedghaderi/review/issues): bug reports and feature requests
+- [Security policy](https://raw.githubusercontent.com/hamedghaderi/review/main/SECURITY.md)
+- [Sponsor](https://github.com/sponsors/hamedghaderi)
