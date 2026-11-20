@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Finding, FindingMessage } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { scrollBehavior } from './motion.ts'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { AnswerText } from './CodeText.tsx'
 import { SpeakerHeading } from './SpeakerHeading.tsx'
@@ -173,8 +174,19 @@ interface SectionProps {
  */
 export function FindingAskSection({ finding: f, focus, disabled, modelPicker, onAsk, onClose, onShowFinding }: SectionProps) {
 	const [pending, setPending] = useState(false)
+	const ref = useRef<HTMLElement>(null)
+	// It opens below the comment and any replies, maybe out of sight: glide to it and let it glow once, so the eye
+	// follows. Each click on Ask AI does it again. Reduced motion jumps instead, and the stylesheet drops the glow.
+	useEffect(() => {
+		const el = ref.current
+		if (!el) return
+		revealBelow(el)
+		el.classList.remove('arrive')
+		void el.offsetWidth // restart the animation
+		el.classList.add('arrive')
+	}, [focus])
 	return (
-		<section className="ic-ask" aria-label="Ask AI about this finding">
+		<section ref={ref} className="ic-ask" aria-label="Ask AI about this finding">
 			<div className="ic-head">
 				<b className="ic-who ai">Ask AI</b>
 				<span className="ic-state" title="Only you see this. It is not part of the comment and is never posted.">
@@ -197,4 +209,19 @@ export function FindingAskSection({ finding: f, focus, disabled, modelPicker, on
 			<AskBox key={f.id} focus={focus} disabled={disabled} onBusy={setPending} onAsk={onAsk} modelPicker={modelPicker} onEscape={onClose} />
 		</section>
 	)
+}
+
+/** Scrolls the nearest scrolling ancestor up or down just enough to show `el`; never sideways, so the code stays put. */
+function revealBelow(el: HTMLElement): void {
+	let box = el.parentElement
+	while (box && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement
+	if (!box) return
+	const r = el.getBoundingClientRect()
+	const view = box.getBoundingClientRect()
+	const pad = 12
+	// Bring the bottom up into view, but never push the top out of it when the section is taller than the view.
+	let dy = 0
+	if (r.bottom > view.bottom - pad) dy = Math.min(r.bottom - view.bottom + pad, r.top - view.top - pad)
+	else if (r.top < view.top + pad) dy = r.top - view.top - pad
+	if (dy !== 0) box.scrollBy({ top: dy, behavior: scrollBehavior() })
 }
