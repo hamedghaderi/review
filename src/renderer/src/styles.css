@@ -1739,18 +1739,22 @@ a.ic-state:hover {
 		transform: translateX(175%) skewX(-14deg);
 	}
 }
+/* The search box has a row of its own; the dropdowns share the row below, keep their whole labels, and wrap onto
+   another line when the panel is too narrow for all of them, each line filled edge to edge. */
 .findings-filters {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 6px;
 	margin: 6px 8px 0;
 	flex-shrink: 0;
 }
 .findings-filters .search {
-	flex: 1;
+	flex: 1 1 100%;
 	min-width: 0;
 }
 .findings-filters select {
-	max-width: 40%;
+	flex: 1 0 auto;
+	max-width: 100%;
 }
 .findings-scroll > .comments-list {
 	flex: none;
