@@ -25,6 +25,15 @@
 	--color-glow: oklch(72% 0.17 288 / 0.1);
 	--color-sheen: oklch(100% 0 0 / 0.38);
 	--color-heart: oklch(68% 0.2 350);
+	/* A wider spectrum around the violet, for the story's diff, badges, glows and gradient words */
+	--color-pink: oklch(72% 0.19 350);
+	--color-amber: oklch(82% 0.15 70);
+	--color-cyan: oklch(80% 0.12 210);
+	--color-green: oklch(78% 0.15 155);
+	--color-red: oklch(70% 0.18 25);
+	--color-add-bg: oklch(78% 0.15 155 / 0.1);
+	--color-del-bg: oklch(70% 0.18 25 / 0.1);
+	--grad-spectrum: linear-gradient(100deg, oklch(76% 0.15 288), oklch(74% 0.19 350) 55%, oklch(84% 0.15 70));
 	--color-heart-soft: oklch(30% 0.08 350 / 0.6);
 
 	--font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
