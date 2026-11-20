@@ -1823,6 +1823,7 @@ a.ic-state:hover {
 }
 .finding-actions {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: flex-end;
 	gap: 6px;
 	padding: 8px;
