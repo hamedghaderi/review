@@ -40,7 +40,7 @@
 					<h1 class="split">
 						<span class="w" style="--i: 0">Code</span> <span class="w" style="--i: 1">review</span> <span class="w" style="--i: 2">on</span>
 						<span class="w" style="--i: 3">your</span> <span class="w" style="--i: 4">own</span>
-						<span class="w" style="--i: 5">machine.</span>
+						<span class="w grad" style="--i: 5">machine.</span>
 					</h1>
 					<p class="lede">
 						A desktop app for Git branches and GitHub pull requests. Comment on any line, publish when you're ready, and add an AI reviewer
@@ -105,6 +105,77 @@
 							<li>GitHub</li>
 						</ul>
 					</div>
+				</div>
+			</section>
+
+			<section class="story" id="how" aria-labelledby="story-title" data-step="3">
+				<div class="story__pin">
+					<div class="story__glow" aria-hidden="true"><span></span><span></span><span></span></div>
+					<div class="story__text">
+						<p class="story__eyebrow">A review, start to finish</p>
+						<h2 id="story-title">From diff to <span class="grad">published review</span>.</h2>
+						<ol class="story__steps">
+							<li data-n="0" data-num="1">
+								<h3>Open a branch or pull request</h3>
+								<p>The diff comes from your own Git, compared from the merge base.</p>
+							</li>
+							<li data-n="1" data-num="2">
+								<h3>Comment on any line</h3>
+								<p>Comments save as you type and stay on your computer.</p>
+							</li>
+							<li data-n="2" data-num="3">
+								<h3>Add an AI reviewer, or don't</h3>
+								<p>Your own model reads the change and raises findings, and can double-check them before you see them.</p>
+							</li>
+							<li data-n="3" data-num="4">
+								<h3>Publish when you're ready</h3>
+								<p>Comments go to your pending review on GitHub. Nothing is submitted until you say so.</p>
+							</li>
+						</ol>
+						<div class="story__rail" aria-hidden="true"><span></span></div>
+					</div>
+
+					<figure
+						class="story__stage"
+						aria-label="A review in progress: a diff of cart.js with your comment, an AI finding, and the pending review on GitHub."
+					>
+						<div class="mock is-sent" aria-hidden="true">
+							<div class="mock__bar">
+								<span class="mock__dots"><i></i><i></i><i></i></span>
+								<span class="mock__file">cart.js</span>
+								<span class="mock__stat"><b class="add">+4</b> <b class="del">−2</b></span>
+								<span class="mock__pending"><span class="mock__count">2</span> pending on GitHub</span>
+							</div>
+							<div class="mock__code">
+								<div class="ln ctx"><i>1</i><code>export function total(items, discount) {</code></div>
+								<div class="ln ctx"><i>2</i><code style="--in: 1">let sum = 0</code></div>
+								<div class="ln del"><i>3</i><code style="--in: 1">for (const item of items) sum += item.price</code></div>
+								<div class="ln add"><i>3</i><code style="--in: 1">for (let i = 0; i &lt;= items.length; i++)</code></div>
+								<div class="ln add"><i>4</i><code style="--in: 2">sum += items[i].price * items[i].qty</code></div>
+								<div class="note note--ai">
+									<div class="note__head">
+										<b class="who ai">AI reviewer</b><span class="badge block">Blocking</span><span class="badge">bug</span
+										><span class="check">Double-checked · holds</span>
+									</div>
+									<p>
+										<code>&lt;=</code> runs one pass past the end, so <code>items[i]</code> is undefined on the last pass and
+										<code>total()</code> throws.
+									</p>
+								</div>
+								<div class="ln del"><i>4</i><code style="--in: 1">return sum</code></div>
+								<div class="ln add"><i>5</i><code style="--in: 1">if (discount &gt; 0) sum -= sum * discount</code></div>
+								<div class="note note--you">
+									<div class="note__head"><b class="who you">You</b><span class="state">In your pending review</span></div>
+									<p class="type" data-text="Is discount a fraction here, or a percent? 10 would make the total negative.">
+										Is discount a fraction here, or a percent? 10 would make the total negative.
+									</p>
+								</div>
+								<div class="ln add"><i>6</i><code style="--in: 1">return Math.round(sum)</code></div>
+								<div class="ln ctx"><i>7</i><code>}</code></div>
+							</div>
+							<div class="mock__toast">Published · 2 comments in your pending review. Submit it on GitHub when you're ready.</div>
+						</div>
+					</figure>
 				</div>
 			</section>
 

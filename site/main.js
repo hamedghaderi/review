@@ -66,6 +66,60 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
 		addEventListener('scroll', () => queued || ((queued = true), requestAnimationFrame(tilt)), { passive: true })
 	}
 
+	// The story: scrolling through its tall section plays a review, step by step, while its content stays on screen.
+	const story = document.querySelector('.story')
+	if (story) {
+		const steps = [...story.querySelectorAll('.story__steps li')]
+		const lines = [...story.querySelectorAll('.ln')]
+		const [you, ai] = ['.note--you', '.note--ai'].map((s) => story.querySelector(s))
+		const typed = story.querySelector('.type')
+		const full = typed.dataset.text
+		const check = story.querySelector('.check')
+		const mock = story.querySelector('.mock')
+		const count = story.querySelector('.mock__count')
+		const toast = story.querySelector('.mock__toast')
+		const state = you.querySelector('.state')
+		let last = ''
+		const play = () => {
+			const r = story.getBoundingClientRect()
+			const p = Math.min(Math.max(-r.top / (r.height - innerHeight), 0), 1)
+			const step = Math.min(Math.floor(p * 4), 3)
+			const local = Math.min(p * 4 - step, 1) // progress through the current step, 0–1
+			const key = `${step}:${local.toFixed(2)}`
+			if (key === last) return
+			last = key
+			story.style.setProperty('--p', p.toFixed(3))
+			story.dataset.step = String(step)
+			steps.forEach((li, i) => {
+				li.classList.toggle('is-on', i === step)
+				li.classList.toggle('is-done', i < step)
+			})
+			// 1: the diff draws in, line by line.
+			const shown = step > 0 ? lines.length : Math.ceil(Math.min(local * 1.6, 1) * lines.length)
+			lines.forEach((l, i) => l.classList.toggle('is-in', i < shown))
+			// 2: your comment opens and types itself.
+			you.classList.toggle('is-in', step >= 1)
+			const chars = step > 1 ? full.length : step === 1 ? Math.round(Math.min(local * 1.5, 1) * full.length) : 0
+			typed.textContent = full.slice(0, chars)
+			typed.classList.toggle('is-typing', step === 1 && chars < full.length)
+			// 3: the AI finding arrives, then its double-check.
+			ai.classList.toggle('is-in', step >= 2)
+			check.classList.toggle('is-in', step > 2 || (step === 2 && local > 0.55))
+			// 4: publishing: the pending count climbs and the comments say where they went.
+			const sent = step < 3 ? 0 : local > 0.5 ? 2 : local > 0.25 ? 1 : 0
+			count.textContent = String(sent)
+			mock.classList.toggle('is-sent', sent > 0)
+			toast.classList.toggle('is-in', step === 3 && local > 0.6)
+			state.textContent = sent ? 'In your pending review' : 'Not posted'
+		}
+		let storyQueued = false
+		addEventListener('scroll', () => storyQueued || ((storyQueued = true), requestAnimationFrame(() => ((storyQueued = false), play()))), {
+			passive: true,
+		})
+		addEventListener('resize', play)
+		play()
+	}
+
 	// A few bugs crawl along the page's text until the visitor catches them.
 	import('./bugs.js').then((m) => m.release())
 
