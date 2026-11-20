@@ -100,6 +100,7 @@ import { Conclusion } from './Conclusion.tsx'
 import { ExplainChange } from './ExplainChange.tsx'
 import { EmptyFigure } from './EmptyFigure.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
+import { TabStrip } from './TabStrip.tsx'
 import type { NotesRange } from '../../shared/releases.ts'
 import { isKey, keyLabel, useKeymap } from './keymap.ts'
 import { canMarkSeen, homeCount, type HomePr } from '../../shared/inbox.ts'
@@ -2386,7 +2387,7 @@ export function App() {
 									)}
 									<Splitter onPointerDown={right.start(-1)} />
 									<aside className="side right" {...pane('Review panel')} style={{ width: right.width }}>
-										<div className="panel-title tabs" role="tablist">
+										<TabStrip active={rightTab}>
 											<button
 												role="tab"
 												aria-selected={rightTab === 'comments'}
@@ -2443,7 +2444,7 @@ export function App() {
 													</span>
 												)}
 											</button>
-										</div>
+										</TabStrip>
 										{aiError && (
 											<button className="notice" onClick={() => setAiError(null)} title="Dismiss">
 												{aiError} ✕
