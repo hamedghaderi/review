@@ -1,0 +1,6 @@
+# Everything here is public and may be crawled, including by AI crawlers.
+# A summary for language models is at /llms.txt.
+User-agent: *
+Allow: /
+
+Sitemap: https://review-code.dev/sitemap.xml
