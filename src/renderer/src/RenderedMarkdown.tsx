@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { markdownBlocks, type LineChanges } from './markdownBlocks.ts'
 import { renderBlocks } from './markdownHtml.ts'
-import { drawDiagrams } from './mermaidDiagrams.ts'
+import { offerDiagrams } from './mermaidDiagrams.ts'
 import { useStored } from './useStored.ts'
 
 /**
  * A Markdown file shown rendered (issue #258), read-only. With `changes`, the blocks and list items the change touched
  * get a bar in the margin; clicking one shows those lines in the source. The file's HTML is sanitised as a GitHub
  * comment's is: no scripts, styles, forms or event handlers, links only to web addresses, and images as links, since
- * the window loads no remote media. Mermaid diagrams are drawn (mermaidDiagrams), in the theme's colours.
+ * the window loads no remote media. A Mermaid diagram is drawn when you ask (mermaidDiagrams), in the theme's colours.
  */
 export function RenderedMarkdown({
 	text,
@@ -24,12 +24,13 @@ export function RenderedMarkdown({
 	const [bars, setBars] = useState<Array<Bar>>([])
 	const diagrams = useMemo(() => blocks.some((b) => b.html.includes('class="language-mermaid"')), [blocks])
 	const theme = useThemeVersion()
+	const drawn = useRef(new Set<string>()) // the diagrams you asked to see drawn, kept while this view is open
 
 	useLayoutEffect(() => {
 		const el = box.current
 		if (!el) return
 		el.replaceChildren(renderBlocks(blocks, document))
-		const stop = drawDiagrams(el)
+		const stop = offerDiagrams(el, drawn.current)
 		const measure = (): void => {
 			const top = el.getBoundingClientRect().top
 			setBars(

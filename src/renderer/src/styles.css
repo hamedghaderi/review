@@ -6734,7 +6734,11 @@ textarea.style-edit {
 	left: 4px;
 	width: 6px;
 }
-/* A Mermaid diagram, drawn as an image; the code shows, dimmed, until it is drawn. */
+/* A Mermaid diagram: its code with a button that draws it, as an image; the code dims while it is drawn. */
+.md-body .mermaid-draw {
+	display: block;
+	margin-bottom: 6px;
+}
 .md-body figure.mermaid-diagram {
 	margin: 0 0 16px;
 	overflow-x: auto;

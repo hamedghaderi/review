@@ -301,7 +301,7 @@ test(
 )
 
 test(
-	'Mermaid diagrams in Chromium, under the app’s content security policy: drawn as images, and a diagram can loosen nothing',
+	'Mermaid diagrams in Chromium, under the app’s content security policy: drawn only when asked, as images, and a diagram can loosen nothing',
 	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
 	async () => {
 		const csp = /content="(default-src[^"]*)"/.exec(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'))![1]
@@ -315,19 +315,41 @@ test(
 			;(async () => {
 				const violations = []
 				document.addEventListener('securitypolicyviolation', (e) => violations.push(e.violatedDirective))
-				const root = document.createElement('div')
-				document.body.append(root)
-				for (const text of ${JSON.stringify(diagrams)}) {
-					const pre = document.createElement('pre')
-					const code = Object.assign(document.createElement('code'), { className: 'language-mermaid', textContent: text })
-					pre.append(code)
-					root.append(pre)
+				const view = () => {
+					const root = document.createElement('div')
+					document.body.append(root)
+					for (const text of ${JSON.stringify(diagrams)}) {
+						const pre = document.createElement('pre')
+						const code = Object.assign(document.createElement('code'), { className: 'language-mermaid', textContent: text })
+						pre.append(code)
+						root.append(pre)
+					}
+					return root
 				}
-				App.drawDiagrams(root)
-				for (let i = 0; i < 200 && root.querySelector('.mermaid-pending'); i++) await new Promise((r) => setTimeout(r, 100))
-				await new Promise((r) => setTimeout(r, 500)) // the images decode
+				const settle = async (root) => {
+					for (let i = 0; i < 200 && root.querySelector('.mermaid-pending'); i++) await new Promise((r) => setTimeout(r, 100))
+					await new Promise((r) => setTimeout(r, 500)) // the images decode
+				}
+				const asked = new Set()
+				const root = view()
+				App.offerDiagrams(root, asked)
+				await new Promise((r) => setTimeout(r, 300))
+				const offered = {
+					buttons: [...root.querySelectorAll('button.mermaid-draw')].map((b) => b.textContent),
+					figures: root.querySelectorAll('figure').length,
+					pending: root.querySelectorAll('.mermaid-pending').length,
+				}
+				for (const b of root.querySelectorAll('button.mermaid-draw')) b.click()
+				await settle(root)
+				// The view drawn again (a theme change): what you asked for is drawn without asking.
+				const again = view()
+				App.offerDiagrams(again, asked)
+				await settle(again)
 				const imgs = [...root.querySelectorAll('figure.mermaid-diagram img')]
 				return {
+					offered,
+					buttonsLeft: root.querySelectorAll('button.mermaid-draw').length,
+					redrawn: { buttons: again.querySelectorAll('button.mermaid-draw').length, figures: again.querySelectorAll('figure').length },
 					drawn: imgs.map((i) => [i.alt, i.naturalWidth > 0]),
 					left: [...root.querySelectorAll('pre')].map((p) => p.textContent),
 					errors: root.querySelectorAll('.mermaid-error').length,
@@ -341,6 +363,10 @@ test(
 			})()`,
 			{ html: `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><body></body>`, files: {} },
 		) as Record<string, unknown>
+		// Nothing is drawn until you ask.
+		assert.deepEqual(out.offered, { buttons: ['Draw diagram', 'Draw diagram', 'Draw diagram'], figures: 0, pending: 0 })
+		assert.equal(out.buttonsLeft, 0)
+		assert.deepEqual(out.redrawn, { buttons: 0, figures: 2 })
 		assert.deepEqual(out.drawn, [
 			['Checkout', true],
 			['Diagram', true],

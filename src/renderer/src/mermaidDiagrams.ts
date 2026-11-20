@@ -1,15 +1,16 @@
 import type { Mermaid, MermaidConfig } from 'mermaid'
 
 /**
- * Mermaid diagrams in a rendered Markdown file (issue #258). Each ```mermaid block is drawn by Mermaid, loaded only
- * when a file has one, in its strictest mode: labels can't hold markup and diagrams can't link or run anything.
+ * Mermaid diagrams in a rendered Markdown file (issue #258). A ```mermaid block shows as code with a button that
+ * draws it; Mermaid is loaded only then, and runs in its strictest mode: labels can't hold markup and diagrams can't
+ * link or run anything.
  *
  * The drawing is then shown as an image (an SVG data URL in an <img>), never as SVG in the page. An image can't run
  * scripts, load anything, or let its CSS reach the app, so whatever a diagram's author slips past Mermaid stays inside
  * the picture. The app uses system fonts, which an image can use too, so labels fit as Mermaid measured them.
  *
- * Colours come from the app's theme; the view draws again when the theme changes. A diagram that can't be drawn
- * stays as code, with Mermaid's error under it.
+ * Colours come from the app's theme; a drawn diagram is drawn again when the theme changes. A diagram that can't be
+ * drawn stays as code, with Mermaid's error under it.
  */
 
 let loading: Promise<Mermaid> | null = null
@@ -35,38 +36,65 @@ const LOCKED = [
 	'altFontFamily',
 ]
 
-/** Draws the diagrams under `root` in place. Returns a function that stops, for when the view is redrawn or closed. */
-export function drawDiagrams(root: HTMLElement): () => void {
-	const blocks = [...root.querySelectorAll<HTMLElement>('pre > code.language-mermaid')]
+/**
+ * Offers to draw each diagram under `root`: a "Draw diagram" button above its code. Nothing of Mermaid loads or runs
+ * until you click one, so a diagram in a pull request does nothing, and can't hang the window, unless you ask for it.
+ * `drawn` holds the diagrams (by their text) you have asked for in this view; those are drawn again without asking,
+ * as when the theme changes. Returns a function that stops, for when the view is redrawn or closed.
+ */
+export function offerDiagrams(root: HTMLElement, drawn: Set<string>): () => void {
 	let live = true
-	for (const code of blocks) {
+	const isLive = (): boolean => live
+	for (const code of root.querySelectorAll<HTMLElement>('pre > code.language-mermaid')) {
 		const pre = code.parentElement!
-		pre.classList.add('mermaid-pending')
-		queue = queue.then(async () => {
-			if (!live) return
-			const mermaid = await load()
-			mermaid.initialize(config())
-			try {
-				const { svg } = await mermaid.render(`mermaid-${++seq}`, code.textContent ?? '')
-				if (!live) return
-				const fig = figure(svg)
-				fig.querySelector('img')!.addEventListener(
-					'error',
-					() => {
-						fig.replaceWith(pre)
-						failed(pre, 'the drawing could not be shown.')
-					},
-					{ once: true },
-				)
-				pre.replaceWith(fig)
-			} catch (e) {
-				if (live) failed(pre, e instanceof Error ? e.message : String(e))
-			}
+		const text = code.textContent ?? ''
+		if (drawn.has(text)) {
+			draw(pre, text, isLive)
+			continue
+		}
+		const button = document.createElement('button')
+		button.className = 'btn small mermaid-draw'
+		button.textContent = 'Draw diagram'
+		button.title = 'Draw this Mermaid diagram from its code. Diagrams in a file are drawn only when you ask.'
+		button.addEventListener('click', () => {
+			drawn.add(text)
+			button.disabled = true
+			button.textContent = 'Drawing…'
+			draw(pre, text, isLive, () => button.remove())
 		})
+		pre.before(button)
 	}
 	return () => {
 		live = false
 	}
+}
+
+/** Draws one diagram in place of its code; `done` runs once it is drawn or has failed. */
+function draw(pre: HTMLElement, text: string, live: () => boolean, done?: () => void): void {
+	pre.classList.add('mermaid-pending')
+	queue = queue.then(async () => {
+		if (!live()) return
+		try {
+			const mermaid = await load()
+			mermaid.initialize(config())
+			const { svg } = await mermaid.render(`mermaid-${++seq}`, text)
+			if (!live()) return
+			const fig = figure(svg)
+			fig.querySelector('img')!.addEventListener(
+				'error',
+				() => {
+					fig.replaceWith(pre)
+					failed(pre, 'the drawing could not be shown.')
+				},
+				{ once: true },
+			)
+			pre.replaceWith(fig)
+		} catch (e) {
+			if (live()) failed(pre, e instanceof Error ? e.message : String(e))
+		} finally {
+			done?.()
+		}
+	})
 }
 
 function failed(pre: HTMLElement, message: string): void {
