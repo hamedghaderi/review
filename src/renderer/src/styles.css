@@ -5410,16 +5410,48 @@ textarea.style-edit {
 .target-bar .target-title {
 	font-weight: 600;
 }
-/* On narrow windows the commit range goes first, then the base branch; the title keeps the room. */
+/* On narrow windows the base branch goes first, then the branch under review; the title keeps the room. */
 @media (max-width: 1100px) {
-	.target-bar .hfield.compare .mono.small {
+	.target-bar .hfield.compare .base-ref {
 		display: none;
 	}
 }
 @media (max-width: 800px) {
-	.target-bar .hfield.compare .mono {
+	.target-bar .hfield.compare .mono,
+	.target-bar .hfield.compare .branch-ref {
 		display: none;
 	}
+}
+/* The branch under review, with a button that copies its name (issue #257). */
+.branch-ref {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	min-width: 0;
+	flex: 0 1 auto;
+}
+.target-bar .hfield.compare .branch-ref .mono {
+	max-width: 220px;
+	min-width: 0;
+	font-size: 12px;
+}
+.copy-ref {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--text-2);
+	cursor: pointer;
+}
+.copy-ref:hover {
+	background: var(--hover);
+	color: var(--text);
 }
 /* How many changed files are marked as viewed, under the file filters. */
 .tree-viewed {
