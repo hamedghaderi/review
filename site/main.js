@@ -66,6 +66,9 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
 		addEventListener('scroll', () => queued || ((queued = true), requestAnimationFrame(tilt)), { passive: true })
 	}
 
+	// A few bugs crawl along the page's text until the visitor catches them.
+	import('./bugs.js').then((m) => m.release())
+
 	// A spotlight follows the cursor across the tiles' borders.
 	const grid = document.querySelector('.grid')
 	grid?.addEventListener('pointermove', (e) => {
