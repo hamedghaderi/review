@@ -3,6 +3,8 @@ import type { FileLinesResult, Side } from '../../shared/types.ts'
 import { useSymbolLinks, type SymbolRequest } from './SymbolNav.tsx'
 import { CodeText } from './CodeText.tsx'
 import { useSyntax } from './useSyntax.ts'
+import { isMarkdownPath } from './markdownBlocks.ts'
+import { MarkdownSwitch, RenderedMarkdown, useMarkdownView } from './RenderedMarkdown.tsx'
 
 export interface OutsideFile {
 	path: string
@@ -27,6 +29,8 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 		state: 'loading',
 	})
 	const scroller = useRef<HTMLDivElement>(null)
+	const markdown = isMarkdownPath(file.path)
+	const mdView = useMarkdownView()
 	const tokens = useSyntax(file.path, lines.state === 'done' && lines.value.kind === 'text' ? lines.value.lines : null)
 	placeRef.current = () => scroller.current?.scrollTop ?? 0
 	useSymbolLinks(
@@ -58,6 +62,7 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 	else if (lines.state === 'error') body = <div className="state error">Could not load this file: {lines.message}</div>
 	else if (lines.value.kind === 'binary') body = <div className="state">Binary file. Its content is not shown.</div>
 	else if (lines.value.kind === 'too-large') body = <div className="state">This file is too large to show: {lines.value.reason}.</div>
+	else if (markdown && mdView.view === 'rendered') body = <RenderedMarkdown text={lines.value.lines.join('\n')} changes={null} />
 	else
 		// ponytail: every line is rendered; virtualise if very large files make this slow
 		body = (
@@ -81,6 +86,12 @@ export function FileView({ comparisonId, file, placeRef, onLookup }: Props) {
 					{file.path}
 				</span>
 				<span className="muted small">Not changed by this review · {file.side === 'old' ? 'base' : 'head'} commit</span>
+				{markdown && (
+					<>
+						<span className="spacer" />
+						<MarkdownSwitch view={mdView.view} onView={mdView.choose} />
+					</>
+				)}
 			</div>
 			<div className="diff-scroll" ref={scroller}>
 				{body}

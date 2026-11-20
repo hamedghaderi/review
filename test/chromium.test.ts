@@ -7,6 +7,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
 import { build, type Rollup } from 'vite'
+import { markdownBlocks } from '../src/renderer/src/markdownBlocks.ts'
 
 /** One of the app's renderer modules, bundled with what it imports, as a script that sets the global `App` to it. */
 async function bundle(module: string): Promise<string> {
@@ -238,5 +239,57 @@ test(
 			nothing: no('a\nb', [0, 3]),
 			readOnly: no('a', [1, 1]),
 		})
+	},
+)
+
+test(
+	'a Markdown file rendered in Chromium: what the file says can run nothing, style nothing, or load anything',
+	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
+	async () => {
+		const file = [
+			'<script>window.ran = "script"</script>', // 1
+			'',
+			'<img src="x" onerror="window.ran = \'onerror\'">', // 3
+			'',
+			'[run](javascript:window.ran=1) [site](https://example.com) [doc](docs/other.md)', // 5
+			'',
+			'<iframe src="https://example.com"></iframe>', // 7
+			'',
+			'<p style="position: fixed; inset: 0">over the app</p>', // 9
+			'',
+			'![flow](docs/flow.png)', // 11
+			'',
+			'- [x] done', // 13
+			'- [ ] next', // 14
+		].join('\n')
+		const blocks = markdownBlocks(file, { added: new Set([14]), cuts: [] })
+		const out = inChromium(`${await bundle('markdownHtml.ts')}
+			;(async () => {
+				const box = document.createElement('div')
+				box.append(App.renderBlocks(${JSON.stringify(blocks)}, document))
+				document.body.append(box)
+				await new Promise((r) => setTimeout(r, 300)) // time for an image error or a frame to load
+				return {
+					ran: window.ran ?? null,
+					handlers: [...box.querySelectorAll('*')].flatMap((el) => [...el.attributes].map((a) => a.name)).filter((n) => n.startsWith('on')),
+					tags: ['script', 'iframe', 'img', '[style]'].filter((t) => box.querySelector(t)),
+					links: [...box.querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href'), a.getAttribute('target')]),
+					text: box.textContent.replace(/\\s+/g, ' ').trim(),
+					boxes: [...box.querySelectorAll('input')].map((i) => [i.type, i.checked, i.disabled]),
+					changed: [...box.querySelectorAll('[data-changed]')].map((el) => [el.tagName, el.dataset.start, el.dataset.end]),
+				}
+			})()`) as Record<string, unknown>
+		assert.equal(out.ran, null)
+		assert.deepEqual(out.handlers, [])
+		assert.deepEqual(out.tags, [])
+		// Web links open outside the app; others keep only their words.
+		assert.deepEqual(out.links, [['site', 'https://example.com/', '_blank']])
+		assert.match(out.text as string, /run site doc/)
+		assert.match(out.text as string, /🖼 flow/)
+		assert.deepEqual(out.boxes, [
+			['checkbox', true, true],
+			['checkbox', false, true],
+		])
+		assert.deepEqual(out.changed, [['LI', '14', '14']])
 	},
 )

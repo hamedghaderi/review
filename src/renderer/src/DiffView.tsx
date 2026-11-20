@@ -41,6 +41,8 @@ import { FindBar } from './FindBar.tsx'
 import { countLabel, findMatches, firstFrom, scrollToRange, textRanges } from './findInFile.ts'
 import { isKey } from './keymap.ts'
 import { announce } from './announce.ts'
+import { changedLines, isMarkdownPath } from './markdownBlocks.ts'
+import { MarkdownSwitch, RenderedMarkdown, useMarkdownView } from './RenderedMarkdown.tsx'
 
 const EXPAND_STEP = 20
 const FIND = 'code-find'
@@ -109,6 +111,7 @@ export function DiffView(p: Props) {
 	const [patch, setPatch] = useState<Load<PatchResult>>({ state: 'loading' })
 	const [force, setForce] = useState(false)
 	const [lines, setLines] = useState<FileLinesResult | null>(null)
+	const [linesError, setLinesError] = useState<string | null>(null)
 	const [revealed, setRevealed] = useState<Set<number>>(() => new Set())
 	const [pivot, setPivot] = useState<number | null>(null)
 	const [extending, setExtending] = useState(false)
@@ -137,11 +140,16 @@ export function DiffView(p: Props) {
 	useEffect(() => {
 		let live = true
 		setPatch({ state: 'loading' })
+		setLinesError(null)
 		void window.review.loadPatch(comparison.id, file.key, force).then((r) => {
 			if (!live) return
 			setPatch(r.ok ? { state: 'done', value: r.value } : { state: 'error', message: r.error.message })
 			if (r.ok && r.value.kind === 'text' && file.oldPath && file.newPath) {
-				void window.review.loadFileLines(comparison.id, file.key).then((l) => live && setLines(l.ok ? l.value : null))
+				void window.review.loadFileLines(comparison.id, file.key).then((l) => {
+					if (!live) return
+					setLines(l.ok ? l.value : null)
+					setLinesError(l.ok ? null : l.error.message)
+				})
 			}
 		})
 		return () => {
@@ -186,6 +194,18 @@ export function DiffView(p: Props) {
 	// Each version is coloured whole, so a line inside a multi-line string or comment is coloured as one (issue #237).
 	const sides = useMemo(() => (hunks ? sideLines(hunks, fileLines) : null), [hunks, fileLines])
 	const oldTokens = useSyntax(file.oldPath, sides && sides.old)
+	// A Markdown file can be shown rendered (issue #258): the whole new file, or a deleted one as it was.
+	const markdown = isMarkdownPath(file.newPath ?? file.oldPath)
+	const mdView = useMarkdownView()
+	const rendered = markdown && mdView.view === 'rendered'
+	const mdText = useMemo(() => {
+		if (!rendered || !hunks || !sides) return null
+		if (!file.newPath) return sides.old.join('\n')
+		return file.oldPath && !fileLines ? null : sides.new.join('\n') // an edited file needs its whole new version
+	}, [rendered, hunks, sides, file.newPath, file.oldPath, fileLines])
+	// Only an edited file marks what changed: in a new file every block would be marked.
+	const mdChanges = useMemo(() => (rendered && hunks && file.oldPath && file.newPath ? changedLines(hunks) : null), [rendered, hunks, file])
+	const [sourceJump, setSourceJump] = useState<{ line: number; nonce: number } | null>(null)
 	const newTokens = useSyntax(file.newPath, sides && sides.new)
 	// Added lines whose characters change how the code looks (issue #223). Marks that are normal in some text don't count.
 	const hidden = useMemo(
@@ -297,6 +317,7 @@ export function DiffView(p: Props) {
 	}, [found, cur, curIdx, rowAt, oldTokens, newTokens])
 
 	const openFind = (): void => {
+		if (rendered) mdView.show('source') // find searches the source
 		if (!find) {
 			findReturn.current = document.activeElement
 			setFind({ ...lastFind })
@@ -411,6 +432,14 @@ export function DiffView(p: Props) {
 			sc.scrollTop += target.getBoundingClientRect().top - sc.getBoundingClientRect().top - 3 * target.offsetHeight
 		} else target?.scrollIntoView({ block: 'center' })
 	}, [p.reveal, rows, file.key, patch.state, gaps, lines])
+
+	// A changed block clicked in the rendered file: its first line in the source, which the change keeps on screen.
+	useLayoutEffect(() => {
+		if (!sourceJump || rendered) return
+		const n = rows.findIndex((row) => lineNo(row, 'new') === sourceJump.line)
+		if (n >= 0) scroller.current?.querySelector(`[data-row="${n}"]`)?.scrollIntoView({ block: 'center' })
+		setSourceJump(null)
+	}, [sourceJump, rendered, rows])
 
 	// "Comment on file" opens its box at the top of the file, which may be far above where you are reading: bring it
 	// into view and put the cursor in it, also when that box was already open (the box itself doesn't refocus then).
@@ -765,6 +794,26 @@ export function DiffView(p: Props) {
 		)
 	}
 
+	const renderedBody =
+		mdText !== null ? (
+			<RenderedMarkdown
+				text={mdText}
+				changes={mdChanges}
+				onShowSource={(line) => {
+					mdView.show('source')
+					setSourceJump({ line, nonce: Date.now() })
+				}}
+			/>
+		) : linesError ? (
+			<div className="state error">Could not load the whole file to render it: {linesError}</div>
+		) : lines && lines.kind !== 'text' ? (
+			<div className="state">
+				It can’t be rendered: {lines.kind === 'binary' ? 'its content is binary' : lines.reason}. The source view shows the change.
+			</div>
+		) : (
+			<div className="state">Loading file…</div>
+		)
+
 	const pathLabel =
 		file.oldPath && file.newPath && file.oldPath !== file.newPath ? `${file.oldPath} → ${file.newPath}` : (file.newPath ?? file.oldPath)
 
@@ -837,6 +886,8 @@ export function DiffView(p: Props) {
 		)
 	}
 
+	if (rendered && hunks && hunks.length > 0) body = renderedBody
+
 	return (
 		<div className="diff">
 			<div className="diff-head">
@@ -851,7 +902,8 @@ export function DiffView(p: Props) {
 					</span>
 				)}
 				<span className="spacer" />
-				{blocks.length > 0 && (
+				{markdown && <MarkdownSwitch view={mdView.view} onView={mdView.choose} />}
+				{blocks.length > 0 && !rendered && (
 					<span className="nav">
 						<span className="muted small">
 							{blockIdx >= 0 ? `${blockIdx + 1}/` : ''}
