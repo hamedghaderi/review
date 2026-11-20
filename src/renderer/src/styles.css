@@ -1061,6 +1061,31 @@ input[type='checkbox'] {
 .ic-ai .ask-box textarea {
 	min-height: 30px;
 }
+/* Ask AI opened inside your comment: in the same card but set apart, dashed like a private question, as none of it is posted. */
+.ic-ask {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 6px;
+	padding: 6px 8px 8px;
+	border: 1px dashed var(--accent-line);
+	border-radius: 6px;
+	background: var(--panel);
+}
+.composer .ic-ask {
+	margin: 0 10px 10px;
+}
+.ic-ask .finding-thread {
+	margin: 0;
+	padding-top: 0;
+	border-top: 0;
+}
+.ic-ask .thread-msg {
+	font-size: 13px;
+}
+.ic-ask .ask-box {
+	margin: 0;
+}
 .ic.is-resolved {
 	border-left-color: var(--border-strong);
 	background: var(--panel);

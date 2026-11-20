@@ -1251,6 +1251,16 @@ export function App() {
 		if (r.ok && comparisonIdRef.current === comparison.id) setQuestions((qs) => [...qs.filter((q) => q.id.startsWith('new:')), ...r.value])
 	}
 
+	// A finding a comment was made from, for Ask AI in that comment's card. Like the Findings tab, a question waits for
+	// its run to finish.
+	const findingFor = (id: string): { finding: Finding; disabled: string | null } | null => {
+		for (const r of aiRuns) {
+			const f = r.findings.find((x) => x.id === id)
+			if (f) return { finding: f, disabled: r.status === 'running' ? 'Wait for the run to finish before asking.' : null }
+		}
+		return null
+	}
+
 	const askFinding = async (f: Finding, question: string): Promise<string | null> => {
 		if (!comparison) return 'No comparison is open.'
 		const r = await window.review.askFinding(comparison.id, f.id, question)
@@ -1271,14 +1281,12 @@ export function App() {
 		return null
 	}
 
-	// From a draft or comment made from a finding: show that finding (and its questions) in the Findings tab.
-	const [askFocus, setAskFocus] = useState<{ findingId: string; nonce: number } | null>(null)
+	// From a draft or comment made from a finding: show that finding in the Findings tab. Asking about it happens in the card.
 	const showFinding = (findingId: string): void => {
 		const f = aiRuns.flatMap((r) => r.findings).find((x) => x.id === findingId)
 		if (!f) return
 		setRightTab('findings')
 		setSelectedFinding(f)
-		setAskFocus({ findingId, nonce: Date.now() })
 	}
 
 	const file = comparison?.files.find((f) => f.key === selected) ?? null
@@ -2359,6 +2367,8 @@ export function App() {
 														onEditComment={draftHandlers.edit}
 														onDeleteComment={draftHandlers.remove}
 														onShowFinding={showFinding}
+														findingFor={findingFor}
+														onAskFinding={askFinding}
 														onDraftReply={
 															comparison.pr
 																? async (threadId) => {
@@ -2510,7 +2520,6 @@ export function App() {
 													aiProblem={aiProblem}
 													threads={threads}
 													selectedFindingId={selectedFinding?.id ?? null}
-													askFocus={askFocus}
 													onRetryRules={activeRun ? null : (run, rules) => void retryRules(run, rules)}
 													onStop={(run) => void window.review.cancelAiReview(run.id)}
 													onOpen={openFinding}

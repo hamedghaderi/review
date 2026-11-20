@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AnswerText } from './CodeText.tsx'
 import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { RefText, RefLinksProvider, useRefLinks, type RefTarget } from './RefText.tsx'
 import {
@@ -30,7 +29,6 @@ import type {
 	Finding,
 	FindingDecision,
 	FindingCategory,
-	FindingMessage,
 	FindingVerification,
 	FindingReproducer,
 	FixedPatch,
@@ -47,16 +45,14 @@ import type {
 } from '../../shared/types.ts'
 import { anchorLabel, anchorPath } from './Comment.tsx'
 import { FixedPatchDetails } from './FixedPatch.tsx'
-import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
-import { tabKey } from './tabKey.ts'
 import { scrollBehavior, useReducedMotion } from './motion.ts'
 import { clearedLast, SWEEP_MS, type OpenTally } from './cleared.ts'
 import { createPortal } from 'react-dom'
-import { SpeakerHeading } from './SpeakerHeading.tsx'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
 import { AiOrb } from './AiOrb.tsx'
+import { AskBox, FindingThread } from './FindingAsk.tsx'
 import { EmptyFigure } from './EmptyFigure.tsx'
 import { useStored } from './useStored.ts'
 import { personaOf } from '../../shared/personas.ts'
@@ -70,7 +66,6 @@ interface Props {
 	aiProblem: string | null
 	threads: Array<DiscussionThread> // existing GitHub threads, to note findings that are already discussed
 	selectedFindingId: string | null
-	askFocus: { findingId: string; nonce: number } | null // "Ask AI" on a comment: open this finding's question box
 	/** Null while any AI run is going (only one runs at a time). */
 	onRetryRules: ((run: AiRun, rules: Array<ReviewRule>) => void) | null
 	/** Stops a running run; the answers it already got are kept, and Resume asks the rest. */
@@ -142,7 +137,6 @@ export function FindingsPanel({
 	aiProblem,
 	threads,
 	selectedFindingId,
-	askFocus,
 	onRetryRules,
 	onStop,
 	onOpen,
@@ -191,7 +185,7 @@ export function FindingsPanel({
 		)
 	}, [run, review, roots, byId, order])
 
-	// A finding opened from its comment ("Ask AI") is shown under the filter it belongs to, and its run is picked.
+	// A finding opened from its comment ("Show finding") is shown under the filter it belongs to, and its run is picked.
 	useEffect(() => {
 		if (!selectedFindingId) return
 		const owner = runs.find((r) => r.findings.some((f) => f.id === selectedFindingId))
@@ -505,7 +499,6 @@ export function FindingsPanel({
 								earlier={f.raisedBefore ? (threads.find((t) => t.id === f.raisedBefore!.threadId) ?? null) : null}
 								screened={screenFinding(f, review?.pr?.repo ?? null, review?.pr ? publicRepo(review.pr) : undefined)}
 								selected={f.id === selectedFindingId}
-								focusAsk={askFocus?.findingId === f.id ? askFocus.nonce : null}
 								onOpen={() => onOpen(f)}
 								onAccept={() => onAccept(f)}
 								onDismiss={(reason) => {
@@ -1302,7 +1295,6 @@ interface CardProps {
 	earlier: DiscussionThread | null // the thread it says it raises again, as read now
 	screened: Array<string> // what in its text a person should read before posting (see screenFinding)
 	selected: boolean
-	focusAsk: number | null // changes each time the question box should open and take focus
 	onOpen(): void
 	onAccept(): void
 	onDismiss(reason: DismissReason): void
@@ -1804,8 +1796,10 @@ function FindingCard(p: CardProps) {
 					</dd>
 				</dl>
 			)}
-			{(!!f.thread?.length || asking) && <Thread messages={f.thread ?? []} pending={asking} path={f.anchor.newPath ?? f.anchor.oldPath} />}
-			<AskBox key={f.id} focus={p.focusAsk} disabled={p.askDisabled} onBusy={setAsking} onAsk={p.onAsk} modelPicker={p.askModelPicker} />
+			{(!!f.thread?.length || asking) && (
+				<FindingThread messages={f.thread ?? []} pending={asking} path={f.anchor.newPath ?? f.anchor.oldPath} />
+			)}
+			<AskBox key={f.id} focus={null} disabled={p.askDisabled} onBusy={setAsking} onAsk={p.onAsk} modelPicker={p.askModelPicker} />
 			<div className="finding-actions">
 				{state === 'open' && (
 					<>
@@ -1897,146 +1891,6 @@ function FindingCard(p: CardProps) {
 						.join(' · ')}
 				</div>
 			)}
-		</div>
-	)
-}
-
-const VERDICT_TEXT: Record<'holds' | 'wrong' | 'unsure', { label: string; hint: string }> = {
-	holds: { label: 'Still holds', hint: 'The model still thinks the finding is right' },
-	wrong: { label: 'Finding is wrong', hint: 'The model agrees it is not a problem. You can dismiss it, or delete its comment.' },
-	unsure: { label: 'Unsure', hint: 'The supplied code was not enough to settle it' },
-}
-
-function Thread({ messages, pending, path }: { messages: Array<FindingMessage>; pending: boolean; path: string | null }) {
-	useAnnounceWait(pending, 'Thinking…')
-	useAnnounceNew(
-		messages,
-		(m) => m.id,
-		(m) =>
-			m.role === 'you'
-				? null
-				: m.error
-					? `The AI couldn’t answer: ${m.text}`
-					: `${m.model ?? 'The AI'} answered${m.verdict ? `, ${VERDICT_TEXT[m.verdict].label.toLowerCase()}` : ''}: ${speakable(m.text)}`,
-	)
-	return (
-		<div className="finding-thread">
-			{messages.map((m) => (
-				<article key={m.id} className={`thread-msg ${m.role}${m.error ? ' error' : ''}`}>
-					<SpeakerHeading>
-						{speaker(
-							m,
-							[
-								m.verdict && VERDICT_TEXT[m.verdict].label.toLowerCase(),
-								m.verdict !== 'wrong' && m.level && LEVEL_META[m.level].label.toLowerCase(),
-							]
-								.filter(Boolean)
-								.join(', '),
-						)}
-					</SpeakerHeading>
-					{m.role === 'ai' && (
-						<div className="thread-meta" aria-hidden>
-							<span>{m.model ?? 'AI'}</span>
-							{m.verdict && (
-								<span className={`verdict ${m.verdict}`} title={VERDICT_TEXT[m.verdict].hint}>
-									{VERDICT_TEXT[m.verdict].label}
-								</span>
-							)}
-							{m.verdict !== 'wrong' && m.level && (
-								<span title="The level the model would give the finding now">
-									{LEVEL_META[m.level].emoji} {LEVEL_META[m.level].label}
-								</span>
-							)}
-						</div>
-					)}
-					<AnswerText text={m.text} path={path} />
-				</article>
-			))}
-			{pending && messages[messages.length - 1]?.role !== 'you' && <div className="thread-msg you muted">Sending…</div>}
-			{pending && (
-				<div className="thread-msg ai muted">
-					<AiOrb activity="reasoning" size={14} /> Thinking…
-				</div>
-			)}
-		</div>
-	)
-}
-
-interface AskProps {
-	focus: number | null
-	disabled: string | null
-	onBusy(busy: boolean): void
-	onAsk(question: string): Promise<string | null>
-	modelPicker: React.ReactNode
-}
-
-function AskBox({ focus, disabled, onBusy, onAsk, modelPicker }: AskProps) {
-	const [open, setOpen] = useState(focus !== null)
-	const [text, setText] = useState('')
-	const [busy, setBusy] = useState(false)
-	const [error, setError] = useState<string | null>(null)
-	const ref = useRef<HTMLTextAreaElement>(null)
-	useEffect(() => {
-		if (focus === null) return
-		setOpen(true)
-		requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }))
-	}, [focus])
-	const send = async (): Promise<void> => {
-		const q = text.trim()
-		if (!q || busy) return
-		setBusy(true)
-		onBusy(true)
-		setError(null)
-		const problem = await onAsk(q)
-		setBusy(false)
-		onBusy(false)
-		if (problem) setError(problem)
-		else setText('')
-	}
-	if (!open)
-		return (
-			<div className="ask-box">
-				<button
-					className="btn small ghost"
-					onClick={() => setOpen(true)}
-					disabled={!!disabled}
-					title={disabled ?? 'Ask the model that raised this finding'}
-				>
-					Ask AI about this finding
-				</button>
-			</div>
-		)
-	return (
-		<div className="ask-box">
-			<textarea
-				ref={ref}
-				value={text}
-				rows={2}
-				placeholder="Ask about this finding, e.g. “This component is never unmounted. Does the problem still apply?”"
-				disabled={busy}
-				onChange={(e) => setText(e.target.value)}
-				onKeyDown={(e) => {
-					if (tabKey(e)) return
-					if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-						e.preventDefault()
-						void send()
-					} else if (e.key === 'Escape' && !text) setOpen(false)
-				}}
-			/>
-			{error && <p className="small error-text">{error}</p>}
-			<div className="ask-actions">
-				<span className="muted small">With the code around it · ⌘↵ to send</span>
-				<span className="spacer" />
-				{modelPicker}
-				<button
-					className="btn small primary"
-					onClick={() => void send()}
-					disabled={!text.trim() || busy || !!disabled}
-					title={disabled ?? undefined}
-				>
-					{busy ? 'Asking…' : 'Ask'}
-				</button>
-			</div>
 		</div>
 	)
 }
