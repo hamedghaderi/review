@@ -1061,6 +1061,57 @@ input[type='checkbox'] {
 .ic-ai .ask-box textarea {
 	min-height: 30px;
 }
+/* Ask AI opened inside your comment: in the same card but set apart, dashed like a private question, as none of it is posted. */
+.ic-ask {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 6px;
+	padding: 6px 8px 8px;
+	border: 1px dashed var(--accent-line);
+	border-radius: 6px;
+	background: var(--panel);
+}
+/* Opening it: it unfolds in place, then a ring glows once after the scroll has brought it into view. */
+.ic-ask.arrive {
+	animation:
+		ic-ask-open 260ms cubic-bezier(0.16, 1, 0.3, 1) both,
+		ic-ask-glow 1300ms ease-out 280ms both;
+}
+@keyframes ic-ask-open {
+	from {
+		opacity: 0;
+		transform: translateY(-6px);
+	}
+}
+@keyframes ic-ask-glow {
+	0% {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 0 var(--accent-soft);
+	}
+	25% {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 5px var(--accent-soft);
+	}
+	100% {
+		border-color: var(--accent-line);
+		box-shadow: 0 0 0 0 transparent;
+	}
+}
+.composer .ic-ask {
+	margin: 0 10px 10px;
+}
+.ic-ask .finding-thread {
+	margin: 0;
+	padding-top: 0;
+	border-top: 0;
+}
+.ic-ask .thread-msg {
+	font-size: 13px;
+}
+.ic-ask .ask-box {
+	margin: 0;
+}
 .ic.is-resolved {
 	border-left-color: var(--border-strong);
 	background: var(--panel);

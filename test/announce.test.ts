@@ -75,6 +75,11 @@ test('announce: one region, messages close together said as one, and the setting
 		await settle()
 		assert.equal(region.textContent, 'Thinking… Opus answered: yes.')
 
+		announce('Opus answered: yes.', 'result')
+		announce('Opus answered: yes.', 'result')
+		await settle()
+		assert.equal(region.textContent, 'Opus answered: yes.', 'the same answer shown in two places is said once')
+
 		store.set(ANNOUNCE_KEY, 'results')
 		announce('Thinking…', 'progress')
 		announce('Opus answered: no.', 'result')

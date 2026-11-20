@@ -49,6 +49,8 @@ export function announce(text: string, kind: AnnounceKind): void {
 	const level = announceLevel()
 	const t = text.trim()
 	if (!t || level === 'off' || (level === 'results' && kind === 'progress')) return
+	// The same words from two places at once (a finding's answer shown in its comment and in the Findings tab) are said once.
+	if (queued.includes(t)) return
 	queued.push(t)
 	if (timer) return
 	// Emptied first and filled a moment later, so the same words said twice are still read the second time.

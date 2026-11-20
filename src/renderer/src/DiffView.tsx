@@ -8,12 +8,14 @@ import type {
 	Comparison,
 	DiscussionThread,
 	FileLinesResult,
+	Finding,
 	MyLastReview,
 	PatchResult,
 	ReviewComment,
 	Side,
 } from '../../shared/types.ts'
 import { CommentCard, Composer, DraftStub, QuestionCard, type PostedState } from './Comment.tsx'
+import { FindingAskSection } from './FindingAsk.tsx'
 import { ThreadCard, type DraftFn, type ReplyFn } from './Discussion.tsx'
 import { useSymbolLinks, isMod, type SymbolRequest } from './SymbolNav.tsx'
 import { describeHiddenChars, hiddenInHunks } from '../../shared/hiddenChars.ts'
@@ -89,7 +91,9 @@ interface Props {
 	onDiscardDraft(id: string): void
 	onEditComment(id: string): void
 	onDeleteComment(id: string): void
-	onShowFinding?(findingId: string): void // opens the finding a comment was made from, to ask about it
+	onShowFinding?(findingId: string): void // opens the finding a comment was made from in the Findings tab
+	findingFor?(findingId: string): { finding: Finding; disabled: string | null } | null // that finding, for Ask AI in the card
+	onAskFinding?(finding: Finding, question: string): Promise<string | null> // returns why it failed, or null
 	onReply?: ReplyFn // reply to / resolve a GitHub thread (PR reviews)
 	onDraftReply?: DraftFn // an AI draft of your reply in a GitHub thread
 	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
@@ -115,6 +119,27 @@ export function DiffView(p: Props) {
 	const [revealed, setRevealed] = useState<Set<number>>(() => new Set())
 	const [pivot, setPivot] = useState<number | null>(null)
 	const [extending, setExtending] = useState(false)
+	// The comment or draft whose Ask AI is open, in its own card; nonce: focus the box again on each click.
+	const [askOpen, setAskOpen] = useState<{ id: string; nonce: number } | null>(null)
+	const askAbout = (itemId: string, findingId: string | null): { onAskAi?(): void; asking?: React.ReactNode } => {
+		const hit = findingId && p.findingFor ? p.findingFor(findingId) : null
+		if (!hit || !p.onAskFinding) return {}
+		const open = askOpen?.id === itemId ? askOpen : null
+		return {
+			onAskAi: () => setAskOpen(open ? null : { id: itemId, nonce: Date.now() }),
+			asking: open && (
+				<FindingAskSection
+					finding={hit.finding}
+					focus={open.nonce}
+					disabled={hit.disabled}
+					modelPicker={p.askModelPicker}
+					onAsk={(q) => p.onAskFinding!(hit.finding, q)}
+					onClose={() => setAskOpen(null)}
+					onShowFinding={p.onShowFinding ? () => p.onShowFinding!(hit.finding.id) : undefined}
+				/>
+			),
+		}
+	}
 	const [notice, setNotice] = useState<string | null>(null)
 	const [blockIdx, setBlockIdx] = useState(-1)
 	const [toFileComposer, setToFileComposer] = useState(0)
@@ -642,7 +667,7 @@ export function DiffView(p: Props) {
 					discussed={p.discussed(it.c.anchor, it.c.id)}
 					onEdit={() => p.onEditComment(it.c.id)}
 					onDelete={() => p.onDeleteComment(it.c.id)}
-					onAskAi={it.c.findingId && p.onShowFinding ? () => p.onShowFinding!(it.c.findingId!) : undefined}
+					{...askAbout(it.c.id, it.c.findingId)}
 					onReply={p.onReply}
 					onDraft={p.onDraftReply}
 					modelPicker={p.askModelPicker}
@@ -663,7 +688,7 @@ export function DiffView(p: Props) {
 					onKeep={() => p.onActivateDraft(null)}
 					onDiscard={() => p.onDiscardDraft(d.id)}
 					onToggleExtend={() => setExtending((x) => !x)}
-					onAskAi={d.findingId && p.onShowFinding ? () => p.onShowFinding!(d.findingId!) : undefined}
+					{...askAbout(d.id, d.findingId)}
 					onAskCode={
 						d.commentId === null && d.findingId === null
 							? () => {

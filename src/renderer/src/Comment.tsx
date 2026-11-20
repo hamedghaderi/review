@@ -72,6 +72,7 @@ interface ComposerProps {
 	askCodeDisabled?: string | null // why the question can't be sent now (no model chosen…)
 	askCodeModel?: string | null // the model that answers
 	modelPicker?: ReactNode // the picker for that model
+	asking?: ReactNode // Ask AI about the finding it was made from, open in the card
 }
 
 export function Composer({
@@ -88,6 +89,7 @@ export function Composer({
 	askCodeDisabled,
 	askCodeModel,
 	modelPicker,
+	asking,
 }: ComposerProps) {
 	const ref = useRef<HTMLTextAreaElement>(null)
 	useEffect(() => {
@@ -151,7 +153,7 @@ export function Composer({
 			<div className="composer-actions">
 				<span className="muted small">⌘↵ to {editing ? 'update' : 'add'} · Esc to close · Tab indents</span>
 				<span className="spacer" />
-				{onAskAi && <AskAiButton onClick={onAskAi} />}
+				{onAskAi && <AskAiButton onClick={onAskAi} open={!!asking} />}
 				<button className="btn small ghost" onClick={onDiscard}>
 					{editing ? 'Discard edit' : 'Discard'}
 				</button>
@@ -175,6 +177,7 @@ export function Composer({
 					{editing ? 'Update comment' : 'Add comment'}
 				</button>
 			</div>
+			{asking}
 		</div>
 	)
 }
@@ -198,6 +201,7 @@ interface CardProps {
 	onDraft?: DraftFn // an AI draft of your reply in that thread
 	modelPicker?: React.ReactNode // the model for questions, which writes the draft
 	mine?: MyLastReview | null // your last review on the PR, to mark the replies since
+	asking?: ReactNode // Ask AI about the finding it was made from, open in the card
 }
 
 /** Where your comment stands: only here, on GitHub, or on GitHub with a newer edit not sent yet. */
@@ -217,9 +221,14 @@ function SentState({ posted }: { posted: PostedState }) {
 	)
 }
 
-function AskAiButton({ onClick }: { onClick(): void }) {
+function AskAiButton({ onClick, open }: { onClick(): void; open: boolean }) {
 	return (
-		<button className="btn small ghost" onClick={onClick} title="Ask the model that raised this finding a question about it">
+		<button
+			className={`btn small ghost ${open ? 'on' : ''}`}
+			onClick={onClick}
+			aria-pressed={open}
+			title="Ask the model that raised this finding a question about it. Only you see the conversation."
+		>
 			Ask AI
 		</button>
 	)
@@ -237,6 +246,7 @@ export function CommentCard({
 	onDraft,
 	modelPicker,
 	mine,
+	asking,
 }: CardProps) {
 	const thread = posted?.thread ?? null
 	const replies = thread ? thread.comments.slice(1) : []
@@ -257,7 +267,7 @@ export function CommentCard({
 				{pendingEdit && <span className="ic-state accent">Unsaved edit</span>}
 				{comment.findingId && <span className="muted small">from AI</span>}
 				<span className="spacer" />
-				{onAskAi && <AskAiButton onClick={onAskAi} />}
+				{onAskAi && <AskAiButton onClick={onAskAi} open={!!asking} />}
 				<button className="btn small ghost" onClick={onEdit}>
 					{pendingEdit ? 'Resume edit' : 'Edit'}
 				</button>
@@ -276,6 +286,7 @@ export function CommentCard({
 			))}
 			{thread && <MoreOnGitHub t={thread} />}
 			{thread && onReply && <ThreadReplyBox t={thread} onReply={onReply} onDraft={onDraft} modelPicker={modelPicker} asked={asked} />}
+			{asking}
 		</div>
 	)
 }
