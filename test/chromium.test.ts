@@ -15,7 +15,13 @@ async function bundle(module: string): Promise<string> {
 	const out = (await build({
 		configFile: false,
 		logLevel: 'silent',
-		build: { write: false, minify: false, lib: { entry, formats: ['iife'], name: 'App' } },
+		// One script: code a module loads on demand (Mermaid's diagram types) is put in it too.
+		build: {
+			write: false,
+			minify: false,
+			lib: { entry, formats: ['iife'], name: 'App' },
+			rollupOptions: { output: { inlineDynamicImports: true } },
+		},
 	})) as Array<Rollup.RollupOutput> | Rollup.RollupOutput
 	const chunk = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output).find((c) => c.type === 'chunk')
 	assert.ok(chunk, `no bundle for ${module}`)
@@ -291,5 +297,62 @@ test(
 			['checkbox', false, true],
 		])
 		assert.deepEqual(out.changed, [['LI', '14', '14']])
+	},
+)
+
+test(
+	'Mermaid diagrams in Chromium, under the app’s content security policy: drawn as images, and a diagram can loosen nothing',
+	{ skip: noDisplay && 'needs a display (run under xvfb-run)' },
+	async () => {
+		const csp = /content="(default-src[^"]*)"/.exec(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'))![1]
+		const diagrams = [
+			'flowchart LR\n  accTitle: Checkout\n  A[Cart] --> B[Charge<br/>the card]',
+			'%%{init: {"securityLevel": "loose", "theme": "forest", "themeCSS": "body { display: none; outline: 9px solid red }"}}%%\nflowchart TD\n  X["<img src=x onerror=window.ran=1>"] --> Y\n  click X call window.alert("hi")',
+			'this is not a diagram',
+		]
+		const out = inChromium(
+			`${await bundle('mermaidDiagrams.ts')}
+			;(async () => {
+				const violations = []
+				document.addEventListener('securitypolicyviolation', (e) => violations.push(e.violatedDirective))
+				const root = document.createElement('div')
+				document.body.append(root)
+				for (const text of ${JSON.stringify(diagrams)}) {
+					const pre = document.createElement('pre')
+					const code = Object.assign(document.createElement('code'), { className: 'language-mermaid', textContent: text })
+					pre.append(code)
+					root.append(pre)
+				}
+				App.drawDiagrams(root)
+				for (let i = 0; i < 200 && root.querySelector('.mermaid-pending'); i++) await new Promise((r) => setTimeout(r, 100))
+				await new Promise((r) => setTimeout(r, 500)) // the images decode
+				const imgs = [...root.querySelectorAll('figure.mermaid-diagram img')]
+				return {
+					drawn: imgs.map((i) => [i.alt, i.naturalWidth > 0]),
+					left: [...root.querySelectorAll('pre')].map((p) => p.textContent),
+					errors: root.querySelectorAll('.mermaid-error').length,
+					ran: window.ran ?? null,
+					display: getComputedStyle(document.body).display,
+					inPage: document.querySelectorAll('svg, body style').length,
+					overridden: imgs.some((i) => /9px solid red|#cde498/i.test(decodeURIComponent(i.src))), // its CSS, or forest's colours
+					handlersInDrawing: imgs.some((i) => /\\son[a-z]+\\s*=/i.test(decodeURIComponent(i.src))),
+					violations,
+				}
+			})()`,
+			{ html: `<!doctype html><meta http-equiv="Content-Security-Policy" content="${csp}"><body></body>`, files: {} },
+		) as Record<string, unknown>
+		assert.deepEqual(out.drawn, [
+			['Checkout', true],
+			['Diagram', true],
+		])
+		assert.deepEqual(out.left, ['this is not a diagram'])
+		assert.equal(out.errors, 1)
+		assert.equal(out.ran, null)
+		assert.equal(out.display, 'block')
+		assert.equal(out.overridden, false) // the diagram's own theme and CSS were refused
+		assert.equal(out.inPage, 0) // nothing Mermaid drew stays in the page itself
+		// Mermaid keeps the label's <img> but not its handler; inside a drawing shown as an image it can't load anyway.
+		assert.equal(out.handlersInDrawing, false)
+		assert.deepEqual(out.violations, [])
 	},
 )

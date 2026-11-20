@@ -6734,3 +6734,19 @@ textarea.style-edit {
 	left: 4px;
 	width: 6px;
 }
+/* A Mermaid diagram, drawn as an image; the code shows, dimmed, until it is drawn. */
+.md-body figure.mermaid-diagram {
+	margin: 0 0 16px;
+	overflow-x: auto;
+}
+.mermaid-diagram img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+}
+.md-body pre.mermaid-pending {
+	opacity: 0.6;
+}
+.md-body .mermaid-error {
+	margin-top: -8px;
+}

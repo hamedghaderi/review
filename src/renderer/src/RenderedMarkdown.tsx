@@ -1,13 +1,14 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { markdownBlocks, type LineChanges } from './markdownBlocks.ts'
 import { renderBlocks } from './markdownHtml.ts'
+import { drawDiagrams } from './mermaidDiagrams.ts'
 import { useStored } from './useStored.ts'
 
 /**
  * A Markdown file shown rendered (issue #258), read-only. With `changes`, the blocks and list items the change touched
  * get a bar in the margin; clicking one shows those lines in the source. The file's HTML is sanitised as a GitHub
  * comment's is: no scripts, styles, forms or event handlers, links only to web addresses, and images as links, since
- * the window loads no remote media.
+ * the window loads no remote media. Mermaid diagrams are drawn (mermaidDiagrams), in the theme's colours.
  */
 export function RenderedMarkdown({
 	text,
@@ -21,11 +22,14 @@ export function RenderedMarkdown({
 	const box = useRef<HTMLDivElement>(null)
 	const blocks = useMemo(() => markdownBlocks(text, changes), [text, changes])
 	const [bars, setBars] = useState<Array<Bar>>([])
+	const diagrams = useMemo(() => blocks.some((b) => b.html.includes('class="language-mermaid"')), [blocks])
+	const theme = useThemeVersion()
 
 	useLayoutEffect(() => {
 		const el = box.current
 		if (!el) return
 		el.replaceChildren(renderBlocks(blocks, document))
+		const stop = drawDiagrams(el)
 		const measure = (): void => {
 			const top = el.getBoundingClientRect().top
 			setBars(
@@ -36,10 +40,13 @@ export function RenderedMarkdown({
 			)
 		}
 		measure()
-		const ro = new ResizeObserver(measure)
+		const ro = new ResizeObserver(measure) // also as diagrams are drawn
 		ro.observe(el)
-		return () => ro.disconnect()
-	}, [blocks])
+		return () => {
+			stop()
+			ro.disconnect()
+		}
+	}, [blocks, diagrams ? theme : 0])
 
 	if (!blocks.length) return <div className="state">This file is empty.</div>
 	return (
@@ -60,6 +67,23 @@ export function RenderedMarkdown({
 			<div ref={box} className="md-body selectable" />
 		</div>
 	)
+}
+
+/** Changes whenever the app's colours or fonts may have: another theme, light and dark swapping, a font setting. */
+function useThemeVersion(): number {
+	const [version, setVersion] = useState(0)
+	useEffect(() => {
+		const bump = (): void => setVersion((n) => n + 1)
+		const mo = new MutationObserver(bump)
+		mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] })
+		const scheme = matchMedia('(prefers-color-scheme: dark)')
+		scheme.addEventListener('change', bump)
+		return () => {
+			mo.disconnect()
+			scheme.removeEventListener('change', bump)
+		}
+	}, [])
+	return version
 }
 
 interface Bar {
