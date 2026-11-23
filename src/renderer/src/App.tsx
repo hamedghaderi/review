@@ -2635,6 +2635,7 @@ export function App() {
 													}}
 													onNote={(f, note) => change((r) => ops.setDismissNote(r, f.id, note))}
 													onRestore={(f) => change((r) => ops.setFindingDecision(r, f.id, 'open'))}
+													onOpenNotes={() => openSettings('notes')}
 												/>
 											)}
 										</PanelBoundary>

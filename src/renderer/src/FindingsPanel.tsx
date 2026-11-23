@@ -92,6 +92,8 @@ interface Props {
 	/** Resolves a GitHub thread; absent without a pull request. Resolves with an error message, or null. */
 	onResolveThread?(threadId: string): Promise<string | null>
 	askModelPicker: React.ReactNode // the model for questions; none picked yet: the model that raised the finding answers
+	/** Opens Settings › AI review › Reviewer notes. */
+	onOpenNotes(): void
 }
 
 type Filter = 'open' | 'accepted' | 'dismissed' | 'gone'
@@ -154,6 +156,7 @@ export function FindingsPanel({
 	goneThread,
 	onResolveThread,
 	askModelPicker,
+	onOpenNotes,
 }: Props) {
 	const [filter, setFilter] = useState<Filter>('open')
 	const [level, setLevel] = useStored<Severity | 'all'>('review.findingLevel', 'all', LEVEL_FILTERS)
@@ -334,6 +337,7 @@ export function FindingsPanel({
 				onToggleDetails={() => setShowDetails((x) => !x)}
 				onRetryRules={onRetryRules && ((rules) => onRetryRules(run, rules))}
 				onStop={() => onStop(run)}
+				onOpenNotes={onOpenNotes}
 			/>
 			{dropped && (
 				<div className="small unexplained dropped">
@@ -522,6 +526,7 @@ export function FindingsPanel({
 								timeline={run.history ? findingTimeline(f, run.headSha) : null}
 								askModelPicker={askModelPicker}
 								askDisabled={run.status === 'running' ? 'Wait for the run to finish before asking.' : null}
+								onOpenNotes={onOpenNotes}
 							/>
 						))
 					)}
@@ -670,6 +675,7 @@ function RunSummary({
 	onToggleDetails,
 	onRetryRules,
 	onStop,
+	onOpenNotes,
 }: {
 	run: AiRun
 	since: HistoryCounts | null
@@ -677,6 +683,7 @@ function RunSummary({
 	onToggleDetails(): void
 	onRetryRules: ((rules: Array<ReviewRule>) => void) | null
 	onStop(): void
+	onOpenNotes(): void
 }) {
 	const files = run.coverage.files
 	const reviewed = files.filter((f) => f.state === 'reviewed').length
@@ -884,6 +891,14 @@ function RunSummary({
 					{(run.coverage.facts ?? []).map((f, i) => (
 						<div key={`f${i}`} className="muted">
 							{FACT_LABEL[f.kind]}: {f.text}
+							{f.kind === 'notes' && (
+								<>
+									{' '}
+									<button className="link" onClick={onOpenNotes}>
+										Open reviewer notes
+									</button>
+								</>
+							)}
 						</div>
 					))}
 					{(run.notices ?? []).map((n, i) => (
@@ -1001,6 +1016,7 @@ const FACT_LABEL = {
 	hidden: 'Hidden characters',
 	structure: 'Imports',
 	decisions: 'Your earlier decisions',
+	notes: 'Reviewer notes',
 	earlier: 'Earlier run',
 	drift: 'Base branch',
 	takeover: 'Taken-over PR',
@@ -1315,6 +1331,7 @@ interface CardProps {
 	askDisabled: string | null
 	askModelPicker: React.ReactNode
 	timeline: Array<string> | null // the snapshots it was raised in, oldest first, when the run was compared with an earlier one
+	onOpenNotes(): void
 }
 
 /** The snapshots a finding was raised in: "new" or "a1b2c3d → e4f5a6b → here". */
@@ -1696,6 +1713,22 @@ function FindingCard(p: CardProps) {
 				</div>
 			) : null}
 			{f.raisedBefore && <RaisedBeforeNote r={f.raisedBefore} thread={p.earlier} />}
+			{f.underNote && (
+				<div
+					className="discussed-note raised-note under-note small"
+					title="The reviewer said one of your reviewer notes covers this and raised it anyway. The note is quoted as it read when the run started."
+				>
+					<b>A note of yours covers this:</b> “{f.underNote.text}”{' '}
+					<button className="link" onClick={p.onOpenNotes}>
+						Reviewer notes
+					</button>
+					{f.underNote.why && (
+						<div>
+							<b>Raised anyway because:</b> <RefText text={f.underNote.why} />
+						</div>
+					)}
+				</div>
+			)}
 			<AlreadyDiscussed threads={discussed} unclaimed />
 			{f.body !== undefined ? (
 				<div className="finding-body">

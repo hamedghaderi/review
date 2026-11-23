@@ -70,7 +70,7 @@ It is posted as a review comment, so it follows the review's format:
 - "category": the rule the note was made under, or "bug", "error-handling" or "security" if another of those fits better.
 - "excerpt_id" is the id of the excerpt below. "side", "file_path", "start_line" and "end_line" cite lines in it that include or are next to a changed line, and "evidence" is one to three of those lines copied verbatim, without line numbers or +/- markers. Code you looked up is never cited; name its file and line in the body instead.
 - "body": for a junior developer who has never opened this code. Start with the result someone can see (what goes wrong, missing or stuck), then the steps that lead there, then only the evidence needed, and end with one suggested change or one question only the author can answer. One or two sentences unless it is blocking. Simple English, no em dashes, never ask the reader to investigate.
-- "title" about 12 words, "reasoning" one sentence, "background" null unless a term or code outside the excerpt needs it (about 80 words), "signature", "test_pattern" and "raised_before" null.
+- "title" about 12 words, "reasoning" one sentence, "background" null unless a term or code outside the excerpt needs it (about 80 words), "signature", "test_pattern", "raised_before" and "reviewer_note" null.
 
 ${severitySection(levels)}
 

@@ -13,8 +13,11 @@ import {
 	type RaisedBefore,
 	type RejectedFinding,
 	type ReviewRule,
+	type ReviewerNote,
 	type Side,
+	type UnderNote,
 } from '../../shared/types.ts'
+import { noteCovers } from '../../shared/notes.ts'
 import type { EarlierThread } from './background.ts'
 import type { ContextBatch, ContextExcerpt } from './context.ts'
 import { isProjectDocPath } from './facts.ts'
@@ -33,6 +36,7 @@ const TEXT_LIMITS = {
 	limitation: 1000,
 	note: 400,
 	whyAgain: 600,
+	whyAnyway: 600,
 }
 const MAX_FINDINGS_PER_BATCH = 50
 const MAX_LIMITATIONS_PER_BATCH = 20
@@ -62,6 +66,7 @@ export function validateBatchOutput(
 	rules: ReadonlyArray<ReviewRule> = REVIEW_RULES,
 	levels: ReadonlyArray<FindingLevel> = DEFAULT_LEVELS,
 	threads: ReadonlyMap<string, EarlierThread> = new Map(),
+	notes: ReadonlyMap<string, ReviewerNote> = new Map(),
 ): ValidatedBatch {
 	const parsed = reviewEnvelopeSchema.safeParse(output)
 	if (!parsed.success) throw new InvalidOutputError(`Output does not match the findings schema: ${issueText(parsed.error)}`)
@@ -100,8 +105,12 @@ export function validateBatchOutput(
 			continue
 		}
 		const before = raisedBefore(f, threads)
-		if (typeof before === 'string') rejected.push(reject(f, before))
-		else findings.push(before ? { ...result, raisedBefore: before } : result)
+		if (typeof before === 'string') {
+			rejected.push(reject(f, before))
+			continue
+		}
+		const under = underNote(f, notes)
+		findings.push({ ...result, ...(before ? { raisedBefore: before } : {}), ...(under ? { underNote: under } : {}) })
 	}
 	const limitations = parsed.data.limitations
 		.map((l) => l.trim())
@@ -166,6 +175,21 @@ function raisedBefore(f: ModelFinding, threads: ReadonlyMap<string, EarlierThrea
 		settled: t.settled,
 		...(t.original ? { original: t.original } : {}),
 	}
+}
+
+/**
+ * The reviewer note a finding says covers it (issue #278). The mark is kept only when that note was sent and is about
+ * the finding's rule and file, so a model naming a note at random marks nothing. The finding is kept either way: a note
+ * never removes one.
+ */
+function underNote(f: ModelFinding, notes: ReadonlyMap<string, ReviewerNote>): UnderNote | null {
+	const n = f.reviewer_note
+	if (!n) return null
+	const note = notes.get(n.note_id.trim())
+	if (!note) return null
+	if (note.rule && note.rule !== f.category) return null
+	if (!noteCovers(note, f.file_path)) return null
+	return { noteId: note.id, text: note.text, why: clip(n.why_anyway.trim(), TEXT_LIMITS.whyAnyway) }
 }
 
 function reject(f: unknown, reason: string): RejectedFinding {

@@ -1254,6 +1254,7 @@ export interface Finding {
 	thread?: Array<FindingMessage> // questions you asked about it, and the answers
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
+	underNote?: UnderNote | null // since reviewer-2026-11-23.2: raised although a reviewer note of yours covers it
 	carried?: CarriedFinding | null // copied from an earlier snapshot's run because its file's diff did not change
 	previous?: PreviousFinding | null // the same finding in the earlier snapshot the run compared with (see FindingHistory)
 	unread?: Array<string> // file references in its text to lines the request that raised it never had, as written
@@ -1275,6 +1276,48 @@ export interface RaisedBefore {
 	whyAgain: string
 	settled?: boolean // someone with write access other than the PR author answered or resolved it (false on automatic reviews)
 	original?: number // the thread is on this pull request, which the reviewed one takes over (issue #168)
+}
+
+/**
+ * A note you keep for the AI reviewer about one repository (issue #278), sent with the changed files it covers. The
+ * reviewer is told to follow it, never that it settles a defect the code shows; nothing is hidden by the app.
+ */
+export interface ReviewerNote {
+	id: string
+	text: string
+	rule: FindingCategory | null // the rule it is about; null: any rule
+	paths: Array<string> // globs from the repository root (see shared/notePaths.ts); empty: the whole repository
+	on: boolean
+	addedAt: string
+	editedAt: string | null
+}
+
+/** Your edit to a reviewer note: a new one without `id`. */
+export interface ReviewerNoteEdit {
+	id: string | null
+	text: string
+	rule: FindingCategory | null
+	paths: Array<string>
+	on: boolean
+}
+
+export const MAX_REVIEWER_NOTE_CHARS = 600
+export const MAX_REVIEWER_NOTES = 40 // per repository
+export const MAX_NOTE_PATHS = 20
+export const MAX_NOTE_PATH_CHARS = 300
+
+/** A repository reviewer notes can be kept for: one per GitHub repository, else per local clone. */
+export interface NotesRepo {
+	key: string // "owner/name" in lower case, or "local:<repo id>" without a GitHub remote
+	label: string
+	notes: number
+}
+
+/** The model's account of a finding it raised although a reviewer note covers it, as the note read then. */
+export interface UnderNote {
+	noteId: string
+	text: string
+	why: string // why the note does not settle it here
 }
 
 /** A message a CI tool attached to lines of the head commit (lint, type check, test failure), as GitHub reports it. */
@@ -1557,6 +1600,7 @@ export interface AiRunCoverage {
 			| 'earlier'
 			| 'drift'
 			| 'takeover'
+			| 'notes'
 		text: string
 	}> // what the app computed or read for the reviewer; absent on older runs
 	lookups?: AiLookups | null // files the reviewer opened and searches it made; absent on older runs and when lookups are off
@@ -2233,6 +2277,10 @@ export const IPC = {
 	buildReviewStyle: 'ai:build-review-style',
 	setReviewStyle: 'ai:set-review-style',
 	settleReviewStyle: 'ai:settle-review-style',
+	notesRepos: 'ai:notes-repos',
+	reviewerNotes: 'ai:reviewer-notes',
+	saveReviewerNote: 'ai:save-reviewer-note',
+	deleteReviewerNote: 'ai:delete-reviewer-note',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -2523,6 +2571,13 @@ export interface ReviewApi {
 	setReviewStyle(next: { text: string; on: boolean }): Promise<Result<ReviewStyle>>
 	/** Takes or drops the rebuilt note waiting in `proposed`. */
 	settleReviewStyle(accept: boolean): Promise<Result<ReviewStyle>>
+	/** Every repository reviewer notes can be kept for, and the key of `repoId`'s (null when it is not known). */
+	notesRepos(repoId: string | null): Promise<Result<{ repos: Array<NotesRepo>; current: string | null }>>
+	/** The reviewer notes of a repository (a NotesRepo key), oldest first. */
+	reviewerNotes(key: string): Promise<Result<Array<ReviewerNote>>>
+	/** Adds a note (`id` null) or changes one; resolves with the repository's notes. */
+	saveReviewerNote(key: string, edit: ReviewerNoteEdit): Promise<Result<Array<ReviewerNote>>>
+	deleteReviewerNote(key: string, id: string): Promise<Result<Array<ReviewerNote>>>
 	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
 	stylePrs(): Promise<Result<Array<StylePr>>>
 	setStylePrs(next: Array<StylePr>): Promise<Result<Array<StylePr>>>

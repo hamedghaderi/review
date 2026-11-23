@@ -1,7 +1,18 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import type { AiRun, AutoReviewRecord, BrowserState, MergedPr, Review, ReviewStyle, StyleBasis, StylePr } from '../shared/types.ts'
-import { MAX_STYLE_PRS } from '../shared/types.ts'
+import type {
+	AiRun,
+	AutoReviewRecord,
+	BrowserState,
+	MergedPr,
+	Review,
+	ReviewerNote,
+	ReviewStyle,
+	StyleBasis,
+	StylePr,
+} from '../shared/types.ts'
+import { MAX_NOTE_PATHS, MAX_REVIEWER_NOTE_CHARS, MAX_REVIEWER_NOTES, MAX_STYLE_PRS } from '../shared/types.ts'
+import { CATEGORY_LABEL } from '../shared/findings.ts'
 import type { SeenHeads, WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
 import { parseKeymap, type KeymapOverrides } from '../shared/keymap.ts'
@@ -31,6 +42,8 @@ export interface StoreData {
 	autoConclusion?: false // Settings › Reviewing: write the conclusion after each AI review; absent (on) until turned off
 	reviewStyle?: ReviewStyle // how you word review comments; absent until you build it
 	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
+	// Your notes for the AI reviewer, by repository: "owner/name" in lower case, else "local:<repo id>" (issue #278).
+	reviewerNotes?: Record<string, Array<ReviewerNote>>
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
 }
@@ -49,6 +62,15 @@ export interface RepoState {
 	seenPrs?: Record<string, string> // PR number → when you last looked at it in the app (the Inbox's "new")
 	merged?: Record<string, MergedPr | null> // PR number → how it merged and its findings since; null: closed without merging
 	followedAt?: string // when merged pull requests were last followed
+}
+
+/**
+ * Where a repository's reviewer notes are kept (issue #278): its GitHub repository, so every clone of it shares them,
+ * else the clone itself.
+ */
+export function notesKeyOf(repo: Pick<RepoState, 'repoId' | 'githubRepo' | 'githubResolved'>): string {
+	const gh = repo.githubRepo ?? repo.githubResolved
+	return gh ? gh.toLowerCase() : `local:${repo.repoId}`
 }
 
 /**
@@ -165,7 +187,35 @@ export function migrate(raw: unknown): StoreData {
 		...(d.autoConclusion === false ? { autoConclusion: false as const } : {}),
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
 		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
+		...(d.reviewerNotes && typeof d.reviewerNotes === 'object' ? { reviewerNotes: storedNotes(d.reviewerNotes) } : {}),
 	}
+}
+
+/** The saved reviewer notes that are still readable; a repository left without any is dropped. */
+export function storedNotes(raw: object): Record<string, Array<ReviewerNote>> {
+	const out: Record<string, Array<ReviewerNote>> = {}
+	for (const [key, list] of Object.entries(raw)) {
+		if (!Array.isArray(list)) continue
+		const notes = list
+			.filter((n): n is ReviewerNote => {
+				const o = n as Partial<ReviewerNote> | null
+				return !!o && typeof o.id === 'string' && typeof o.text === 'string' && !!o.text.trim() && typeof o.addedAt === 'string'
+			})
+			.map((n) => ({
+				id: n.id,
+				text: n.text.slice(0, MAX_REVIEWER_NOTE_CHARS),
+				rule: typeof n.rule === 'string' && n.rule in CATEGORY_LABEL ? n.rule : null,
+				paths: Array.isArray(n.paths)
+					? n.paths.filter((p): p is string => typeof p === 'string' && !!p.trim()).slice(0, MAX_NOTE_PATHS)
+					: [],
+				on: n.on !== false,
+				addedAt: n.addedAt,
+				editedAt: typeof n.editedAt === 'string' ? n.editedAt : null,
+			}))
+			.slice(0, MAX_REVIEWER_NOTES)
+		if (notes.length) out[key] = notes
+	}
+	return out
 }
 
 /** The picked pull requests that are still readable, at most MAX_STYLE_PRS. */

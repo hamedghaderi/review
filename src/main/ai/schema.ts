@@ -87,6 +87,14 @@ export const modelFindingSchema = z.object({
 		.nullable()
 		.default(null)
 		.describe('Set when a thread in the conversation already raised this problem. Otherwise null.'),
+	reviewer_note: z
+		.object({
+			note_id: z.string().describe('The reviewer note that covers this finding, e.g. "N1".'),
+			why_anyway: z.string().describe('One sentence: why the note does not settle it here.'),
+		})
+		.nullable()
+		.default(null)
+		.describe('Set when a reviewer note covers this finding and you report it anyway. Otherwise null.'),
 })
 
 export const ruleEvaluationSchema = z.object({
