@@ -92,6 +92,7 @@ import { buildRewriteRequest, findCitations, parseRewrite, resolveCitations, rew
 import type { ProviderRequest, RequestImage } from './provider.ts'
 import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
+import { buildNoteDraftRequest, parseNoteDraft, type DraftGroup, type DraftInput } from './noteDraft.ts'
 import { answeredRequests, defaultBackoff, settlesBy, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
@@ -1495,6 +1496,18 @@ export class AiController {
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}
+	}
+
+	/**
+	 * Groups dismissed findings and drafts a reviewer note for each group (issue #278) with the model for questions. The
+	 * app asks this on its own after you dismiss, so it is skipped (null) while a budget you set is reached.
+	 */
+	async draftNoteGroups(input: DraftInput, selection: ModelSelection): Promise<{ groups: Array<DraftGroup>; model: string } | null> {
+		const label = this.models?.label(selection.connectionId) ?? selection.connectionId
+		if (this.budget?.check([{ id: selection.connectionId, label }]).over.length) return null
+		const config = await this.configFor(selection, 'notes', null)
+		const response = await config.provider.review(buildNoteDraftRequest(input), AbortSignal.timeout(180_000))
+		return { groups: parseNoteDraft(response.output, input), model: selection.modelId }
 	}
 
 	questionsFor(repoId: string, reviewId: string): Array<CodeQuestion> {

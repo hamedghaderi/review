@@ -4,14 +4,16 @@ import type {
 	AiRun,
 	AutoReviewRecord,
 	BrowserState,
+	DismissalRef,
 	MergedPr,
+	NoteSuggestion,
 	Review,
 	ReviewerNote,
 	ReviewStyle,
 	StyleBasis,
 	StylePr,
 } from '../shared/types.ts'
-import { MAX_NOTE_PATHS, MAX_REVIEWER_NOTE_CHARS, MAX_REVIEWER_NOTES, MAX_STYLE_PRS } from '../shared/types.ts'
+import { DISMISS_REASONS, MAX_NOTE_PATHS, MAX_REVIEWER_NOTE_CHARS, MAX_REVIEWER_NOTES, MAX_STYLE_PRS } from '../shared/types.ts'
 import { CATEGORY_LABEL } from '../shared/findings.ts'
 import type { SeenHeads, WatchedPr, WatchState } from '../shared/inbox.ts'
 import { parseTheme, type ThemeSettings } from '../shared/theme.ts'
@@ -44,6 +46,8 @@ export interface StoreData {
 	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
 	// Your notes for the AI reviewer, by repository: "owner/name" in lower case, else "local:<repo id>" (issue #278).
 	reviewerNotes?: Record<string, Array<ReviewerNote>>
+	noteSuggestions?: Record<string, Array<NoteSuggestion>> // notes suggested from your dismissals, by the same key
+	noteChecks?: Record<string, Record<string, string>> // by the same key, then "rule|reason": the dismissals last sent to the model
 	// Pull requests reviewed automatically, keyed by "owner/name#number": the head commit last reviewed, so one is never reviewed twice.
 	autoReviews?: Record<string, AutoReviewRecord>
 }
@@ -188,6 +192,8 @@ export function migrate(raw: unknown): StoreData {
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
 		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
 		...(d.reviewerNotes && typeof d.reviewerNotes === 'object' ? { reviewerNotes: storedNotes(d.reviewerNotes) } : {}),
+		...(d.noteSuggestions && typeof d.noteSuggestions === 'object' ? { noteSuggestions: storedSuggestions(d.noteSuggestions) } : {}),
+		...(d.noteChecks && typeof d.noteChecks === 'object' ? { noteChecks: d.noteChecks } : {}),
 	}
 }
 
@@ -211,9 +217,68 @@ export function storedNotes(raw: object): Record<string, Array<ReviewerNote>> {
 				on: n.on !== false,
 				addedAt: n.addedAt,
 				editedAt: typeof n.editedAt === 'string' ? n.editedAt : null,
+				...(Array.isArray(n.from) ? { from: storedRefs(n.from) } : {}),
+				...(Array.isArray(n.after) ? { after: storedRefs(n.after) } : {}),
 			}))
 			.slice(0, MAX_REVIEWER_NOTES)
 		if (notes.length) out[key] = notes
+	}
+	return out
+}
+
+/** The dismissals a note or suggestion keeps, without any that can no longer be read. */
+function storedRefs(raw: Array<unknown>): Array<DismissalRef> {
+	const str = (v: unknown): v is string => typeof v === 'string'
+	return raw.filter((x): x is DismissalRef => {
+		const o = x as Partial<DismissalRef> | null
+		return (
+			!!o &&
+			[o.key, o.repoId, o.reviewId, o.findingId, o.target, o.prKey, o.path, o.title, o.decidedAt].every(str) &&
+			typeof o.rule === 'string' &&
+			o.rule in CATEGORY_LABEL &&
+			(DISMISS_REASONS as ReadonlyArray<string>).includes(o.reason as string) &&
+			(o.line === null || Number.isInteger(o.line)) &&
+			(o.note === null || str(o.note))
+		)
+	})
+}
+
+/** The saved note suggestions that are still readable; a repository left without any is dropped. */
+export function storedSuggestions(raw: object): Record<string, Array<NoteSuggestion>> {
+	const out: Record<string, Array<NoteSuggestion>> = {}
+	for (const [key, list] of Object.entries(raw)) {
+		if (!Array.isArray(list)) continue
+		const kept = list
+			.filter((s): s is NoteSuggestion => {
+				const o = s as Partial<NoteSuggestion> | null
+				return (
+					!!o &&
+					typeof o.id === 'string' &&
+					typeof o.text === 'string' &&
+					typeof o.rule === 'string' &&
+					o.rule in CATEGORY_LABEL &&
+					(DISMISS_REASONS as ReadonlyArray<string>).includes(o.reason as string) &&
+					(o.state === 'pending' || o.state === 'later' || o.state === 'never') &&
+					Array.isArray(o.from) &&
+					typeof o.at === 'string'
+				)
+			})
+			.map((s) => ({
+				id: s.id,
+				rule: s.rule,
+				reason: s.reason,
+				problem: typeof s.problem === 'string' ? s.problem : '',
+				text: s.text.slice(0, MAX_REVIEWER_NOTE_CHARS),
+				paths: Array.isArray(s.paths)
+					? s.paths.filter((p): p is string => typeof p === 'string' && !!p.trim()).slice(0, MAX_NOTE_PATHS)
+					: [],
+				from: storedRefs(s.from),
+				state: s.state,
+				at: s.at,
+				laterAt: typeof s.laterAt === 'number' ? s.laterAt : null,
+				model: typeof s.model === 'string' ? s.model : '',
+			}))
+		if (kept.length) out[key] = kept
 	}
 	return out
 }

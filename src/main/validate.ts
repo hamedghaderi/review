@@ -35,6 +35,7 @@ import {
 	MAX_REVIEWER_NOTE_CHARS,
 	MAX_STYLE_PRS,
 	type FindingCategory,
+	type NoteSuggestionAction,
 	type ReviewerNoteEdit,
 	type StylePr,
 } from '../shared/types.ts'
@@ -134,6 +135,15 @@ export function reviewerNoteEdit(v: unknown): ReviewerNoteEdit {
 		paths: [...new Set(paths)],
 		on: bool(o.on, 'note on'),
 	}
+}
+
+/** Your answer to a suggested note; an accepted draft is checked like a note you write. */
+export function noteSuggestionAction(v: unknown): NoteSuggestionAction {
+	const o = obj(v, 'answer')
+	const kind = oneOf(o.kind, ['accept', 'later', 'never', 'undo'] as const, 'answer')
+	if (kind !== 'accept') return { kind }
+	const { text, paths } = reviewerNoteEdit({ id: null, text: o.text, rule: null, paths: o.paths, on: true })
+	return { kind, text, paths }
 }
 
 /** Search words or a pull request link, for finding pull requests you reviewed. */

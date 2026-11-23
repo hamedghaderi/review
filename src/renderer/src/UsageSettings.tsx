@@ -24,6 +24,7 @@ const KIND_LABEL: Record<UsageKind, string> = {
 	style: 'Review style',
 	summary: 'Review summaries',
 	commit: 'Commit checks',
+	notes: 'Reviewer note suggestions',
 }
 
 function Cost({ totals }: { totals: UsageTotals }) {

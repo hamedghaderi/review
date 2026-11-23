@@ -80,6 +80,7 @@ import { DescriptionPanel } from './DescriptionPanel.tsx'
 import { ContextPanel } from './ContextPanel.tsx'
 import type { PostedState } from './Comment.tsx'
 import { discussedAt, hasReply, ownThread } from './discussed.ts'
+import { NoteSuggestionBanner } from './NoteSuggestions.tsx'
 import { FixedThreadsBanner, ResolveFixedDialog } from './FixedThreads.tsx'
 import { DiscussionPanel } from './Discussion.tsx'
 import { FindingsPanel } from './FindingsPanel.tsx'
@@ -2186,6 +2187,7 @@ export function App() {
 								/>
 							)}
 							{view === 'review' && comparison?.pr && autoRecord?.rounds ? <FollowUpBanner record={autoRecord} /> : null}
+							{view === 'review' && session && <NoteSuggestionBanner repoId={session.repo.id} onOpenNotes={() => openSettings('notes')} />}
 							{offerWalk && comparison && (
 								<div className="banner" role="status">
 									<span>

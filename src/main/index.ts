@@ -64,6 +64,7 @@ import {
 	reviewStyleEdit,
 	reviewerNoteEdit,
 	notesKey,
+	noteSuggestionAction,
 	stylePrList,
 	reviewedPrQuery,
 	githubToken,
@@ -629,6 +630,10 @@ function registerIpc(): void {
 	handle(IPC.reviewerNotes, async (key: unknown) => service.reviewerNotes(notesKey(key)))
 	handle(IPC.saveReviewerNote, async (key: unknown, raw: unknown) => service.saveReviewerNote(notesKey(key), reviewerNoteEdit(raw)))
 	handle(IPC.deleteReviewerNote, async (key: unknown, id: unknown) => service.deleteReviewerNote(notesKey(key), str(id, 'note id', 128)))
+	handle(IPC.noteSuggestions, async (key: unknown) => service.noteSuggestions(notesKey(key)))
+	handle(IPC.settleNoteSuggestion, async (key: unknown, id: unknown, action: unknown) =>
+		service.settleNoteSuggestion(notesKey(key), str(id, 'suggestion id', 128), noteSuggestionAction(action)),
+	)
 	handle(IPC.stylePrs, async () => service.stylePrs())
 	handle(IPC.setStylePrs, async (raw: unknown) => service.setStylePrs(stylePrList(raw)))
 	handle(IPC.reviewedPrs, async (query: unknown) => service.reviewedPrs(reviewedPrQuery(query)))
@@ -857,6 +862,12 @@ app.whenReady().then(async () => {
 	})
 	ai.attachBudget({ check: budgetCheck, active: () => hasBudgets(connections.budgets()) })
 	service.attachAi(ai)
+	service.attachNotePatterns(
+		() => connections.view().questionModel,
+		(key) => {
+			if (win && !win.isDestroyed()) win.webContents.send(IPC.noteSuggestionsChanged, key)
+		},
+	)
 	mcp = new McpService(dir, credentials)
 	await mcp.load()
 	mcp.onChange((v) => {
