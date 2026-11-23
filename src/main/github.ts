@@ -642,6 +642,19 @@ export class GitHubService {
 		return r.default_branch
 	}
 
+	/** Which merge buttons the repository allows; null for each one GitHub doesn't say (it shows them only to some). */
+	async mergeMethods(
+		repo: string,
+		signal?: AbortSignal,
+	): Promise<{ merge: boolean | null; squash: boolean | null; rebase: boolean | null }> {
+		checkRepo(repo)
+		const r = await this.get<{ allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean }>(
+			`/repos/${repo}`,
+			signal,
+		)
+		return { merge: r.allow_merge_commit ?? null, squash: r.allow_squash_merge ?? null, rebase: r.allow_rebase_merge ?? null }
+	}
+
 	/**
 	 * The pull request a commit came in with: the one merged into `branch` first, else any merged one. Null when GitHub
 	 * knows none (pushed directly, or the history was rewritten after).

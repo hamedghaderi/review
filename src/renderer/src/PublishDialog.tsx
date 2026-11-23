@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fixupWarning } from '../../shared/fixups.ts'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
 import { describeHiddenChars, type HiddenLine } from '../../shared/hiddenChars.ts'
 import type {
@@ -263,15 +264,28 @@ export function PublishDialog({
 			live = false
 		}
 	}, [reviewId])
+	// fixup! commits that would land on the base branch as they are (issue #276). Read once; awaited before approving.
+	const [fixups, setFixups] = useState<Array<{ sha: string; subject: string }>>([])
+	const fixupsRead = useRef<Promise<Array<{ sha: string; subject: string }>> | null>(null)
+	useEffect(() => {
+		let live = true
+		const read = window.review.unsquashedFixups(repoId, reviewId).then((r) => (r.ok ? r.value : []))
+		fixupsRead.current = read
+		void read.then((list) => live && setFixups(list))
+		return () => {
+			live = false
+		}
+	}, [repoId, reviewId])
 	const unviewedOf = (files: Array<{ key: string; path: string }>) => files.filter((f) => !viewed.has(f.key))
 	const unviewed = unviewedOf(toView)
-	// What an approval would go out over: CI that failed or hasn't finished, characters that hide what the code does, and
-	// files you haven't marked viewed.
-	const warningFor = (c: HeadChecks | null, files = toView): string =>
+	// What an approval would go out over: CI that failed or hasn't finished, characters that hide what the code does,
+	// files you haven't marked viewed, and fixup commits that would land as they are.
+	const warningFor = (c: HeadChecks | null, files = toView, fix = fixups): string =>
 		[
 			c && (c.failed.length > 0 || c.pending.length > 0) ? ciWarning(c) : null,
 			hidden.length ? hiddenWarning(hidden) : null,
 			unviewedOf(files).length ? unviewedWarning(unviewedOf(files), files.length) : null,
+			fix.length ? fixupWarning(fix) : null,
 		]
 			.filter(Boolean)
 			.join(' ')
@@ -343,9 +357,13 @@ export function PublishDialog({
 	async function send(confirmed = false): Promise<void> {
 		if (event === 'APPROVE' && !confirmed) {
 			setRunning('Checking CI…')
-			const [fresh, files] = await Promise.all([loadCi(), toViewRead.current ?? Promise.resolve(toView)])
+			const [fresh, files, fix] = await Promise.all([
+				loadCi(),
+				toViewRead.current ?? Promise.resolve(toView),
+				fixupsRead.current ?? Promise.resolve(fixups),
+			])
 			setRunning(null)
-			if (warningFor(fresh, files)) return setConfirmSubmit(true)
+			if (warningFor(fresh, files, fix)) return setConfirmSubmit(true)
 		}
 		setConfirmSubmit(false)
 		if (toPublish.length && !(await addComments())) {
@@ -702,6 +720,11 @@ export function PublishDialog({
 										<button className="link" disabled={!!running} onClick={() => onGoToFile(unviewed[0].key)}>
 											Go to {unviewed.length === 1 ? 'it' : 'the first'}
 										</button>
+									</p>
+								)}
+								{event === 'APPROVE' && fixups.length > 0 && (
+									<p className="small warn-text" title={fixups.map((f) => `${f.sha.slice(0, 7)} ${f.subject}`).join('\n')}>
+										{fixupWarning(fixups)} Unless the pull request is squash-merged, they’d land on the base branch as they are.
 									</p>
 								)}
 								<div className="seg verdict" role="radiogroup" aria-label="Review verdict">

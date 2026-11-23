@@ -91,6 +91,7 @@ import {
 	commitMessages,
 	listCommits,
 	commitAuthorship,
+	commitSubjects,
 	isSha,
 	compareSnapshot,
 	ensureCommits,
@@ -121,6 +122,7 @@ import type { SinceReview } from '../shared/rangeDiff.ts'
 import { lineUpCommits } from './sinceReview.ts'
 import { cherryPickedFrom, type Backports } from '../shared/backports.ts'
 import { findOriginals, MAX_OWN_COMMITS } from './backports.ts'
+import { fixupsWouldLand, isFixupSubject } from '../shared/fixups.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
@@ -632,6 +634,24 @@ export class ReviewService {
 		)
 		for (const x of out.commits) if (x.original) x.pr = this.originalPulls.get(`${pr.repo}@${x.original}`) ?? null
 		return out
+	}
+
+	/**
+	 * The pull request's `fixup!` / `squash!` / `amend!` commits that would land on the base branch as they are (issue
+	 * #276), oldest first: none when the repository only allows squash merges. Shown before an approval.
+	 */
+	async unsquashedFixups(repoId: string, reviewId: string, signal?: AbortSignal): Promise<Array<{ sha: string; subject: string }>> {
+		const repo = this.repo(repoId)
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		const data = this.comparisons.get(reviewId)
+		if (!stored?.pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
+		const c = data.comparison
+		const fixups = (await commitSubjects(repo.root, c.baseSha, c.headSha, 5000)).filter((x) => isFixupSubject(x.subject)).reverse()
+		if (!fixups.length) return []
+		const methods = await this.requireGitHub()
+			.mergeMethods(stored.pr.repo, signal)
+			.catch(() => null)
+		return fixupsWouldLand(methods) ? fixups : []
 	}
 
 	/**
