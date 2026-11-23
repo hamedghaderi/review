@@ -2170,6 +2170,7 @@ export const IPC = {
 	agentShare: 'gh:agent-share',
 	sinceReview: 'gh:since-review',
 	backports: 'gh:backports',
+	unsquashedFixups: 'gh:unsquashed-fixups',
 	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
@@ -2390,6 +2391,8 @@ export interface ReviewApi {
 	sinceReview(repoId: string, reviewId: string, from: string): Promise<Result<SinceReview>>
 	/** A pull request into a branch other than the default one: its commits matched with their originals there (issue #275). */
 	backports(repoId: string, reviewId: string): Promise<Result<Backports | null>>
+	/** The open PR review's fixup! commits that would land unsquashed (issue #276); none when only squash merges are allowed. */
+	unsquashedFixups(repoId: string, reviewId: string): Promise<Result<Array<{ sha: string; subject: string }>>>
 	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>
