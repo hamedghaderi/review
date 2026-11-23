@@ -141,3 +141,66 @@ test('from Git: the fix in a renamed file and in a caller the check read; unread
 	assert.deepEqual(missing.parts, [])
 	assert.match(missing.note ?? '', /^What changed since fffffff could not be read: /)
 })
+
+test('after a force-push, the earlier change is replayed onto the new base: only the author’s fix shows', async () => {
+	const dir = mkdtempSync(join(tmpdir(), 'review-fixed-patch-'))
+	const git = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	const lines = (n: number, at: Record<number, string>, top: Array<string> = []) =>
+		[...top, ...Array.from({ length: n }, (_, i) => at[i + 1] ?? `line ${i + 1}`)].join('\n') + '\n'
+	const commit = (files: Record<string, string>, msg: string): string => {
+		for (const [f, t] of Object.entries(files)) writeFileSync(join(dir, f), t)
+		git('add', '-A')
+		git('commit', '-qm', msg)
+		return git('rev-parse', 'HEAD')
+	}
+	git('init', '-q', '-b', 'main')
+	commit({ 'rules.py': lines(40, {}) }, 'base')
+	git('checkout', '-qb', 'topic')
+	const from = commit({ 'rules.py': lines(40, { 20: '    except Exception:', 21: '        return {}' }) }, 'raised here')
+	// main moves on: three lines at the top of the same file, one just below the finding, and another file.
+	git('checkout', '-q', 'main')
+	commit({ 'rules.py': lines(40, { 23: 'line 23 from main' }, ['# a', '# b', '# c']), 'other.py': 'from main\n' }, 'main moves on')
+	const newBase = git('rev-parse', 'HEAD')
+	// Rebased onto main, with the fix.
+	git('checkout', '-q', '-B', 'topic', 'main')
+	const to = commit(
+		{ 'rules.py': lines(40, { 20: '    except OSError:', 21: '        raise', 23: 'line 23 from main' }, ['# a', '# b', '# c']) },
+		'fixed',
+	)
+
+	const anchor = { fileKey: 'rules.py', oldPath: 'rules.py', newPath: 'rules.py', side: 'new', startLine: 20, endLine: 21 } as Anchor
+	const gone = { finding: { id: 'f', anchor }, at: null, check: null } as unknown as GoneFinding
+	const text = (p: Awaited<ReturnType<typeof loadFixedPatch>>) =>
+		p.parts.flatMap((x) => x.hunks.flatMap((h) => h.lines.filter((l) => l.kind !== 'ctx').map((l) => `${l.kind} ${l.text}`)))
+
+	const p = await loadFixedPatch(dir, from, to, gone, { base: newBase })
+	assert.deepEqual(text(p), ['del     except Exception:', 'del         return {}', 'add     except OSError:', 'add         raise'])
+	assert.match(p.note ?? '', /replayed onto the base it has now first, so what came from the base branch is left out/)
+	assert.equal(p.from, from, 'it still names the head the finding was raised on')
+
+	// Head to head, main's line next to the finding would show as the author's.
+	const raw = await loadFixedPatch(dir, from, to, gone, { base: null })
+	assert.ok(text(raw).includes('add line 23 from main'))
+	assert.match(raw.note ?? '', /can include changes that came from the base branch\.$/)
+
+	// When main changed the same lines, it can't be replayed there: head to head, saying why.
+	git('checkout', '-q', 'main')
+	const clashBase = commit(
+		{ 'rules.py': lines(40, { 20: '    pass', 21: '    pass', 23: 'line 23 from main' }, ['# a', '# b', '# c']) },
+		'main edits the same lines',
+	)
+	git('checkout', '-q', '-B', 'topic', 'main')
+	const to2 = commit(
+		{ 'rules.py': lines(40, { 20: '    except OSError:', 21: '        raise', 23: 'line 23 from main' }, ['# a', '# b', '# c']) },
+		'fixed again',
+	)
+	const clash = await loadFixedPatch(dir, from, to2, gone, { base: clashBase })
+	assert.match(
+		clash.note ?? '',
+		/can include changes that came from the base branch \(the base branch changed the same lines in rules\.py\)\./,
+	)
+})
