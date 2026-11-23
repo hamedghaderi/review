@@ -5,6 +5,8 @@ import { maskLeaks } from '../../shared/leaks.ts'
 import { agentShareDetail, type AgentShare } from '../../shared/agentCommits.ts'
 import type { SinceReview } from '../../shared/rangeDiff.ts'
 import { SinceReviewBanner } from './SinceReview.tsx'
+import { BackportLabel, BackportList, backportTag } from './Backports.tsx'
+import { isBackport, type Backports } from '../../shared/backports.ts'
 import { announce, runAnnouncement } from './announce.ts'
 import { ago } from './branches.ts'
 import type {
@@ -816,6 +818,22 @@ export function App() {
 			if (r.ok && r.value && comparisonIdRef.current === id) setAgents({ reviewId: id, value: r.value })
 		})
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// A pull request into a branch other than the default one, its commits matched with their originals (issue #275),
+	// once per snapshot; nothing when no commit has an original there.
+	const [backports, setBackports] = useState<{ reviewId: string; value: Backports } | null>(null)
+	const [backportsOpen, setBackportsOpen] = useState(false)
+	useEffect(() => {
+		setBackports(null)
+		setBackportsOpen(false)
+		if (!session || !comparison?.pr) return
+		const id = comparison.id
+		void window.review.backports(session.repo.id, id).then((r) => {
+			if (r.ok && r.value && (r.value.error || isBackport(r.value)) && comparisonIdRef.current === id)
+				setBackports({ reviewId: id, value: r.value })
+		})
+	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+	const backportsHere = backports && backports.reviewId === comparison?.id ? backports.value : null
 
 	// A read that failed (offline, GitHub down) is tried again when the connection returns or the window regains focus.
 	const discussionFailed = discussion?.value?.status === 'unavailable' && !discussion.loading
@@ -1944,6 +1962,9 @@ export function App() {
 										<ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />
 									)}
 									{agents?.reviewId === comparison.id && <AgentShareLabel share={agents.value} />}
+									{backportsHere && (
+										<BackportLabel backports={backportsHere} open={backportsOpen} onToggle={() => setBackportsOpen((x) => !x)} />
+									)}
 									{seenable && (
 										<button
 											className="btn small ghost"
@@ -2004,6 +2025,7 @@ export function App() {
 													<option key={x.sha} value={x.sha}>
 														{seenCommits.has(`${comparison.id}:${x.sha}`) ? '✓ ' : ''}
 														{i + 1}. {x.sha.slice(0, 7)} {x.subject}
+														{backportTag(backportsHere, x.sha)}
 														{commitChecks.checks[x.sha] ? ` · ${VERDICT_SHORT[commitChecks.checks[x.sha].verdict]}` : ''}
 													</option>
 												))}
@@ -2131,6 +2153,9 @@ export function App() {
 									open={sinceOpen}
 									onToggle={() => setSinceOpen((x) => !x)}
 								/>
+							)}
+							{view === 'review' && comparison && backportsHere && backportsOpen && !backportsHere.error && (
+								<BackportList backports={backportsHere} repoUrl={comparison.pr ? `https://github.com/${comparison.pr.repo}` : null} />
 							)}
 							{view === 'review' && comparison && takeover?.reviewId === comparison.id && <TakeoverBanner info={takeover.value} />}
 							{view === 'review' && comparison?.pr && offerFixed && lastFinished && (

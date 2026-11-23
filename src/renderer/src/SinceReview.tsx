@@ -105,7 +105,7 @@ function CommitLine({ c, repoUrl }: { c: RangeCommit; repoUrl: string | null }) 
 }
 
 /** A diff of the diff: the first column says what changed in the patch, the rest is the patch line itself. */
-function InterDiff({ lines }: { lines: Array<string> }) {
+export function InterDiff({ lines }: { lines: Array<string> }) {
 	return (
 		<pre className="fixed-patch-hunk mono since-interdiff">
 			{lines.map((l, i) => {

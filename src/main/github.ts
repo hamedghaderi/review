@@ -636,6 +636,33 @@ export class GitHubService {
 		return b.commit.sha
 	}
 
+	async defaultBranch(repo: string, signal?: AbortSignal): Promise<string> {
+		checkRepo(repo)
+		const r = await this.get<{ default_branch: string }>(`/repos/${repo}`, signal)
+		return r.default_branch
+	}
+
+	/**
+	 * The pull request a commit came in with: the one merged into `branch` first, else any merged one. Null when GitHub
+	 * knows none (pushed directly, or the history was rewritten after).
+	 */
+	async pullOfCommit(
+		repo: string,
+		sha: string,
+		branch: string,
+		signal?: AbortSignal,
+	): Promise<{ number: number; title: string; url: string } | null> {
+		checkRepo(repo)
+		if (!/^[0-9a-f]{40}$/.test(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+		const all = await this.get<Array<{ number: number; title: string; html_url: string; merged_at: string | null; base: { ref: string } }>>(
+			`/repos/${repo}/commits/${sha}/pulls`,
+			signal,
+		)
+		const merged = all.filter((p) => p.merged_at)
+		const p = merged.find((x) => x.base.ref === branch) ?? merged[0]
+		return p ? { number: p.number, title: p.title, url: p.html_url } : null
+	}
+
 	async detail(repo: string, number: number, signal?: AbortSignal): Promise<PrDetail> {
 		checkRepo(repo)
 		if (!Number.isInteger(number) || number < 1) throw new AppFail('invalid-input', 'Invalid pull request number.')
