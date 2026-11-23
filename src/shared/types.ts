@@ -7,6 +7,7 @@ import type { KeymapOverrides } from './keymap.ts'
 import type { CommitFileMap } from './commitStep.ts'
 import type { NotesRange } from './releases.ts'
 import type { HiddenLine } from './hiddenChars.ts'
+import type { AgentShare } from './agentCommits.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -2164,6 +2165,7 @@ export const IPC = {
 	prDiscussion: 'gh:discussion',
 	baseDrift: 'gh:base-drift',
 	takeoverInfo: 'gh:takeover-info',
+	agentShare: 'gh:agent-share',
 	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
@@ -2377,6 +2379,8 @@ export interface ReviewApi {
 	baseDrift(repoId: string, reviewId: string): Promise<Result<BaseDrift>>
 	/** The pull request this one takes over and whose work it doesn't credit (issue #168); null: it takes none over. */
 	takeoverInfo(repoId: string, reviewId: string): Promise<Result<TakeoverInfo | null>>
+	/** How many of the open PR review's commits a coding agent wrote (issue #272); null: none did. */
+	agentShare(repoId: string, reviewId: string): Promise<Result<AgentShare | null>>
 	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>

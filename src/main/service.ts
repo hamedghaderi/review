@@ -90,6 +90,7 @@ import {
 	commitsUpTo,
 	commitMessages,
 	listCommits,
+	commitAuthorship,
 	compareSnapshot,
 	ensureCommits,
 	filesAt,
@@ -114,6 +115,7 @@ import {
 import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
+import { agentShare, type AgentShare } from '../shared/agentCommits.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
@@ -526,6 +528,15 @@ export class ReviewService {
 			.then(([theirs, ours]) => uncreditedAuthors(theirs, ours))
 			.catch(() => null)
 		return { number: o.number, url: o.url, title: o.title, how: o.how, unreadable: null, uncredited }
+	}
+
+	/** How many of the open pull request's own commits a coding agent wrote (issue #272), from the clone's history. */
+	async agentShare(repoId: string, reviewId: string): Promise<AgentShare | null> {
+		this.repo(repoId)
+		const data = this.comparisons.get(reviewId)
+		if (!data?.comparison.pr) throw new AppFail('not-found', 'Open this pull request review first.')
+		const c = data.comparison
+		return agentShare(await commitAuthorship(data.root, c.baseSha, c.headSha))
 	}
 
 	/**
