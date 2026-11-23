@@ -368,3 +368,20 @@ export const mergeSchema = z.object({
 export type ModelGroups = z.infer<typeof mergeSchema>
 export const MERGE_SCHEMA_NAME = 'finding_groups'
 export const MERGE_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(mergeSchema, { target: 'draft-7' }))
+
+/** Dismissed findings grouped by the problem they are about, each group with a drafted reviewer note (issue #278). */
+export const noteGroupsSchema = z.object({
+	groups: z
+		.array(
+			z.object({
+				group: z.string().nullable().describe('An existing group this is, e.g. "G2"; null for a new group.'),
+				dismissals: z.array(z.string()).describe('The dismissed findings in this group, e.g. ["D1", "D4"].'),
+				problem: z.string().describe('What the findings are about, at most 8 words.'),
+				note: z.string().describe('The note for the AI reviewer: a fact about this repository, under 300 characters.'),
+				paths: z.array(z.string()).describe('Glob patterns from the repository root that cover the files of the group; [] for anywhere.'),
+			}),
+		)
+		.default([]),
+})
+export const NOTE_GROUPS_SCHEMA_NAME = 'reviewer_note_groups'
+export const NOTE_GROUPS_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(noteGroupsSchema, { target: 'draft-7' }))

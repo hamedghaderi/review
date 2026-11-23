@@ -4,6 +4,7 @@ import {
 	MAX_REVIEWER_NOTE_CHARS,
 	MAX_REVIEWER_NOTES,
 	type FindingCategory,
+	type NoteSuggestion,
 	type NotesRepo,
 	type Result,
 	type ReviewerNote,
@@ -11,6 +12,7 @@ import {
 } from '../../shared/types.ts'
 import { CATEGORY_LABEL } from '../../shared/findings.ts'
 import { notesMarkdown, noteScope } from '../../shared/notes.ts'
+import { DismissalList, evidenceLine, NoteSuggestionReview, REASON_LABEL, sourceLine } from './NoteSuggestions.tsx'
 
 const when = (iso: string): string => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 const RULES = Object.keys(CATEGORY_LABEL) as Array<FindingCategory>
@@ -23,6 +25,8 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 	const [repos, setRepos] = useState<Array<NotesRepo> | null>(null)
 	const [key, setKey] = useState<string | null>(null)
 	const [notes, setNotes] = useState<Array<ReviewerNote> | null>(null)
+	const [suggestions, setSuggestions] = useState<Array<NoteSuggestion>>([])
+	const [reviewing, setReviewing] = useState<string | null>(null) // the suggestion open for review
 	const [editing, setEditing] = useState<ReviewerNoteEdit | null>(null)
 	const [copied, setCopied] = useState<'yes' | 'failed' | null>(null)
 	const [error, setError] = useState<string | null>(null)
@@ -38,8 +42,13 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 		setNotes(null)
 		setEditing(null)
 		setCopied(null)
+		setSuggestions([])
+		setReviewing(null)
 		if (!key) return
+		const loadSuggestions = (): void => void window.review.noteSuggestions(key).then((r) => r.ok && setSuggestions(r.value))
 		void window.review.reviewerNotes(key).then((r) => (r.ok ? setNotes(r.value) : setError(r.error.message)))
+		loadSuggestions()
+		return window.review.onNoteSuggestionsChanged((k) => k === key && loadSuggestions())
 	}, [key])
 
 	const take = (r: Result<Array<ReviewerNote>>): boolean => {
@@ -123,6 +132,12 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 											</label>
 										</div>
 										<p className="note-text selectable">{n.text}</p>
+										{n.from?.length ? (
+											<details className="small">
+												<summary className="muted">{sourceLine(n.from)}</summary>
+												<DismissalList refs={n.from} />
+											</details>
+										) : null}
 										<div className="note-foot small">
 											<span className="muted">
 												Added {when(n.addedAt)}
@@ -176,7 +191,102 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 					)}
 				</>
 			)}
+			{key && (
+				<SuggestionsSection
+					notesKey={key}
+					suggestions={suggestions}
+					reviewing={reviewing}
+					onReview={setReviewing}
+					onSettled={async (next, accepted) => {
+						setSuggestions(next)
+						setReviewing(null)
+						if (accepted) take(await window.review.reviewerNotes(key))
+					}}
+					onError={setError}
+				/>
+			)}
 			{error && <p className="small error-text">{error}</p>}
+		</div>
+	)
+}
+
+/**
+ * The notes suggested from your dismissals (issue #278): the ones waiting or put off, each opened to review it here,
+ * and the kinds you said never to suggest, which you can undo.
+ */
+function SuggestionsSection(props: {
+	notesKey: string
+	suggestions: Array<NoteSuggestion>
+	reviewing: string | null
+	onReview(id: string | null): void
+	onSettled(list: Array<NoteSuggestion>, accepted: boolean): void
+	onError(message: string): void
+}) {
+	const open = props.suggestions.filter((s) => s.state !== 'never')
+	const never = props.suggestions.filter((s) => s.state === 'never')
+	return (
+		<div className="note-suggestions">
+			<h4>Suggested from your dismissals</h4>
+			<p className="muted small">
+				When you dismiss findings of one rule for the same reason across pull requests (3 across 2 for wrong, intended or handled elsewhere;
+				5 across 3 for not worth fixing), the model for questions groups them and drafts a note. It asks a little after the dismissal that
+				completes a pattern, once per new set of dismissals, and not while a budget you set is reached.
+			</p>
+			{!open.length && <p className="muted small">Nothing suggested right now.</p>}
+			{open.map((s) =>
+				props.reviewing === s.id ? (
+					<div key={s.id} className="key-form">
+						<NoteSuggestionReview notesKey={props.notesKey} suggestion={s} onSettled={props.onSettled} />
+						<div className="form-actions start">
+							<button className="btn small ghost" onClick={() => props.onReview(null)}>
+								Close
+							</button>
+						</div>
+					</div>
+				) : (
+					<div key={s.id} className="note-card">
+						<div className="small">
+							<b>{s.problem || CATEGORY_LABEL[s.rule]}</b>
+							{s.state === 'later' ? <span className="muted"> · put off; asks again after 3 more</span> : null}
+						</div>
+						<p className="small">{evidenceLine(s)}</p>
+						<div className="note-foot small">
+							<span className="spacer" />
+							<button className="btn small" disabled={!!props.reviewing} onClick={() => props.onReview(s.id)}>
+								Review…
+							</button>
+						</div>
+					</div>
+				),
+			)}
+			{!!never.length && (
+				<>
+					<h4>Not suggested again</h4>
+					<ul className="note-list">
+						{never.map((s) => (
+							<li key={s.id} className="note-foot small">
+								<span>
+									{s.problem || CATEGORY_LABEL[s.rule]}{' '}
+									<span className="muted">
+										({CATEGORY_LABEL[s.rule]}, {REASON_LABEL[s.reason]}, {s.from.length} dismissal{s.from.length === 1 ? '' : 's'})
+									</span>
+								</span>
+								<span className="spacer" />
+								<button
+									className="btn small"
+									onClick={async () => {
+										const r = await window.review.settleNoteSuggestion(props.notesKey, s.id, { kind: 'undo' })
+										if (r.ok) props.onSettled(r.value, false)
+										else props.onError(r.error.message)
+									}}
+								>
+									Undo
+								</button>
+							</li>
+						))}
+					</ul>
+				</>
+			)}
 		</div>
 	)
 }

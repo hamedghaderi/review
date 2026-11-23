@@ -1290,7 +1290,49 @@ export interface ReviewerNote {
 	on: boolean
 	addedAt: string
 	editedAt: string | null
+	from?: Array<DismissalRef> // the dismissals it was suggested from; absent on notes you wrote yourself
+	after?: Array<DismissalRef> // dismissals of the same kind made after it was added (issue #278, for checking it)
 }
+
+/** A finding you dismissed, as reviewer notes keep it: where, what, and your reason and note. */
+export interface DismissalRef {
+	key: string // the same finding across runs and snapshots of one pull request or branch: target, path and title
+	repoId: string
+	reviewId: string
+	findingId: string
+	target: string // "#12", or the branch, for showing
+	prKey: string // the pull request or branch, for counting how many it spans (see targetKey)
+	rule: FindingCategory
+	reason: DismissReason
+	path: string
+	line: number | null
+	title: string
+	note: string | null
+	decidedAt: string
+}
+
+/**
+ * A reviewer note the app suggests from findings you dismissed the same way across pull requests (issue #278).
+ * Pending: waiting for you. Later: you said Not now; it comes back once more dismissals join it (see notePatterns.ts).
+ * Never: nothing more is suggested for this kind of finding, until you undo it.
+ */
+export interface NoteSuggestion {
+	id: string
+	rule: FindingCategory
+	reason: DismissReason
+	problem: string // what the findings were about, in a few words
+	text: string // the drafted note
+	paths: Array<string>
+	from: Array<DismissalRef>
+	state: 'pending' | 'later' | 'never'
+	at: string // when it was first suggested
+	laterAt: number | null // later: how many dismissals it had when you said Not now
+	model: string // the model that grouped and drafted it
+}
+
+/** Your answer to a suggested note; accept takes your edits to the draft. */
+export type NoteSuggestionAction =
+	{ kind: 'accept'; text: string; paths: Array<string> } | { kind: 'later' } | { kind: 'never' } | { kind: 'undo' } // a Never: suggest this kind of finding again
 
 /** Your edit to a reviewer note: a new one without `id`. */
 export interface ReviewerNoteEdit {
@@ -1702,7 +1744,7 @@ export interface SummaryRewrite {
 // change and questions about it; reply: a drafted reply in a GitHub thread; style: building your review style note;
 // summary: a drafted review summary.
 export type UsageKind =
-	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit'
+	'review' | 'question' | 'explain' | 'verify' | 'test' | 'overview' | 'conclusion' | 'reply' | 'style' | 'summary' | 'commit' | 'notes' // grouping your dismissals and drafting reviewer notes (issue #278)
 
 /**
  * What one model used for one run, retry or on-demand request, kept in the usage history apart from the review, so
@@ -2281,6 +2323,9 @@ export const IPC = {
 	reviewerNotes: 'ai:reviewer-notes',
 	saveReviewerNote: 'ai:save-reviewer-note',
 	deleteReviewerNote: 'ai:delete-reviewer-note',
+	noteSuggestions: 'ai:note-suggestions',
+	settleNoteSuggestion: 'ai:settle-note-suggestion',
+	noteSuggestionsChanged: 'ai:note-suggestions-changed',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -2578,6 +2623,12 @@ export interface ReviewApi {
 	/** Adds a note (`id` null) or changes one; resolves with the repository's notes. */
 	saveReviewerNote(key: string, edit: ReviewerNoteEdit): Promise<Result<Array<ReviewerNote>>>
 	deleteReviewerNote(key: string, id: string): Promise<Result<Array<ReviewerNote>>>
+	/** The notes suggested from your dismissals for a repository (a NotesRepo key), newest first. */
+	noteSuggestions(key: string): Promise<Result<Array<NoteSuggestion>>>
+	/** Accepts, puts off, refuses or un-refuses a suggestion; resolves with the repository's suggestions. */
+	settleNoteSuggestion(key: string, id: string, action: NoteSuggestionAction): Promise<Result<Array<NoteSuggestion>>>
+	/** A repository's suggestions changed (a new one, or one settled); the handler gets its key. */
+	onNoteSuggestionsChanged(handler: (key: string) => void): () => void
 	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
 	stylePrs(): Promise<Result<Array<StylePr>>>
 	setStylePrs(next: Array<StylePr>): Promise<Result<Array<StylePr>>>

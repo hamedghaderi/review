@@ -161,6 +161,13 @@ const api: ReviewApi = {
 	reviewerNotes: (key) => ipcRenderer.invoke(IPC.reviewerNotes, key),
 	saveReviewerNote: (key, edit) => ipcRenderer.invoke(IPC.saveReviewerNote, key, edit),
 	deleteReviewerNote: (key, id) => ipcRenderer.invoke(IPC.deleteReviewerNote, key, id),
+	noteSuggestions: (key) => ipcRenderer.invoke(IPC.noteSuggestions, key),
+	settleNoteSuggestion: (key, id, action) => ipcRenderer.invoke(IPC.settleNoteSuggestion, key, id, action),
+	onNoteSuggestionsChanged: (handler) => {
+		const listener = (_: unknown, key: string): void => handler(key)
+		ipcRenderer.on(IPC.noteSuggestionsChanged, listener)
+		return () => ipcRenderer.removeListener(IPC.noteSuggestionsChanged, listener)
+	},
 	stylePrs: () => ipcRenderer.invoke(IPC.stylePrs),
 	setStylePrs: (next) => ipcRenderer.invoke(IPC.setStylePrs, next),
 	reviewedPrs: (query) => ipcRenderer.invoke(IPC.reviewedPrs, query),

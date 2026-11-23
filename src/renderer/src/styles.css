@@ -6896,3 +6896,47 @@ textarea.style-edit {
 .commit-fixups {
 	margin-top: 4px;
 }
+
+/* Notes suggested from your dismissals (issue #278): the evidence first, then the draft. */
+.modal.note-suggestion-modal {
+	width: min(640px, 100%);
+	max-height: min(720px, 100%);
+}
+.note-suggestion {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.note-suggestion h4,
+.note-suggestions h4 {
+	margin: 4px 0 0;
+}
+.note-suggestions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	border-top: 1px solid var(--border);
+	padding-top: 12px;
+	margin-top: 4px;
+}
+.dismissal-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 260px;
+	overflow: auto;
+}
+.dismissal-list li {
+	border-left: 2px solid var(--border-strong);
+	padding: 2px 8px;
+	overflow-wrap: anywhere;
+}
+.note-card details summary {
+	cursor: pointer;
+}
+.note-card details .dismissal-list {
+	margin-top: 6px;
+}

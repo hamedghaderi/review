@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
+	NoteSuggestion,
+	NoteSuggestionAction,
 	NotesRepo,
 	ReviewerNote,
 	ReviewerNoteEdit,
@@ -164,6 +166,8 @@ import {
 } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
 import { notesKeyOf, type ReviewStore, type StoreData } from './store.ts'
+import { applyGroups, bucketsToCheck, collectDismissals, draftInputFor, freeDismissals } from './notePatterns.ts'
+
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import {
 	carriedViewed,
@@ -190,6 +194,8 @@ const PR_ATTEMPTS = 3
 const MAX_EARLIER_LIMITATIONS = 12
 const MAX_COMMIT_BODY = 4000
 const MAX_EARLIER_COMMITS = 60
+// How long after a dismissal the app looks for a pattern (issue #278): time to add a note to it.
+const NOTE_CHECK_DELAY_MS = 30_000
 
 /**
  * The notes an AI review of one commit is given: which commit of how many, its message, the earlier commits' subjects
@@ -265,6 +271,10 @@ export class ReviewService {
 	private watched: { at: number; prs: Array<WatchedPr> } | null = null
 	private ai: AiController | null = null
 	private mcp: McpService | null = null
+	// Reviewer note suggestions (issue #278): the model for questions, who to tell, and the checks waiting or running by key.
+	private notePatterns: { model: () => ModelSelection | null; changed: (key: string) => void } | null = null
+	private noteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+	private noteChecking = new Map<string, Promise<void>>()
 	private github: GitHubService | null
 	private loadGen = 0
 	private opening: AbortController | null = null
@@ -836,6 +846,11 @@ export class ReviewService {
 
 	attachAi(ai: AiController): void {
 		this.ai = ai
+	}
+
+	/** Turns on note suggestions: `model` is the model for questions, `changed` hears a repository's suggestions change. */
+	attachNotePatterns(model: () => ModelSelection | null, changed: (key: string) => void): void {
+		this.notePatterns = { model, changed }
 	}
 
 	attachMcp(mcp: McpService): void {
@@ -1885,6 +1900,13 @@ export class ReviewService {
 		await this.store.update((d) => {
 			Object.assign(d.repos[repoId].reviews[id], next, { updatedAt: savedAt })
 		})
+		// A new dismissal with a reason may complete a pattern across pull requests (issue #278).
+		const dismissed = (r: Pick<Review, 'findingDecisions'>, fid: string): string | null => {
+			const x = r.findingDecisions[fid]
+			return x?.status === 'dismissed' && x.reason ? x.reason : null
+		}
+		if (Object.keys(next.findingDecisions).some((fid) => dismissed(next, fid) && dismissed(next, fid) !== dismissed(stored, fid)))
+			this.scheduleNoteCheck(repoId)
 		return { savedAt }
 	}
 
@@ -2203,6 +2225,109 @@ export class ReviewService {
 			out = list
 		})
 		return out
+	}
+
+	/** The notes suggested from your dismissals for a repository, newest first. */
+	noteSuggestions(key: string): Array<NoteSuggestion> {
+		return [...(this.store.read().noteSuggestions?.[key] ?? [])].sort((a, b) => b.at.localeCompare(a.at))
+	}
+
+	/**
+	 * Accept turns a suggestion into a note that keeps the dismissals it came from; Not now and Never keep it, so its
+	 * dismissals don't make it again; undoing a Never drops it, so they count again.
+	 */
+	async settleNoteSuggestion(key: string, id: string, action: NoteSuggestionAction): Promise<Array<NoteSuggestion>> {
+		await this.store.update((d) => {
+			const list = [...(d.noteSuggestions?.[key] ?? [])]
+			const i = list.findIndex((x) => x.id === id)
+			if (i < 0) throw new AppFail('not-found', 'That suggestion no longer exists.')
+			const s = list[i]
+			if (action.kind === 'accept') {
+				const notes = d.reviewerNotes?.[key] ?? []
+				if (notes.length >= MAX_REVIEWER_NOTES)
+					throw new AppFail('invalid-input', `A repository can have at most ${MAX_REVIEWER_NOTES} reviewer notes. Delete one first.`)
+				const note: ReviewerNote = {
+					id: randomUUID(),
+					text: action.text,
+					rule: s.rule,
+					paths: action.paths,
+					on: true,
+					addedAt: new Date().toISOString(),
+					editedAt: null,
+					from: s.from,
+				}
+				d.reviewerNotes = { ...d.reviewerNotes, [key]: [...notes, note] }
+				list.splice(i, 1)
+			} else if (action.kind === 'undo') list.splice(i, 1)
+			else list[i] = { ...s, state: action.kind, laterAt: action.kind === 'later' ? s.from.length : null }
+			const next = { ...d.noteSuggestions }
+			if (list.length) next[key] = list
+			else delete next[key]
+			d.noteSuggestions = next
+		})
+		this.notePatterns?.changed(key)
+		return this.noteSuggestions(key)
+	}
+
+	/** Checks a repository for dismissal patterns a little after you dismiss, so a note you add straight after counts. */
+	private scheduleNoteCheck(repoId: string): void {
+		const repo = this.store.read().repos[repoId]
+		if (!repo || !this.notePatterns) return
+		const key = notesKeyOf(repo)
+		clearTimeout(this.noteTimers.get(key))
+		const t = setTimeout(() => {
+			this.noteTimers.delete(key)
+			void this.checkDismissalPatterns(key).catch((e) => console.warn('Dismissal patterns could not be checked:', e))
+		}, NOTE_CHECK_DELAY_MS)
+		t.unref?.()
+		this.noteTimers.set(key, t)
+	}
+
+	/**
+	 * Looks for rules and reasons with enough dismissals no note or suggestion holds (notePatterns.ts), and asks the
+	 * model for questions to group each and draft notes. Without that model, or with a budget reached, nothing is asked.
+	 * One check per repository at a time; a check asked for meanwhile runs after it.
+	 */
+	checkDismissalPatterns(key: string): Promise<void> {
+		const running = this.noteChecking.get(key)
+		const next = (running ?? Promise.resolve()).then(() => this.checkPatternsNow(key))
+		const tracked = next.finally(() => {
+			if (this.noteChecking.get(key) === tracked) this.noteChecking.delete(key)
+		})
+		this.noteChecking.set(key, tracked)
+		return tracked
+	}
+
+	private async checkPatternsNow(key: string): Promise<void> {
+		const selection = this.notePatterns?.model() ?? null
+		if (!selection || !this.ai) return
+		const d = this.store.read()
+		const notes = d.reviewerNotes?.[key] ?? []
+		const suggestions = d.noteSuggestions?.[key] ?? []
+		const free = freeDismissals(collectDismissals(d, key), notes, suggestions)
+		let surfaced = 0
+		for (const bucket of bucketsToCheck(free, notes, suggestions, d.noteChecks?.[key] ?? {})) {
+			const { input, groups, labels } = draftInputFor(bucket, notes, suggestions)
+			const drafted = await this.ai.draftNoteGroups(input, selection)
+			if (!drafted) return // a budget is reached: try again after the next dismissal
+			await this.store.update((s) => {
+				// Read again: you may have settled a suggestion or changed a note while the model answered.
+				const out = applyGroups(
+					bucket,
+					drafted.groups,
+					groups,
+					labels,
+					s.reviewerNotes?.[key] ?? [],
+					s.noteSuggestions?.[key] ?? [],
+					drafted.model,
+				)
+				surfaced += out.surfaced
+				if (out.notes.length) s.reviewerNotes = { ...s.reviewerNotes, [key]: out.notes }
+				if (out.suggestions.length) s.noteSuggestions = { ...s.noteSuggestions, [key]: out.suggestions }
+				s.noteChecks = { ...s.noteChecks, [key]: { ...s.noteChecks?.[key], [bucket.id]: bucket.hash } }
+			})
+		}
+		if (surfaced) this.notePatterns?.changed(key)
 	}
 
 	/** Your review style note, or null until it is built. */
