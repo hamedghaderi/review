@@ -91,6 +91,7 @@ import {
 	commitMessages,
 	listCommits,
 	commitAuthorship,
+	isSha,
 	compareSnapshot,
 	ensureCommits,
 	filesAt,
@@ -116,6 +117,8 @@ import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
 import { agentShare, type AgentShare } from '../shared/agentCommits.ts'
+import type { SinceReview } from '../shared/rangeDiff.ts'
+import { lineUpCommits } from './sinceReview.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
@@ -545,6 +548,41 @@ export class ReviewService {
 		if (!data?.comparison.pr) throw new AppFail('not-found', 'Open this pull request review first.')
 		const c = data.comparison
 		return agentShare(await commitAuthorship(data.root, c.baseSha, c.headSha))
+	}
+
+	/**
+	 * What the author changed since your review when the branch was force-pushed (issue #274): the commits on `from` (the
+	 * head your last review was on) and on the head now, lined up by `git range-diff` with the base branch's commits left
+	 * out of both. When they can't be lined up one to one (squashed), the whole change before and after instead.
+	 * `from` is fetched from GitHub when it isn't in the clone. Never fatal: a failure says why.
+	 */
+	async sinceReview(repoId: string, reviewId: string, from: string): Promise<SinceReview> {
+		const repo = this.repo(repoId)
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		const data = this.comparisons.get(reviewId)
+		if (!stored?.pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
+		if (!isSha(from)) throw new AppFail('invalid-input', 'Invalid commit id.')
+		const c = data.comparison
+		const out: SinceReview = { from, to: c.headSha, rewritten: false, squashed: false, commits: [], error: null }
+		if (from === c.headSha) return out
+		const short = from.slice(0, 7)
+		try {
+			await ensureCommits(repo.root, fetchRemote(repo, [stored.pr.repo]), [from])
+		} catch (e) {
+			// Had the head only moved on, your review's commit would be in it, and so in the clone: it was rewritten.
+			return {
+				...out,
+				rewritten: true,
+				error: `Your last review was on ${short}, which isn't in this clone and couldn't be fetched from GitHub (${errorOf(e).message}), so the commits can't be lined up.`,
+			}
+		}
+		if (await isAncestor(repo.root, from, c.headSha)) return out
+		out.rewritten = true
+		try {
+			return { ...out, ...(await lineUpCommits(repo.root, { base: c.baseSha, from, head: c.headSha, baseLabel: shortRef(c.baseRef) })) }
+		} catch (e) {
+			return { ...out, error: `The commits couldn't be lined up: ${errorOf(e).message}` }
+		}
 	}
 
 	/**

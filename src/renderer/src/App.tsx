@@ -3,6 +3,8 @@ import { cyclePane, pane } from './panes.ts'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
 import { agentShareDetail, type AgentShare } from '../../shared/agentCommits.ts'
+import type { SinceReview } from '../../shared/rangeDiff.ts'
+import { SinceReviewBanner } from './SinceReview.tsx'
 import { announce, runAnnouncement } from './announce.ts'
 import { ago } from './branches.ts'
 import type {
@@ -933,6 +935,20 @@ export function App() {
 	const current = discussion && comparison && discussion.reviewId === comparison.id ? discussion : null
 	const threads: Array<DiscussionThread> = useMemo(() => current?.value?.threads ?? [], [current?.value])
 	const fileThreads = useMemo(() => threads.filter((t) => t.fileKey === selected), [threads, selected])
+	// What the author changed since your last review when the branch was force-pushed (issue #274), once per snapshot
+	// and reviewed head. Your review's head comes from the discussion read.
+	const reviewedHead = current?.value?.mine?.commit ?? null
+	const [since, setSince] = useState<{ reviewId: string; value: SinceReview } | null>(null)
+	const [sinceOpen, setSinceOpen] = useState(false)
+	useEffect(() => {
+		setSince(null)
+		setSinceOpen(false)
+		if (!session || !comparison?.pr || !reviewedHead || reviewedHead === comparison.headSha) return
+		const id = comparison.id
+		void window.review.sinceReview(session.repo.id, id, reviewedHead).then((r) => {
+			if (r.ok && comparisonIdRef.current === id) setSince({ reviewId: id, value: r.value })
+		})
+	}, [session?.repo.id, comparison?.id, reviewedHead]) // eslint-disable-line react-hooks/exhaustive-deps
 	// "@" in a comment suggests the PR's author, then whoever spoke on it most recently, then GitHub's matches.
 	const prAuthor = comparison?.pr?.author ?? (prReview?.id === comparison?.id ? (prReview?.author ?? null) : null)
 	const mentionRepo = session?.repo.id ?? null
@@ -2108,6 +2124,14 @@ export function App() {
 							{view === 'review' && comparison && drift?.reviewId === comparison.id && (
 								<DriftBanner drift={drift.value} open={driftOpen} onToggle={() => setDriftOpen((x) => !x)} />
 							)}
+							{view === 'review' && comparison && since?.reviewId === comparison.id && (
+								<SinceReviewBanner
+									since={since.value}
+									repoUrl={comparison.pr ? `https://github.com/${comparison.pr.repo}` : null}
+									open={sinceOpen}
+									onToggle={() => setSinceOpen((x) => !x)}
+								/>
+							)}
 							{view === 'review' && comparison && takeover?.reviewId === comparison.id && <TakeoverBanner info={takeover.value} />}
 							{view === 'review' && comparison?.pr && offerFixed && lastFinished && (
 								<FixedThreadsBanner
@@ -2842,10 +2866,6 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
 	)
 }
 
-/**
- * "Takes over #12: Refunds", and the original's commit authors this pull request doesn't credit, as GitHub reports their
- * logins (no @, so nothing reads as a mention). A fact for you, never posted.
- */
 /** "Written with an agent: 9 of 12 commits", from the commits' Co-authored-by trailers and authors. A hint, not a verdict. */
 function AgentShareLabel({ share: s }: { share: AgentShare }) {
 	return (
@@ -2858,6 +2878,10 @@ function AgentShareLabel({ share: s }: { share: AgentShare }) {
 	)
 }
 
+/**
+ * "Takes over #12: Refunds", and the original's commit authors this pull request doesn't credit, as GitHub reports their
+ * logins (no @, so nothing reads as a mention). A fact for you, never posted.
+ */
 function TakeoverBanner({ info: t }: { info: TakeoverInfo }) {
 	return (
 		<div className="banner" role="status">

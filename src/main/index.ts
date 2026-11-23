@@ -408,6 +408,9 @@ function registerIpc(): void {
 	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.takeoverInfo, (repoId: unknown, reviewId: unknown) => service.takeoverInfo(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.agentShare, (repoId: unknown, reviewId: unknown) => service.agentShare(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.sinceReview, (repoId: unknown, reviewId: unknown, from: unknown) =>
+		service.sinceReview(str(repoId, 'repository'), comparisonId(reviewId), str(from, 'commit')),
+	)
 	// What automatic review did on a pull request, for the review's banner (its follow-up rounds, issue #166).
 	handle(IPC.autoReviewRecord, async (repo: unknown, number: unknown) => {
 		const n = Number(number)
