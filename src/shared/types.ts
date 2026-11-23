@@ -8,6 +8,7 @@ import type { CommitFileMap } from './commitStep.ts'
 import type { NotesRange } from './releases.ts'
 import type { HiddenLine } from './hiddenChars.ts'
 import type { AgentShare } from './agentCommits.ts'
+import type { SinceReview } from './rangeDiff.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -2166,6 +2167,7 @@ export const IPC = {
 	baseDrift: 'gh:base-drift',
 	takeoverInfo: 'gh:takeover-info',
 	agentShare: 'gh:agent-share',
+	sinceReview: 'gh:since-review',
 	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
@@ -2382,6 +2384,8 @@ export interface ReviewApi {
 	takeoverInfo(repoId: string, reviewId: string): Promise<Result<TakeoverInfo | null>>
 	/** How many of the open PR review's commits a coding agent wrote (issue #272); null: none did. */
 	agentShare(repoId: string, reviewId: string): Promise<Result<AgentShare | null>>
+	/** What the author changed since your review on `from` when the branch was force-pushed, commit by commit (issue #274). */
+	sinceReview(repoId: string, reviewId: string, from: string): Promise<Result<SinceReview>>
 	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>

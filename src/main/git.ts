@@ -143,12 +143,12 @@ export function git(
 	cwd: string,
 	args: Array<string>,
 	maxBytes = 256 * 1024 * 1024,
-	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean } = {},
+	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean; env?: Record<string, string> } = {},
 ): Promise<GitOutput> {
 	return new Promise((resolve, reject) => {
 		const child = spawn('git', [...GLOBAL_ARGS, ...args], {
 			cwd,
-			env: envFor(cwd, !!options.appClone),
+			env: options.env ? { ...envFor(cwd, !!options.appClone), ...options.env } : envFor(cwd, !!options.appClone),
 			shell: false,
 			windowsHide: true,
 			signal: options.signal,
@@ -613,6 +613,51 @@ export async function mergeBase(root: string, a: string, b: string, headLabel: s
 		)
 	}
 	throw new AppFail('git-failed', `git merge-base failed: ${mb.stderr.trim()}`)
+}
+
+/** How many commits `from..to` has, merges left out. */
+export async function countCommits(root: string, from: string, to: string): Promise<number> {
+	if (!isSha(from) || !isSha(to)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['rev-list', '--count', '--no-merges', `${from}..${to}`])
+	if (r.code !== 0) throw new AppFail('git-failed', `git rev-list failed: ${r.stderr.trim()}`)
+	return Number(r.stdout.toString('utf8').trim())
+}
+
+/**
+ * `git range-diff` of `old` and `new` (each `base..head`), commits by full id, without colour. Null when the output is
+ * larger than `maxBytes`.
+ */
+export async function rangeDiff(root: string, old: [string, string], now: [string, string], maxBytes: number): Promise<string | null> {
+	if (![...old, ...now].every(isSha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['range-diff', '--no-color', '--abbrev=40', `${old[0]}..${old[1]}`, `${now[0]}..${now[1]}`], maxBytes, {
+		timeoutMs: 120_000,
+	})
+	if (r.truncated) return null
+	if (r.code !== 0) throw new AppFail('git-failed', `git range-diff failed: ${r.stderr.trim()}`)
+	return r.stdout.toString('utf8')
+}
+
+/**
+ * A commit with `head`'s files on top of `parent`: a branch's whole change as one commit, to line up with another when
+ * one side was squashed. Only the object is written, nothing points at it, and with a fixed author and date the same
+ * inputs give the same commit, so looking again writes nothing new.
+ */
+export async function wholeChangeCommit(root: string, head: string, parent: string): Promise<string> {
+	if (!isSha(head) || !isSha(parent)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const when = '1970-01-01T00:00:00Z'
+	const r = await git(root, ['commit-tree', '--no-gpg-sign', `${head}^{tree}`, '-p', parent, '-m', 'The whole change'], 1024, {
+		env: {
+			GIT_AUTHOR_NAME: 'Review',
+			GIT_AUTHOR_EMAIL: 'review@localhost',
+			GIT_AUTHOR_DATE: when,
+			GIT_COMMITTER_NAME: 'Review',
+			GIT_COMMITTER_EMAIL: 'review@localhost',
+			GIT_COMMITTER_DATE: when,
+		},
+	})
+	const sha = r.stdout.toString('utf8').trim()
+	if (r.code !== 0 || !isSha(sha)) throw new AppFail('git-failed', `git commit-tree failed: ${r.stderr.trim()}`)
+	return sha
 }
 
 /** Whether commit `a` is `b` or one of its ancestors. */

@@ -6510,6 +6510,42 @@ textarea.style-edit {
 	padding-left: 18px;
 }
 
+/* What the author changed since your review after a force-push (issue #274). */
+.since-list {
+	margin: 6px 0 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.since-list summary {
+	cursor: pointer;
+}
+.since-state {
+	display: inline-block;
+	min-width: 8ch;
+	font-weight: 600;
+	color: var(--text-2);
+}
+.since-state.changed {
+	color: var(--warn-fg);
+}
+.since-state.new {
+	color: var(--add-fg);
+}
+.since-state.dropped {
+	color: var(--del-fg);
+}
+.since-interdiff {
+	margin-top: 6px;
+	max-height: 360px;
+	overflow: auto;
+}
+.since-interdiff .fixed-patch-line.head {
+	color: var(--text-2);
+}
+
 /* What "Rewrite with AI" found about the references in your summary (issue #191). */
 .rewrite-checks {
 	margin-top: 6px;

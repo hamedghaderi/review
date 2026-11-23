@@ -94,6 +94,7 @@ const api: ReviewApi = {
 	baseDrift: (repoId, reviewId) => ipcRenderer.invoke(IPC.baseDrift, repoId, reviewId),
 	takeoverInfo: (repoId, reviewId) => ipcRenderer.invoke(IPC.takeoverInfo, repoId, reviewId),
 	agentShare: (repoId, reviewId) => ipcRenderer.invoke(IPC.agentShare, repoId, reviewId),
+	sinceReview: (repoId, reviewId, from) => ipcRenderer.invoke(IPC.sinceReview, repoId, reviewId, from),
 	autoReviewRecord: (repo, number) => ipcRenderer.invoke(IPC.autoReviewRecord, repo, number),
 	prDescription: (repoId, reviewId) => ipcRenderer.invoke(IPC.prDescription, repoId, reviewId),
 	headChecks: (repoId, reviewId) => ipcRenderer.invoke(IPC.headChecks, repoId, reviewId),
