@@ -1002,6 +1002,7 @@ export type FindingCategory =
 	| 'security'
 	| 'error-handling'
 	| 'performance'
+	| 'resilience' // since reviewer-2026-11-23.1: callers a slow or failing dependency takes down with it (issue #277)
 	| 'breaking-change'
 	| 'file-split'
 	| 'over-engineered'
@@ -1031,6 +1032,7 @@ export const REVIEW_RULES = [
 	'security',
 	'error-handling',
 	'performance',
+	'resilience',
 	'breaking-change',
 	'file-split',
 	'over-engineered',
@@ -1095,7 +1097,7 @@ export const BUGS_ONLY_RULES: ReadonlyArray<ReviewRule> = ['bug', 'security']
 
 /** The roles a new team starts with, and the passes of a focused-pass run. Each rule belongs to exactly one role. */
 export const DEFAULT_TEAM_ROLES: ReadonlyArray<{ id: string; role: string; rules: ReadonlyArray<ReviewRule> }> = [
-	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling', 'performance'] },
+	{ id: 'defects', role: 'Defects', rules: ['bug', 'error-handling', 'performance', 'resilience'] },
 	{ id: 'security', role: 'Security', rules: ['security'] },
 	{
 		id: 'callers',

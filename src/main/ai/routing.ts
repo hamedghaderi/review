@@ -13,6 +13,7 @@ const APPLIES: Record<string, (kind: FileKind, risk: FileRisk | undefined) => bo
 	bug: (k) => k === 'code' || k === 'other',
 	'error-handling': (k) => k === 'code' || k === 'other',
 	performance: (k) => k === 'code',
+	resilience: (k) => k === 'code',
 	security: (k, r) => (k === 'code' || k === 'other') && r?.level !== 'low',
 	// Lock files carry the dependency facts that show who a version change can break.
 	'breaking-change': (k) => k === 'code' || k === 'other' || k === 'lock',

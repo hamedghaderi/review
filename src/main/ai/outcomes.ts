@@ -21,7 +21,15 @@ import type { RepoState } from '../store.ts'
 
 export const MIN_DECIDED = 10
 
-const DEFECTS: ReadonlySet<FindingCategory> = new Set(['bug', 'security', 'error-handling', 'breaking-change', 'performance', 'drift'])
+const DEFECTS: ReadonlySet<FindingCategory> = new Set([
+	'bug',
+	'security',
+	'error-handling',
+	'breaking-change',
+	'performance',
+	'resilience',
+	'drift',
+])
 
 export function outcomeGroup(category: FindingCategory | undefined): OutcomeGroup {
 	return !category ? 'uncategorised' : DEFECTS.has(category) ? 'defect' : 'design'

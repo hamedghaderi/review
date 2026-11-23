@@ -55,11 +55,12 @@ Missing tests, test style and test length are not findings.`,
 		name: 'Pragmatic',
 		inspiredBy: 'Andrew Hunt and David Thomas, The Pragmatic Programmer',
 		summary: 'Crash early: errors that surface, logic that holds at the edges.',
-		rules: ['bug', 'error-handling'],
-		brief: `Look hardest at "bug" and "error-handling", the way a pragmatic programmer who wants code to crash early would:
+		rules: ['bug', 'error-handling', 'resilience'],
+		brief: `Look hardest at "bug", "error-handling" and "resilience", the way a pragmatic programmer who wants code to crash early would:
 - Walk each changed path with the inputs at its edges: empty, one, many, missing, duplicated, out of order, concurrent.
 - Where the change repeats logic, in two places it adds or as a copy of existing code, set the copies side by side and look for the guard, case or step one of them dropped.
 - Follow every error the change can raise or catch to the caller that reads it, and check it reaches someone who can act on it instead of turning into a quiet success, or into a different kind of failure (a bug reported as "not found" or "the database failed").
+- For each outbound call the change adds or changes, ask what its callers do while the other end is slow or down: wait forever, retry into it, or fall back through the same broken path.
 - Dead programs tell no lies: an assumption the changed code relies on and never checks is a "bug" only when the supplied code shows a caller that breaks it.`,
 	},
 	{

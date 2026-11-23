@@ -333,7 +333,11 @@ function checkPolicy(
 	// Reach only moves a finding to should fix, never out of the review: with should fix turned off, it stays blocking.
 	// With blocking turned off, the finding moves down for that reason below.
 	const capReach = levels.includes('blocking') && levels.includes('should_fix')
-	if (severity === 'blocking' && !f.disproof?.trim()) {
+	if (severity === 'blocking' && f.category === 'resilience') {
+		// A dependency that is slow or down rarely breaks the change's own case (issue #277).
+		severity = 'should_fix'
+		adjusted = 'Lowered to should fix: a call that fails badly when its dependency is slow or down does not block on its own.'
+	} else if (severity === 'blocking' && !f.disproof?.trim()) {
 		severity = 'should_fix'
 		adjusted = 'Lowered to should fix: a blocking finding needs a check that would prove it false, and none was given.'
 	} else if (severity === 'blocking' && !reach && capReach) {
@@ -394,13 +398,14 @@ const SEVERITY_RANK: Record<string, number> = {
 	low: 6,
 }
 
-type Budget = 'defect' | 'performance' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue' | 'drift'
+type Budget = 'defect' | 'performance' | 'resilience' | 'structure' | 'convention' | 'naming' | 'tests' | 'residue' | 'drift'
 export function budgetOf(c: FindingCategory | undefined): Budget {
 	if (c === 'drift') return 'drift'
 	if (c === 'file-split' || c === 'over-engineered') return 'structure'
 	if (c === 'test-value') return 'tests'
 	if (c === 'misleading-name') return 'naming'
 	if (c === 'performance') return 'performance'
+	if (c === 'resilience') return 'resilience'
 	return c === 'convention' ? 'convention' : c === 'residue' ? 'residue' : 'defect'
 }
 
@@ -408,6 +413,7 @@ export function budgetOf(c: FindingCategory | undefined): Budget {
 export const BUDGETS = {
 	defect: { perFile: 3, total: 10 },
 	performance: { perFile: 2, total: 3 },
+	resilience: { perFile: 2, total: 3 },
 	structure: { perFile: 2, total: 2 },
 	convention: { perFile: 3, total: 3 },
 	naming: { perFile: 2, total: 3 },
@@ -448,6 +454,7 @@ export function applyBudget(existing: Array<Finding>, incoming: Array<Finding>):
 const BUDGET_LABEL: Record<Budget, string> = {
 	defect: 'line findings',
 	performance: 'performance findings',
+	resilience: 'resilience findings',
 	structure: 'structural findings',
 	convention: 'convention findings',
 	naming: 'misleading-name findings',

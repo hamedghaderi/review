@@ -122,6 +122,7 @@ export const CATEGORY_LABEL: Record<FindingCategory, string> = {
 	security: 'Security',
 	'error-handling': 'Error handling',
 	performance: 'Performance',
+	resilience: 'Resilience',
 	'breaking-change': 'Breaking change',
 	'file-split': 'File structure',
 	'over-engineered': 'Over-engineered',

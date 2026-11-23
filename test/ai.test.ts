@@ -986,7 +986,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-16.5')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-23.1')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -2161,12 +2161,12 @@ test('convention findings have their own budget, and saved teams take on the con
 	])
 	assert.deepEqual(
 		settings.teams[0].members.find((m) => m.id === 'defects')!.rules,
-		['bug', 'performance'],
-		'performance goes to whoever checks bugs',
+		['bug', 'performance', 'resilience'],
+		'performance and resilience go to whoever checks bugs',
 	)
 	assert.deepEqual(
 		settings.teams[1].members[0].rules,
-		['bug', 'convention', 'test-value', 'misleading-name', 'performance', 'drift'],
+		['bug', 'convention', 'test-value', 'misleading-name', 'performance', 'drift', 'resilience'],
 		'no callers member: the first member',
 	)
 })
@@ -2231,6 +2231,7 @@ test('test value: needs a pattern, takes over residue signature 7, has its own b
 	})
 	assert.deepEqual(settings.teams[0].members[0].rules, ['residue-6', 'test-value'], 'whoever checked signature 7 checks test-value')
 	assert.ok(!settings.teams[0].members[1].rules.includes('test-value'))
+	assert.ok(settings.teams[0].members[1].rules.includes('resilience'), 'resilience goes to whoever checks bugs, not the first member')
 })
 
 test('focused passes: one model runs as the four default roles, each on its own rules, and the run reads as a team', async () => {
@@ -3572,4 +3573,41 @@ test('drift: a reviewer checking the rule gets what landed on the base branch, w
 		run.evaluation!.some((e) => e.rule === 'drift'),
 		'every rule is reported on, drift included',
 	)
+})
+
+test('resilience: its own rule and budget, never blocking, and the prompt keeps timeouts to clients with no default', async () => {
+	const { applyBudget } = await import('../src/main/ai/findings.ts')
+	const { reviewerInstructions } = await import('../src/main/ai/prompt.ts')
+	const prompt = reviewerInstructions(undefined, true)
+	assert.match(prompt, /- "resilience": an outbound call the change adds or changes/)
+	assert.match(prompt, /only when you know the client has no default/)
+	assert.match(prompt, /in this order: bug, security, error-handling, performance, resilience, breaking-change/)
+
+	const { comp, srcs } = sources()
+	const batch = buildContext(comp, srcs, LIMITS).batches[0]
+	const r = validateBatchOutput(
+		out([finding({ category: 'resilience', title: 'fetch without a timeout' }), finding({ title: 'Real bug' })]),
+		batch,
+		comp,
+		'r',
+	)
+	assert.deepEqual(
+		r.findings.map((f) => [f.title, f.severity]),
+		[
+			['fetch without a timeout', 'should_fix'],
+			['Real bug', 'blocking'],
+		],
+	)
+	assert.match(r.findings[0].adjusted!, /^Lowered to should fix: a call that fails badly when its dependency is slow or down/)
+
+	const call = (i: number, file = `r${i}.ts`) =>
+		({ id: `r${i}`, category: 'resilience', severity: 'should_fix', anchor: { fileKey: file } }) as unknown as Finding
+	const bug = { id: 'b', category: 'bug', severity: 'should_fix', anchor: { fileKey: 'a.ts' } } as unknown as Finding
+	const b = applyBudget([], [call(1, 'a.ts'), call(2, 'a.ts'), call(3, 'a.ts'), call(4), call(5), bug])
+	assert.deepEqual(
+		b.kept.map((x) => x.id),
+		['r1', 'r2', 'r4', 'b'],
+		'at most 2 resilience findings per file and 3 per review; never a bug',
+	)
+	assert.match(b.held[0].heldBack!, /2 resilience findings per file/)
 })
