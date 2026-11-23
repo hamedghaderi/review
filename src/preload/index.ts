@@ -106,6 +106,7 @@ const api: ReviewApi = {
 	mentionable: (repoId, reviewId, query) => ipcRenderer.invoke(IPC.mentionable, repoId, reviewId, query),
 	loadPatch: (comparisonId, fileKey, force) => ipcRenderer.invoke(IPC.loadPatch, comparisonId, fileKey, force),
 	hiddenChars: (comparisonId) => ipcRenderer.invoke(IPC.hiddenChars, comparisonId),
+	filesToView: (comparisonId) => ipcRenderer.invoke(IPC.filesToView, comparisonId),
 	loadFileLines: (comparisonId, fileKey) => ipcRenderer.invoke(IPC.loadFileLines, comparisonId, fileKey),
 	loadFileAt: (comparisonId, path, side) => ipcRenderer.invoke(IPC.loadFileAt, comparisonId, path, side),
 	filesAtHead: (comparisonId, paths) => ipcRenderer.invoke(IPC.filesAtHead, comparisonId, paths),

@@ -126,7 +126,7 @@ import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
 import { findImporters } from './ai/imports.ts'
 import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
-import { findSymbol } from './symbols.ts'
+import { findSymbol, generatedPath } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -1646,6 +1646,22 @@ export class ReviewService {
 				const found = l.found.filter((h) => h.warn)
 				if (found.length) out.push({ ...l, found })
 			}
+		}
+		return out
+	}
+
+	/**
+	 * The files an approval says you read, to check against what you marked viewed (issue #273): every file the diff shows,
+	 * less lockfiles and generated or vendored ones. Binary files, submodules, renames with no changed lines and diffs too
+	 * large to show by default are left out, since there is nothing to read in the diff.
+	 */
+	async filesToView(comparisonId: string): Promise<Array<{ key: string; path: string }>> {
+		const out: Array<{ key: string; path: string }> = []
+		for (const f of this.loaded(comparisonId).comparison.files) {
+			const path = f.newPath ?? f.oldPath ?? f.key
+			if (f.binary || f.submodule || generatedPath(path)) continue
+			const p = await this.loadPatch(comparisonId, f.key, false).catch(() => null)
+			if (p?.kind === 'text' && p.hunks.length) out.push({ key: f.key, path }) // a rename alone has no lines to read
 		}
 		return out
 	}

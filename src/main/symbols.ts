@@ -60,6 +60,11 @@ const SKIP_FILES =
 const CODE =
 	/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue|svelte|py|pyi|rb|go|rs|java|kt|kts|scala|groovy|cs|fs|vb|php|swift|m|mm|c|h|cc|cpp|cxx|hpp|hh|dart|ex|exs|erl|hrl|hs|clj|cljs|lua|pl|pm|r|jl|sh|bash|zsh|ps1|sql)$/i
 
+/** Vendored, built or generated, or a lockfile: what nobody reads line by line. */
+export function generatedPath(p: string): boolean {
+	return SKIP_DIRS.test(p) || SKIP_FILES.test(p)
+}
+
 /** Not a source file, or vendored, built or generated. */
 export function skipPath(p: string): boolean {
 	return !CODE.test(p) || SKIP_DIRS.test(p) || SKIP_FILES.test(p)

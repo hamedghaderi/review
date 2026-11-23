@@ -2177,6 +2177,7 @@ export const IPC = {
 	mentionable: 'gh:mentionable',
 	loadPatch: 'diff:patch',
 	hiddenChars: 'diff:hidden-chars',
+	filesToView: 'diff:files-to-view',
 	loadFileLines: 'diff:file-lines',
 	loadFileAt: 'diff:file-at',
 	filesAtHead: 'diff:files-at-head',
@@ -2401,6 +2402,8 @@ export interface ReviewApi {
 	loadPatch(comparisonId: string, fileKey: string, force: boolean): Promise<Result<PatchResult>>
 	/** Added lines with hidden or direction-changing characters worth checking before an approval (issue #223). */
 	hiddenChars(comparisonId: string): Promise<Result<Array<HiddenLine>>>
+	/** The files an approval says you read, to check against the ones marked viewed (issue #273). */
+	filesToView(comparisonId: string): Promise<Result<Array<{ key: string; path: string }>>>
 	loadFileLines(comparisonId: string, fileKey: string): Promise<Result<FileLinesResult>>
 	/** Any file of the reviewed commits, read-only: at the head commit, or the base commit for `side: 'old'`. */
 	loadFileAt(comparisonId: string, path: string, side: Side): Promise<Result<FileLinesResult>>
