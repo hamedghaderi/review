@@ -236,6 +236,7 @@ const api: ReviewApi = {
 		return () => ipcRenderer.removeListener(IPC.reviewingChanged, listener)
 	},
 	commitList: (reviewId) => ipcRenderer.invoke(IPC.commitList, reviewId),
+	separateFixups: (reviewId, separate) => ipcRenderer.invoke(IPC.separateFixups, reviewId, separate),
 	openCommit: (reviewId, sha) => ipcRenderer.invoke(IPC.openCommit, reviewId, sha),
 	commitFileMap: (reviewId, commitId, fileKey) => ipcRenderer.invoke(IPC.commitFileMap, reviewId, commitId, fileKey),
 	checkCommit: (reviewId, sha, overBudget) => ipcRenderer.invoke(IPC.checkCommit, reviewId, sha, overBudget),

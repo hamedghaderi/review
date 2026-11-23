@@ -6854,3 +6854,8 @@ textarea.style-edit {
 .backport-toggle.on {
 	color: var(--text);
 }
+
+/* fixup! commits folded into a commit's step, or why not (issue #276). */
+.commit-fixups {
+	margin-top: 4px;
+}

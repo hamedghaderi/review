@@ -122,6 +122,7 @@ import type { SinceReview } from '../shared/rangeDiff.ts'
 import { lineUpCommits } from './sinceReview.ts'
 import { cherryPickedFrom, type Backports } from '../shared/backports.ts'
 import { findOriginals, MAX_OWN_COMMITS } from './backports.ts'
+import { foldFixups } from './fixupFold.ts'
 import { fixupsWouldLand, isFixupSubject } from '../shared/fixups.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
@@ -199,6 +200,13 @@ export function commitRunNotes(view: CommitView, index: number, commits: Array<C
 		'The commit message:',
 		view.entry.subject,
 		...(body ? ['', body] : []),
+		...(view.entry.folded
+			? [
+					'',
+					'Its fixup commits are folded in, as they would be squashed into it before merging, so this is the commit in its final form:',
+					...view.entry.folded.fixups.map((f) => `- ${f.subject}`),
+				]
+			: []),
 		...(earlier.length
 			? [
 					'',
@@ -242,6 +250,9 @@ export class ReviewService {
 	private takeoverHeads = new Map<string, string>() // by review: the head of the pull request it takes over, for version "original"
 	// Commits opened on their own (parent..sha), most recent last; only the diff reads use them.
 	private commitViews = new Map<string, ComparisonData>()
+	// The commits to step through, fixups folded or not, by "root|base..head|separate" (folding writes stand-in commits).
+	private stepLists = new Map<string, Promise<{ steps: Array<CommitEntry>; folded: number }>>()
+	private separateFixups = new Set<string>() // reviews whose fixup! commits you asked to see on their own, this session
 	private defaultBranches = new Map<string, string>() // GitHub repository → its default branch
 	private originalPulls = new Map<string, { number: number; title: string; url: string } | null>() // "repo@commit" → its pull request
 	private commitMappers = new Map<string, Mapper>() // "commit view id>head sha" → its line map, which caches what it reads
@@ -2334,19 +2345,47 @@ export class ReviewService {
 		return data
 	}
 
-	/** The review's own commits, oldest first, without merges. */
+	/**
+	 * The review's commits to step through, oldest first, without merges, the first MAX_STEP_COMMITS; fixup! commits are
+	 * folded into the commit they name (see foldFixups) unless you asked to see them on their own. `total` counts them all.
+	 */
+	private async steps(reviewId: string, data: ComparisonData): Promise<{ commits: Array<CommitEntry>; total: number; folded: number }> {
+		const c = data.comparison
+		const separate = this.separateFixups.has(reviewId)
+		const key = `${data.root}|${c.baseSha}..${c.headSha}|${separate}`
+		let list = this.stepLists.get(key)
+		if (!list) {
+			list = listCommits(data.root, c.baseSha, c.headSha, Number.MAX_SAFE_INTEGER).then(({ commits }) =>
+				separate ? { steps: commits, folded: 0 } : foldFixups(data.root, commits),
+			)
+			list.catch(() => this.stepLists.delete(key))
+			this.stepLists.set(key, list)
+			while (this.stepLists.size > 20) this.stepLists.delete(this.stepLists.keys().next().value!)
+		}
+		const { steps, folded } = await list
+		return { commits: steps.slice(0, MAX_STEP_COMMITS), total: steps.length, folded }
+	}
+
+	/** The review's own commits, oldest first, without merges; fixups folded in (issue #276) unless shown on their own. */
 	async commitList(reviewId: string): Promise<CommitList> {
 		const data = this.steppable(reviewId)
-		const c = data.comparison
-		const { commits, total } = await listCommits(data.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
-		return { reviewId, commits, total }
+		const { commits, total, folded } = await this.steps(reviewId, data)
+		return { reviewId, commits, total, fixups: folded, separate: this.separateFixups.has(reviewId) }
+	}
+
+	/** Shows the review's fixup! commits on their own (`separate`) or folded into the commit they name again. */
+	async separateFixupCommits(reviewId: string, separate: boolean): Promise<CommitList> {
+		this.steppable(reviewId)
+		if (separate) this.separateFixups.add(reviewId)
+		else this.separateFixups.delete(reviewId)
+		return this.commitList(reviewId)
 	}
 
 	/** One of the review's commits on its own: parent..sha, kept so its files can be read like any comparison's. */
 	async openCommit(reviewId: string, sha: string): Promise<CommitView> {
 		const data = this.steppable(reviewId)
 		const c = data.comparison
-		const { commits } = await listCommits(data.root, c.baseSha, c.headSha, Number.MAX_SAFE_INTEGER)
+		const { commits } = await this.steps(reviewId, data)
 		const entry = commits.find((x) => x.sha === sha)
 		if (!entry) throw new AppFail('not-found', 'That commit is not one of this review’s commits.')
 		const id = `${entry.parent}..${entry.sha}`
@@ -2406,7 +2445,7 @@ export class ReviewService {
 		// Nothing it added is left in the latest code: reviewing it on its own would only find problems that are gone.
 		if (await this.superseded(reviewId, view))
 			return { skipped: 'Everything this commit added was changed again by later commits, so the AI did not review it on its own.' }
-		const { commits } = await listCommits(head.root, head.comparison.baseSha, head.comparison.headSha, MAX_STEP_COMMITS)
+		const { commits } = await this.steps(reviewId, head)
 		const at = commits.findIndex((x) => x.sha === sha)
 		const notes = commitRunNotes(view, at, commits, this.store.read().repos[repoId]?.reviews[reviewId]?.context?.notes ?? '')
 		const id = view.comparison.id
@@ -2463,7 +2502,7 @@ export class ReviewService {
 		const head = this.steppable(reviewId)
 		const c = head.comparison
 		const repoId = c.repoId
-		const { commits } = await listCommits(head.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
+		const { commits } = await this.steps(reviewId, head)
 		const byCommit = new Map<string, AiRun>()
 		for (const r of this.commitRunsOf(repoId, reviewId))
 			if ((r.status === 'completed' || r.status === 'partial') && r.commitOf) byCommit.set(r.commitOf.sha, r) // newest last
@@ -2480,7 +2519,7 @@ export class ReviewService {
 				if (f.mergedInto) continue
 				notes++
 				const a = f.anchor
-				const drop = (why: string): void => void dropped.push({ sha: entry.sha, title: f.title, why })
+				const drop = (why: string): void => void dropped.push({ sha: entry.folded?.original ?? entry.sha, title: f.title, why })
 				const path = a.newPath ?? a.oldPath
 				const m = path ? await mapper.move(path) : null
 				if (!m?.path) {
@@ -2507,7 +2546,7 @@ export class ReviewService {
 							...at,
 						},
 						repeatOf: null,
-						fromCommit: { sha: entry.sha, subject: entry.subject },
+						fromCommit: { sha: entry.folded?.original ?? entry.sha, subject: entry.subject },
 						...(atHead ? { atHead } : {}),
 					})
 				}
@@ -2595,12 +2634,14 @@ export class ReviewService {
 	async reviewedUpTo(reviewId: string, tips: Array<string>): Promise<Array<number>> {
 		const data = this.steppable(reviewId)
 		const c = data.comparison
-		const { commits } = await listCommits(data.root, c.baseSha, c.headSha, MAX_STEP_COMMITS)
+		const { commits } = await this.steps(reviewId, data)
+		// A folded commit is reached when it and all its fixups are.
+		const real = (x: CommitEntry) => (x.folded ? [x.folded.original, ...x.folded.fixups.map((f) => f.sha)] : [x.sha])
 		return Promise.all(
 			tips.map(async (tip) => {
 				const reached = await commitsUpTo(data.root, c.baseSha, tip)
 				if (!reached) return -1
-				return commits.findLastIndex((x) => reached.has(x.sha))
+				return commits.findLastIndex((x) => real(x).every((sha) => reached.has(sha)))
 			}),
 		)
 	}

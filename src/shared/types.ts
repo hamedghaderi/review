@@ -459,6 +459,10 @@ export interface CommitEntry {
 	subject: string
 	author: string
 	at: string // author date, ISO
+	// A stand-in (issue #276): the commit `original` with its fixup! commits folded in, as `rebase --autosquash` would.
+	folded?: { original: string; fixups: Array<{ sha: string; subject: string }> }
+	// A fixup! commit left on its own: why it couldn't be folded into `target`.
+	unfolded?: { target: string; why: string }
 }
 
 /** The commits of a review, oldest first; at most MAX_STEP_COMMITS of `total`. */
@@ -466,6 +470,8 @@ export interface CommitList {
 	reviewId: string
 	commits: Array<CommitEntry>
 	total: number
+	fixups: number // fixup! commits folded into the commit they name
+	separate: boolean // fixups are shown on their own, as you asked, not folded
 }
 
 export const MAX_STEP_COMMITS = 300
@@ -2274,6 +2280,7 @@ export const IPC = {
 	setReviewing: 'app:set-reviewing',
 	reviewingChanged: 'app:reviewing-changed',
 	commitList: 'diff:commit-list',
+	separateFixups: 'diff:separate-fixups',
 	openCommit: 'diff:open-commit',
 	commitFileMap: 'diff:commit-file-map',
 	checkCommit: 'ai:check-commit',
@@ -2565,6 +2572,8 @@ export interface ReviewApi {
 	onReviewingChanged(handler: (next: ReviewingPrefs) => void): () => void
 	/** The open review's commits, to step through; refused unless Settings › Reviewing has it on. */
 	commitList(reviewId: string): Promise<Result<CommitList>>
+	/** Shows the review's fixup! commits on their own, or folded into the commit they name again (issue #276). */
+	separateFixups(reviewId: string, separate: boolean): Promise<Result<CommitList>>
 	/** One of those commits on its own. Its comparison id works with loadPatch and the other diff reads. */
 	openCommit(reviewId: string, sha: string): Promise<Result<CommitView>>
 	/** How a file of an opened commit lines up with the review's head, to move comments between the two. */

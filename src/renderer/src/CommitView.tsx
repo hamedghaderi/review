@@ -47,6 +47,8 @@ interface Props {
 	// all the notes against the final code (`finishing` while it does).
 	walk: { ai: boolean; finishing: boolean; onStop(): void; onFinish(): void } | null
 	runs: CommitRuns // the AI's reviews of the review's commits
+	// fixup! commits (issue #276): folded into the commit they name, or shown on their own when `separate`.
+	fixups: { separate: boolean; onSeparate(separate: boolean): void }
 }
 
 type MapState = CommitFileMap | { error: string }
@@ -259,7 +261,8 @@ export function CommitView(p: Props) {
 						</button>
 					</div>
 					<div className="muted small commit-meta">
-						<span className="mono selectable">{commit.entry.sha.slice(0, 7)}</span> · {commit.entry.author} ·{' '}
+						<span className="mono selectable">{(commit.entry.folded?.original ?? commit.entry.sha).slice(0, 7)}</span> ·{' '}
+						{commit.entry.author} ·{' '}
 						<span title={date.toLocaleString()}>{date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span>
 						{commit.body && (
 							<>
@@ -272,6 +275,7 @@ export function CommitView(p: Props) {
 						)}
 					</div>
 					{commit.body && bodyOpen && <pre className="commit-body selectable">{commit.body}</pre>}
+					<FixupNote entry={commit.entry} fixups={p.fixups} />
 					{(p.walk?.ai || aiRun || p.runs.skipped[sha]) && (
 						<CommitNotes sha={sha} runs={p.runs} selected={finding?.id ?? null} onSelect={openFinding} />
 					)}
@@ -400,4 +404,45 @@ type EmptyWhy = 'none' | 'skipped'
 const EMPTY_TEXT: Record<EmptyWhy, string> = {
 	none: 'The AI noted nothing in this commit.',
 	skipped: 'Later commits changed everything this commit added, so the AI didn’t review it on its own.',
+}
+
+/**
+ * What a commit's step says about fixup! commits (issue #276): the ones folded into it, with a way to see them on their
+ * own; why one couldn't be folded; or, while they're shown on their own, a way to fold them again.
+ */
+function FixupNote({ entry: e, fixups }: { entry: CommitData['entry']; fixups: Props['fixups'] }) {
+	if (e.folded) {
+		const n = e.folded.fixups.length
+		return (
+			<div className="muted small commit-fixups">
+				Includes {n} fixup commit{n === 1 ? '' : 's'}, folded in as they’d be squashed before merging:{' '}
+				{e.folded.fixups.map((f, i) => (
+					<span key={f.sha} title={f.sha}>
+						{i ? ', ' : ''}
+						<span className="mono">{f.sha.slice(0, 7)}</span> {f.subject}
+					</span>
+				))}
+				.{' '}
+				<button className="link" onClick={() => fixups.onSeparate(true)}>
+					Show them separately
+				</button>
+			</div>
+		)
+	}
+	if (e.unfolded)
+		return (
+			<div className="muted small commit-fixups">
+				Not folded into <span className="mono">{e.unfolded.target.slice(0, 7)}</span>: {e.unfolded.why}.
+			</div>
+		)
+	if (fixups.separate && /^(fixup|squash|amend)! /.test(e.subject))
+		return (
+			<div className="muted small commit-fixups">
+				Shown on its own, as you asked.{' '}
+				<button className="link" onClick={() => fixups.onSeparate(false)}>
+					Fold fixups into their commits
+				</button>
+			</div>
+		)
+	return null
 }
