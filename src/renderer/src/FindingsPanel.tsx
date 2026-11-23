@@ -113,6 +113,7 @@ export const RULE_LABEL: Record<StoredRule, string> = {
 	security: 'Security',
 	'error-handling': 'Missing or hidden error handling',
 	performance: 'Work that repeats per row, item or request',
+	resilience: 'Callers a slow or failing dependency takes down',
 	'breaking-change': 'Breaking changes for callers',
 	'file-split': 'File takes on a second job',
 	'over-engineered': 'Machinery for requirements that do not exist',
@@ -1077,7 +1078,7 @@ function NearMissVerdict({ check, run }: { check: NearMissCheck; run: AiRun }) {
 }
 
 const RULE_GROUPS: Array<{ title: string; rules: Array<ReviewRule> }> = [
-	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'breaking-change', 'drift'] },
+	{ title: 'Defects', rules: ['bug', 'security', 'error-handling', 'performance', 'resilience', 'breaking-change', 'drift'] },
 	{ title: 'Structure', rules: ['file-split', 'over-engineered'] },
 	{ title: 'Conventions', rules: ['convention', 'misleading-name'] },
 	{ title: 'Tests', rules: ['test-value'] },

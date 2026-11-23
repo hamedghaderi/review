@@ -17,6 +17,7 @@ export const modelFindingSchema = z.object({
 			'security',
 			'error-handling',
 			'performance',
+			'resilience',
 			'breaking-change',
 			'file-split',
 			'over-engineered',
