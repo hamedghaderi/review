@@ -2275,7 +2275,7 @@ export function App() {
 
 					{page === 'outcomes' ? (
 						<main className="body home-body" {...pane('Outcomes')}>
-							<Outcomes />
+							<Outcomes onOpenNotes={() => openSettings('notes')} />
 						</main>
 					) : home ? (
 						<main className="body home-body" {...pane('Home')}>

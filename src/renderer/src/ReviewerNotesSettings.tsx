@@ -4,6 +4,7 @@ import {
 	MAX_REVIEWER_NOTE_CHARS,
 	MAX_REVIEWER_NOTES,
 	type FindingCategory,
+	type NoteCheck,
 	type NoteSuggestion,
 	type NotesRepo,
 	type Result,
@@ -13,6 +14,7 @@ import {
 import { CATEGORY_LABEL } from '../../shared/findings.ts'
 import { notesMarkdown, noteScope } from '../../shared/notes.ts'
 import { DismissalList, evidenceLine, NoteSuggestionReview, REASON_LABEL, sourceLine } from './NoteSuggestions.tsx'
+import { NotePeriods, NoteWarnings } from './NoteChecks.tsx'
 
 const when = (iso: string): string => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 const RULES = Object.keys(CATEGORY_LABEL) as Array<FindingCategory>
@@ -50,6 +52,17 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 		loadSuggestions()
 		return window.review.onNoteSuggestionsChanged((k) => k === key && loadSuggestions())
 	}, [key])
+
+	// How each note is doing: read again whenever the notes change, since a check carries the note it is about.
+	const [checks, setChecks] = useState<Map<string, NoteCheck>>(new Map())
+	useEffect(() => {
+		if (!key || !notes) return setChecks(new Map())
+		let live = true
+		void window.review.noteChecks(key).then((r) => live && r.ok && setChecks(new Map(r.value.map((c) => [c.note.id, c]))))
+		return () => {
+			live = false
+		}
+	}, [key, notes])
 
 	const take = (r: Result<Array<ReviewerNote>>): boolean => {
 		if (!r.ok) {
@@ -132,6 +145,33 @@ export function ReviewerNotesSettings({ repoId }: { repoId: string | null }) {
 											</label>
 										</div>
 										<p className="note-text selectable">{n.text}</p>
+										{checks.get(n.id) && (
+											<>
+												<NotePeriods check={checks.get(n.id)!} />
+												<NoteWarnings
+													check={checks.get(n.id)!}
+													actions={
+														<div className="form-actions start">
+															<button
+																className="btn small"
+																disabled={!!editing}
+																onClick={() => setEditing({ id: n.id, text: n.text, rule: n.rule, paths: n.paths, on: n.on })}
+															>
+																Edit the note
+															</button>
+															{n.on && (
+																<button
+																	className="btn small"
+																	onClick={() => void save({ id: n.id, text: n.text, rule: n.rule, paths: n.paths, on: false })}
+																>
+																	Switch it off
+																</button>
+															)}
+														</div>
+													}
+												/>
+											</>
+										)}
 										{n.from?.length ? (
 											<details className="small">
 												<summary className="muted">{sourceLine(n.from)}</summary>

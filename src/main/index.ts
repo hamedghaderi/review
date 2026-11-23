@@ -631,6 +631,7 @@ function registerIpc(): void {
 	handle(IPC.saveReviewerNote, async (key: unknown, raw: unknown) => service.saveReviewerNote(notesKey(key), reviewerNoteEdit(raw)))
 	handle(IPC.deleteReviewerNote, async (key: unknown, id: unknown) => service.deleteReviewerNote(notesKey(key), str(id, 'note id', 128)))
 	handle(IPC.noteSuggestions, async (key: unknown) => service.noteSuggestions(notesKey(key)))
+	handle(IPC.noteChecks, async (key: unknown) => service.noteChecks(notesKey(key)))
 	handle(IPC.settleNoteSuggestion, async (key: unknown, id: unknown, action: unknown) =>
 		service.settleNoteSuggestion(notesKey(key), str(id, 'suggestion id', 128), noteSuggestionAction(action)),
 	)

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
+	NoteCheck,
 	NoteSuggestion,
 	NoteSuggestionAction,
 	NotesRepo,
@@ -144,7 +145,7 @@ import { findSymbol, generatedPath } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
-import { summarizeOutcomes } from './ai/outcomes.ts'
+import { noteChecks, summarizeOutcomes } from './ai/outcomes.ts'
 import { AFTER_MERGE_DAYS, followAfterMerge, type FollowTarget } from './afterMerge.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
@@ -1588,7 +1589,8 @@ export class ReviewService {
 	 */
 	/** What became of AI findings in every repository's reviews: read from the store, nothing is fetched. */
 	outcomes(filter: OutcomeFilter): OutcomeSummary {
-		return summarizeOutcomes(Object.values(this.store.read().repos), filter)
+		const d = this.store.read()
+		return summarizeOutcomes(Object.values(d.repos), filter, new Date(), d.reviewerNotes ?? {})
 	}
 
 	/**
@@ -2225,6 +2227,12 @@ export class ReviewService {
 			out = list
 		})
 		return out
+	}
+
+	/** How each reviewer note of a repository is doing (issue #278), in the notes' order. */
+	noteChecks(key: string): Array<NoteCheck> {
+		const d = this.store.read()
+		return noteChecks(Object.values(d.repos), d.reviewerNotes ?? {}, key)
 	}
 
 	/** The notes suggested from your dismissals for a repository, newest first. */

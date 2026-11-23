@@ -162,6 +162,7 @@ const api: ReviewApi = {
 	saveReviewerNote: (key, edit) => ipcRenderer.invoke(IPC.saveReviewerNote, key, edit),
 	deleteReviewerNote: (key, id) => ipcRenderer.invoke(IPC.deleteReviewerNote, key, id),
 	noteSuggestions: (key) => ipcRenderer.invoke(IPC.noteSuggestions, key),
+	noteChecks: (key) => ipcRenderer.invoke(IPC.noteChecks, key),
 	settleNoteSuggestion: (key, id, action) => ipcRenderer.invoke(IPC.settleNoteSuggestion, key, id, action),
 	onNoteSuggestionsChanged: (handler) => {
 		const listener = (_: unknown, key: string): void => handler(key)
