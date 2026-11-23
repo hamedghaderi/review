@@ -39,6 +39,8 @@ interface Props {
 	onMaskComment?(commentId: string): Promise<void> // masks what looks private in a comment (see maskLeaks) and saves it
 	prepared?: PreparedReview | null // an automatic review left for you: its verdict and summary start the dialog
 	onSubmitted?(review: PublishedReview): void // then the dialog closes
+	viewed: ReadonlySet<string> // file keys you marked viewed
+	onGoToFile(fileKey: string): void // closes the dialog and opens the file
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -75,6 +77,8 @@ export function PublishDialog({
 	onMaskComment,
 	prepared,
 	onSubmitted,
+	viewed,
+	onGoToFile,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -247,9 +251,28 @@ export function PublishDialog({
 			live = false
 		}
 	}, [reviewId])
-	// What an approval would go out over: CI that failed or hasn't finished, and characters that hide what the code does.
-	const warningFor = (c: HeadChecks | null): string =>
-		[c && (c.failed.length > 0 || c.pending.length > 0) ? ciWarning(c) : null, hidden.length ? hiddenWarning(hidden) : null]
+	// Files you haven't marked viewed (issue #273): approving says you read the change. Read once; awaited before approving.
+	const [toView, setToView] = useState<Array<{ key: string; path: string }>>([])
+	const toViewRead = useRef<Promise<Array<{ key: string; path: string }>> | null>(null)
+	useEffect(() => {
+		let live = true
+		const read = window.review.filesToView(reviewId).then((r) => (r.ok ? r.value : []))
+		toViewRead.current = read
+		void read.then((files) => live && setToView(files))
+		return () => {
+			live = false
+		}
+	}, [reviewId])
+	const unviewedOf = (files: Array<{ key: string; path: string }>) => files.filter((f) => !viewed.has(f.key))
+	const unviewed = unviewedOf(toView)
+	// What an approval would go out over: CI that failed or hasn't finished, characters that hide what the code does, and
+	// files you haven't marked viewed.
+	const warningFor = (c: HeadChecks | null, files = toView): string =>
+		[
+			c && (c.failed.length > 0 || c.pending.length > 0) ? ciWarning(c) : null,
+			hidden.length ? hiddenWarning(hidden) : null,
+			unviewedOf(files).length ? unviewedWarning(unviewedOf(files), files.length) : null,
+		]
 			.filter(Boolean)
 			.join(' ')
 	const approveWarning = warningFor(ci)
@@ -320,9 +343,9 @@ export function PublishDialog({
 	async function send(confirmed = false): Promise<void> {
 		if (event === 'APPROVE' && !confirmed) {
 			setRunning('Checking CI…')
-			const fresh = await loadCi()
+			const [fresh, files] = await Promise.all([loadCi(), toViewRead.current ?? Promise.resolve(toView)])
 			setRunning(null)
-			if (warningFor(fresh)) return setConfirmSubmit(true)
+			if (warningFor(fresh, files)) return setConfirmSubmit(true)
 		}
 		setConfirmSubmit(false)
 		if (toPublish.length && !(await addComments())) {
@@ -673,6 +696,14 @@ export function PublishDialog({
 										{hiddenWarning(hidden)} They change how the code looks, not what it does, so check them in the diff before approving.
 									</p>
 								)}
+								{event === 'APPROVE' && unviewed.length > 0 && (
+									<p className="small warn-text" title={unviewed.map((f) => f.path).join('\n')}>
+										{unviewedWarning(unviewed, toView.length)}{' '}
+										<button className="link" disabled={!!running} onClick={() => onGoToFile(unviewed[0].key)}>
+											Go to {unviewed.length === 1 ? 'it' : 'the first'}
+										</button>
+									</p>
+								)}
 								<div className="seg verdict" role="radiogroup" aria-label="Review verdict">
 									{EVENTS.map(([k, label, hint]) => (
 										<button
@@ -864,6 +895,14 @@ function hiddenWarning(lines: Array<HiddenLine>): string {
 	const where = lines.slice(0, 3).map((l) => `${l.path}:${l.line}`)
 	const more = lines.length > 3 ? ` and ${lines.length - 3} more line${lines.length - 3 === 1 ? '' : 's'}` : ''
 	return `This change adds ${describeHiddenChars(lines.flatMap((l) => l.found))} in ${where.join(', ')}${more}.`
+}
+
+/** "7 of 21 files aren't marked viewed (src/a.ts, src/b.ts, src/c.ts and 4 more)." */
+function unviewedWarning(files: Array<{ path: string }>, total: number): string {
+	const n = files.length
+	const names = files.slice(0, 3).map((f) => f.path)
+	const more = n > 3 ? ` and ${n - 3} more` : ''
+	return `${n} of ${total} file${total === 1 ? '' : 's'} ${n === 1 ? 'isn’t' : 'aren’t'} marked viewed (${names.join(', ')}${more}).`
 }
 
 /** "✕ Lint: also fails at base abc1234" for the tooltip. */

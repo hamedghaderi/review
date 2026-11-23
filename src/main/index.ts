@@ -464,6 +464,7 @@ function registerIpc(): void {
 		service.loadPatch(comparisonId(cid), str(key, 'file'), bool(force, 'force')),
 	)
 	handle(IPC.hiddenChars, (cid: unknown) => service.hiddenChars(comparisonId(cid)))
+	handle(IPC.filesToView, (cid: unknown) => service.filesToView(comparisonId(cid)))
 	handle(IPC.loadFileLines, (cid: unknown, key: unknown) => service.loadFileLines(comparisonId(cid), str(key, 'file')))
 	handle(IPC.loadFileAt, (cid: unknown, path: unknown, side: unknown) =>
 		service.loadFileAt(comparisonId(cid), repoPath(path), side === 'old' ? 'old' : 'new'),

@@ -2608,6 +2608,12 @@ export function App() {
 						blocking={review && aiRuns.length ? blockingSummary(review, aiRuns, roots) : null}
 						stillReviewing={stillReviewing}
 						prepared={review?.prepared ?? null}
+						viewed={viewed}
+						onGoToFile={(key) => {
+							setPublishOpen(false)
+							setView('review')
+							selectFile(key)
+						}}
 						onSubmitted={(s) => {
 							// The dialog closes on submit (issue #243): this says it went.
 							const said =
