@@ -143,7 +143,7 @@ export function git(
 	cwd: string,
 	args: Array<string>,
 	maxBytes = 256 * 1024 * 1024,
-	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean; env?: Record<string, string> } = {},
+	options: { signal?: AbortSignal; timeoutMs?: number; appClone?: boolean; env?: Record<string, string>; input?: Buffer } = {},
 ): Promise<GitOutput> {
 	return new Promise((resolve, reject) => {
 		const child = spawn('git', [...GLOBAL_ARGS, ...args], {
@@ -193,6 +193,11 @@ export function git(
 			out.push(chunk)
 		})
 		child.stderr.on('data', (chunk: Buffer) => err.push(chunk))
+		if (options.input) {
+			// Git may exit before reading all of it (an error); the broken pipe then shows as its exit code, not a throw.
+			child.stdin.on('error', () => undefined)
+			child.stdin.end(options.input)
+		}
 		child.on('error', (e: NodeJS.ErrnoException) =>
 			settle(() => {
 				if (e.name === 'AbortError') reject(new AppFail('cancelled', 'Cancelled.'))
@@ -623,15 +628,86 @@ export async function countCommits(root: string, from: string, to: string): Prom
 	return Number(r.stdout.toString('utf8').trim())
 }
 
+/** `from..to`'s commits, newest first, merges left out, with their subjects; the first `max`. */
+export async function commitSubjects(
+	root: string,
+	from: string,
+	to: string,
+	max: number,
+): Promise<Array<{ sha: string; subject: string }>> {
+	if (!isSha(from) || !isSha(to)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['log', '--no-merges', `--max-count=${max}`, '--format=%H%x1f%s', `${from}..${to}`], 64 * 1024 * 1024)
+	if (r.code !== 0) throw new AppFail('git-failed', `git log failed: ${r.stderr.trim()}`)
+	return r.stdout
+		.toString('utf8')
+		.split('\n')
+		.map((l) => l.split('\x1f'))
+		.filter((x) => x.length === 2 && isSha(x[0]))
+		.map(([sha, subject]) => ({ sha, subject }))
+}
+
+/**
+ * The commits on each side of `left...right` (merges left out) whose patch the other side also has, by git's patch id,
+ * so a cherry-pick or rebase still counts. Commits both sides share aren't in either set.
+ */
+export async function equivalentCommits(root: string, left: string, right: string): Promise<{ left: Set<string>; right: Set<string> }> {
+	if (!isSha(left) || !isSha(right)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const side = async (flag: string): Promise<Set<string>> => {
+		const r = await git(root, ['rev-list', '--cherry-mark', flag, '--no-merges', `${left}...${right}`], 32 * 1024 * 1024, {
+			timeoutMs: 120_000,
+		})
+		if (r.code !== 0) throw new AppFail('git-failed', `git rev-list failed: ${r.stderr.trim()}`)
+		return new Set(
+			r.stdout
+				.toString('utf8')
+				.split('\n')
+				.filter((l) => l.startsWith('=') && isSha(l.slice(1)))
+				.map((l) => l.slice(1)),
+		)
+	}
+	const [l, r] = await Promise.all([side('--left-only'), side('--right-only')])
+	return { left: l, right: r }
+}
+
+/** Each commit's patch id (`git patch-id --stable`: line numbers and whitespace don't count). An empty commit has none. */
+export async function patchIds(root: string, shas: ReadonlyArray<string>): Promise<Map<string, string>> {
+	const out = new Map<string, string>()
+	const list = [...new Set(shas)]
+	if (!list.length) return out
+	if (!list.every(isSha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const log = await git(root, ['log', '--no-walk=unsorted', '-p', '--no-color', '--format=commit %H', ...list], 256 * 1024 * 1024)
+	if (log.code !== 0) throw new AppFail('git-failed', `git log failed: ${log.stderr.trim()}`)
+	if (log.truncated) throw new AppFail('git-failed', 'The commits are too large to compare.')
+	const r = await git(root, ['patch-id', '--stable'], 1024 * 1024, { input: log.stdout })
+	if (r.code !== 0) throw new AppFail('git-failed', `git patch-id failed: ${r.stderr.trim()}`)
+	for (const line of r.stdout.toString('utf8').split('\n')) {
+		const [id, sha] = line.split(' ')
+		if (isSha(sha) && id) out.set(sha, id)
+	}
+	return out
+}
+
 /**
  * `git range-diff` of `old` and `new` (each `base..head`), commits by full id, without colour. Null when the output is
  * larger than `maxBytes`.
  */
-export async function rangeDiff(root: string, old: [string, string], now: [string, string], maxBytes: number): Promise<string | null> {
+export async function rangeDiff(
+	root: string,
+	old: [string, string],
+	now: [string, string],
+	maxBytes: number,
+	creationFactor?: number,
+): Promise<string | null> {
 	if (![...old, ...now].every(isSha)) throw new AppFail('invalid-input', 'Invalid commit id.')
-	const r = await git(root, ['range-diff', '--no-color', '--abbrev=40', `${old[0]}..${old[1]}`, `${now[0]}..${now[1]}`], maxBytes, {
-		timeoutMs: 120_000,
-	})
+	const factor = creationFactor === undefined ? [] : [`--creation-factor=${Math.round(creationFactor)}`]
+	const r = await git(
+		root,
+		['range-diff', '--no-color', '--abbrev=40', ...factor, `${old[0]}..${old[1]}`, `${now[0]}..${now[1]}`],
+		maxBytes,
+		{
+			timeoutMs: 120_000,
+		},
+	)
 	if (r.truncated) return null
 	if (r.code !== 0) throw new AppFail('git-failed', `git range-diff failed: ${r.stderr.trim()}`)
 	return r.stdout.toString('utf8')

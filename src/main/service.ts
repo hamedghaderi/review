@@ -119,6 +119,8 @@ import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
 import { agentShare, type AgentShare } from '../shared/agentCommits.ts'
 import type { SinceReview } from '../shared/rangeDiff.ts'
 import { lineUpCommits } from './sinceReview.ts'
+import { cherryPickedFrom, type Backports } from '../shared/backports.ts'
+import { findOriginals, MAX_OWN_COMMITS } from './backports.ts'
 import { shiftRange, type CommitFileMap } from '../shared/commitStep.ts'
 import { codeAround } from './ai/ask.ts'
 import { errorOf, type GitHubService, type LinkedIssue } from './github.ts'
@@ -238,6 +240,8 @@ export class ReviewService {
 	private takeoverHeads = new Map<string, string>() // by review: the head of the pull request it takes over, for version "original"
 	// Commits opened on their own (parent..sha), most recent last; only the diff reads use them.
 	private commitViews = new Map<string, ComparisonData>()
+	private defaultBranches = new Map<string, string>() // GitHub repository → its default branch
+	private originalPulls = new Map<string, { number: number; title: string; url: string } | null>() // "repo@commit" → its pull request
 	private commitMappers = new Map<string, Mapper>() // "commit view id>head sha" → its line map, which caches what it reads
 	private store: ReviewStore
 	private images: ContextImages
@@ -584,6 +588,50 @@ export class ReviewService {
 		} catch (e) {
 			return { ...out, error: `The commits couldn't be lined up: ${errorOf(e).message}` }
 		}
+	}
+
+	/**
+	 * A pull request into a branch other than the default one, its commits matched with their originals on the default
+	 * branch (issue #275). Null for one into the default branch. Never fatal: a failure says why.
+	 */
+	async backports(repoId: string, reviewId: string, signal?: AbortSignal): Promise<Backports | null> {
+		const repo = this.repo(repoId)
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		const data = this.comparisons.get(reviewId)
+		if (!stored?.pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
+		const pr = stored.pr
+		const gh = this.requireGitHub()
+		let main = this.defaultBranches.get(pr.repo)
+		if (!main) {
+			main = await gh.defaultBranch(pr.repo, signal)
+			this.defaultBranches.set(pr.repo, main)
+		}
+		if (pr.baseRef === main) return null
+		const out: Backports = { defaultBranch: main, commits: [], error: null }
+		const c = data.comparison
+		try {
+			const tip = await gh.branchHead(pr.repo, main, signal)
+			await ensureCommits(repo.root, fetchRemote(repo, [pr.repo]), [tip], signal)
+			Object.assign(out, await findOriginals(repo.root, { base: c.baseSha, head: c.headSha, mainTip: tip, mainLabel: main }))
+		} catch (e) {
+			// Only worth saying when the commits say they're backports; otherwise this is an ordinary pull request.
+			const own = await commitMessages(repo.root, c.baseSha, c.headSha, MAX_OWN_COMMITS)
+			return own.some((x) => cherryPickedFrom(x.body))
+				? { ...out, error: `The commits couldn't be matched with ${main}: ${errorOf(e).message}` }
+				: out
+		}
+		// The pull request each original came in with; a lookup that fails just leaves the link out.
+		const originals = [...new Set(out.commits.flatMap((x) => (x.original && x.original !== x.sha ? [x.original] : [])))].slice(0, 30)
+		await Promise.all(
+			originals.map(async (sha) => {
+				const key = `${pr.repo}@${sha}`
+				if (this.originalPulls.has(key)) return
+				const p = await gh.pullOfCommit(pr.repo, sha, main, signal).catch(() => undefined)
+				if (p !== undefined) this.originalPulls.set(key, p)
+			}),
+		)
+		for (const x of out.commits) if (x.original) x.pr = this.originalPulls.get(`${pr.repo}@${x.original}`) ?? null
+		return out
 	}
 
 	/**

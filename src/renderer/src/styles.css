@@ -6845,3 +6845,12 @@ textarea.style-edit {
 .md-body .mermaid-error {
 	margin-top: -8px;
 }
+
+/* Backported commits matched with their originals (issue #275). */
+.backport-toggle {
+	color: var(--text-2);
+	font-weight: 400;
+}
+.backport-toggle.on {
+	color: var(--text);
+}

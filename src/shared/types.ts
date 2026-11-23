@@ -9,6 +9,7 @@ import type { NotesRange } from './releases.ts'
 import type { HiddenLine } from './hiddenChars.ts'
 import type { AgentShare } from './agentCommits.ts'
 import type { SinceReview } from './rangeDiff.ts'
+import type { Backports } from './backports.ts'
 export type Side = 'old' | 'new'
 
 export type ErrorCode =
@@ -2168,6 +2169,7 @@ export const IPC = {
 	takeoverInfo: 'gh:takeover-info',
 	agentShare: 'gh:agent-share',
 	sinceReview: 'gh:since-review',
+	backports: 'gh:backports',
 	autoReviewRecord: 'gh:auto-review-record',
 	prDescription: 'gh:description',
 	headChecks: 'gh:head-checks',
@@ -2386,6 +2388,8 @@ export interface ReviewApi {
 	agentShare(repoId: string, reviewId: string): Promise<Result<AgentShare | null>>
 	/** What the author changed since your review on `from` when the branch was force-pushed, commit by commit (issue #274). */
 	sinceReview(repoId: string, reviewId: string, from: string): Promise<Result<SinceReview>>
+	/** A pull request into a branch other than the default one: its commits matched with their originals there (issue #275). */
+	backports(repoId: string, reviewId: string): Promise<Result<Backports | null>>
 	autoReviewRecord(repo: string, number: number): Promise<Result<AutoReviewRecord | null>>
 	/** CI for the open PR review's head commit, as GitHub reports it now. */
 	headChecks(repoId: string, reviewId: string): Promise<Result<HeadChecks>>

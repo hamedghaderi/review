@@ -408,6 +408,7 @@ function registerIpc(): void {
 	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.takeoverInfo, (repoId: unknown, reviewId: unknown) => service.takeoverInfo(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.agentShare, (repoId: unknown, reviewId: unknown) => service.agentShare(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.backports, (repoId: unknown, reviewId: unknown) => service.backports(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.sinceReview, (repoId: unknown, reviewId: unknown, from: unknown) =>
 		service.sinceReview(str(repoId, 'repository'), comparisonId(reviewId), str(from, 'commit')),
 	)
