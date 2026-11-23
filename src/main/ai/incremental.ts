@@ -93,6 +93,33 @@ export function checkedEverywhere(run: AiRun, fileKey: string): boolean {
 }
 
 type Blobs = ReadonlyMap<string, { oldBlob: string | null; newBlob: string | null }>
+type Changes = { files: ReadonlyArray<ChangedFile>; blobs: Blobs }
+
+/** Whether the file `key` changes the same way in both: the same paths, and the same content before and after. */
+export function sameChange(before: Changes, now: Changes, key: string): boolean {
+	const was = before.files.find((f) => f.key === key)
+	const is = now.files.find((f) => f.key === key)
+	const a = before.blobs.get(key)
+	const b = now.blobs.get(key)
+	return (
+		!!was &&
+		!!is &&
+		!!a &&
+		!!b &&
+		was.oldPath === is.oldPath &&
+		was.newPath === is.newPath &&
+		a.oldBlob === b.oldBlob &&
+		a.newBlob === b.newBlob
+	)
+}
+
+/**
+ * The files marked viewed in an earlier snapshot that stay viewed in a new one (issue #273): those whose diff is the
+ * same, as GitHub keeps them. A file that changed since, in the pull request or under it on the base, is unticked.
+ */
+export function carriedViewed(viewed: ReadonlyArray<string>, before: Changes, now: Changes): Array<string> {
+	return viewed.filter((key) => sameChange(before, now, key))
+}
 
 /**
  * Splits the comparison's files into those to review and those whose results carry over from `earlier`, which reviewed
@@ -102,17 +129,13 @@ type Blobs = ReadonlyMap<string, { oldBlob: string | null; newBlob: string | nul
 export function planIncremental(
 	earlier: AiRun,
 	origin: CarriedRun,
-	before: { files: Array<ChangedFile>; blobs: Blobs },
-	now: { files: Array<ChangedFile>; blobs: Blobs },
+	before: Changes,
+	now: Changes,
 ): { review: Array<string>; carry: Array<FileCoverage> } {
 	const review: Array<string> = []
 	const carry: Array<FileCoverage> = []
 	for (const f of now.files) {
-		const was = before.files.find((x) => x.key === f.key)
-		const a = before.blobs.get(f.key)
-		const b = now.blobs.get(f.key)
-		const same =
-			!!was && !!a && !!b && was.oldPath === f.oldPath && was.newPath === f.newPath && a.oldBlob === b.oldBlob && a.newBlob === b.newBlob
+		const same = sameChange(before, now, f.key)
 		const cov = earlier.coverage.files.find((x) => x.fileKey === f.key)
 		if (same && cov && (cov.state === 'carried' || (cov.state === 'reviewed' && checkedEverywhere(earlier, f.key)))) {
 			const from = cov.from ?? origin

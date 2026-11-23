@@ -153,7 +153,15 @@ import {
 import type { MyReview } from '../shared/prStack.ts'
 import type { ReviewStore, StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
-import { carryFindings, citersOfChangedFiles, mergeRechecks, planIncremental, trustGap, usersOfChangedNames } from './ai/incremental.ts'
+import {
+	carriedViewed,
+	carryFindings,
+	citersOfChangedFiles,
+	mergeRechecks,
+	planIncremental,
+	trustGap,
+	usersOfChangedNames,
+} from './ai/incremental.ts'
 import { findingBaseline, type Baseline } from './ai/history.ts'
 import { loadFixedPatch } from './fixedPatch.ts'
 import { fixedThread, fixedThreadCandidates, MAX_FIXED_CHECKS } from './fixedThreads.ts'
@@ -913,9 +921,10 @@ export class ReviewService {
 		this.ai?.cancelUnless(c.id)
 		const carry = target.kind === 'target' ? await this.carry(repoId, data, target.from ?? null) : null
 		const context = target.kind === 'target' ? this.carriedContext(repoId, c, target.from ?? null) : null
+		const viewed = target.kind === 'target' ? await this.viewedToCarry(repoId, data, target.from ?? null) : null
 		if (gen !== this.loadGen) throw new AppFail('cancelled', 'A newer review was opened.')
-		if (carry?.notice) notice = notice ? `${notice} ${carry.notice}` : carry.notice
-		await this.saveSnapshot(repoId, c, carry, context, true)
+		for (const more of [carry?.notice, viewed?.notice]) if (more) notice = notice ? `${notice} ${more}` : more
+		await this.saveSnapshot(repoId, c, carry, context, viewed?.viewed ?? [], true)
 		return {
 			comparison: c,
 			review: this.store.read().repos[repoId].reviews[c.id],
@@ -937,7 +946,8 @@ export class ReviewService {
 		const { data } = await this.openPr(repoId, { kind: 'pr', repo: pr.repo, number: pr.number }, signal)
 		const c = data.comparison
 		this.comparisons.set(c.id, data)
-		await this.saveSnapshot(repoId, c, await this.carry(repoId, data, null), this.carriedContext(repoId, c, null), false)
+		const viewed = await this.viewedToCarry(repoId, data, null)
+		await this.saveSnapshot(repoId, c, await this.carry(repoId, data, null), this.carriedContext(repoId, c, null), viewed.viewed, false)
 		return c
 	}
 
@@ -1013,6 +1023,7 @@ export class ReviewService {
 		c: Comparison,
 		carry: { comments: Array<ReviewComment> } | null,
 		context: ReviewContext | null,
+		viewed: Array<string>, // carried from the snapshot it replaces; only a new snapshot takes them
 		activate: boolean,
 	): Promise<void> {
 		const now = new Date().toISOString()
@@ -1045,7 +1056,7 @@ export class ReviewService {
 					updatedAt: now,
 					comments: carry?.comments ?? [],
 					drafts: [],
-					viewed: [],
+					viewed,
 					findingDecisions: {},
 					...(carry?.comments.length ? { carriedOrigins: carry.comments.map((x) => x.carried!.originId) } : {}),
 					...(context ? { context } : {}),
@@ -1093,6 +1104,38 @@ export class ReviewService {
 		if (reviews[c.id]) return null
 		const src = (from && from !== c.id ? reviews[from] : undefined) ?? this.predecessor(repoId, c, Object.values(reviews))
 		return src?.context ? structuredClone(src.context) : null
+	}
+
+	/**
+	 * Files marked viewed in the snapshot a new one replaces (the one comments carry from) whose diff is the same here, to
+	 * stay viewed (issue #273). Nothing for a snapshot that exists already, or when the earlier commits are gone.
+	 */
+	private async viewedToCarry(
+		repoId: string,
+		data: ComparisonData,
+		from: string | null,
+	): Promise<{ viewed: Array<string>; notice: string | null }> {
+		const c = data.comparison
+		const reviews = this.store.read().repos[repoId]?.reviews ?? {}
+		const none = { viewed: [], notice: null }
+		if (reviews[c.id]) return none
+		const src = (from && from !== c.id ? reviews[from] : undefined) ?? this.predecessor(repoId, c, Object.values(reviews))
+		if (!src?.viewed.length) return none
+		let viewed: Array<string>
+		try {
+			const before = await changesBetween(data.root, src.baseSha, src.headSha, false)
+			viewed = carriedViewed(src.viewed, before, { files: c.files, blobs: data.blobs })
+		} catch {
+			return none
+		}
+		// Files you had viewed that are still in the comparison but changed: say so, or they quietly come back unticked.
+		const changed = src.viewed.filter((k) => !viewed.includes(k) && c.files.some((f) => f.key === k)).length
+		const n = viewed.length
+		const kept = n
+			? `${n} file${n === 1 ? '' : 's'} you marked viewed ${n === 1 ? 'is' : 'are'} unchanged and stay${n === 1 ? 's' : ''} viewed.`
+			: ''
+		const unticked = changed ? `${changed} changed since and ${changed === 1 ? 'is' : 'are'} unticked.` : ''
+		return { viewed, notice: [kept, unticked].filter(Boolean).join(' ') || null }
 	}
 
 	/**
