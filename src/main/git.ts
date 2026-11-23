@@ -737,6 +737,49 @@ export async function wholeChangeCommit(root: string, head: string, parent: stri
 }
 
 /**
+ * A commit made only as an object, for a view of commits that never existed (a commit with its fixups folded in): nothing
+ * points at it, and with the committer and date fixed the same inputs give the same commit, so looking again writes
+ * nothing new.
+ */
+export async function standInCommit(
+	root: string,
+	o: { tree: string; parent: string; message: string; author: { name: string; email: string; date: string } },
+): Promise<string> {
+	if (!isSha(o.tree) || !isSha(o.parent)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['commit-tree', '--no-gpg-sign', o.tree, '-p', o.parent, '-F', '-'], 1024, {
+		input: Buffer.from(o.message.endsWith('\n') ? o.message : `${o.message}\n`, 'utf8'),
+		env: {
+			GIT_AUTHOR_NAME: o.author.name,
+			GIT_AUTHOR_EMAIL: o.author.email,
+			GIT_AUTHOR_DATE: o.author.date,
+			GIT_COMMITTER_NAME: 'Review',
+			GIT_COMMITTER_EMAIL: 'review@localhost',
+			GIT_COMMITTER_DATE: '1970-01-01T00:00:00Z',
+		},
+	})
+	const sha = r.stdout.toString('utf8').trim()
+	if (r.code !== 0 || !isSha(sha)) throw new AppFail('git-failed', `git commit-tree failed: ${r.stderr.trim()}`)
+	return sha
+}
+
+/** Each commit's author and whole message. */
+export async function commitDetails(
+	root: string,
+	shas: ReadonlyArray<string>,
+): Promise<Map<string, { name: string; email: string; date: string; message: string }>> {
+	const out = new Map<string, { name: string; email: string; date: string; message: string }>()
+	if (!shas.length) return out
+	if (!shas.every(isSha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['log', '--no-walk=unsorted', '--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%B%x1e', ...new Set(shas)], 64 * 1024 * 1024)
+	if (r.code !== 0) throw new AppFail('git-failed', `git log failed: ${r.stderr.trim()}`)
+	for (const rec of r.stdout.toString('utf8').split('\x1e')) {
+		const [sha, name, email, date, message] = rec.replace(/^\n/, '').split('\x1f')
+		if (isSha(sha)) out.set(sha, { name, email, date, message: message ?? '' })
+	}
+	return out
+}
+
+/**
  * The change `base..from` replayed onto `onto`, as a tree: a three-way merge done by `git merge-tree` in the object
  * store only (nothing checked out). `conflicted` lists the paths where it didn't apply cleanly; their content in the
  * tree carries conflict markers.

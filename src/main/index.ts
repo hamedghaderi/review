@@ -282,6 +282,9 @@ function registerIpc(): void {
 		return next
 	})
 	handle(IPC.commitList, (rid: unknown) => service.commitList(comparisonId(rid)))
+	handle(IPC.separateFixups, (rid: unknown, separate: unknown) =>
+		service.separateFixupCommits(comparisonId(rid), bool(separate, 'separate')),
+	)
 	handle(IPC.openCommit, (rid: unknown, sha: unknown) => service.openCommit(comparisonId(rid), commitSha(sha)))
 	handle(IPC.commitFileMap, (rid: unknown, cid: unknown, key: unknown) =>
 		service.commitFileMap(comparisonId(rid), comparisonId(cid), str(key, 'file')),

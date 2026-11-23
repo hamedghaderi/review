@@ -1566,6 +1566,25 @@ export function App() {
 		setSeenCommits((s) => new Set(s).add(`${id}:${sha}`))
 	}
 	/**
+	 * Shows the review's fixup! commits on their own or folded again (issue #276), staying on the open commit: the
+	 * commit a folded step stands for, or the step a commit now folds into.
+	 */
+	const separateFixups = async (separate: boolean): Promise<void> => {
+		if (!comparison) return
+		const id = comparison.id
+		const r = await window.review.separateFixups(id, separate)
+		if (comparisonIdRef.current !== id) return
+		if (!r.ok) return setNotice(`Could not ${separate ? 'unfold' : 'fold'} the fixups: ${r.error.message}`)
+		setCommitList(r.value)
+		const was = openCommit?.entry
+		if (!was) return
+		const real = new Set(was.folded ? [was.folded.original, ...was.folded.fixups.map((f) => f.sha)] : [was.sha])
+		const step =
+			r.value.commits.find((x) => real.has(x.sha)) ??
+			r.value.commits.find((x) => x.folded && (real.has(x.folded.original) || x.folded.fixups.some((f) => real.has(f.sha))))
+		void showCommit(step?.sha ?? null)
+	}
+	/**
 	 * `ai`: an AI review commit by commit (from Run AI review): the AI reviews each commit as the walkthrough reaches
 	 * it, with the reviewer chosen there, and moving on waits for it. Null: a walkthrough without the AI.
 	 */
@@ -2019,12 +2038,13 @@ export function App() {
 														? 'Commits unavailable'
 														: !commitList
 															? 'Loading commits…'
-															: `All changes · ${commitList.total} commit${commitList.total === 1 ? '' : 's'}`}
+															: `All changes · ${commitList.total} commit${commitList.total === 1 ? '' : 's'}${commitList.fixups ? ` (${commitList.fixups} fixup${commitList.fixups === 1 ? '' : 's'} folded in)` : ''}`}
 												</option>
 												{commitsHere.map((x, i) => (
 													<option key={x.sha} value={x.sha}>
 														{seenCommits.has(`${comparison.id}:${x.sha}`) ? '✓ ' : ''}
-														{i + 1}. {x.sha.slice(0, 7)} {x.subject}
+														{i + 1}. {(x.folded?.original ?? x.sha).slice(0, 7)} {x.subject}
+														{x.folded ? ` (+${x.folded.fixups.length} fixup${x.folded.fixups.length === 1 ? '' : 's'})` : ''}
 														{backportTag(backportsHere, x.sha)}
 														{commitChecks.checks[x.sha] ? ` · ${VERDICT_SHORT[commitChecks.checks[x.sha].verdict]}` : ''}
 													</option>
@@ -2344,6 +2364,7 @@ export function App() {
 												walking ? { ai: !!walkAi, finishing, onStop: () => setWalking(false), onFinish: () => void finishWalk() } : null
 											}
 											runs={commitRuns}
+											fixups={{ separate: !!commitList?.separate, onSeparate: (on) => void separateFixups(on) }}
 										/>
 									) : (
 										<>
