@@ -1,11 +1,16 @@
 import type { FixedPatch, GoneFinding, Hunk } from '../shared/types.ts'
-import { readPatchBetween } from './git.ts'
+import { mergeBase, readPatchBetween, replayChange } from './git.ts'
+import { Mapper } from './linemap.ts'
 import { parsePatch } from './patch.ts'
 
 /**
  * What changed at a gone finding between the head it was raised on and this run's (issue #215), so a "fixed" verdict
  * can be checked by eye before resolving a thread: the hunks at the finding's lines, and at the lines the double-check
  * says it read, since the fix often lands in a caller. Read from Git; no model is asked.
+ *
+ * After a force-push (issue #274) the earlier head's change is first replayed onto the base the branch has now, so the
+ * diff shows what the author changed and not what came in from the base branch. Where that can't be done, it compares
+ * the two heads as before and says so.
  */
 
 const NEAR = 3 // lines either side of a range that still count as touching it
@@ -46,6 +51,8 @@ export function selectFixedPatch(o: {
 	from: string
 	to: string
 	rewritten: boolean
+	replayed?: boolean // rewritten, and compared from the earlier change replayed onto the new base
+	unreplayed?: string | null // rewritten, compared head to head: why it couldn't be replayed
 	own: PatchFile & { range: Range | null }
 	checked: ReadonlyArray<{ path: string } & Range>
 	others: ReadonlyArray<PatchFile>
@@ -94,35 +101,70 @@ export function selectFixedPatch(o: {
 		notes.push(
 			`Nothing changed at the finding’s lines${o.checked.length ? ' or the lines the double-check read' : ''} between ${short(o.from)} and ${short(o.to)}.`,
 		)
-	if (o.rewritten)
-		notes.push(`The branch was force-pushed since ${short(o.from)}, so this can include changes that came from the base branch.`)
+	if (o.rewritten && o.replayed)
+		notes.push(
+			`The branch was force-pushed since ${short(o.from)}. Its change then is replayed onto the base it has now first, so what came from the base branch is left out.`,
+		)
+	else if (o.rewritten)
+		notes.push(
+			`The branch was force-pushed since ${short(o.from)}, so this can include changes that came from the base branch${o.unreplayed ? ` (${o.unreplayed})` : ''}.`,
+		)
 	return { from: o.from, to: o.to, parts, more, note: notes.length ? notes.join(' ') : null }
 }
 
-export async function loadFixedPatch(root: string, from: string, to: string, gone: GoneFinding, rewritten: boolean): Promise<FixedPatch> {
+/**
+ * `rewritten.base` is where the branch leaves its base branch now (the run's merge base); with it, a rewritten branch's
+ * earlier change is replayed onto it before comparing.
+ */
+export async function loadFixedPatch(
+	root: string,
+	from: string,
+	to: string,
+	gone: GoneFinding,
+	rewritten: false | { base: string | null },
+): Promise<FixedPatch> {
 	const a = gone.finding.anchor
 	const before = a.newPath ?? a.oldPath ?? a.fileKey
 	const now = gone.at?.newPath ?? null
+	let range = a.side === 'new' && a.startLine !== null ? { start: a.startLine, end: a.endLine ?? a.startLine } : null
+	const checked = parseChecked(gone.check?.checked ?? [])
+	const otherPaths = [...new Set(checked.map((c) => c.path))].filter((p) => p !== before && p !== now).slice(0, MAX_OTHER_FILES)
+	// After a force-push, compare from the earlier change replayed onto the new base, when it applies cleanly to these files.
+	let diffFrom = from
+	let unreplayed: string | null = null
+	if (rewritten && rewritten.base) {
+		try {
+			const oldBase = await mergeBase(root, from, rewritten.base, short(from), short(rewritten.base))
+			const r = await replayChange(root, { from, onto: rewritten.base, base: oldBase })
+			const clash = [before, ...(now ? [now] : []), ...otherPaths].filter((p) => r.conflicted.includes(p))
+			if (clash.length) unreplayed = `the base branch changed the same lines in ${clash.join(', ')}`
+			else {
+				if (range) {
+					const map = new Mapper(root, from, r.tree)
+					range = await map.near(await map.move(before), range.start, range.end)
+				}
+				diffFrom = r.tree
+			}
+		} catch {
+			unreplayed = 'the earlier change could not be replayed onto the new base'
+		}
+	}
 	const hunksOf = async (paths: Array<string>): Promise<Array<Hunk>> => {
-		const r = await readPatchBetween(root, from, to, [...new Set(paths)], PATCH_LIMIT)
+		const r = await readPatchBetween(root, diffFrom, to, [...new Set(paths)], PATCH_LIMIT)
 		if (r.truncated) throw new Error('the diff is too large to show')
 		return parsePatch(r.text).flatMap((s) => (s.binary ? [] : s.hunks))
 	}
 	try {
 		const own = await hunksOf(now ? [before, now] : [before])
-		const checked = parseChecked(gone.check?.checked ?? [])
 		const others: Array<PatchFile> = []
-		const otherPaths = [...new Set(checked.map((c) => c.path))].filter((p) => p !== before && p !== now)
-		for (const path of otherPaths.slice(0, MAX_OTHER_FILES)) others.push({ path, hunks: await hunksOf([path]) })
+		for (const path of otherPaths) others.push({ path, hunks: await hunksOf([path]) })
 		return selectFixedPatch({
 			from,
 			to,
-			rewritten,
-			own: {
-				path: now ?? before,
-				hunks: own,
-				range: a.side === 'new' && a.startLine !== null ? { start: a.startLine, end: a.endLine ?? a.startLine } : null,
-			},
+			rewritten: !!rewritten,
+			replayed: diffFrom !== from,
+			unreplayed,
+			own: { path: now ?? before, hunks: own, range },
 			checked,
 			others,
 		})

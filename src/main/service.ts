@@ -350,7 +350,8 @@ export class ReviewService {
 		const gone = run?.history?.gone.find((g) => g.finding.id === findingId)
 		if (!run?.history || !gone) throw new AppFail('not-found', 'That finding is no longer listed as gone.')
 		const data = this.loaded(reviewId)
-		return loadFixedPatch(data.root, run.history.from.headSha, run.headSha, gone, run.history.rewritten)
+		const rewritten = run.history.rewritten ? { base: data.comparison.headSha === run.headSha ? data.comparison.baseSha : null } : false
+		return loadFixedPatch(data.root, run.history.from.headSha, run.headSha, gone, rewritten)
 	}
 
 	/**

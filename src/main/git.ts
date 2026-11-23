@@ -660,6 +660,27 @@ export async function wholeChangeCommit(root: string, head: string, parent: stri
 	return sha
 }
 
+/**
+ * The change `base..from` replayed onto `onto`, as a tree: a three-way merge done by `git merge-tree` in the object
+ * store only (nothing checked out). `conflicted` lists the paths where it didn't apply cleanly; their content in the
+ * tree carries conflict markers.
+ */
+export async function replayChange(
+	root: string,
+	o: { from: string; onto: string; base: string },
+): Promise<{ tree: string; conflicted: Array<string> }> {
+	if (!isSha(o.from) || !isSha(o.onto) || !isSha(o.base)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(
+		root,
+		['merge-tree', '--write-tree', '-z', '--name-only', '--no-messages', `--merge-base=${o.base}`, o.onto, o.from],
+		16 * 1024 * 1024,
+		{ timeoutMs: 120_000 },
+	)
+	const [tree, ...paths] = r.stdout.toString('utf8').split('\0')
+	if ((r.code !== 0 && r.code !== 1) || !isSha(tree)) throw new AppFail('git-failed', `git merge-tree failed: ${r.stderr.trim()}`)
+	return { tree, conflicted: [...new Set(paths.filter(Boolean))] }
+}
+
 /** Whether commit `a` is `b` or one of its ancestors. */
 export async function isAncestor(root: string, a: string, b: string): Promise<boolean> {
 	if (!isSha(a) || !isSha(b)) throw new AppFail('invalid-input', 'Invalid commit id.')
