@@ -211,6 +211,41 @@ test('the context you gave the reviewer is saved, carried into a newer snapshot,
 	await assert.rejects(svc.saveReview({ ...v2.review, context: { notes: '', files: six } }), /too many/)
 })
 
+test('files marked viewed stay viewed in a newer snapshot only while their diff is the same', async () => {
+	const w = world()
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(w.dir)
+	const v1 = await svc.loadComparison(s.repo.id, { kind: 'target', target })
+	await svc.saveReview({ ...v1.review, viewed: ['f.txt', 'g.txt'] })
+
+	// v2 changes f.txt again and adds k.txt: g.txt stays viewed, f.txt is unticked, k.txt was never viewed.
+	w.run('checkout', '-q', 'topic')
+	w.commit({ 'f.txt': lines(10, { 5: 'L5 again' }), 'k.txt': 'k\n' }, 'v2')
+	w.run('checkout', '-q', 'main')
+	const v2 = await svc.loadComparison(s.repo.id, { kind: 'target', target, from: v1.review.id })
+	assert.notEqual(v2.review.id, v1.review.id)
+	assert.deepEqual(v2.review.viewed, ['g.txt'])
+	assert.match(v2.notice ?? '', /1 file you marked viewed is unchanged and stays viewed\. 1 changed since and is unticked\./)
+	assert.deepEqual(store.read().repos[s.repo.id].reviews[v1.review.id].viewed, ['f.txt', 'g.txt'])
+
+	// Reopening a snapshot keeps its own ticks.
+	await svc.saveReview({ ...v2.review, viewed: ['g.txt', 'k.txt'] })
+	const again = await svc.loadComparison(s.repo.id, { kind: 'target', target })
+	assert.equal(again.review.id, v2.review.id)
+	assert.deepEqual(again.review.viewed, ['g.txt', 'k.txt'])
+
+	// The base adds a line to g.txt and the branch merges it in: the branch's own edit is the same, but the file around it
+	// is not, so it is unticked.
+	w.commit({ 'g.txt': 'g1\ng2\ng3 on main\n' }, 'main moves')
+	w.run('checkout', '-q', 'topic')
+	w.run('merge', '-q', '--no-edit', 'main')
+	w.run('checkout', '-q', 'main')
+	const v3 = await svc.loadComparison(s.repo.id, { kind: 'target', target, from: v2.review.id })
+	assert.deepEqual(v3.review.viewed, ['k.txt'])
+})
+
 test('context images: stored once by content, checked by their bytes, and a review can only reference stored ones', async () => {
 	const w = world()
 	const store = ReviewStore.in(tmp())
