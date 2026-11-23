@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cyclePane, pane } from './panes.ts'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
+import { agentShareDetail, type AgentShare } from '../../shared/agentCommits.ts'
 import { announce, runAnnouncement } from './announce.ts'
 import { ago } from './branches.ts'
 import type {
@@ -800,6 +801,17 @@ export function App() {
 		const id = comparison.id
 		void window.review.takeoverInfo(session.repo.id, id).then((r) => {
 			if (r.ok && r.value && comparisonIdRef.current === id) setTakeover({ reviewId: id, value: r.value })
+		})
+	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// How many of the pull request's commits a coding agent wrote (issue #272), once per snapshot; nothing when none did.
+	const [agents, setAgents] = useState<{ reviewId: string; value: AgentShare } | null>(null)
+	useEffect(() => {
+		setAgents(null)
+		if (!session || !comparison?.pr) return
+		const id = comparison.id
+		void window.review.agentShare(session.repo.id, id).then((r) => {
+			if (r.ok && r.value && comparisonIdRef.current === id) setAgents({ reviewId: id, value: r.value })
 		})
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1915,6 +1927,7 @@ export function App() {
 									{comparison.pr && prReview?.id === comparison.id && (
 										<ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />
 									)}
+									{agents?.reviewId === comparison.id && <AgentShareLabel share={agents.value} />}
 									{seenable && (
 										<button
 											className="btn small ghost"
@@ -2827,6 +2840,18 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
  * "Takes over #12: Refunds", and the original's commit authors this pull request doesn't credit, as GitHub reports their
  * logins (no @, so nothing reads as a mention). A fact for you, never posted.
  */
+/** "Written with an agent: 9 of 12 commits", from the commits' Co-authored-by trailers and authors. A hint, not a verdict. */
+function AgentShareLabel({ share: s }: { share: AgentShare }) {
+	return (
+		<span
+			className="agent-share nowrap"
+			title={`${agentShareDetail(s)}.\nFrom the commits' Co-authored-by lines and authors. Merge commits aren't counted.`}
+		>
+			Written with an agent: {s.agentCommits} of {s.commits} {s.commits === 1 ? 'commit' : 'commits'}
+		</span>
+	)
+}
+
 function TakeoverBanner({ info: t }: { info: TakeoverInfo }) {
 	return (
 		<div className="banner" role="status">

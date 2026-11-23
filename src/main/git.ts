@@ -273,6 +273,23 @@ export async function listCommits(
 	return { commits: all.slice(0, max), total: all.length }
 }
 
+/** Every commit from `base` (left out) to `head`, without merges: its author and full message, for agent trailers. */
+export async function commitAuthorship(
+	cwd: string,
+	base: string,
+	head: string,
+): Promise<Array<{ sha: string; name: string; email: string; message: string }>> {
+	if (!isSha(base) || !isSha(head)) return []
+	const r = await git(cwd, ['log', '--no-merges', '--format=%H%x1f%an%x1f%ae%x1f%B%x1e', `${base}..${head}`], 64 * 1024 * 1024)
+	if (r.code !== 0) throw new AppFail('git-failed', `Could not read the commits: ${r.stderr.trim() || `exit ${r.code}`}`)
+	return r.stdout
+		.toString('utf8')
+		.split('\x1e')
+		.map((x) => x.replace(/^\n/, '').split('\x1f'))
+		.filter((x) => x.length === 4 && isSha(x[0]))
+		.map(([sha, name, email, message]) => ({ sha, name, email, message }))
+}
+
 /** The commits from `base` (left out) to `tip`, without merges; null when `tip` can't be read here. */
 export async function commitsUpTo(cwd: string, base: string, tip: string): Promise<Set<string> | null> {
 	if (!isSha(base) || !isSha(tip)) return null

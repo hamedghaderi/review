@@ -5435,6 +5435,10 @@ textarea.style-edit {
 	color: var(--text-2);
 	font-size: 12px;
 }
+.agent-share {
+	color: var(--text-2);
+	font-size: 12px;
+}
 
 /* Review view: what is under review gets its own row below the header, so the actions never squeeze the title away. */
 .target-bar {
