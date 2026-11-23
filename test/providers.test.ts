@@ -822,7 +822,7 @@ test('batches are sized to the model context window; too-small windows fail expl
 	const { store, access, comparison } = await reviewSetup(400)
 	const sizes: Array<number> = []
 	const small = createFakeProvider({
-		limits: { contextWindow: 14_336, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
+		limits: { contextWindow: 15_360, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
 		script: (req) => {
 			sizes.push(req.input.length)
 			return EMPTY_OUTPUT
@@ -862,7 +862,7 @@ test('a response whose reported input tokens show silent truncation is not count
 test('a model that becomes unavailable stops the run without retrying and without switching providers', async () => {
 	const { store, access, comparison } = await reviewSetup(400)
 	const gone = createFakeProvider({
-		limits: { contextWindow: 14_336, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
+		limits: { contextWindow: 15_360, maxOutputTokens: 2048 }, // the smallest window the instructions leave room in, with some to spare
 		script: () => new ProviderError('model-unavailable', 'Model "x" is not available'),
 	})
 	const run = await runWithProvider(store, access, comparison, gone)
