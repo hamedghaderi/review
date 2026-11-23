@@ -4236,6 +4236,12 @@ input.member-role {
 	margin-top: 2px;
 }
 
+/* A finding the reviewer raised although one of your reviewer notes covers it (issue #278) */
+.under-note {
+	border-left-color: var(--accent);
+	background: var(--panel);
+}
+
 /* Where a pull request stands on review: approved, changes requested, reviewed */
 .rv-badge {
 	flex-shrink: 0;
@@ -4451,6 +4457,37 @@ button.stack-row:hover {
 }
 .style-note.off {
 	opacity: 0.6;
+}
+
+/* Settings › AI review › Reviewer notes (issue #278) */
+.note-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.note-card {
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px 12px;
+	background: var(--panel);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.note-card.off {
+	opacity: 0.6;
+}
+.note-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.note-foot {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 }
 textarea.style-edit {
 	width: 100%;

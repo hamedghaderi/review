@@ -29,7 +29,16 @@ import type {
 import { PERSONA_IDS } from '../shared/personas.ts'
 import { SOUND_EVENTS, SOUNDS, storedSounds, type SoundId, type SoundPrefs } from '../shared/sounds.ts'
 import { MAX_STYLE_CHARS } from './ai/style.ts'
-import { MAX_STYLE_PRS, type StylePr } from '../shared/types.ts'
+import {
+	MAX_NOTE_PATH_CHARS,
+	MAX_NOTE_PATHS,
+	MAX_REVIEWER_NOTE_CHARS,
+	MAX_STYLE_PRS,
+	type FindingCategory,
+	type ReviewerNoteEdit,
+	type StylePr,
+} from '../shared/types.ts'
+import { CATEGORY_LABEL } from '../shared/findings.ts'
 import { isImageType } from './contextImages.ts'
 import { AppFail, isSha } from './git.ts'
 import { REPO_RE } from './github.ts'
@@ -99,6 +108,32 @@ export function soundPrefs(v: unknown): SoundPrefs {
 export function reviewStyleEdit(v: unknown): { text: string; on: boolean } {
 	const o = obj(v, 'review style')
 	return { text: str(o.text, 'review style', MAX_STYLE_CHARS), on: bool(o.on, 'review style on') }
+}
+
+/** A repository's reviewer notes key: "owner/name" (lower case) or "local:<repo id>". */
+export function notesKey(v: unknown): string {
+	const k = str(v, 'repository', 300)
+	if (k.startsWith('local:')) str(k.slice(6), 'repository', LIMITS.id)
+	else if (!REPO_RE.test(k) || k !== k.toLowerCase()) bad('repository')
+	return k
+}
+
+/** Your edit to a reviewer note (issue #278). Paths are trimmed; blank ones are dropped. */
+export function reviewerNoteEdit(v: unknown): ReviewerNoteEdit {
+	const o = obj(v, 'reviewer note')
+	const note = str(o.text, 'note', MAX_REVIEWER_NOTE_CHARS)
+	if (!note.trim()) bad('note (it is empty)')
+	const paths = arr(o.paths, 'paths')
+		.map((p) => text(p, 'path', MAX_NOTE_PATH_CHARS).trim())
+		.filter(Boolean)
+	if (paths.length > MAX_NOTE_PATHS) bad(`paths (at most ${MAX_NOTE_PATHS})`)
+	return {
+		id: o.id === null ? null : str(o.id, 'note id', LIMITS.id),
+		text: note.trim(),
+		rule: o.rule === null ? null : oneOf<FindingCategory>(o.rule, Object.keys(CATEGORY_LABEL) as Array<FindingCategory>, 'rule'),
+		paths: [...new Set(paths)],
+		on: bool(o.on, 'note on'),
+	}
 }
 
 /** Search words or a pull request link, for finding pull requests you reviewed. */

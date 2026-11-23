@@ -62,6 +62,8 @@ import {
 	notificationPrefs,
 	soundPrefs,
 	reviewStyleEdit,
+	reviewerNoteEdit,
+	notesKey,
 	stylePrList,
 	reviewedPrQuery,
 	githubToken,
@@ -623,6 +625,10 @@ function registerIpc(): void {
 	})
 	handle(IPC.setReviewStyle, async (raw: unknown) => service.setReviewStyle(reviewStyleEdit(raw)))
 	handle(IPC.settleReviewStyle, async (accept: unknown) => service.settleReviewStyle(bool(accept, 'accept')))
+	handle(IPC.notesRepos, async (repoId: unknown) => service.notesRepos(repoId === null ? null : str(repoId, 'repository')))
+	handle(IPC.reviewerNotes, async (key: unknown) => service.reviewerNotes(notesKey(key)))
+	handle(IPC.saveReviewerNote, async (key: unknown, raw: unknown) => service.saveReviewerNote(notesKey(key), reviewerNoteEdit(raw)))
+	handle(IPC.deleteReviewerNote, async (key: unknown, id: unknown) => service.deleteReviewerNote(notesKey(key), str(id, 'note id', 128)))
 	handle(IPC.stylePrs, async () => service.stylePrs())
 	handle(IPC.setStylePrs, async (raw: unknown) => service.setStylePrs(stylePrList(raw)))
 	handle(IPC.reviewedPrs, async (query: unknown) => service.reviewedPrs(reviewedPrQuery(query)))

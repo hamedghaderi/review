@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
+	NotesRepo,
+	ReviewerNote,
+	ReviewerNoteEdit,
 	AppClone,
 	AiRun,
 	ConsistencyReport,
@@ -65,6 +68,7 @@ import type {
 	TargetProbe,
 } from '../shared/types.ts'
 import {
+	MAX_REVIEWER_NOTES,
 	MAX_STEP_COMMITS,
 	targetKey,
 	type CommitCheck,
@@ -159,7 +163,7 @@ import {
 	type WatchedPr,
 } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
-import type { ReviewStore, StoreData } from './store.ts'
+import { notesKeyOf, type ReviewStore, type StoreData } from './store.ts'
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
 import {
 	carriedViewed,
@@ -2143,6 +2147,64 @@ export class ReviewService {
 		return ai.checkConsistency(access, reviewId, selection)
 	}
 
+	/**
+	 * Every repository reviewer notes can be kept for (issue #278): one per GitHub repository, however many clones of it
+	 * are open, else each clone on its own; plus any that still have notes but are no longer open here.
+	 */
+	notesRepos(repoId: string | null): { repos: Array<NotesRepo>; current: string | null } {
+		const d = this.store.read()
+		const labels = new Map<string, string>()
+		for (const s of Object.values(d.repos)) {
+			const key = notesKeyOf(s)
+			if (!labels.has(key) || !isManagedClone(s.root)) labels.set(key, key.startsWith('local:') ? basename(s.root) : key)
+		}
+		for (const key of Object.keys(d.reviewerNotes ?? {})) if (!labels.has(key)) labels.set(key, key.replace(/^local:/, ''))
+		const repos = [...labels].map(([key, label]) => ({ key, label, notes: d.reviewerNotes?.[key]?.length ?? 0 }))
+		repos.sort((a, b) => a.label.localeCompare(b.label))
+		const s = repoId ? d.repos[repoId] : undefined
+		return { repos, current: s ? notesKeyOf(s) : null }
+	}
+
+	reviewerNotes(key: string): Array<ReviewerNote> {
+		return this.store.read().reviewerNotes?.[key] ?? []
+	}
+
+	async saveReviewerNote(key: string, edit: ReviewerNoteEdit): Promise<Array<ReviewerNote>> {
+		let out: Array<ReviewerNote> = []
+		await this.store.update((d) => {
+			const list = [...(d.reviewerNotes?.[key] ?? [])]
+			const now = new Date().toISOString()
+			const { id, ...rest } = edit
+			if (id === null) {
+				if (list.length >= MAX_REVIEWER_NOTES)
+					throw new AppFail('invalid-input', `A repository can have at most ${MAX_REVIEWER_NOTES} reviewer notes.`)
+				list.push({ id: randomUUID(), ...rest, addedAt: now, editedAt: null })
+			} else {
+				const i = list.findIndex((n) => n.id === id)
+				if (i < 0) throw new AppFail('not-found', 'That note no longer exists.')
+				const cur = list[i]
+				const changed = cur.text !== rest.text || cur.rule !== rest.rule || cur.paths.join('\n') !== rest.paths.join('\n')
+				list[i] = { ...cur, ...rest, editedAt: changed ? now : cur.editedAt }
+			}
+			d.reviewerNotes = { ...d.reviewerNotes, [key]: list }
+			out = list
+		})
+		return out
+	}
+
+	async deleteReviewerNote(key: string, id: string): Promise<Array<ReviewerNote>> {
+		let out: Array<ReviewerNote> = []
+		await this.store.update((d) => {
+			const list = (d.reviewerNotes?.[key] ?? []).filter((n) => n.id !== id)
+			const next = { ...d.reviewerNotes }
+			if (list.length) next[key] = list
+			else delete next[key]
+			d.reviewerNotes = next
+			out = list
+		})
+		return out
+	}
+
 	/** Your review style note, or null until it is built. */
 	reviewStyle(): ReviewStyle | null {
 		return this.store.read().reviewStyle ?? null
@@ -2260,6 +2322,10 @@ export class ReviewService {
 				findRelated: (sources, signal) => findRelated(data.root, data.comparison.headSha, sources, signal),
 				testExamples: (fileKey) => this.testExamples(data, fileKey),
 				pastDecisions: () => this.pastDecisions(repoId, data.comparison),
+				reviewerNotes: () => {
+					const repo = this.store.read().repos[repoId]
+					return repo ? this.reviewerNotes(notesKeyOf(repo)).filter((n) => n.on) : []
+				},
 				earlierLimitations: () => this.earlierLimitations(repoId, data.comparison),
 				findingBaseline: (pinned) => this.findingBaseline(reviewId, pinned),
 				tools: (budget, external) =>

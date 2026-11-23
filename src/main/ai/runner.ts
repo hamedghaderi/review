@@ -20,6 +20,7 @@ import {
 	type FindingVerification,
 	type NearMissCheck,
 	type PastDecision,
+	type ReviewerNote,
 	type EarlierLimitations,
 	type ReviewContext,
 	type Takeover,
@@ -52,6 +53,7 @@ import { buildBotClaimRequest, buildVerifyRequest, MAX_BOT_CHECKS, MAX_VERIFIED,
 import { buildNearMissRequest, parseNearMissCheck, pickNearMisses, type NearMissCandidate } from './nearMiss.ts'
 import { buildMergeRequest, readGroups } from './merge.ts'
 import { decisionFacts, earlierFacts } from './decisions.ts'
+import { noteFacts, notesSummary } from './notes.ts'
 import { recheckFacts } from './incremental.ts'
 import { findingTexts, Seen, seenInBatch, unreadRefs, verificationTexts, withUnread } from './citations.ts'
 import { traceFindings, type Baseline } from './history.ts'
@@ -177,6 +179,8 @@ export interface RunInput {
 	previousFindings: Array<Finding> // from earlier runs of the same review, used to mark repeats
 	/** Findings the reviewer dismissed on earlier runs of the same pull request or branch, told to this run. */
 	decisions?: Array<PastDecision>
+	/** Your reviewer notes for this repository that are on (issue #278), sent with the files they cover. */
+	notes?: Array<ReviewerNote>
 	/** What the newest finished run of the same pull request or branch could not settle; a retry passes its run's own. */
 	earlier?: EarlierLimitations | null
 	/**
@@ -277,6 +281,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	let discussion: Discussion | null = null // the PR's threads, once read, for checking the ones bots started
 	let takeoverFact: ContextFact | null = null // what the pull request this one takes over changed (issue #168)
 	let takeoverFiles = new Set<string>()
+	let noteLabels = new Map<string, ReviewerNote>() // the reviewer notes sent, by the label the requests use
 	const workers: Array<Worker> = retry
 		? retryWorkers(run, retry.rules, retry.providers, lookups, options.style ?? null)
 		: options.team
@@ -474,6 +479,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			}
 			const told = decisionFacts(input.decisions ?? [], sources)
 			const leads = earlierFacts(input.earlier ?? null, sources)
+			const noted = noteFacts(input.notes ?? [], sources)
+			noteLabels = noted.labels
 			let drift: ContextFact | null = null
 			if (input.loadDrift && workers.some((w) => w.rules.includes('drift'))) {
 				try {
@@ -489,6 +496,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				...(facts?.facts ?? []),
 				...importFacts(related?.importers ?? []),
 				...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
+				...noted.facts,
 				...told,
 				...leads,
 			]
@@ -540,6 +548,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					...(takeoverFact ? [{ kind: 'takeover' as const, text: takeoverFact.title }] : []),
 					...(facts?.summary ?? []),
 					...(related?.importers.length ? [{ kind: 'structure' as const, text: importSummary(related.importers) }] : []),
+					...(notesSummary(noteLabels) ? [{ kind: 'notes' as const, text: notesSummary(noteLabels)! }] : []),
 					...(told.length
 						? [
 								{
@@ -610,10 +619,13 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			})
 		const facts = input.loadFacts ? await input.loadFacts(sources, controller.signal) : null
 		if (controller.signal.aborted) return finish(null)
+		const noted = noteFacts(input.notes ?? [], sources)
+		noteLabels = noted.labels
 		const allFacts = [
 			...(facts?.facts ?? []),
 			...importFacts(related?.importers ?? []),
 			...recheckFacts(run.rechecked ?? [], run.carriedFrom ?? null),
+			...noted.facts,
 			...decisionFacts(input.decisions ?? [], sources),
 			...earlierFacts(input.earlier ?? null, sources),
 		]
@@ -771,7 +783,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						`${w.role ? `${w.role}: the` : 'The'} endpoint does not support native structured output; JSON mode was used and the output was validated against the same schema.`,
 					)
 				checkTruncation(batch, response.usage?.inputTokens ?? null, w)
-				const value = validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads)
+				const value = validateBatchOutput(response.output, batch, input.comparison, run.id, w.rules, levels, background.threads, noteLabels)
 				const seen = seenInBatch(batch, tools?.log.seen ?? [])
 				// What MCP tools returned can't be told apart from the rest of the answer, so every finding of the request carries it.
 				const servers = mcpServers(tools?.log.external ?? [])

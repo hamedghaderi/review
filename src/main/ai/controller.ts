@@ -25,6 +25,7 @@ import {
 	type ReviewRule,
 	type ReviewTeam,
 	type PastDecision,
+	type ReviewerNote,
 	type EarlierLimitations,
 	type ReviewContext,
 	type FindingLevel,
@@ -130,6 +131,8 @@ export interface ComparisonAccess {
 	testExamples?(fileKey: string): Promise<Array<{ path: string; text: string }>>
 	/** Findings the reviewer dismissed on earlier runs of this pull request or branch, newest first. */
 	pastDecisions?(): Array<PastDecision>
+	/** Your reviewer notes for this repository that are on (issue #278). */
+	reviewerNotes?(): Array<ReviewerNote>
 	/** What the newest finished run of this pull request or branch could not settle. */
 	earlierLimitations?(): EarlierLimitations | null
 	/** The newest finished run on an earlier snapshot of this pull request or branch, moved here; `pinned`: that run instead. */
@@ -1614,6 +1617,7 @@ export class AiController {
 				external,
 				automatic: background !== null,
 				decisions: access.pastDecisions?.() ?? [],
+				notes: access.reviewerNotes?.() ?? [],
 				earlier: input.retry ? (input.retry.run.earlier ?? null) : (access.earlierLimitations?.() ?? null),
 			},
 			options,
