@@ -77,6 +77,13 @@ export const KEY_ACTIONS: ReadonlyArray<KeyAction> = [
 	{ id: 'findingPrev', label: 'Previous finding', group: 'Findings', defaults: same('k') },
 	{ id: 'findingAccept', label: 'Add finding to the review', group: 'Findings', defaults: same('a') },
 	{ id: 'findingDismiss', label: 'Dismiss finding', group: 'Findings', defaults: same('d'), note: 'Then 1–4 picks the reason.' },
+	{
+		id: 'runDrawer',
+		label: 'Show or hide the run',
+		group: 'View',
+		defaults: same('Mod+j'),
+		note: 'The drawer under the review that shows what an AI review run did, step by step.',
+	},
 	{ id: 'zoomReset', label: 'Actual size', group: 'View', defaults: same('Mod+Shift+0'), menu: true },
 	{ id: 'zoomIn', label: 'Zoom in', group: 'View', defaults: same('Mod+=', 'Mod+Shift+='), menu: true },
 	{ id: 'zoomOut', label: 'Zoom out', group: 'View', defaults: same('Mod+-'), menu: true },

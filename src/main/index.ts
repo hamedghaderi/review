@@ -856,6 +856,11 @@ app.whenReady().then(async () => {
 			// Your edits to its findings come after a run, so this is when there may be enough new ones to update your style.
 			if (before === 'running' && run.status === 'completed') void service.refreshReviewStyle(connections.view().questionModel)
 		},
+		{
+			onBeat: (runId, beat) => {
+				if (win && !win.isDestroyed()) win.webContents.send(IPC.aiRunBeat, runId, beat)
+			},
+		},
 	)
 	connections.onRemoved((id) => ai.cancelForConnection(id))
 	connections.onChange((v) => {

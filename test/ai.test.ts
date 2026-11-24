@@ -10,6 +10,7 @@ import { evidenceMatches, locateEvidence, onlyKnownMentions, validateBatchOutput
 import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
 import { buildInput, instructionsFor, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
+import { createJourney, lookupBeat, MAX_LOOKUP_BEATS, verdictTone } from '../src/main/ai/journey.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunInput, type RunnerOptions } from '../src/main/ai/runner.ts'
 import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
@@ -28,6 +29,7 @@ import {
 	type Finding,
 	type Hunk,
 	type Review,
+	type RunBeat,
 } from '../src/shared/types.ts'
 import {
 	acceptFinding,
@@ -3628,4 +3630,123 @@ test('resilience: its own rule and budget, never blocking, and the prompt keeps 
 		'at most 2 resilience findings per file and 3 per review; never a bug',
 	)
 	assert.match(b.held[0].heldBack!, /2 resilience findings per file/)
+})
+
+test('journey: stages, lookups, the request, its findings and the double-check verdict, in order, live and on the run', async () => {
+	const s = sources()
+	const live: Array<{ runId: string; beat: RunBeat }> = []
+	const provider = createFakeProvider({
+		script: (req, _call, lookups) => {
+			if (req.schema?.name === 'finding_verification')
+				return req.input.includes('Title: Addition replaces subtraction')
+					? { verdict: 'wrong', reason: 'Every caller wants a sum.', level: null, checked: [] }
+					: { verdict: 'holds', reason: 'Nothing checks the token now.', level: 'blocking', checked: [] }
+			if (!lookups.length)
+				return {
+					tool_calls: [
+						{ name: 'read_file', args: { path: 'src/app.ts', version: 'head', start_line: 1, end_line: 8 } },
+						{ name: 'search_code', args: { text: 'add(', path_prefix: null } },
+						{ name: 'read_file', args: { path: '../etc/passwd', version: 'head', start_line: null, end_line: null } },
+					],
+				}
+			return out([
+				finding(),
+				finding({
+					excerpt_id: 'E2',
+					file_path: 'src/gone.ts',
+					side: 'old',
+					start_line: 2,
+					end_line: 2,
+					title: 'The token is no longer checked',
+					evidence: 'check(token)',
+				}),
+				finding({ severity: 'should_fix', disproof: null, title: 'Comment above no longer matches the code' }),
+			])
+		},
+	})
+	const tools = (budget: { maxCalls: number; maxChars: number }) => {
+		const log = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [], seen: [] }
+		return {
+			definitions: [],
+			log,
+			exhausted: () => log.calls >= budget.maxCalls,
+			call: async (name: string, args: { path?: string }) => {
+				log.calls++
+				return args.path?.startsWith('..') ? { text: 'no', error: true } : { text: `${name} ok`, error: false }
+			},
+		} as never
+	}
+	const handle = startRun(
+		{ reviewId: s.comp.id, comparison: s.comp, scope: { kind: 'all' }, loadSources: async () => s.srcs, previousFindings: [], tools },
+		options(provider, { limits: { ...LIMITS, verify: true } }),
+		() => {},
+		(runId, beat) => live.push({ runId, beat }),
+	)
+	const run = await handle.done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	const journey = run.journey!
+	assert.deepEqual(
+		live.map((x) => x.beat),
+		journey,
+		'every beat is sent as it happens and kept on the run',
+	)
+	assert.ok(live.every((x) => x.runId === run.id))
+	assert.deepEqual(
+		journey.map((b) => b.seq),
+		journey.map((_, i) => i),
+	)
+	const shape = journey.map((b) =>
+		b.kind === 'stage' ? `stage:${b.stage}` : b.kind === 'finding' || b.kind === 'verdict' ? `${b.kind}:${b.tone}:${b.title}` : b.kind,
+	)
+	assert.deepEqual(shape, [
+		'stage:sources',
+		'stage:packed',
+		'read',
+		'search', // the refused read of ../etc/passwd is left out
+		'request',
+		'finding:pending:Addition replaces subtraction', // neutral until the double-check says which
+		'finding:pending:The token is no longer checked',
+		'finding:concern:Comment above no longer matches the code',
+		'stage:double-check',
+		'verdict:cleared:Addition replaces subtraction',
+		'verdict:confirmed:The token is no longer checked',
+		'stage:finished',
+	])
+	const read = journey.find((b) => b.kind === 'read')
+	assert.deepEqual(read && { path: read.path, start: read.start, end: read.end }, { path: 'src/app.ts', start: 1, end: 8 })
+	const request = journey.find((b) => b.kind === 'request')
+	assert.deepEqual(request && { findings: request.findings, total: request.total, error: request.error }, {
+		findings: 3,
+		total: 1,
+		error: null,
+	})
+	const last = journey.at(-1)!
+	assert.equal(last.kind === 'stage' && last.text, 'Finished · 3 findings, 2 blocking')
+})
+
+test("journey: a retry continues the run's journey; past the cap, lookups stop being recorded but the rest is kept", () => {
+	const beats: Array<RunBeat> = [{ kind: 'stage', stage: 'finished', text: 'Finished', seq: 0, at: 1, memberId: null }]
+	const sent: Array<RunBeat> = []
+	const j = createJourney(
+		beats,
+		(b) => sent.push(b),
+		() => 5,
+	)
+	for (let i = 0; i < MAX_LOOKUP_BEATS + 10; i++) j.add('m1', { kind: 'search', text: `t${i}` })
+	j.add(null, { kind: 'stage', stage: 'finished', text: 'Retry: finished' })
+	assert.equal(beats.filter((b) => b.kind === 'search').length, MAX_LOOKUP_BEATS)
+	assert.equal(beats.at(-1)?.kind, 'stage')
+	assert.equal(beats.at(-1)?.seq, MAX_LOOKUP_BEATS + 1)
+	assert.equal(sent.length, MAX_LOOKUP_BEATS + 1)
+	assert.equal(sent[0].seq, 1)
+	assert.equal(sent[0].memberId, 'm1')
+	assert.equal(lookupBeat('get_issue', {}, false, (n) => (n === 'get_issue' ? 'jira: get_issue' : null))?.kind, 'tool')
+	assert.equal(
+		lookupBeat('nope', {}, false, () => null),
+		null,
+	)
+	assert.equal(verdictTone('unsure', true), 'unsettled')
+	assert.equal(verdictTone('safe'), 'cleared')
+	assert.equal(verdictTone('problem'), 'confirmed')
+	assert.equal(verdictTone('unsure'), 'concern')
 })

@@ -95,6 +95,7 @@ import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
+import { drawerUsed, rememberDrawerUsed, RunDrawer, RunDrawerHandle } from './RunDrawer.tsx'
 import { playSound } from './sounds.ts'
 import { Home, useHomeInbox } from './Home.tsx'
 import { useStored } from './useStored.ts'
@@ -215,6 +216,14 @@ export function App() {
 	const [aiRuns, setAiRuns] = useState<Array<AiRun>>([])
 	const [aiError, setAiError] = useState<string | null>(null)
 	const [rightTab, setRightTab] = useState<'comments' | 'findings' | 'description' | 'github' | 'context'>('comments')
+	// The Run drawer under the review (issue #299), and the run it shows (null: the newest).
+	const [drawerOpen, setDrawerOpen] = useState(false)
+	const [drawerRun, setDrawerRun] = useState<string | null>(null)
+	const toggleDrawer = (): void =>
+		setDrawerOpen((open) => {
+			if (!open) rememberDrawerUsed()
+			return !open
+		})
 	const [discussion, setDiscussion] = useState<{ reviewId: string; value: Discussion | null; loading: boolean } | null>(null)
 	const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null)
 	const left = usePanelWidth('panel.left', 280, 180, 600)
@@ -889,6 +898,7 @@ export function App() {
 			if (isKey(e, 'outcomes')) return run(() => setPage('outcomes'))
 			if (!sessionRef.current) return
 			if (isKey(e, 'quickOpen')) return run(() => setPaletteOpen(true))
+			if (isKey(e, 'runDrawer')) return run(toggleDrawer)
 			const list = tabsRef.current
 			const n = [1, 2, 3, 4, 5, 6, 7, 8].find((i) => isKey(e, `repo${i}`))
 			const tab = n ? list[n - 1] : isKey(e, 'repoLast') ? list[list.length - 1] : undefined
@@ -1070,8 +1080,14 @@ export function App() {
 		if (!r.ok && r.error.code === 'over-budget' && window.confirm(`${r.error.message}\n\nStart this review anyway?`))
 			r = await window.review.startAiReview(comparison.id, scope, choice, true)
 		if (!r.ok) setAiError(r.error.message)
-		else if (comparisonIdRef.current === r.value.reviewId)
+		else if (comparisonIdRef.current === r.value.reviewId) {
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
+			// A run you start opens the Run drawer, once you have opened the drawer yourself.
+			if (drawerUsed()) {
+				setDrawerRun(r.value.id)
+				setDrawerOpen(true)
+			}
+		}
 	}
 
 	// Asked when the run dialog opens; a newly finished run can change the answer, so it is part of the key.
@@ -2699,6 +2715,21 @@ export function App() {
 								<div className="empty">{busy ?? 'Loading…'}</div>
 							)}
 						</main>
+					)}
+					{!drawerOpen && !page && !home && view === 'review' && comparison && review && (
+						<RunDrawerHandle running={!!activeRun} onOpen={toggleDrawer} />
+					)}
+					{drawerOpen && !page && !home && view === 'review' && comparison && review && (
+						<RunDrawer
+							runs={aiRuns}
+							runId={drawerRun}
+							onRunId={setDrawerRun}
+							onClose={() => setDrawerOpen(false)}
+							onOpen={(path, line) => {
+								if (comparison.files.some((x) => x.key === path)) selectFile(path)
+								else setOutside({ path, side: 'new', line, scrollTop: null, nonce: Date.now() })
+							}}
+						/>
 					)}
 				</div>
 				{fixedOpen && session && comparison?.pr && (
