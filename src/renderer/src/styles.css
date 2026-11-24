@@ -4051,6 +4051,12 @@ input.member-role {
 .explain-change.empty {
 	background: var(--panel);
 }
+.explain-change > .ask-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
 .explain-head {
 	display: flex;
 	flex-wrap: wrap;
@@ -4162,6 +4168,26 @@ input.member-role {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+}
+/* "This is wrong" under an AI text (issue #289) */
+.conclusion-flag {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.flag-wrong-mark {
+	color: var(--danger);
+}
+.flag-wrong-form {
+	display: inline-flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+.flag-wrong-form input {
+	min-width: 220px;
+	flex: 1;
 }
 .ask-box.conclusion-ask {
 	margin: 0;

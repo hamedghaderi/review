@@ -1175,6 +1175,18 @@ export function App() {
 		const f = comparison?.files.find((x) => (x.newPath ?? x.oldPath) === path)
 		if (f) selectFile(f.key)
 	}
+	// "This is wrong" on the explanation, the conclusion or an answer (issue #289): both come back with the flag in place.
+	const flagAiText = async (textId: string, flag: { note: string | null } | null): Promise<string | null> => {
+		if (!comparison) return 'No review is open.'
+		const reviewId = comparison.id
+		const r = await window.review.flagAiText(reviewId, textId, flag)
+		if (!r.ok) return r.error.message
+		if (comparisonIdRef.current === reviewId) {
+			setExplanation(r.value.explanation)
+			setConclusion(r.value.conclusion)
+		}
+		return null
+	}
 	const explainPanel = (
 		<ExplainChange
 			explanation={explanation}
@@ -1185,6 +1197,7 @@ export function App() {
 			described={!!comparison?.pr?.body?.trim()}
 			onExplain={() => void explainChange()}
 			onOpenPath={openPath}
+			onFlag={flagAiText}
 		/>
 	)
 	// The AI's conclusion on the whole change, shown in place of the code. Like questions, only the main process writes it.
@@ -2429,6 +2442,7 @@ export function App() {
 														onWrite={() => void conclude(null)}
 														onAsk={conclude}
 														onHide={() => setConclusionOpen(false)}
+														onFlag={flagAiText}
 													/>
 												) : outside ? (
 													<FileView comparisonId={comparison.id} file={outside} placeRef={placeRef} onLookup={(r) => void lookup(r)} />

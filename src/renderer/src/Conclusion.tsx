@@ -7,6 +7,7 @@ import { ago } from './branches.ts'
 import { Markdown } from './Markdown.tsx'
 import { scrollBehavior } from './motion.ts'
 import { SpeakerHeading } from './SpeakerHeading.tsx'
+import { FlagWrong } from './FlagWrong.tsx'
 
 interface Props {
 	conclusion: ChangeConclusion | null
@@ -23,6 +24,7 @@ interface Props {
 	onWrite(): void
 	onAsk(question: string): Promise<boolean> // false: not sent, so the box keeps the text
 	onHide(): void
+	onFlag(textId: string, flag: { note: string | null } | null): Promise<string | null>
 }
 
 /**
@@ -44,6 +46,7 @@ export function Conclusion({
 	onWrite,
 	onAsk,
 	onHide,
+	onFlag,
 }: Props) {
 	const [text, setText] = useState('')
 	const end = useRef<HTMLDivElement>(null)
@@ -131,7 +134,15 @@ export function Conclusion({
 							{first.error ? (
 								<p className="error-text selectable">{first.text}</p>
 							) : (
-								<Markdown text={first.text} paths={paths} onOpenPath={onOpenPath} />
+								<>
+									<Markdown text={first.text} paths={paths} onOpenPath={onOpenPath} />
+									<div className="conclusion-flag">
+										<span className="muted small" aria-hidden>
+											{first.model}
+										</span>
+										<FlagWrong textId={first.textId} flagged={first.flagged} what="conclusion" onFlag={onFlag} />
+									</div>
+								</>
 							)}
 							{c && c.omitted.length > 0 && (
 								<p className="small muted">
@@ -171,9 +182,12 @@ export function Conclusion({
 								<article key={m.id} className="conclusion-a">
 									<SpeakerHeading>{speaker(m)}</SpeakerHeading>
 									<Markdown text={m.text} paths={paths} onOpenPath={onOpenPath} />
-									<span className="muted small" aria-hidden>
-										{m.model}
-									</span>
+									<div className="conclusion-flag">
+										<span className="muted small" aria-hidden>
+											{m.model}
+										</span>
+										<FlagWrong textId={m.textId} flagged={m.flagged} what="answer" onFlag={onFlag} />
+									</div>
 								</article>
 							),
 						)}

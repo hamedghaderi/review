@@ -275,7 +275,10 @@ const AI_TEXT_LABEL: Record<AiTextFeature, string> = {
 	reply: 'Drafted replies',
 }
 
-/** The AI's text besides findings (issue #289): how much it made, and for drafted replies, what you sent of them. */
+/**
+ * The AI's text besides findings (issue #289): how much it made, how much of it you said was wrong, and for drafted
+ * replies, what you sent of them. A count of flags, never an accuracy rate: a text nobody flagged isn't shown right.
+ */
 function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltered: boolean }) {
 	if (!rows.length) return null
 	const reply = (r: AiTextRow, n: number) => (r.feature === 'reply' ? n : <span className="muted">—</span>)
@@ -283,8 +286,9 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 		<>
 			<div className="section-title">AI text besides findings</div>
 			<p className="muted small">
-				Explanations, conclusions, answers about the conclusion and drafted replies, by model. For drafted replies: what you sent. A light
-				edit changed a fifth of the draft’s words or fewer; a draft you emptied or never sent counts as not sent.
+				Explanations, conclusions, answers about the conclusion and drafted replies, by model. Flagged wrong counts the ones you said were
+				wrong; one nobody flagged isn’t proven right. For drafted replies: what you sent. A light edit changed a fifth of the draft’s words
+				or fewer; a draft you emptied or never sent counts as not sent.
 				{notFiltered ? ' Prompt version and kind of finding don’t apply to these, so those filters are left out here.' : ''}
 			</p>
 			<table className="level-table usage-table outcomes-table">
@@ -293,6 +297,9 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 						<th>Text</th>
 						<th>Model</th>
 						<th className="num">Made</th>
+						<th className="num" title="You said it was wrong. Hover a count for what you noted.">
+							Flagged wrong
+						</th>
 						<th className="num" title="Drafted replies you sent without changing a word">
 							Sent as drafted
 						</th>
@@ -318,6 +325,9 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 									{r.detail && <span className="muted small"> · {r.detail}</span>}
 								</td>
 								<td className="num">{c.made}</td>
+								<td className="num" title={r.notes.length ? r.notes.map((n) => `“${n}”`).join('\n') : undefined}>
+									{r.feature === 'reply' ? <span className="muted">—</span> : c.flagged}
+								</td>
 								<td className="num">{reply(r, c.asDrafted)}</td>
 								<td className="num">{reply(r, c.light)}</td>
 								<td className="num">{reply(r, c.rewrite)}</td>
