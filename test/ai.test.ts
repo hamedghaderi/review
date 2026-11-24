@@ -3704,8 +3704,8 @@ test('journey: stages, lookups, the request, its findings and the double-check v
 		'read',
 		'search', // the refused read of ../etc/passwd is left out
 		'request',
-		'finding:confirmed:Addition replaces subtraction',
-		'finding:confirmed:The token is no longer checked',
+		'finding:pending:Addition replaces subtraction', // neutral until the double-check says which
+		'finding:pending:The token is no longer checked',
 		'finding:concern:Comment above no longer matches the code',
 		'stage:double-check',
 		'verdict:cleared:Addition replaces subtraction',

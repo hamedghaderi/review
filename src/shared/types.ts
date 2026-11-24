@@ -2044,9 +2044,10 @@ export type RunStage =
 
 /**
  * Colour of a beat, by the state of the code it found: cleared = fine (green), confirmed = a problem (red), concern =
- * not disproved or not blocking (amber), unsettled = never decided (grey).
+ * not disproved or not blocking (amber), unsettled = never decided (grey), pending = a blocking finding as raised,
+ * neutral until its double-check says which (its verdict is its own beat).
  */
-export type BeatTone = 'cleared' | 'confirmed' | 'concern' | 'unsettled'
+export type BeatTone = 'cleared' | 'confirmed' | 'concern' | 'unsettled' | 'pending'
 
 export type RunBeatBody =
 	| { kind: 'stage'; stage: RunStage; text: string }

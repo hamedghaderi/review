@@ -49,9 +49,12 @@ export function lookupBeat(name: string, args: unknown, refused: boolean, label:
 	}
 }
 
-/** Blocking findings are problems; the rest are concerns. */
+/**
+ * A raised blocking finding is a claim until the double-check tries it, so it stays neutral and its verdict colours
+ * it; the rest are concerns.
+ */
 export function severityTone(s: Severity): BeatTone {
-	return s === 'blocking' || s === 'high' ? 'confirmed' : 'concern'
+	return s === 'blocking' || s === 'high' ? 'pending' : 'concern'
 }
 
 /** A double-check, a near-miss check or a bot-thread check, as the state of the code it found. */

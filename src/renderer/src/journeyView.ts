@@ -69,13 +69,14 @@ export function lookupText(b: Lookup): string {
 	}
 }
 
-export const TONE_GLYPH: Record<BeatTone, string> = { cleared: '✓', confirmed: '✗', concern: '⚠', unsettled: '○' }
+export const TONE_GLYPH: Record<BeatTone, string> = { cleared: '✓', confirmed: '✗', concern: '⚠', unsettled: '○', pending: '◇' }
 
 export const TONE_LABEL: Record<BeatTone, string> = {
 	cleared: 'Cleared',
 	confirmed: 'Problem',
 	concern: 'Concern',
 	unsettled: 'Not settled',
+	pending: 'Raised, not double-checked yet',
 }
 
 /** Who a beat belongs to: the member's role in a team run, nothing for the run itself or a single-model run. */

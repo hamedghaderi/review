@@ -7174,6 +7174,9 @@ body.resizing-y * {
 .run-beat.tone-concern .run-glyph {
 	color: var(--warn-fg);
 }
+.run-beat.tone-pending .run-glyph {
+	color: var(--text);
+}
 .run-beat.tone-unsettled .run-glyph,
 .run-beat.tone-unsettled .run-text {
 	color: var(--text-2);
