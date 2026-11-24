@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { RunBeat, RunBeatBody } from '../src/shared/types.ts'
-import { journeyRows, lookupSummary, lookupText, withLive } from '../src/renderer/src/journeyView.ts'
+import type { AiRun, BeatTone, RunBeat, RunBeatBody, RunStage } from '../src/shared/types.ts'
+import { journeyRows, journeyTally, lookupSummary, lookupText, trailLayout, withLive } from '../src/renderer/src/journeyView.ts'
 
 let seq = 0
 const beat = (memberId: string | null, body: RunBeatBody): RunBeat => ({ ...body, seq: seq++, at: 0, memberId }) as RunBeat
@@ -53,4 +53,100 @@ test("run rows: live beats add to the run's own, once each and in order, and nev
 		withLive(stored, [stored[1], later[1], later[0], later[1]]).map((b) => b.seq),
 		[0, 1, 2, 3],
 	)
+})
+
+const teamRun = (late = false): AiRun =>
+	({
+		startedAt: new Date(0).toISOString(),
+		team: {
+			id: 't',
+			name: 'T',
+			members: [
+				{ id: 'm1', role: 'Opus' },
+				{ id: 'm2', role: 'Codex', ...(late ? { late: true } : {}) },
+			],
+		},
+	}) as unknown as AiRun
+const at = (m: string | null, stageName: RunStage) => beat(m, { kind: 'stage', stage: stageName, text: stageName })
+const shape = (items: ReturnType<typeof trailLayout>['items']) =>
+	items.map((x) =>
+		x.kind === 'row'
+			? `${x.lane}|${x.lines.map((l) => `${l.lane}${l.top ? '^' : ''}${l.bottom ? 'v' : ''}`).join(' ')}`
+			: `${x.kind}:${x.lanes.join(',')}${x.kind === 'merge' && x.through.length ? `/${x.through.join(',')}` : ''}`,
+	)
+
+test('trail: one model stays on the spine, which starts at the first step and stops at the newest', () => {
+	seq = 0
+	const rows = journeyRows([at(null, 'sources'), at(null, 'packed'), read(null, 'a.ts'), request(null)])
+	const { items, lanes } = trailLayout({ startedAt: '', team: null } as unknown as AiRun, rows)
+	assert.equal(lanes, 0)
+	assert.deepEqual(shape(items), ['0|0v', '0|0^v', '0|0^v', '0|0^'])
+})
+
+test('trail: a team splits into a strand per reviewer once packed, and joins again at the next stage', () => {
+	seq = 0
+	const rows = journeyRows([
+		at(null, 'sources'),
+		at(null, 'packed'),
+		read('m1', 'a.ts'),
+		request('m2'),
+		request('m1'),
+		at(null, 'double-check'),
+		beat('m2', { kind: 'verdict', of: 'finding', title: 't', tone: 'cleared', reason: 'r', findingId: 'f', path: null, line: null }),
+		at(null, 'finished'),
+	])
+	const { items, lanes } = trailLayout(teamRun(), rows)
+	assert.equal(lanes, 2)
+	assert.deepEqual(shape(items), [
+		'0|0v',
+		'0|0^v',
+		'fork:1,2',
+		'1|1^v 2^v',
+		'2|1^v 2^v',
+		'1|1^v 2^v',
+		'merge:1,2',
+		'0|0^v',
+		'0|0^v', // a check after the join sits on the spine, with its checker's name on the row
+		'0|0^',
+	])
+})
+
+test('trail: a reviewer the run does not wait for keeps its strand past the join, until the late finish', () => {
+	seq = 0
+	const rows = journeyRows([at(null, 'packed'), request('m1'), at(null, 'finished'), request('m2'), at(null, 'late-finished')])
+	assert.deepEqual(shape(trailLayout(teamRun(true), rows).items), [
+		'0|0v',
+		'fork:1,2',
+		'1|1^v 2^v',
+		'merge:1/2',
+		'0|0^v 2^v',
+		'2|0^v 2^v',
+		'merge:2',
+		'0|0^',
+	])
+})
+
+test('tally: a raised finding counts as its double-check verdict once there is one', () => {
+	seq = 0
+	const f = (id: string, tone: BeatTone) =>
+		beat('m1', { kind: 'finding', findingId: id, title: id, severity: 'blocking', path: 'a', line: 1, tone })
+	const v = (id: string, tone: BeatTone) =>
+		beat('m2', { kind: 'verdict', of: 'finding', title: id, tone, reason: '', findingId: id, path: null, line: null })
+	const near = beat('m2', {
+		kind: 'verdict',
+		of: 'near-miss',
+		title: 'n',
+		tone: 'confirmed',
+		reason: '',
+		findingId: null,
+		path: null,
+		line: null,
+	})
+	assert.deepEqual(journeyTally([f('a', 'pending'), f('b', 'pending'), f('c', 'concern'), v('a', 'cleared'), near]), {
+		cleared: 1,
+		confirmed: 1,
+		concern: 1,
+		unsettled: 0,
+		pending: 1,
+	})
 })

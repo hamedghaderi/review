@@ -105,3 +105,84 @@ export function withLive(stored: ReadonlyArray<RunBeat>, live: ReadonlyArray<Run
 	const seen = new Set<number>()
 	return [...stored, ...extra.filter((b) => !seen.has(b.seq) && seen.add(b.seq))]
 }
+
+/** A line of the trail through one row: the whole row, or only above or below its node. */
+export interface TrailLine {
+	lane: number // 0: the run's spine; 1…n: the team's members in order
+	top: boolean // from the row's top edge to its node
+	bottom: boolean // from its node to the bottom edge
+}
+
+/**
+ * The trail drawn beside the rows (issue #299): one spine for the run, which splits into a strand per reviewer once the
+ * requests are packed and joins again at the next stage. A reviewer the run does not wait for keeps its strand past the
+ * join, until its last step or the run's late finish.
+ */
+export type TrailItem =
+	| { kind: 'row'; row: JourneyRow; lane: number; lines: Array<TrailLine> }
+	| { kind: 'fork'; lanes: Array<number> }
+	| { kind: 'merge'; lanes: Array<number>; through: Array<number> }
+
+export function trailLayout(run: AiRun, rows: ReadonlyArray<JourneyRow>): { items: Array<TrailItem>; lanes: number } {
+	const members = run.team?.members ?? []
+	const split = members.length > 1
+	const laneOf = (id: string | null): number => (id ? members.findIndex((m) => m.id === id) + 1 : 0)
+	const late = new Set(members.flatMap((m, i) => (m.late ? [i + 1] : [])))
+	const memberOf = (row: JourneyRow): string | null => (row.kind === 'beat' ? row.beat.memberId : row.memberId)
+	const isStage = (row: JourneyRow, stage?: string): boolean =>
+		row.kind === 'beat' && row.beat.kind === 'stage' && (!stage || row.beat.stage === stage)
+	// Where each late strand ends: its own last step.
+	const lastOf = new Map<number, number>()
+	rows.forEach((r, i) => lastOf.set(laneOf(memberOf(r)), i))
+	// Once the late reviewers are done the run says so, and their strands join the spine there.
+	const lateEnd = rows.findIndex((r) => isStage(r, 'late-finished'))
+	if (lateEnd >= 0) for (const l of late) lastOf.set(l, lateEnd)
+
+	const items: Array<TrailItem> = []
+	let phase: 'spine' | 'lanes' | 'after' = 'spine'
+	let strands: Array<number> = [] // member lanes drawn through the current row, besides the spine
+	const all = members.map((_, i) => i + 1)
+	rows.forEach((row, i) => {
+		const first = i === 0
+		const last = i === rows.length - 1
+		if (phase === 'lanes' && isStage(row)) {
+			const through = strands.filter((l) => late.has(l) && (lastOf.get(l) ?? -1) > i)
+			items.push({ kind: 'merge', lanes: strands.filter((l) => !through.includes(l)), through })
+			strands = through
+			phase = 'after'
+		} else if (phase === 'after' && strands.length && isStage(row, 'late-finished')) {
+			items.push({ kind: 'merge', lanes: strands, through: [] })
+			strands = []
+		}
+		const own = laneOf(memberOf(row))
+		const lane = phase === 'lanes' ? own || 1 : strands.includes(own) ? own : 0
+		const spine = phase !== 'lanes'
+		const forks = phase === 'spine' && split && isStage(row, 'packed')
+		const lines: Array<TrailLine> = [
+			...(spine ? [{ lane: 0, top: !first, bottom: !last || forks }] : []),
+			// A strand stops at the newest step while the run goes on, and a late one at its own last step.
+			...strands.map((l) => ({ lane: l, top: true, bottom: !last && !(phase === 'after' && lastOf.get(l) === i) })),
+		]
+		items.push({ kind: 'row', row, lane, lines })
+		if (forks) {
+			items.push({ kind: 'fork', lanes: all })
+			strands = all
+			phase = 'lanes'
+		}
+		// A late strand with nothing more to show ends at its last node.
+		if (phase === 'after') strands = strands.filter((l) => (lastOf.get(l) ?? -1) > i)
+	})
+	return { items, lanes: split ? members.length : 0 }
+}
+
+/** How the run's findings and checks stand now: a raised finding counts as its verdict once it has one. */
+export function journeyTally(beats: ReadonlyArray<RunBeat>): Record<BeatTone, number> {
+	const tally: Record<BeatTone, number> = { cleared: 0, confirmed: 0, concern: 0, unsettled: 0, pending: 0 }
+	const verdicts = new Map<string, BeatTone>()
+	for (const b of beats) if (b.kind === 'verdict' && b.of === 'finding' && b.findingId) verdicts.set(b.findingId, b.tone)
+	for (const b of beats) {
+		if (b.kind === 'finding') tally[verdicts.get(b.findingId) ?? b.tone]++
+		else if (b.kind === 'verdict' && b.of !== 'finding') tally[b.tone]++
+	}
+	return tally
+}

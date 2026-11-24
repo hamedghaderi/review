@@ -7098,25 +7098,148 @@ body.resizing-y * {
 	min-height: 0;
 	overflow: auto;
 	margin: 0;
-	padding: 6px 0 10px;
+	padding: 8px 0 14px;
 	list-style: none;
 	font-size: 12px;
 	user-select: text;
 }
+/* Each team member's colour, for its name, its strand and its nodes. */
+.run-drawer [data-slot='0'] {
+	--member: #7c5cff;
+}
+.run-drawer [data-slot='1'] {
+	--member: #d9468c;
+}
+.run-drawer [data-slot='2'] {
+	--member: #c98a00;
+}
+.run-drawer [data-slot='3'] {
+	--member: #1ea7b8;
+}
+.run-drawer [data-slot='4'] {
+	--member: #3c9a4a;
+}
+.run-drawer [data-slot='5'] {
+	--member: #e0612b;
+}
 .run-beat {
 	display: flex;
-	align-items: baseline;
+	align-items: flex-start;
 	gap: 8px;
-	padding: 2px 12px;
+	padding: 0 12px 0 0;
+	min-height: 22px;
+}
+.run-beat > :not(.run-rail) {
+	padding-top: 3px;
 }
 .run-beat:hover {
 	background: var(--hover);
 }
-.run-glyph {
-	flex: 0 0 14px;
-	text-align: center;
-	color: var(--text-2);
-	font-weight: 600;
+.run-rail {
+	position: relative;
+	align-self: stretch;
+	flex-shrink: 0;
+}
+.run-line {
+	position: absolute;
+	width: 2px;
+	margin-left: -1px;
+	border-radius: 1px;
+	background: var(--member, var(--accent-line));
+	transform-origin: top;
+}
+.run-node {
+	position: absolute;
+	display: grid;
+	place-items: center;
+	width: 8px;
+	height: 8px;
+	transform: translate(-50%, -50%);
+	border-radius: 50%;
+	font-style: normal;
+	font-weight: 700;
+	line-height: 1;
+	background: var(--panel);
+}
+/* A stage: a ring on the spine with a soft glow. */
+.run-node.node-stage {
+	width: 11px;
+	height: 11px;
+	border: 2px solid var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.run-node.node-stage::after {
+	content: '';
+	width: 3px;
+	height: 3px;
+	border-radius: 50%;
+	background: var(--accent);
+}
+.run-node.node-end {
+	width: 17px;
+	height: 17px;
+	font-size: 10px;
+	color: var(--accent-text);
+	background: var(--accent);
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+/* What a reviewer read: a small dot on its strand. */
+.run-node.node-look {
+	width: 5px;
+	height: 5px;
+	background: var(--member, var(--text-2));
+	opacity: 0.7;
+}
+/* A request answered: a diamond in the reviewer's colour; one that failed: a hollow grey ring. */
+.run-node.node-req {
+	width: 7px;
+	height: 7px;
+	border-radius: 1px;
+	transform: translate(-50%, -50%) rotate(45deg);
+	background: var(--member, var(--text-2));
+}
+.run-node.node-fail {
+	width: 9px;
+	height: 9px;
+	border: 1.5px solid var(--text-2);
+}
+/* A finding as raised (outlined) and a verdict (filled), in the colour of what it says about the code. */
+.run-node.node-mark,
+.run-node.node-verdict {
+	width: 16px;
+	height: 16px;
+	font-size: 9px;
+	--tone: var(--text-2);
+	border: 1.5px solid var(--tone);
+	color: var(--tone);
+}
+.run-node.node-verdict {
+	color: var(--panel);
+	background: var(--tone);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+.run-node.tone-cleared {
+	--tone: var(--ok);
+}
+.run-node.tone-confirmed {
+	--tone: var(--danger);
+}
+.run-node.tone-concern {
+	--tone: var(--warn-fg);
+}
+.run-node.tone-pending {
+	--tone: var(--text);
+}
+.run-link {
+	display: block;
+	height: 12px;
+	line-height: 0;
+}
+.run-link path {
+	fill: none;
+	stroke: var(--member, var(--accent-line));
+	stroke-width: 2;
+	stroke-linecap: round;
 }
 .run-text {
 	flex: 1;
@@ -7138,11 +7261,11 @@ body.resizing-y * {
 	color: var(--text-2);
 }
 .run-beat.is-stage {
-	margin-top: 6px;
+	min-height: 26px;
 	font-weight: 600;
 }
-.run-beat.is-stage .run-glyph {
-	color: var(--accent);
+.run-beat.tone-unsettled .run-text {
+	color: var(--text-2);
 }
 .run-time {
 	flex-shrink: 0;
@@ -7165,22 +7288,6 @@ body.resizing-y * {
 .run-place:hover {
 	text-decoration: underline;
 }
-.run-beat.tone-cleared .run-glyph {
-	color: var(--ok);
-}
-.run-beat.tone-confirmed .run-glyph {
-	color: var(--danger);
-}
-.run-beat.tone-concern .run-glyph {
-	color: var(--warn-fg);
-}
-.run-beat.tone-pending .run-glyph {
-	color: var(--text);
-}
-.run-beat.tone-unsettled .run-glyph,
-.run-beat.tone-unsettled .run-text {
-	color: var(--text-2);
-}
 .run-member {
 	flex-shrink: 0;
 	padding: 0 6px;
@@ -7190,21 +7297,100 @@ body.resizing-y * {
 	color: var(--member, var(--text-2));
 	background: color-mix(in srgb, var(--member, var(--text-2)) 14%, transparent);
 }
-.run-member[data-slot='0'] {
-	--member: #7c5cff;
+.run-beat > .run-member {
+	margin-top: 3px;
+	padding-top: 0;
 }
-.run-member[data-slot='1'] {
-	--member: #d9468c;
+.run-tally {
+	display: inline-flex;
+	gap: 8px;
+	margin-left: 4px;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
 }
-.run-member[data-slot='2'] {
-	--member: #c98a00;
+.run-tally .tone-cleared {
+	color: var(--ok);
 }
-.run-member[data-slot='3'] {
-	--member: #1ea7b8;
+.run-tally .tone-confirmed {
+	color: var(--danger);
 }
-.run-member[data-slot='4'] {
-	--member: #3c9a4a;
+.run-tally .tone-concern {
+	color: var(--warn-fg);
 }
-.run-member[data-slot='5'] {
-	--member: #e0612b;
+.run-tally .tone-pending,
+.run-tally .tone-unsettled {
+	color: var(--text-2);
+}
+/*
+ * Motion, only for steps that arrive while you watch (or replay): the strand draws down to the new node, the node pops
+ * in, a verdict sends out a ring. The newest node breathes while the run goes on. Reduced motion stops all of it.
+ */
+.run-beat.fresh > :not(.run-rail) {
+	animation: run-in 260ms ease-out both;
+}
+.run-beat.fresh .run-line {
+	animation: run-draw 220ms ease-out both;
+}
+.run-beat.fresh .run-node {
+	animation: run-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 120ms both;
+}
+.run-beat.fresh .run-node.node-req {
+	animation-name: run-pop-diamond;
+}
+.run-beat.fresh .run-node.node-verdict::after,
+.run-beat.fresh .run-node.node-end::after {
+	content: '';
+	position: absolute;
+	inset: -2px;
+	border-radius: 50%;
+	border: 2px solid var(--tone, var(--accent));
+	animation: run-ring 700ms ease-out 260ms both;
+}
+.run-beat.tip .run-node {
+	animation: run-breathe 1.6s ease-in-out infinite;
+}
+.run-beat.tip .run-node.node-req {
+	animation: none;
+}
+@keyframes run-in {
+	from {
+		opacity: 0;
+		transform: translateX(-4px);
+	}
+}
+@keyframes run-draw {
+	from {
+		transform: scaleY(0);
+	}
+}
+@keyframes run-pop {
+	from {
+		transform: translate(-50%, -50%) scale(0.2);
+		opacity: 0;
+	}
+}
+@keyframes run-pop-diamond {
+	from {
+		transform: translate(-50%, -50%) rotate(45deg) scale(0.2);
+		opacity: 0;
+	}
+}
+@keyframes run-ring {
+	from {
+		transform: scale(0.8);
+		opacity: 0.9;
+	}
+	to {
+		transform: scale(2.4);
+		opacity: 0;
+	}
+}
+@keyframes run-breathe {
+	0%,
+	100% {
+		filter: drop-shadow(0 0 0 transparent);
+	}
+	50% {
+		filter: drop-shadow(0 0 4px var(--tone, var(--member, var(--accent))));
+	}
 }
