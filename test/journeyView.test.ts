@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { AiRun, BeatTone, RunBeat, RunBeatBody, RunStage } from '../src/shared/types.ts'
 import { journeyRows, journeyTally, lookupSummary, lookupText, trailLayout, withLive } from '../src/renderer/src/journeyView.ts'
@@ -149,4 +150,19 @@ test('tally: a raised finding counts as its double-check verdict once there is o
 		unsettled: 0,
 		pending: 1,
 	})
+})
+
+// The drawer's styles sit at the end of styles.css, so a class name it shares with the rest of the app restyles that
+// too: `.run-line` once turned the Findings panel's header into a 2px strip.
+test('run drawer styles: no class or animation the rest of the window already uses', () => {
+	const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+	const cut = css.indexOf('/* The Run drawer under the review')
+	assert.ok(cut > 0)
+	const before = css.slice(0, cut)
+	const mine = css.slice(cut)
+	const names = new Set([...mine.matchAll(/\.([a-z][a-z0-9-]*)/g), ...mine.matchAll(/@keyframes ([a-z-]+)/g)].map((m) => m[1]))
+	// Combined with the drawer's own classes only (`.run-beat.fresh`), never styled on their own.
+	for (const n of ['fresh', 'live', 'tip']) names.delete(n)
+	const shared = [...names].filter((n) => new RegExp(`(\\.|@keyframes )${n}(?![a-z0-9-])`).test(before))
+	assert.deepEqual(shared, [])
 })

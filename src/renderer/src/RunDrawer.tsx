@@ -319,7 +319,7 @@ function Rail({
 				l.top || l.bottom ? (
 					<i
 						key={l.lane}
-						className="run-line"
+						className="run-strand"
 						data-slot={slotOf(run, l.lane)}
 						style={{
 							left: laneX(l.lane),

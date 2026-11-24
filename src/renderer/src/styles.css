@@ -7140,7 +7140,7 @@ body.resizing-y * {
 	align-self: stretch;
 	flex-shrink: 0;
 }
-.run-line {
+.run-strand {
 	position: absolute;
 	width: 2px;
 	margin-left: -1px;
@@ -7328,7 +7328,7 @@ body.resizing-y * {
 .run-beat.fresh > :not(.run-rail) {
 	animation: run-in 260ms ease-out both;
 }
-.run-beat.fresh .run-line {
+.run-beat.fresh .run-strand {
 	animation: run-draw 220ms ease-out both;
 }
 .run-beat.fresh .run-node {
