@@ -7408,3 +7408,189 @@ body.resizing-y * {
 		filter: drop-shadow(0 0 4px var(--tone, var(--member, var(--accent))));
 	}
 }
+/* The drawer's tabs, and the Console (issue #299): Review's commands, each kept as a block with what it did. */
+.run-drawer-tabs {
+	display: flex;
+	gap: 2px;
+}
+.run-drawer-tabs button {
+	height: 22px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 5px;
+	background: none;
+	color: var(--text-2);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.run-drawer-tabs button:hover {
+	color: var(--text);
+	background: var(--hover);
+}
+.run-drawer-tabs button.on {
+	color: var(--text);
+	background: var(--track);
+}
+.console {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	font-size: 12px;
+}
+.console-blocks {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 8px 12px 4px;
+	user-select: text;
+}
+.console-empty {
+	margin: 4px 0;
+}
+.console-block {
+	margin-bottom: 8px;
+	padding: 6px 10px;
+	border: 1px solid var(--border);
+	border-radius: 7px;
+	background: var(--bg);
+}
+.console-line {
+	color: var(--text);
+	font-size: 12px;
+}
+.console-prompt {
+	color: var(--accent);
+	font-weight: 700;
+}
+.console-out {
+	margin: 4px 0 0;
+	color: var(--text);
+}
+.console-out.error {
+	color: var(--danger);
+}
+.console-help td {
+	padding: 1px 12px 1px 0;
+	vertical-align: top;
+}
+.console-help td:first-child {
+	white-space: nowrap;
+	color: var(--accent);
+}
+.console-list {
+	margin: 4px 0 0;
+	padding: 0;
+	list-style: none;
+}
+.console-list li {
+	padding: 1px 0;
+}
+.console-trail {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+.console-stages {
+	display: inline-flex;
+	align-items: center;
+}
+.console-stage {
+	padding: 0 6px;
+	border-radius: 8px;
+	font-size: 10px;
+	line-height: 16px;
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.console-dash {
+	display: inline-block;
+	width: 10px;
+	height: 2px;
+	margin: 0 2px;
+	vertical-align: middle;
+	background: var(--accent-line);
+}
+.console-dash.pending {
+	width: 18px;
+	background: repeating-linear-gradient(90deg, var(--accent-line) 0 3px, transparent 3px 6px);
+	animation: console-flow 0.8s linear infinite;
+}
+@keyframes console-flow {
+	to {
+		background-position: 6px 0;
+	}
+}
+.console-tone {
+	font-variant-numeric: tabular-nums;
+}
+.console-tone.tone-confirmed {
+	color: var(--danger);
+}
+.console-tone.tone-cleared {
+	color: var(--ok);
+}
+.console-tone.tone-concern {
+	color: var(--warn-fg);
+}
+.console-tone.tone-pending,
+.console-tone.tone-unsettled {
+	color: var(--text-2);
+}
+.console-input {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 12px;
+	padding: 6px 10px;
+	border: 1px solid var(--border-strong);
+	border-radius: 7px;
+	background: var(--bg);
+}
+.console-input:focus-within {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.console-field {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	font-size: 12px;
+}
+.console-field input {
+	position: relative;
+	width: 100%;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--text);
+	font: inherit;
+}
+/* What Tab would fill in, in grey after what you typed, under the field. */
+.console-ghost {
+	position: absolute;
+	inset: 0;
+	color: var(--text-2);
+	opacity: 0.7;
+	white-space: pre;
+	overflow: hidden;
+	pointer-events: none;
+}
+.console-typed {
+	visibility: hidden;
+}
+.console-hint {
+	min-height: 16px;
+	padding: 4px 14px 8px;
+	color: var(--text-2);
+	font-size: 11px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.console-hint.ai .mono {
+	color: var(--accent);
+}

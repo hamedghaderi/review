@@ -42,6 +42,7 @@ interface Props {
 	onSubmitted?(review: PublishedReview): void // then the dialog closes
 	viewed: ReadonlySet<string> // file keys you marked viewed
 	onGoToFile(fileKey: string): void // closes the dialog and opens the file
+	initialEvent?: ReviewEvent | null // the verdict asked for in the Console ("approve"); still yours to change before submitting
 }
 
 /** Your pending review on GitHub: its comments are visible only to you until it is submitted. */
@@ -80,6 +81,7 @@ export function PublishDialog({
 	onSubmitted,
 	viewed,
 	onGoToFile,
+	initialEvent,
 }: Props) {
 	const [plan, setPlan] = useState<PublishPlan | null>(null)
 	const [error, setError] = useState<AppError | null>(null)
@@ -90,7 +92,7 @@ export function PublishDialog({
 	const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null) // while adding comments
 	// Blocking findings you added to the review are changes you are asking for, so that is the suggestion.
 	// A prepared automatic review starts with its verdict and summary (an approval is re-checked: see headMoved).
-	const [event, setEvent] = useState<ReviewEvent>(prepared?.event ?? (blocking?.added ? 'REQUEST_CHANGES' : 'COMMENT'))
+	const [event, setEvent] = useState<ReviewEvent>(initialEvent ?? prepared?.event ?? (blocking?.added ? 'REQUEST_CHANGES' : 'COMMENT'))
 	const [summary, setSummaryState] = useState(() => unsentSummaries.get(reviewId) ?? prepared?.body ?? '')
 	// Kept while the dialog is closed (e.g. to add a GIPHY key in Settings), until the review is submitted.
 	const setSummary = (text: string): void => {

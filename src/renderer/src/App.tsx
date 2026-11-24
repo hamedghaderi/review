@@ -52,6 +52,7 @@ import type {
 	Side,
 	SymbolHit,
 	TargetProbe,
+	ReviewEvent,
 } from '../../shared/types.ts'
 import { commitsLabel, targetKey, type CommitList, type CommitView as CommitData, type ReviewingPrefs } from '../../shared/types.ts'
 import { CommitView, type DraftHandlers } from './CommitView.tsx'
@@ -95,7 +96,8 @@ import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
 import { AiOrb } from './AiOrb.tsx'
-import { drawerUsed, rememberDrawerUsed, RunDrawer, RunDrawerHandle } from './RunDrawer.tsx'
+import { drawerUsed, rememberDrawerUsed, RunDrawer, RunDrawerHandle, type DrawerTab } from './RunDrawer.tsx'
+import { Console, type ConsoleActions } from './Console.tsx'
 import { playSound } from './sounds.ts'
 import { Home, useHomeInbox } from './Home.tsx'
 import { useStored } from './useStored.ts'
@@ -207,6 +209,7 @@ export function App() {
 	useKeymap() // shortcut labels follow Settings › Keymap
 	const [feedbackOpen, setFeedbackOpen] = useState(false)
 	const [publishOpen, setPublishOpen] = useState(false)
+	const [publishEvent, setPublishEvent] = useState<ReviewEvent | null>(null) // the verdict the Console asked for, if any
 	const [pendingReview, setPendingReview] = useState<PendingReview | null>(null)
 	const browserRef = useRef<BrowserHandle>(null)
 	const [aiSettings, setAiSettings] = useState<AiSettingsView | null>(null)
@@ -219,6 +222,7 @@ export function App() {
 	// The Run drawer under the review (issue #299), and the run it shows (null: the newest).
 	const [drawerOpen, setDrawerOpen] = useState(false)
 	const [drawerRun, setDrawerRun] = useState<string | null>(null)
+	const [drawerTab, setDrawerTab] = useState<DrawerTab>('run')
 	const toggleDrawer = (): void =>
 		setDrawerOpen((open) => {
 			if (!open) rememberDrawerUsed()
@@ -1069,8 +1073,9 @@ export function App() {
 		bugsOnly = false,
 		persona: PersonaId | null = null,
 		overBudget = false,
-	): Promise<void> => {
-		if (!comparison || !reviewer) return
+	): Promise<{ run: AiRun } | { error: string }> => {
+		if (!comparison) return { error: 'No review is open.' }
+		if (!reviewer) return { error: 'Choose a model or a team to review with first.' }
 		await persist()
 		setAiError(null)
 		setRightTab('findings')
@@ -1079,8 +1084,11 @@ export function App() {
 		// A budget was reached after the dialog showed the estimate: ask, as the dialog would have.
 		if (!r.ok && r.error.code === 'over-budget' && window.confirm(`${r.error.message}\n\nStart this review anyway?`))
 			r = await window.review.startAiReview(comparison.id, scope, choice, true)
-		if (!r.ok) setAiError(r.error.message)
-		else if (comparisonIdRef.current === r.value.reviewId) {
+		if (!r.ok) {
+			setAiError(r.error.message)
+			return { error: r.error.message }
+		}
+		if (comparisonIdRef.current === r.value.reviewId) {
 			setAiRuns((runs) => (runs.some((x) => x.id === r.value.id) ? runs : [...runs, r.value]))
 			// A run you start opens the Run drawer, once you have opened the drawer yourself.
 			if (drawerUsed()) {
@@ -1088,6 +1096,7 @@ export function App() {
 				setDrawerOpen(true)
 			}
 		}
+		return { run: r.value }
 	}
 
 	// Asked when the run dialog opens; a newly finished run can change the answer, so it is part of the key.
@@ -1273,6 +1282,58 @@ export function App() {
 		if (r.ok) setConclusion(r.value)
 		else setConclusionError(r.error.message)
 		return r.ok
+	}
+	// The Console's commands (issue #299) go through the same code as the buttons; the ones that change GitHub open their dialog.
+	const openAt = (path: string, line: number | null): void => {
+		if (comparison?.files.some((x) => x.key === path)) selectFile(path)
+		else setOutside({ path, side: 'new', line, scrollTop: null, nonce: Date.now() })
+	}
+	const reviewerName =
+		reviewer?.kind === 'team'
+			? (aiSettings?.teams.find((t) => t.id === reviewer.teamId)?.name ?? null)
+			: (reviewer?.selection.modelId ?? null)
+	const consoleActions: ConsoleActions = {
+		review: (scope) => startAi(scope === 'all' ? { kind: 'all' } : { kind: 'changed' }),
+		estimate: async (scope) => {
+			if (!comparison || !reviewer) return null
+			const r = await window.review.estimateRun(comparison.id, reviewer, scope === 'all' ? { kind: 'all' } : { kind: 'changed' })
+			return r.ok ? r.value : null
+		},
+		stop: () => {
+			if (!activeRun) return 'No AI review is running.'
+			void window.review.cancelAiReview(activeRun.id)
+			return null
+		},
+		conclude: async (question) => {
+			if (concludeDisabled) return { error: concludeDisabled }
+			if (question !== null && !conclusion) return { error: 'There is no conclusion yet to ask about. Run “conclude” first.' }
+			if (!comparison) return { error: 'No review is open.' }
+			const reviewId = comparison.id
+			const r = await window.review.conclude(reviewId, question)
+			if (!r.ok) return { error: r.error.message }
+			if (comparisonIdRef.current === reviewId) setConclusion(r.value)
+			const last = [...r.value.messages].reverse().find((m) => m.role === 'ai')
+			return last && !last.error ? { text: last.text } : { error: last?.text ?? 'No answer came back.' }
+		},
+		openFile: openAt,
+		openFinding: (f) => openFinding(f),
+		showRun: (id) => {
+			setDrawerRun(id)
+			setDrawerTab('run')
+		},
+		submit: (event) => {
+			if (!comparison?.pr) return 'This review is not of a pull request, so there is nothing to submit on GitHub.'
+			if (!github) return 'Connect GitHub in Settings first.'
+			setPublishEvent(event)
+			setPublishOpen(true)
+			return null
+		},
+		resolve: () => {
+			if (!comparison?.pr) return 'This review is not of a pull request.'
+			if (!fixedRows.some((x) => x.state === 'confirmed')) return 'None of your threads was found fixed by the newest run.'
+			setFixedOpen(true)
+			return null
+		},
 	}
 	const toggleConclusion = (): void => {
 		if (conclusionOpen) return setConclusionOpen(false)
@@ -2725,10 +2786,19 @@ export function App() {
 							runId={drawerRun}
 							onRunId={setDrawerRun}
 							onClose={() => setDrawerOpen(false)}
-							onOpen={(path, line) => {
-								if (comparison.files.some((x) => x.key === path)) selectFile(path)
-								else setOutside({ path, side: 'new', line, scrollTop: null, nonce: Date.now() })
-							}}
+							onOpen={openAt}
+							tab={drawerTab}
+							onTab={setDrawerTab}
+							consolePane={
+								<Console
+									reviewId={comparison.id}
+									runs={aiRuns}
+									review={review}
+									reviewer={reviewerName}
+									askModel={askDisabled ? null : (aiSettings?.questionModel?.modelId ?? null)}
+									actions={consoleActions}
+								/>
+							}
 						/>
 					)}
 				</div>
@@ -2750,10 +2820,12 @@ export function App() {
 				{publishOpen && session && comparison?.pr && github && (
 					<PublishDialog
 						repoId={session.repo.id}
+						initialEvent={publishEvent}
 						reviewId={comparison.id}
 						writeTokenUrl={github.writeTokenUrl}
 						onClose={() => {
 							setPublishOpen(false)
+							setPublishEvent(null)
 							loadDiscussion(session.repo.id, comparison.id) // what was just published shows up as discussion
 						}}
 						onOpenGitHubSettings={() => {
