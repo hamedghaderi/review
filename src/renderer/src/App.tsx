@@ -1263,6 +1263,29 @@ export function App() {
 		setConclusionOpen(true)
 		if (!conclusion && !concludingHere && !concludeDisabled) void conclude(null)
 	}
+	// The file:line references in the explanation and the conclusion's messages, opened at the head commit once each is
+	// shown (issue #289). Only the check's result is merged in, so it never undoes a newer answer that arrived meanwhile.
+	const citationChecks = useRef(new Set<string>()) // text ids asked about in this window
+	useEffect(() => {
+		if (!comparison) return
+		const reviewId = comparison.id
+		const due = [explanation, ...(conclusion?.messages ?? [])].flatMap((t) =>
+			t?.textId && !t.citations && !('error' in t && t.error) && !citationChecks.current.has(t.textId) ? [t.textId] : [],
+		)
+		for (const textId of due) {
+			citationChecks.current.add(textId)
+			void window.review.checkAiCitations(reviewId, textId).then((r) => {
+				if (!r.ok || comparisonIdRef.current !== reviewId) return
+				const e = r.value.explanation
+				if (e?.textId === textId) setExplanation((x) => (x?.textId === textId ? { ...x, citations: e.citations } : x))
+				const m = r.value.conclusion?.messages.find((x) => x.textId === textId)
+				if (m)
+					setConclusion((c) =>
+						c ? { ...c, messages: c.messages.map((x) => (x.textId === textId ? { ...x, citations: m.citations } : x)) } : c,
+					)
+			})
+		}
+	}, [comparison?.id, explanation, conclusion]) // eslint-disable-line react-hooks/exhaustive-deps
 	const changedPaths = useMemo(() => new Set((comparison?.files ?? []).map((f) => (f.newPath ?? f.oldPath) as string)), [comparison?.files])
 
 	const askCode = async (anchor: Anchor, text: string, questionId: string | null): Promise<string | null> => {

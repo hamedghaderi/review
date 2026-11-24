@@ -692,6 +692,7 @@ export interface ChangeExplanation {
 	at: string
 	textId?: string // its AiTextRecord, which Outcomes counts (issue #289); absent on explanations from before
 	flagged?: AiTextFlag // you said it is wrong
+	citations?: CitationCheckResult // its file:line references, checked after it was shown
 }
 
 /**
@@ -999,6 +1000,7 @@ export interface CodeMessage {
 	error?: boolean // the question could not be answered; `text` says why
 	textId?: string // answers about the conclusion: its AiTextRecord, which Outcomes counts (issue #289)
 	flagged?: AiTextFlag // you said it is wrong
+	citations?: CitationCheckResult // its file:line references, checked after it was shown
 }
 
 /** Questions you asked the AI about lines of code. Private to you; never posted. */
@@ -1954,6 +1956,18 @@ export interface AiTextRecord {
 	model: string
 	sent?: { fate: ReplyFate; share: number; at: string } // drafted replies only: how it went out; absent while not sent
 	flagged?: AiTextFlag // explanations, conclusions and answers: you said it is wrong
+	citations?: { checked: number; broken: number } // explanations, conclusions and answers: their file:line references
+}
+
+/**
+ * The file:line references in an AI text, opened at the head commit (issue #289). Broken: no such file, or the file is
+ * shorter than the lines cited. A reference several files could mean, or a file that can't be read, isn't counted.
+ * Whether the code says what the text claims there is not checked.
+ */
+export interface CitationCheckResult {
+	at: string
+	checked: number
+	broken: Array<{ ref: string; reason: string }>
 }
 
 /** "This is wrong" on an AI text, with what was wrong if you said. No thumbs-up: not flagging it proves nothing. */
@@ -1969,10 +1983,12 @@ export interface AiTextCounts {
 	light: number
 	rewrite: number
 	flagged: number // explanations, conclusions and answers you said are wrong
+	cited: number // their file:line references that could be checked
+	brokenRefs: number // of those, the ones that point at no file, or past its end
 }
 
-/** A review's explanation and conclusion after a flag changed, to show in place. */
-export interface FlaggedText {
+/** A review's explanation and conclusion after a flag or a citation check changed, to show in place. */
+export interface ReviewAiTexts {
 	explanation: ChangeExplanation | null
 	conclusion: ChangeConclusion | null
 }
@@ -2410,6 +2426,7 @@ export const IPC = {
 	aiDraftReply: 'ai:draft-reply',
 	aiReplySent: 'ai:reply-sent',
 	aiFlagText: 'ai:flag-text',
+	aiCheckCitations: 'ai:check-citations',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
 	agentSetup: 'agent:setup',
@@ -2702,7 +2719,8 @@ export interface ReviewApi {
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<{ id: string; text: string }>>
 	aiReplySent(repoId: string, textId: string, draft: string, sent: string): Promise<Result<void>>
-	flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<Result<FlaggedText>>
+	flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<Result<ReviewAiTexts>>
+	checkAiCitations(reviewId: string, textId: string): Promise<Result<ReviewAiTexts>>
 	/** Drafts the summary of the review you are about to submit with `event`, from your comments in it. Nothing is sent. */
 	draftSummary(reviewId: string, event: ReviewEvent): Promise<Result<string>>
 	/**

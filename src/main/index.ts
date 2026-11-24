@@ -595,6 +595,9 @@ function registerIpc(): void {
 	handle(IPC.aiFlagText, (reviewId: unknown, textId: unknown, flag: unknown) =>
 		service.flagAiText(comparisonId(reviewId), str(textId, 'text id', 128), flagInput(flag)),
 	)
+	handle(IPC.aiCheckCitations, (reviewId: unknown, textId: unknown) =>
+		service.checkAiCitations(comparisonId(reviewId), str(textId, 'text id', 128)),
+	)
 	handle(IPC.aiDraftSummary, async (reviewId: unknown, event: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')

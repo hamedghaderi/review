@@ -8,6 +8,7 @@ import { Markdown } from './Markdown.tsx'
 import { scrollBehavior } from './motion.ts'
 import { SpeakerHeading } from './SpeakerHeading.tsx'
 import { FlagWrong } from './FlagWrong.tsx'
+import { CitationNote } from './CitationNote.tsx'
 
 interface Props {
 	conclusion: ChangeConclusion | null
@@ -135,7 +136,8 @@ export function Conclusion({
 								<p className="error-text selectable">{first.text}</p>
 							) : (
 								<>
-									<Markdown text={first.text} paths={paths} onOpenPath={onOpenPath} />
+									<Markdown text={first.text} paths={paths} onOpenPath={onOpenPath} broken={first.citations?.broken} />
+									<CitationNote result={first.citations} />
 									<div className="conclusion-flag">
 										<span className="muted small" aria-hidden>
 											{first.model}
@@ -181,7 +183,8 @@ export function Conclusion({
 							) : (
 								<article key={m.id} className="conclusion-a">
 									<SpeakerHeading>{speaker(m)}</SpeakerHeading>
-									<Markdown text={m.text} paths={paths} onOpenPath={onOpenPath} />
+									<Markdown text={m.text} paths={paths} onOpenPath={onOpenPath} broken={m.citations?.broken} />
+									<CitationNote result={m.citations} />
 									<div className="conclusion-flag">
 										<span className="muted small" aria-hidden>
 											{m.model}

@@ -68,7 +68,7 @@ import type {
 	SymbolKind,
 	StackedBase,
 	SymbolLookup,
-	FlaggedText,
+	ReviewAiTexts,
 	PyImportRef,
 	TargetProbe,
 } from '../shared/types.ts'
@@ -144,7 +144,8 @@ import { findRelated } from './ai/related.ts'
 import { findImporters } from './ai/imports.ts'
 import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
 import { findSymbol, generatedPath, MAX_SYMBOL_HITS, pythonModuleFiles } from './symbols.ts'
-import { flagText, markReplySent } from './ai/aiText.ts'
+import { aiTextOf, citationResult, flagText, markReplySent, storeCitations } from './ai/aiText.ts'
+import { findCitations, resolveCitations } from './ai/rewrite.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -2194,7 +2195,7 @@ export class ReviewService {
 	}
 
 	/** "This is wrong" on the review's explanation, conclusion or an answer, or taken back (issue #289). */
-	async flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<FlaggedText> {
+	async flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<ReviewAiTexts> {
 		const repoId = this.loaded(reviewId).comparison.repoId
 		let found = false
 		await this.store.update((d) => {
@@ -2202,6 +2203,27 @@ export class ReviewService {
 			found = !!repo && flagText(repo, reviewId, textId, flag)
 		})
 		if (!found) throw new AppFail('not-found', 'That AI text is no longer recorded.')
+		const r = this.store.read().repos[repoId]?.reviews[reviewId]
+		return structuredClone({ explanation: r?.explanation ?? null, conclusion: r?.conclusion ?? null })
+	}
+
+	/**
+	 * Opens the file:line references in the review's explanation or a conclusion message at the head commit (issue #289),
+	 * after the text is shown, so it appears as fast as before. Only whether each file and line exists is checked; no
+	 * model is asked whether the code says what the text claims.
+	 */
+	async checkAiCitations(reviewId: string, textId: string): Promise<ReviewAiTexts> {
+		const { access } = this.aiAccess(reviewId)
+		const repoId = access.comparison.repoId
+		const review = this.store.read().repos[repoId]?.reviews[reviewId]
+		const text = review ? aiTextOf(review, textId) : null
+		if (text === null) throw new AppFail('not-found', 'That AI text is no longer on this review.')
+		const resolved = access.headFiles ? await resolveCitations(findCitations(text), access.headFiles) : []
+		const result = citationResult(resolved)
+		await this.store.update((d) => {
+			const repo = d.repos[repoId]
+			if (repo) storeCitations(repo, reviewId, textId, result)
+		})
 		const r = this.store.read().repos[repoId]?.reviews[reviewId]
 		return structuredClone({ explanation: r?.explanation ?? null, conclusion: r?.conclusion ?? null })
 	}

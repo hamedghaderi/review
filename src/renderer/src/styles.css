@@ -4179,6 +4179,23 @@ input.member-role {
 .flag-wrong-mark {
 	color: var(--danger);
 }
+/* File:line references the citation check couldn't find (issue #289) */
+.citation-note {
+	padding: 6px 8px;
+	border-left: 3px solid var(--warn-fg);
+	background: var(--warn-bg);
+	color: var(--warn-fg);
+	border-radius: 4px;
+}
+.citation-note ul {
+	margin: 4px 0 0;
+	padding-left: 18px;
+}
+.md-broken {
+	text-decoration: underline wavy var(--danger);
+	text-underline-offset: 3px;
+	cursor: help;
+}
 .flag-wrong-form {
 	display: inline-flex;
 	align-items: center;

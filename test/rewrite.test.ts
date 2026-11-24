@@ -76,6 +76,11 @@ test('resolving: the path as written, else the one file ending in it, preferring
 		"src/a.ts:11 -> src/a.ts has 10 lines at the head commit, so line 11 isn't there.",
 	])
 	assert.equal(files.listed, 1, 'the file list is read once, and only when a path is not exact')
+	assert.deepEqual(
+		r.map((x) => (x.path === null ? x.problem : 'found')),
+		['found', 'found', 'found', 'ambiguous', 'missing', 'past-end'],
+		'what kind of problem, so a vague reference is not counted as a wrong one',
+	)
 })
 
 test('input: your text fenced as data, the cited lines numbered with context, and what could not be opened', async () => {

@@ -5,15 +5,30 @@ import { CodeBlock } from './CodeText.tsx'
  * Markdown the AI wrote, shown with the GitHub look (`md-body`): headings, paragraphs, lists (nested by indent), quotes,
  * fenced code (coloured by the language it names), rules, and inline code, bold, italics and web links. Nothing is parsed as HTML, so the text can never add
  * markup or run anything. A reference to one of `paths` (`src/a.ts` or `src/a.ts:12`) becomes a link that opens it.
+ * A reference in `broken` (one the citation check couldn't find, issue #289) is marked, with why on hover.
  */
-export function Markdown({ text, paths, onOpenPath }: { text: string; paths?: ReadonlySet<string>; onOpenPath?(path: string): void }) {
-	const links: Links | undefined = paths && onOpenPath ? { paths, open: onOpenPath } : undefined
+export function Markdown({
+	text,
+	paths,
+	onOpenPath,
+	broken,
+}: {
+	text: string
+	paths?: ReadonlySet<string>
+	onOpenPath?(path: string): void
+	broken?: ReadonlyArray<{ ref: string; reason: string }>
+}) {
+	const links: Links | undefined =
+		(paths && onOpenPath) || broken?.length
+			? { paths: paths ?? new Set(), open: onOpenPath ?? (() => {}), broken: broken ?? [] }
+			: undefined
 	return <div className="md-body selectable">{blocks(text.replace(/\r\n?/g, '\n').split('\n'), links, 'b')}</div>
 }
 
 interface Links {
 	paths: ReadonlySet<string>
 	open(path: string): void
+	broken?: ReadonlyArray<{ ref: string; reason: string }>
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/
@@ -143,7 +158,17 @@ function inline(text: string, links: Links | undefined, key: string): Array<Reac
 /** A reference to a changed file becomes a link that opens it; anything else shows as written. */
 function PathOr({ text, links, code = false }: { text: string; links?: Links; code?: boolean }) {
 	const path = text.replace(/:\d+(?:-\d+)?$/, '')
-	const shown = code ? <code>{text}</code> : text
+	const ref = text.replace(/\s+/g, '')
+	const bad = links?.broken?.find((b) => b.ref === ref || b.ref.startsWith(`${ref},`))
+	const shown = bad ? (
+		<span className="md-broken" title={`Not at the head commit: ${bad.reason}`}>
+			{code ? <code>{text}</code> : text}
+		</span>
+	) : code ? (
+		<code>{text}</code>
+	) : (
+		text
+	)
 	if (!links?.paths.has(path)) return <>{shown}</>
 	return (
 		<button className="link md-path" title={`Open ${path}`} onClick={() => links.open(path)}>
