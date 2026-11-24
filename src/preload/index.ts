@@ -114,6 +114,7 @@ const api: ReviewApi = {
 	loadFileAt: (comparisonId, path, side) => ipcRenderer.invoke(IPC.loadFileAt, comparisonId, path, side),
 	filesAtHead: (comparisonId, paths) => ipcRenderer.invoke(IPC.filesAtHead, comparisonId, paths),
 	lookupSymbol: (comparisonId, name, side, kind) => ipcRenderer.invoke(IPC.lookupSymbol, comparisonId, name, side, kind),
+	lookupImport: (comparisonId, side, from, ref) => ipcRenderer.invoke(IPC.lookupImport, comparisonId, side, from, ref),
 	saveReview: (review) => ipcRenderer.invoke(IPC.saveReview, review),
 	getAiSettings: () => ipcRenderer.invoke(IPC.aiSettings),
 	onAiSettingsChanged: (handler) => {

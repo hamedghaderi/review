@@ -185,6 +185,9 @@ test('calls in conditions and names in comments are not definitions; class field
 		'// call the function isAdmin first',
 		' * Unlike class Report, this',
 		'# def summarize is old',
+		'        description="Return only the events on one of these object types. Repeat to give more.",',
+		"    help='the class Report, as a string'",
+		'    msg = `function format is in a template`',
 	])
 		assert.equal(definedName(line), null, line)
 	assert.equal(definedName('\tasync lookupSymbol('), 'lookupSymbol')
@@ -192,6 +195,8 @@ test('calls in conditions and names in comments are not definitions; class field
 	assert.equal(definedName('\tonClick = () => {'), 'onClick')
 	assert.equal(definedName('func (s *Server) Serve(port int) error {'), 'Serve')
 	assert.equal(definedName('public static int count(List<String> xs) {'), 'count')
+	assert.equal(definedName('def label(self, sep: str = ", ") -> str:'), 'label', 'a string after the name keeps it')
+	assert.equal(definedName("fn first<'a>(xs: &'a [u8]) -> &'a u8 {"), 'first', 'Rust lifetimes are not strings')
 })
 
 test('links in a finding: only paths that are files at the head commit count, not folders or missing files', async () => {
@@ -199,4 +204,73 @@ test('links in a finding: only paths that are files at the head commit count, no
 	const found = await svc.filesAtHead(id, ['src/discount.ts', 'src/money.ts', 'src/missing.ts', 'src', 'tools/report.py'])
 	assert.deepEqual(found.sort(), ['src/discount.ts', 'src/money.ts', 'tools/report.py'])
 	assert.deepEqual(await svc.filesAtHead(id, []), [])
+})
+
+test('⌘/Ctrl-click in a Python import opens the module, or the name in that module, at the clicked side', async () => {
+	const dir = tmp()
+	const run = (...a: Array<string>): string =>
+		execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], {
+			cwd: dir,
+			encoding: 'utf8',
+		}).trim()
+	const write = (files: Record<string, string>): void => {
+		for (const [f, text] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, f)), { recursive: true })
+			writeFileSync(join(dir, f), text)
+		}
+	}
+	run('init', '-q', '-b', 'main')
+	write({
+		'shop/src/shop/__init__.py': '',
+		'shop/src/shop/billing/__init__.py': '',
+		'shop/src/shop/billing/context.py': 'class Context:\n    pass\n',
+		'shop/src/shop/types.py': 'def is_paid(x):\n    return x\n',
+		'shop/tests/test_bill.py': 'from shop.billing.context import Context\n',
+		'api/src/api/route.py': 'class Context:\n    pass\n\nq = Field(description="filter on these object types")\n',
+	})
+	run('add', '-A')
+	run('commit', '-qm', 'base')
+	run('checkout', '-qb', 'topic')
+	write({ 'shop/tests/test_bill.py': 'from shop.billing.context import Context\nfrom shop.types import is_paid\n' })
+	run('add', '-A')
+	run('commit', '-qm', 'topic')
+
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const svc = new ReviewService(store, null)
+	const s = await svc.open(dir)
+	const { comparison } = await svc.loadComparison(s.repo.id, {
+		kind: 'target',
+		target: { kind: 'branch', headRef: 'refs/heads/topic', baseRef: 'refs/heads/main' },
+	})
+	const from = 'shop/tests/test_bill.py'
+	const mod = await svc.lookupImport(comparison.id, 'new', from, { level: 0, parts: ['shop', 'billing', 'context'], name: false })
+	assert.equal(mod.by, 'module')
+	assert.equal(mod.name, 'shop.billing.context')
+	assert.deepEqual(
+		mod.hits.map((h) => [h.path, h.line, h.fileKey]),
+		[['shop/src/shop/billing/context.py', 1, null]],
+	)
+	const name = await svc.lookupImport(comparison.id, 'new', from, {
+		level: 0,
+		parts: ['shop', 'billing', 'context', 'Context'],
+		name: true,
+	})
+	assert.equal(name.by, 'name')
+	assert.deepEqual(
+		name.hits.map((h) => h.path),
+		['shop/src/shop/billing/context.py'],
+		'the Context in the module it is imported from, not the one in api/',
+	)
+	const outside = await svc.lookupImport(comparison.id, 'new', from, { level: 0, parts: ['os'], name: false })
+	assert.deepEqual([outside.by, outside.hits], ['module', []])
+	assert.deepEqual(
+		(await svc.lookupSymbol(comparison.id, 'types', 'new', 'definition')).hits,
+		[],
+		'the words of a string are not a definition of types',
+	)
+	assert.deepEqual(
+		(await svc.lookupImport(comparison.id, 'new', from, { level: 0, parts: ['shop', 'types'], name: false })).hits.map((h) => h.path),
+		['shop/src/shop/types.py'],
+	)
 })

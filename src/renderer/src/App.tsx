@@ -1375,12 +1375,13 @@ export function App() {
 	}
 	const travelRef = useRef(travel)
 	travelRef.current = travel
-	const jumpTo = (hit: SymbolHit, side: Side): void => {
+	// `whole`: a module's file, opened at its top with no line marked.
+	const jumpTo = (hit: SymbolHit, side: Side, whole = false): void => {
 		if (!comparison) return
 		setSymbolPop(null)
 		const cur = here()
 		if (cur) history.current = { back: [...history.current.back.slice(-99), cur], forward: [] }
-		if (!hit.fileKey) return setOutside({ path: hit.path, side, line: hit.line, scrollTop: null, nonce: Date.now() })
+		if (!hit.fileKey) return setOutside({ path: hit.path, side, line: whole ? null : hit.line, scrollTop: null, nonce: Date.now() })
 		const f = comparison.files.find((x) => x.key === hit.fileKey)
 		selectFile(hit.fileKey)
 		setSelectedFinding(null)
@@ -1388,19 +1389,21 @@ export function App() {
 			fileKey: hit.fileKey,
 			itemId: null,
 			nonce: Date.now(),
-			mark: true,
-			anchor: {
-				repoId: comparison.repoId,
-				baseSha: comparison.baseSha,
-				headSha: comparison.headSha,
-				fileKey: hit.fileKey,
-				oldPath: f?.oldPath ?? null,
-				newPath: f?.newPath ?? null,
-				side,
-				startLine: hit.line,
-				endLine: hit.line,
-				excerpt: '',
-			},
+			mark: !whole,
+			anchor: whole
+				? null
+				: {
+						repoId: comparison.repoId,
+						baseSha: comparison.baseSha,
+						headSha: comparison.headSha,
+						fileKey: hit.fileKey,
+						oldPath: f?.oldPath ?? null,
+						newPath: f?.newPath ?? null,
+						side,
+						startLine: hit.line,
+						endLine: hit.line,
+						excerpt: '',
+					},
 		})
 	}
 	// A file a finding's text refers to: a changed file in its diff, any other read-only. Back returns to the finding.
@@ -1437,10 +1440,19 @@ export function App() {
 		if (!comparison) return
 		const gen = ++lookupGen.current
 		setSymbolPop({ ...r, state: 'loading' })
-		const res = await window.review.lookupSymbol(comparison.id, r.name, r.side, r.kind)
+		const res =
+			r.kind === 'definition' && r.module
+				? await window.review.lookupImport(comparison.id, r.side, r.from.path, r.module)
+				: await window.review.lookupSymbol(comparison.id, r.name, r.side, r.kind)
 		if (gen !== lookupGen.current) return
 		if (!res.ok) return setSymbolPop({ ...r, state: 'error', message: res.error.message })
 		if (r.kind === 'uses') return setSymbolPop({ ...r, state: 'done', value: res.value })
+		// A module in an import: its file opens; several places it could be are listed, nearest first.
+		if (res.value.by === 'module') {
+			const files = byProximity(res.value.hits, r.from)
+			if (files.length === 1) return jumpTo(files[0], r.side, true)
+			return setSymbolPop({ ...r, state: 'done', value: { ...res.value, hits: files } })
+		}
 		const hits = byProximity(res.value.hits, r.from)
 		// A definition in the clicked file shadows same-named ones elsewhere; one candidate opens directly.
 		const local = hits.filter((h) => h.path === r.from.path)

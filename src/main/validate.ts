@@ -1,5 +1,6 @@
 import type {
 	AiScope,
+	PyImportRef,
 	AiStartScope,
 	McpServerInput,
 	Anchor,
@@ -498,6 +499,24 @@ export function symbolName(v: unknown): string {
 	const s = str(v, 'name', 200)
 	if (!/^[A-Za-z_$][\w$]*$/.test(s)) bad('name')
 	return s
+}
+
+/** A Python import's module path, as the renderer read it from the clicked line. */
+export function pyImportRef(v: unknown): PyImportRef {
+	const o = obj(v, 'import')
+	const level = o.level
+	if (typeof level !== 'number' || !Number.isInteger(level) || level < 0 || level > 32) bad('import level')
+	const parts = arr(o.parts, 'import path')
+	if (parts.length < 1 || parts.length > 64) bad('import path')
+	return {
+		level,
+		parts: parts.map((p) => {
+			const s = str(p, 'import path', 200)
+			if (!/^[A-Za-z_]\w*$/.test(s)) bad('import path')
+			return s
+		}),
+		name: bool(o.name, 'import name'),
+	}
 }
 
 export function commitSha(v: unknown): string {

@@ -78,6 +78,7 @@ import {
 	repoPath,
 	repoPaths,
 	symbolName,
+	pyImportRef,
 	connectionId,
 	connectionPatch,
 	modelId,
@@ -485,6 +486,9 @@ function registerIpc(): void {
 	handle(IPC.filesAtHead, (cid: unknown, paths: unknown) => service.filesAtHead(comparisonId(cid), repoPaths(paths)))
 	handle(IPC.lookupSymbol, (cid: unknown, name: unknown, side: unknown, kind: unknown) =>
 		service.lookupSymbol(comparisonId(cid), symbolName(name), side === 'old' ? 'old' : 'new', kind === 'uses' ? 'uses' : 'definition'),
+	)
+	handle(IPC.lookupImport, (cid: unknown, side: unknown, from: unknown, ref: unknown) =>
+		service.lookupImport(comparisonId(cid), side === 'old' ? 'old' : 'new', from === null ? null : repoPath(from), pyImportRef(ref)),
 	)
 	handle(IPC.saveReview, (review: unknown) => service.saveReview(review))
 	handle(IPC.aiStart, (reviewId: unknown, scope: unknown, reviewer: unknown, overBudget: unknown) => {
