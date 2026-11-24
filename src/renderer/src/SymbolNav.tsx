@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { IDENT, type Side, type SymbolHit, type SymbolKind, type SymbolLookup } from '../../shared/types.ts'
+import { IDENT, type PyImportRef, type Side, type SymbolHit, type SymbolKind, type SymbolLookup } from '../../shared/types.ts'
+import { pythonImportAt } from '../../shared/pyImport.ts'
 
 export const IS_MAC = /Mac/.test(navigator.platform)
 
@@ -20,8 +21,20 @@ export interface SymbolRequest {
 	side: Side
 	kind: SymbolKind
 	from: SymbolOrigin
+	module: PyImportRef | null // the name is part of a Python import: go to the module's file rather than a same-named thing
 	x: number
 	y: number
+}
+
+/** The Python import a clicked name is part of, read from its whole line in the `.code` cell. */
+function importAt(range: Range, from: SymbolOrigin): PyImportRef | null {
+	if (!from.path || !/\.pyi?$/.test(from.path)) return null
+	const cell = range.startContainer.parentElement?.closest('.code')
+	if (!cell) return null
+	const before = document.createRange()
+	before.setStart(cell, 0)
+	before.setEnd(range.startContainer, range.startOffset)
+	return pythonImportAt(cell.textContent ?? '', before.toString().length)
 }
 
 /**
@@ -106,7 +119,9 @@ export function useSymbolLinks(
 			if (!s || !from) return
 			e.preventDefault() // no text selection, so no comment draft
 			clear()
-			latest.current.onLookup({ name: s.name, side: from.side, kind: e.shiftKey ? 'uses' : 'definition', from, x: e.clientX, y: e.clientY })
+			const kind = e.shiftKey ? 'uses' : 'definition'
+			const module = kind === 'definition' ? importAt(s.range, from) : null
+			latest.current.onLookup({ name: s.name, side: from.side, kind, from, module, x: e.clientX, y: e.clientY })
 		}
 		el.addEventListener('mousemove', onMove)
 		el.addEventListener('mouseleave', onLeave)
@@ -133,7 +148,7 @@ export type SymbolPop = SymbolRequest &
 
 interface PopoverProps {
 	pop: SymbolPop
-	onPick(hit: SymbolHit, side: Side): void
+	onPick(hit: SymbolHit, side: Side, whole: boolean): void
 	onFindUses(r: SymbolRequest): void
 	onClose(): void
 }
@@ -161,6 +176,7 @@ export function SymbolPopover({ pop, onPick, onFindUses, onClose }: PopoverProps
 
 	const commit = pop.side === 'old' ? 'base' : 'head'
 	const what = pop.kind === 'definition' ? 'Definitions' : 'Uses'
+	const module = pop.state === 'done' && pop.value.by === 'module' ? pop.value.name : null
 	const width = Math.min(POP_WIDTH, window.innerWidth - 16)
 	const style = {
 		width,
@@ -174,7 +190,11 @@ export function SymbolPopover({ pop, onPick, onFindUses, onClose }: PopoverProps
 		body = <p className="symbol-state small error-text">{pop.message}</p>
 	} else if (pop.state === 'done' && !pop.value.hits.length) {
 		meta = `${commit} commit`
-		body = (
+		body = module ? (
+			<p className="symbol-state muted small">
+				No file for <code>{module}</code> in this repository. It may be an installed package or part of Python.
+			</p>
+		) : (
 			<p className="symbol-state muted small">
 				No {pop.kind === 'definition' ? 'definition' : 'uses'} of <code>{pop.name}</code> found.
 			</p>
@@ -186,8 +206,9 @@ export function SymbolPopover({ pop, onPick, onFindUses, onClose }: PopoverProps
 		const outside = hits.filter((h) => !h.inDiff).length
 		const count = `${hits.length}${pop.value.truncated ? '+' : ''}`
 		const files = `${groups.size} file${groups.size === 1 ? '' : 's'}`
-		meta =
-			pop.kind === 'definition'
+		meta = module
+			? `${files} · ${commit} commit`
+			: pop.kind === 'definition'
 				? `${count} matches in ${files} · ${commit} commit`
 				: `${count} in ${files} · ${outside ? `${outside} outside this change` : 'all in this change'} · ${commit} commit`
 		body = (
@@ -204,8 +225,8 @@ export function SymbolPopover({ pop, onPick, onFindUses, onClose }: PopoverProps
 								{list[0].fileKey && <span className="symbol-chip">in this change</span>}
 							</div>
 							{list.map((h) => (
-								<button key={h.line} className="symbol-hit" title={h.text} onClick={() => onPick(h, pop.side)}>
-									<span className="symbol-ln">{h.line}</span>
+								<button key={h.line} className="symbol-hit" title={h.text} onClick={() => onPick(h, pop.side, !!module)}>
+									<span className="symbol-ln">{module ? '' : h.line}</span>
 									<span className="ellipsis">{h.text}</span>
 									{h.inDiff && <span className="symbol-tag">{pop.side === 'old' ? 'removed' : 'changed'}</span>}
 								</button>
@@ -218,17 +239,35 @@ export function SymbolPopover({ pop, onPick, onFindUses, onClose }: PopoverProps
 		)
 	}
 	return (
-		<div ref={ref} className="popover symbol-pop" role="dialog" aria-label={`${what} of ${pop.name}`} style={style}>
+		<div
+			ref={ref}
+			className="popover symbol-pop"
+			role="dialog"
+			aria-label={module ? `Module ${module}` : `${what} of ${pop.name}`}
+			style={style}
+		>
 			<div className="symbol-head">
 				<div className="popover-title ellipsis">
-					{what} of <code>{pop.name}</code>
+					{module ? (
+						<>
+							Module <code>{module}</code>
+						</>
+					) : (
+						<>
+							{what} of <code>{pop.name}</code>
+						</>
+					)}
 				</div>
 				<div className="muted small">{meta}</div>
 			</div>
 			{body}
 			<div className="symbol-foot">
-				<span className="muted small">Matched by name, so a match can be a different thing with the same name.</span>
-				{pop.kind === 'definition' && (
+				<span className="muted small">
+					{module
+						? 'Found by matching the import’s path to the files in this repository.'
+						: 'Matched by name, so a match can be a different thing with the same name.'}
+				</span>
+				{pop.kind === 'definition' && !module && (
 					<button className="btn small" onClick={() => onFindUses({ ...pop, kind: 'uses' })}>
 						Find uses
 					</button>

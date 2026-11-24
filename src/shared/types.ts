@@ -581,11 +581,19 @@ export interface SymbolHit {
 
 /** Text matches for a name at the head commit, or the base commit for `side: 'old'`. */
 export interface SymbolLookup {
-	name: string
+	name: string // for `by: 'module'`, the dotted module name, with its leading dots when relative
 	side: Side
 	kind: SymbolKind
+	by: 'name' | 'module' // matched by name, or the files of a module an import names (their hits are at line 1)
 	hits: Array<SymbolHit>
 	truncated: boolean // more matches than are listed
+}
+
+/** A module a Python import names, up to the clicked part: `from ..a.b import c` is level 2, parts a, b (and c). */
+export interface PyImportRef {
+	level: number // leading dots: 0 is absolute, 1 the clicked file's package, 2 its parent…
+	parts: Array<string>
+	name: boolean // the last part was imported from the rest (`from a.b import c`): a module, or a name defined in a.b
 }
 
 export interface Anchor {
@@ -2320,6 +2328,7 @@ export const IPC = {
 	loadFileAt: 'diff:file-at',
 	filesAtHead: 'diff:files-at-head',
 	lookupSymbol: 'diff:lookup-symbol',
+	lookupImport: 'diff:lookup-import',
 	saveReview: 'review:save',
 	aiSettings: 'ai:settings',
 	aiSettingsChanged: 'ai:settings-changed',
@@ -2564,6 +2573,7 @@ export interface ReviewApi {
 	filesAtHead(comparisonId: string, paths: Array<string>): Promise<Result<Array<string>>>
 	/** Where a name is defined or used, by text, at the head commit (base for `side: 'old'`). */
 	lookupSymbol(comparisonId: string, name: string, side: Side, kind: SymbolKind): Promise<Result<SymbolLookup>>
+	lookupImport(comparisonId: string, side: Side, from: string | null, ref: PyImportRef): Promise<Result<SymbolLookup>>
 	saveReview(review: Review): Promise<Result<{ savedAt: string }>>
 	getAiSettings(): Promise<Result<AiSettingsView>>
 	onAiSettingsChanged(handler: (view: AiSettingsView) => void): () => void

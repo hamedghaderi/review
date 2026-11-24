@@ -68,6 +68,7 @@ import type {
 	SymbolKind,
 	StackedBase,
 	SymbolLookup,
+	PyImportRef,
 	TargetProbe,
 } from '../shared/types.ts'
 import {
@@ -141,7 +142,7 @@ import { discussionOf, placeThreads } from './discussion.ts'
 import { findRelated } from './ai/related.ts'
 import { findImporters } from './ai/imports.ts'
 import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
-import { findSymbol, generatedPath } from './symbols.ts'
+import { findSymbol, generatedPath, MAX_SYMBOL_HITS, pythonModuleFiles } from './symbols.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -1878,6 +1879,47 @@ export class ReviewService {
 			h.inDiff = changed.get(f.key)!.has(h.line)
 		}
 		return found
+	}
+
+	/**
+	 * ⌘/Ctrl-click in a Python import (issue #287): the files of the module it names. A name imported with `from a.b import
+	 * c` that is no module of a.b is looked up by name, keeping only definitions in a.b's files when there are any.
+	 */
+	async lookupImport(comparisonId: string, side: Side, from: string | null, ref: PyImportRef): Promise<SymbolLookup> {
+		const data = this.loaded(comparisonId)
+		const c = data.comparison
+		const sha = side === 'old' ? c.baseSha : c.headSha
+		const paths = await this.pathsCached(data.root, sha)
+		const files = pythonModuleFiles(paths, from, ref)
+		const dotted = '.'.repeat(ref.level) + ref.parts.join('.')
+		if (files.length || !ref.name) {
+			const byPath = new Map(
+				c.files.flatMap((f) => ((side === 'old' ? f.oldPath : f.newPath) ? [[(side === 'old' ? f.oldPath : f.newPath)!, f.key]] : [])),
+			)
+			const hits = files
+				.slice(0, MAX_SYMBOL_HITS.definition)
+				.map((path) => ({ path, line: 1, text: dotted, fileKey: byPath.get(path) ?? null, inDiff: false }))
+			return { name: dotted, side, kind: 'definition', by: 'module', hits, truncated: files.length > hits.length }
+		}
+		const name = ref.parts[ref.parts.length - 1]
+		const found = await this.lookupSymbol(comparisonId, name, side, 'definition')
+		const home = new Set(pythonModuleFiles(paths, from, { ...ref, parts: ref.parts.slice(0, -1), name: false }))
+		const inHome = found.hits.filter((h) => home.has(h.path))
+		return inHome.length ? { ...found, hits: inHome, truncated: false } : found
+	}
+
+	// Every file path at the last few commits looked up, for resolving imports without listing the tree on each click.
+	private paths = new Map<string, Promise<Array<string>>>()
+	private pathsCached(root: string, sha: string): Promise<Array<string>> {
+		const key = `${root}\0${sha}`
+		let p = this.paths.get(key)
+		if (!p) {
+			p = pathsAt(root, sha).then((x) => x ?? [])
+			p.catch(() => this.paths.delete(key))
+			this.paths.set(key, p)
+			while (this.paths.size > 4) this.paths.delete(this.paths.keys().next().value!)
+		}
+		return p
 	}
 
 	async saveReview(input: unknown): Promise<{ savedAt: string }> {

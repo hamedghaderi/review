@@ -1,5 +1,5 @@
 import { grepCommit } from './git.ts'
-import { IDENT, type Side, type SymbolHit, type SymbolKind, type SymbolLookup } from '../shared/types.ts'
+import { IDENT, type PyImportRef, type Side, type SymbolHit, type SymbolKind, type SymbolLookup } from '../shared/types.ts'
 
 /**
  * Names in code, found by text: the definition patterns and `git grep` on one commit (the object database, never the
@@ -41,11 +41,15 @@ export const NOT_NAMES = new Set(
 	useEffect useMemo useCallback useRef describe it test expect assert should beforeEach afterEach toBe toEqual equal`.split(/\s+/),
 )
 
+// A quoted string on one line. Its words are prose: `"filter on these object types"` defines nothing (issue #287).
+const STRING = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`/g
+
 /** The name a line defines, or null. */
 export function definedName(text: string): string | null {
 	if (COMMENT.test(text)) return null
+	const code = text.replace(STRING, (s) => s[0] + s[0])
 	for (const re of DEFINITIONS) {
-		const m = re.exec(text)
+		const m = re.exec(code)
 		if (m && !NOT_NAMES.has(m[1])) return m[1]
 	}
 	return null
@@ -85,5 +89,39 @@ export async function findSymbol(root: string, sha: string, name: string, side: 
 		.filter((h) => (kind === 'definition' ? definedName(h.text) === name : definedName(h.text) !== name && !IMPORT.test(h.text)))
 		.map((h) => ({ ...h, text: h.text.trim(), fileKey: null, inDiff: false }))
 	const max = MAX_SYMBOL_HITS[kind]
-	return { name, side, kind, hits: all.slice(0, max), truncated: r.truncated || all.length > max }
+	return { name, side, kind, by: 'name', hits: all.slice(0, max), truncated: r.truncated || all.length > max }
+}
+
+// Where a module's code is, in the order Python's own lookup would take a source file over a stub.
+const MODULE_FILES = ['.py', '/__init__.py', '.pyi', '/__init__.pyi']
+
+/**
+ * The files of the module a Python import names (issue #287), one per place it could live, among `paths` (every file
+ * at the commit). A relative import is resolved from `from`'s folder. An absolute one is matched by its path's tail, so
+ * a package under `src/` or in one project of a monorepo is found; several matches are all returned. Vendored and
+ * virtualenv folders are skipped.
+ */
+export function pythonModuleFiles(paths: Array<string>, from: string | null, ref: PyImportRef): Array<string> {
+	const rel = ref.parts.join('/')
+	if (ref.level > 0) {
+		if (from === null) return []
+		const dir = from.split('/').slice(0, -1)
+		if (ref.level - 1 > dir.length) return []
+		const base = dir.slice(0, dir.length - (ref.level - 1)).join('/')
+		const all = new Set(paths)
+		const hit = MODULE_FILES.map((ext) => (base ? `${base}/` : '') + rel + ext).find((p) => all.has(p))
+		return hit ? [hit] : []
+	}
+	const best = new Map<string, { path: string; rank: number }>() // by the folder the module sits in
+	for (const p of paths) {
+		if (SKIP_DIRS.test(p)) continue
+		MODULE_FILES.forEach((ext, rank) => {
+			const tail = rel + ext
+			if (p !== tail && !p.endsWith(`/${tail}`)) return
+			const at = p.slice(0, p.length - tail.length)
+			const had = best.get(at)
+			if (!had || rank < had.rank) best.set(at, { path: p, rank })
+		})
+	}
+	return [...best.values()].map((b) => b.path).sort()
 }
