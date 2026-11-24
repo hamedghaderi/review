@@ -22,6 +22,8 @@ import {
 } from './journeyView.ts'
 import { pane } from './panes.ts'
 
+export type DrawerTab = 'run' | 'console'
+
 const HEIGHT_KEY = 'runDrawer.height'
 const USED_KEY = 'runDrawer.used'
 const MIN_HEIGHT = 120
@@ -72,12 +74,18 @@ export function RunDrawer({
 	onRunId,
 	onClose,
 	onOpen,
+	tab,
+	onTab,
+	consolePane,
 }: {
 	runs: ReadonlyArray<AiRun>
 	runId: string | null
 	onRunId: (id: string) => void
 	onClose: () => void
 	onOpen: (path: string, line: number | null) => void
+	tab: DrawerTab
+	onTab: (tab: DrawerTab) => void
+	consolePane: React.ReactNode
 }) {
 	const run = runs.find((r) => r.id === runId) ?? runs.at(-1) ?? null
 	const [live, setLive] = useState<{ runId: string | null; beats: Array<RunBeat> }>({ runId: null, beats: [] })
@@ -168,45 +176,58 @@ export function RunDrawer({
 		<section className="run-drawer" style={{ height }} {...pane('Run')}>
 			<div className="run-drawer-grip" onPointerDown={resize} role="separator" aria-orientation="horizontal" aria-label="Resize" />
 			<header className="run-drawer-head">
-				<h2>Run</h2>
-				{run?.status === 'running' && <AiOrb activity="working" size={14} label="Running" />}
-				{runs.length > 1 && run && (
-					<select className="run-drawer-pick" value={run.id} onChange={(e) => onRunId(e.target.value)} aria-label="Run">
-						{[...runs].reverse().map((r) => (
-							<option key={r.id} value={r.id}>
-								{runName(r)}
-							</option>
-						))}
-					</select>
-				)}
-				{runs.length === 1 && run && <span className="muted">{runName(run)}</span>}
-				<Tally tally={tally} />
-				<span className="spacer" />
-				{run && run.status !== 'running' && beats.length > 1 && !playing && (
-					<button className="btn small ghost" onClick={startReplay} title="Play this run's steps again">
-						▶ Replay
-					</button>
-				)}
-				{playing && (
+				<div className="run-drawer-tabs" role="tablist" aria-label="Drawer">
+					{(['run', 'console'] as const).map((t) => (
+						<button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => onTab(t)}>
+							{t === 'run' ? 'Run' : 'Console'}
+						</button>
+					))}
+				</div>
+				{tab === 'run' && (
 					<>
-						<button
-							className="btn small ghost"
-							onClick={() => setReplay((r) => r && { ...r, speed: r.speed === 1 ? 4 : 1 })}
-							title="Replay speed"
-							aria-label={`Replay speed ${playing.speed}×`}
-						>
-							{playing.speed}×
-						</button>
-						<button className="btn small ghost" onClick={() => setReplay(null)} title="Show every step now">
-							Skip to end
-						</button>
+						{run?.status === 'running' && <AiOrb activity="working" size={14} label="Running" />}
+						{runs.length > 1 && run && (
+							<select className="run-drawer-pick" value={run.id} onChange={(e) => onRunId(e.target.value)} aria-label="Run">
+								{[...runs].reverse().map((r) => (
+									<option key={r.id} value={r.id}>
+										{runName(r)}
+									</option>
+								))}
+							</select>
+						)}
+						{runs.length === 1 && run && <span className="muted">{runName(run)}</span>}
+						<Tally tally={tally} />
+						<span className="spacer" />
+						{run && run.status !== 'running' && beats.length > 1 && !playing && (
+							<button className="btn small ghost" onClick={startReplay} title="Play this run's steps again">
+								▶ Replay
+							</button>
+						)}
+						{playing && (
+							<>
+								<button
+									className="btn small ghost"
+									onClick={() => setReplay((r) => r && { ...r, speed: r.speed === 1 ? 4 : 1 })}
+									title="Replay speed"
+									aria-label={`Replay speed ${playing.speed}×`}
+								>
+									{playing.speed}×
+								</button>
+								<button className="btn small ghost" onClick={() => setReplay(null)} title="Show every step now">
+									Skip to end
+								</button>
+							</>
+						)}
 					</>
 				)}
+				{tab === 'console' && <span className="spacer" />}
 				<button className="btn small ghost" onClick={onClose} title={key ? `Close (${key})` : 'Close'} aria-label="Close">
 					✕
 				</button>
 			</header>
-			{!run ? (
+			{tab === 'console' ? (
+				consolePane
+			) : !run ? (
 				<p className="run-drawer-empty muted">No AI review of this snapshot yet. Start one and you can follow it here.</p>
 			) : !beats.length ? (
 				<p className="run-drawer-empty muted">

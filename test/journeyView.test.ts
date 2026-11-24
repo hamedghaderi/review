@@ -162,17 +162,28 @@ test('tally: a raised finding counts as its double-check verdict once there is o
 
 // The drawer's styles sit at the end of styles.css, so a class name it shares with the rest of the app restyles that
 // too: `.run-line` once turned the Findings panel's header into a 2px strip.
-test('run drawer styles: no class or animation the rest of the window already uses', () => {
+test('run drawer styles: no rule of its own that reaches outside the drawer', () => {
 	const css = readFileSync('src/renderer/src/styles.css', 'utf8')
 	const cut = css.indexOf('/* The Run drawer under the review')
 	assert.ok(cut > 0)
 	const before = css.slice(0, cut)
-	const mine = css.slice(cut)
-	const names = new Set([...mine.matchAll(/\.([a-z][a-z0-9-]*)/g), ...mine.matchAll(/@keyframes ([a-z-]+)/g)].map((m) => m[1]))
-	// Combined with the drawer's own classes only (`.run-beat.fresh`), never styled on their own.
-	for (const n of ['fresh', 'live', 'tip']) names.delete(n)
-	const shared = [...names].filter((n) => new RegExp(`(\\.|@keyframes )${n}(?![a-z0-9-])`).test(before))
-	assert.deepEqual(shared, [])
+	const mine = css.slice(cut).replace(/\/\*[\s\S]*?\*\//g, '')
+	// What each rule hangs on: the first class of its selector. A modifier after it (`.console-out.error`) or a class
+	// inside it (`.console-hint .mono`) only applies within the drawer's own elements.
+	const owners = new Set<string>()
+	for (const [, selectors] of mine.matchAll(/([^{}]+)\{/g))
+		for (const sel of selectors.split(',')) {
+			const first = /^\s*\.([a-z][a-z0-9-]*)/.exec(sel)
+			if (first) owners.add(first[1])
+			else if (!/^\s*(from|to|\d+%|@keyframes|body)/.test(sel)) assert.fail(`a rule not scoped by a class: ${sel.trim()}`)
+		}
+	const animations = [...mine.matchAll(/@keyframes ([a-z-]+)/g)].map((m) => m[1])
+	const taken = (n: string) => new RegExp(`\\.${n}(?![a-z0-9-])`).test(before)
+	assert.deepEqual([...owners].filter(taken), [])
+	assert.deepEqual(
+		animations.filter((n) => before.includes(`@keyframes ${n}`)),
+		[],
+	)
 })
 
 test('suspicions: one that became a finding has no row of its own, and its node takes the double-check once there is one', () => {
