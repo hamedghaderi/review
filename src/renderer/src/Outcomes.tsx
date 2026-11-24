@@ -6,6 +6,7 @@ import type {
 	AfterMergeItem,
 	AiCost,
 	DismissReason,
+	NoteCheck,
 	FindingCategory,
 	OutcomeCounts,
 	OutcomeFilter,
@@ -16,6 +17,8 @@ import type {
 } from '../../shared/types.ts'
 import { ago } from './branches.ts'
 import { useStored } from './useStored.ts'
+import { NotePeriods, NoteWarnings, noteWarned } from './NoteChecks.tsx'
+import { noteScope } from '../../shared/notes.ts'
 
 const PERIODS: Array<[OutcomePeriod, string]> = [
 	['30d', 'Last 30 days'],
@@ -101,6 +104,39 @@ function AfterMergeList({ items }: { items: Array<AfterMergeItem> }) {
 						>
 							{i.commit.sha.slice(0, 7)} ↗
 						</a>
+					</li>
+				))}
+			</ul>
+		</>
+	)
+}
+
+/** Your reviewer notes and how each is doing (issue #278): warned ones first. Read here, changed in Settings. */
+function NotesSection({ notes, onOpenNotes }: { notes: Array<NoteCheck>; onOpenNotes(): void }) {
+	if (!notes.length) return null
+	const repos = new Set(notes.map((c) => c.key)).size
+	const sorted = [...notes].sort((a, b) => Number(noteWarned(b)) - Number(noteWarned(a)))
+	return (
+		<>
+			<div className="section-title">Reviewer notes</div>
+			<p className="muted small">
+				What runs raised of each note’s kind (its rule, in its files) before and since you added it, whatever the period above. A note warns
+				when you accept findings the reviewer said it covers, or when a dismissed finding of its kind was reverted after merge.{' '}
+				<button className="link" onClick={onOpenNotes}>
+					Open reviewer notes
+				</button>
+			</p>
+			<ul className="note-list">
+				{sorted.map((c) => (
+					<li key={`${c.key}:${c.note.id}`} className={`note-card${c.note.on ? '' : ' off'}`}>
+						<div className="small">
+							<b>{noteScope(c.note)}</b>
+							{repos > 1 && <span className="muted"> · {c.repo}</span>}
+							{!c.note.on && <span className="muted"> · off</span>}
+						</div>
+						<p className="note-text small">{c.note.text}</p>
+						<NotePeriods check={c} />
+						<NoteWarnings check={c} />
 					</li>
 				))}
 			</ul>
@@ -234,7 +270,7 @@ function Table({
  * The Outcomes page: what became of the AI's findings in every repository on this computer, by model, setup and rule.
  * It only reads what the reviews already store, and it never ranks models: the samples are small and not random.
  */
-export function Outcomes() {
+export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 	const [period, setPeriod] = useStored<OutcomePeriod>('outcomes.period', '12m', ['30d', '12m', 'all'])
 	const [rest, setRest] = useState<Omit<OutcomeFilter, 'period'>>({ repoId: null, promptVersion: null, group: null, model: null })
 	const [summary, setSummary] = useState<OutcomeSummary | null>(null)
@@ -376,6 +412,7 @@ export function Outcomes() {
 					<Table title="By rule" label="Rule" rows={ruleRows(s.rules)} min={min} />
 					<Table title="By level" label="Level" rows={levelRows(s.levels)} min={min} notWorth />
 					<AfterMergeList items={s.afterMerge} />
+					<NotesSection notes={s.notes} onOpenNotes={onOpenNotes} />
 					{s.cost === null && <p className="muted small">Cost can’t be split by kind of finding, so it isn’t shown with that filter.</p>}
 				</>
 			)}

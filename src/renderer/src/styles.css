@@ -6940,3 +6940,21 @@ textarea.style-edit {
 .note-card details .dismissal-list {
 	margin-top: 6px;
 }
+
+/* How a reviewer note is doing (issue #278) */
+.note-periods {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.note-warnings {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.note-warnings .dismissal-list {
+	margin-top: 4px;
+}
+.note-warnings details summary {
+	cursor: pointer;
+}

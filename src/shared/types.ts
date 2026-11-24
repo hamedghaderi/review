@@ -1348,6 +1348,44 @@ export const MAX_REVIEWER_NOTES = 40 // per repository
 export const MAX_NOTE_PATHS = 20
 export const MAX_NOTE_PATH_CHARS = 300
 
+/** A finding a check on a reviewer note points at (issue #278), with what happened after its pull request merged. */
+export interface NoteFindingRef {
+	repoId: string
+	reviewId: string
+	findingId: string
+	target: string // "#12", or the branch
+	title: string
+	path: string
+	line: number | null
+	commit: { sha: string; subject: string; at: string } | null // reverted or changed after merge: the first commit that did
+}
+
+/** What runs raised of the kind a note covers (its rule and files) in one period, and what you decided. */
+export interface NotePeriod {
+	runs: number // runs that reviewed at least one file the note covers
+	raised: number // problems of its rule in its files, each counted once
+	accepted: number
+	dismissed: number
+}
+
+/**
+ * How a reviewer note is doing (issue #278): what was raised of its kind before and since it was added, and the
+ * warnings that it may hide real problems. Review never changes a note because of them.
+ */
+export interface NoteCheck {
+	key: string // the NotesRepo key
+	repo: string // for showing
+	note: ReviewerNote
+	before: NotePeriod
+	after: NotePeriod
+	marked: number // raised since, that the reviewer said this note covers
+	acceptedUnder: Array<NoteFindingRef> // accepted although the reviewer said this note covers them; warns at NOTE_ACCEPTED_WARN
+	reverted: Array<NoteFindingRef> // dismissed findings of its kind whose lines were reverted after merge: warns
+	changed: Array<NoteFindingRef> // dismissed findings of its kind whose lines changed after merge: not judged, shown only
+}
+
+export const NOTE_ACCEPTED_WARN = 2
+
 /** A repository reviewer notes can be kept for: one per GitHub repository, else per local clone. */
 export interface NotesRepo {
 	key: string // "owner/name" in lower case, or "local:<repo id>" without a GitHub remote
@@ -1912,6 +1950,7 @@ export interface OutcomeSummary {
 	minDecided: number // below this many accepted or dismissed, rows show counts only
 	afterMerge: Array<AfterMergeItem> // newest first
 	followedAt: string | null // when merged pull requests were last followed; null: never
+	notes: Array<NoteCheck> // your reviewer notes and how each is doing, whatever the period (issue #278)
 }
 
 export interface AiRun {
@@ -2326,6 +2365,7 @@ export const IPC = {
 	noteSuggestions: 'ai:note-suggestions',
 	settleNoteSuggestion: 'ai:settle-note-suggestion',
 	noteSuggestionsChanged: 'ai:note-suggestions-changed',
+	noteChecks: 'ai:note-checks',
 	aiDeleteCodeQuestion: 'ai:delete-code-question',
 	gifStatus: 'gif:status',
 	gifSetKey: 'gif:key-set',
@@ -2629,6 +2669,8 @@ export interface ReviewApi {
 	settleNoteSuggestion(key: string, id: string, action: NoteSuggestionAction): Promise<Result<Array<NoteSuggestion>>>
 	/** A repository's suggestions changed (a new one, or one settled); the handler gets its key. */
 	onNoteSuggestionsChanged(handler: (key: string) => void): () => void
+	/** How each reviewer note of a repository (a NotesRepo key) is doing, in the notes' order. */
+	noteChecks(key: string): Promise<Result<Array<NoteCheck>>>
 	/** The pull requests you picked for your review style; empty means the ones you reviewed most recently. */
 	stylePrs(): Promise<Result<Array<StylePr>>>
 	setStylePrs(next: Array<StylePr>): Promise<Result<Array<StylePr>>>

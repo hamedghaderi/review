@@ -8,16 +8,21 @@ import type {
 	Finding,
 	FindingCategory,
 	FindingDecision,
+	NoteCheck,
+	NoteFindingRef,
+	NotePeriod,
 	OutcomeCounts,
 	OutcomeFilter,
 	OutcomeGroup,
 	OutcomeRow,
 	OutcomeSummary,
 	Review,
+	ReviewerNote,
 	Severity,
 } from '../../shared/types.ts'
 import { FINDING_LEVELS } from '../../shared/types.ts'
-import type { RepoState } from '../store.ts'
+import { notesKeyOf, type RepoState } from '../store.ts'
+import { noteCovers } from '../../shared/notes.ts'
 
 export const MIN_DECIDED = 10
 
@@ -201,7 +206,12 @@ function addCost(a: AiCost | null, b: AiCost | null | undefined): AiCost {
 }
 
 /** How many problems were accepted, dismissed, fixed and so on, for each model, setup and rule, from stored runs. */
-export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter, now = new Date()): OutcomeSummary {
+export function summarizeOutcomes(
+	repos: Array<RepoState>,
+	filter: OutcomeFilter,
+	now = new Date(),
+	notes: Record<string, Array<ReviewerNote>> = {},
+): OutcomeSummary {
 	const from = since(filter.period, now)
 	const runMatches = (s: RepoState, run: AiRun): boolean =>
 		!run.fixture &&
@@ -338,5 +348,99 @@ export function summarizeOutcomes(repos: Array<RepoState>, filter: OutcomeFilter
 		minDecided: MIN_DECIDED,
 		afterMerge: afterMerge.sort((a, b) => b.commit.at.localeCompare(a.commit.at)),
 		followedAt,
+		notes: noteChecks(
+			repos,
+			notes,
+			filter.repoId === null ? null : notesKeyOf(repos.find((r) => r.repoId === filter.repoId) ?? { repoId: filter.repoId }),
+		),
 	}
+}
+
+/**
+ * How each reviewer note is doing (issue #278). A problem is of a note's kind when its lead finding is under the
+ * note's rule in a file it covers; it falls before or after the note by when it was first raised. Runs count when
+ * they reviewed a file the note covers. Warnings: findings you accepted although the reviewer said the note covers
+ * them, and dismissed findings of its kind whose lines were reverted after merge. Lines that only changed after merge
+ * are listed apart: nothing judged whether that change fixed anything.
+ */
+export function noteChecks(
+	repos: Array<RepoState>,
+	notes: Record<string, Array<ReviewerNote>>,
+	only: string | null = null, // a NotesRepo key
+): Array<NoteCheck> {
+	const keys = Object.keys(notes).filter((k) => (only === null || k === only) && notes[k].length)
+	const out: Array<NoteCheck> = []
+	for (const key of keys) {
+		const mine = repos.filter((s) => notesKeyOf(s) === key)
+		const repo = mine[0] ? repoLabel(mine[0]) : key.replace(/^local:/, '')
+		const checks = notes[key].map((note): NoteCheck => ({
+			key,
+			repo,
+			note,
+			before: emptyPeriod(),
+			after: emptyPeriod(),
+			marked: 0,
+			acceptedUnder: [],
+			reverted: [],
+			changed: [],
+		}))
+		for (const s of mine) {
+			const roots = new Map<string, Map<string, string>>()
+			const byId = new Map<string, Map<string, Finding>>()
+			for (const [reviewId, rs] of Object.entries(s.aiRuns)) {
+				roots.set(reviewId, findingRoots(rs))
+				byId.set(reviewId, new Map(rs.flatMap((r) => r.findings.map((f) => [f.id, f] as const))))
+			}
+			for (const run of Object.values(s.aiRuns).flat()) {
+				if (run.fixture) continue
+				const files = run.coverage.files.filter((f) => f.state === 'reviewed' || f.state === 'carried' || f.state === 'partial')
+				for (const c of checks) if (files.some((f) => noteCovers(c.note, f.fileKey))) periodOf(c, run.startedAt).runs++
+			}
+			for (const p of problemsOf(s)) {
+				const raised = p.occurrences.filter((o) => o.raisers.length)
+				if (!raised.length) continue
+				const lead = raised.find((o) => !o.finding.mergedInto) ?? raised[0]
+				const path = lead.finding.anchor.newPath ?? lead.finding.anchor.oldPath ?? lead.finding.anchor.fileKey
+				const first = raised.reduce((a, o) => (o.run.startedAt < a ? o.run.startedAt : a), raised[0].run.startedAt)
+				const state = decided(p, roots, byId)
+				const ref = (o: Occurrence, commit: NoteFindingRef['commit'] = null): NoteFindingRef => ({
+					repoId: s.repoId,
+					reviewId: o.review.id,
+					findingId: o.finding.id,
+					target: o.review.pr ? `#${o.review.pr.number}` : (o.review.headRef ?? 'a branch'),
+					title: o.finding.title,
+					path,
+					line: o.finding.anchor.startLine,
+					commit,
+				})
+				for (const c of checks) {
+					if (c.note.rule && lead.finding.category !== c.note.rule) continue
+					if (!noteCovers(c.note, path)) continue
+					const period = periodOf(c, first)
+					period.raised++
+					if (state === 'accepted') period.accepted++
+					else if (typeof state === 'object') period.dismissed++
+					const marked = p.occurrences.find((o) => o.finding.underNote?.noteId === c.note.id)
+					if (marked) {
+						c.marked++
+						if (state === 'accepted') c.acceptedUnder.push(ref(marked))
+					}
+					if (typeof state === 'object' && p.after?.result.commit) {
+						if (p.after.result.state === 'reverted') c.reverted.push(ref(lead, p.after.result.commit))
+						else if (p.after.result.state === 'changed') c.changed.push(ref(lead, p.after.result.commit))
+					}
+				}
+			}
+		}
+		out.push(...checks)
+	}
+	return out
+}
+
+function emptyPeriod(): NotePeriod {
+	return { runs: 0, raised: 0, accepted: 0, dismissed: 0 }
+}
+
+function periodOf(c: NoteCheck, at: string): NotePeriod {
+	return at < c.note.addedAt ? c.before : c.after
 }
