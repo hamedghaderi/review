@@ -1934,6 +1934,39 @@ export interface AfterMergeItem {
 	days: number // after the merge
 }
 
+/** What the AI writes besides findings (issue #289): Explain this change, the conclusion and its answers, drafted replies. */
+export type AiTextFeature = 'explain' | 'conclusion' | 'conclusion-answer' | 'reply'
+
+/** A drafted reply as it was sent: unchanged, lightly edited (a fifth of its words or less changed) or rewritten. */
+export type ReplyFate = 'as-drafted' | 'light' | 'rewrite'
+
+/** One text the AI made, kept per repository for Outcomes. The text itself isn't kept. */
+export interface AiTextRecord {
+	id: string
+	feature: AiTextFeature
+	at: string
+	connectionId: string
+	connectionLabel: string
+	model: string
+	sent?: { fate: ReplyFate; share: number; at: string } // drafted replies only: how it went out; absent while not sent
+}
+
+/** Drafted replies not sent are made − asDrafted − light − rewrite: never sent, or emptied from the box. */
+export interface AiTextCounts {
+	made: number
+	asDrafted: number
+	light: number
+	rewrite: number
+}
+
+export interface AiTextRow {
+	feature: AiTextFeature
+	key: string // the model, as OutcomeRow keys of `models`
+	label: string
+	detail: string | null
+	counts: AiTextCounts
+}
+
 export interface OutcomeRow {
 	key: string
 	label: string
@@ -1958,6 +1991,7 @@ export interface OutcomeSummary {
 	minDecided: number // below this many accepted or dismissed, rows show counts only
 	afterMerge: Array<AfterMergeItem> // newest first
 	followedAt: string | null // when merged pull requests were last followed; null: never
+	aiText: Array<AiTextRow> // by feature, then model; period, repository and model filters only
 	notes: Array<NoteCheck> // your reviewer notes and how each is doing, whatever the period (issue #278)
 }
 
@@ -2355,6 +2389,7 @@ export const IPC = {
 	aiExplainChange: 'ai:explain-change',
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
+	aiReplySent: 'ai:reply-sent',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
 	agentSetup: 'agent:setup',
@@ -2645,7 +2680,8 @@ export interface ReviewApi {
 	// `question` null writes the conclusion (again, replacing the conversation); otherwise asks about it.
 	conclude(reviewId: string, question: string | null): Promise<Result<ChangeConclusion>>
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
-	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<string>>
+	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<{ id: string; text: string }>>
+	aiReplySent(repoId: string, textId: string, draft: string, sent: string): Promise<Result<void>>
 	/** Drafts the summary of the review you are about to submit with `event`, from your comments in it. Nothing is sent. */
 	draftSummary(reviewId: string, event: ReviewEvent): Promise<Result<string>>
 	/**

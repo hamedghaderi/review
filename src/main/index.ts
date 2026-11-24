@@ -588,6 +588,9 @@ function registerIpc(): void {
 			'Your drafted reply',
 		)
 	})
+	handle(IPC.aiReplySent, (repoId: unknown, textId: unknown, draft: unknown, sent: unknown) =>
+		service.replySent(str(repoId, 'repository'), str(textId, 'draft id', 128), str(draft, 'draft', 100_000), str(sent, 'reply', 100_000)),
+	)
 	handle(IPC.aiDraftSummary, async (reviewId: unknown, event: unknown) => {
 		const selection = connections.view().questionModel
 		if (!selection) throw new AppFail('ai-unavailable', 'Choose a model for questions first, in Settings › AI.')

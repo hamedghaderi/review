@@ -20,6 +20,7 @@ import {
 	type GoneFinding,
 	type Finding,
 	type ModelSelection,
+	type AiTextFeature,
 	type PatchResult,
 	type ReviewerChoice,
 	type ReviewRule,
@@ -94,6 +95,12 @@ import type { UsageLog } from './usage.ts'
 import type { BudgetCheck } from './budget.ts'
 import { buildNoteDraftRequest, parseNoteDraft, type DraftGroup, type DraftInput } from './noteDraft.ts'
 import { answeredRequests, defaultBackoff, settlesBy, startRun, type RunHandle, type RunInput, type RunnerOptions } from './runner.ts'
+import { recordAiText } from './aiText.ts'
+
+/** Who wrote a text, for the AI-text counts in Outcomes (issue #289). */
+function textBy(feature: AiTextFeature, config: RunConfig, selection: ModelSelection) {
+	return { feature, connectionId: config.connectionId, connectionLabel: config.connectionLabel, model: selection.modelId }
+}
 
 /** Resolves a model selection into a fixed run configuration (adapter + captured credential). */
 export type RunConfigSource = (selection: ModelSelection) => Promise<RunConfig>
@@ -1014,6 +1021,7 @@ export class AiController {
 		await this.store.update((d) => {
 			const r = d.repos[repoId]?.reviews[reviewId]
 			if (r) r.explanation = explanation
+			if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('explain', config, selection))
 		})
 		return structuredClone(explanation)
 	}
@@ -1194,10 +1202,16 @@ export class AiController {
 				await this.store.update((d) => {
 					const r = d.repos[repoId]?.reviews[reviewId]
 					if (r) r.conclusion = conclusion
+					if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('conclusion', config, selection))
 				})
 				return structuredClone(conclusion)
 			}
-			return this.addConclusionMessage(repoId, reviewId, answer)
+			const saved = await this.addConclusionMessage(repoId, reviewId, answer)
+			if (!answer.error)
+				await this.store.update((d) => {
+					if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('conclusion-answer', config, selection))
+				})
+			return saved
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}
@@ -1243,8 +1257,8 @@ export class AiController {
 
 	/**
 	 * Drafts your next reply in a GitHub thread, by `selection`'s model, from the thread, the code around it, the PR's
-	 * text and, when your comment came from an AI finding, that finding. Nothing is posted or saved: the draft is only
-	 * put in the reply box, for you to edit and send. `viewer` is your login, so the model knows which comments are yours.
+	 * text and, when your comment came from an AI finding, that finding. Nothing is posted: the draft is only put in
+	 * the reply box, for you to edit and send. Only a record that a draft was made is saved, for Outcomes. `viewer` is your login, so the model knows which comments are yours.
 	 */
 	async draftReply(
 		access: ComparisonAccess,
@@ -1253,7 +1267,7 @@ export class AiController {
 		viewer: string | null,
 		findingId: string | null,
 		selection: ModelSelection,
-	): Promise<string> {
+	): Promise<{ id: string; text: string }> {
 		const repoId = access.comparison.repoId
 		const busy = `reply:${thread.id}`
 		if (this.onDemandBusy.has(busy)) throw new AppFail('ai-busy', 'A reply to this thread is already being drafted.')
@@ -1298,9 +1312,15 @@ export class AiController {
 			)
 			// A mention calls a bot back into the thread, whatever the instructions said: keep its name, drop the @.
 			const bots = new Set(thread.comments.filter((x) => x.bot && x.author).map((x) => x.author!.toLowerCase()))
-			return parseReply(response.output).replace(/(^|[^\w`])@([A-Za-z0-9-]+(?:\[bot\])?)/g, (m, pre: string, login: string) =>
+			const text = parseReply(response.output).replace(/(^|[^\w`])@([A-Za-z0-9-]+(?:\[bot\])?)/g, (m, pre: string, login: string) =>
 				bots.has(login.toLowerCase().replace(/\[bot\]$/, '')) ? `${pre}${login}` : m,
 			)
+			// Counted for Outcomes; the reply box says later whether it was sent and how much you changed (issue #289).
+			let id = ''
+			await this.store.update((d) => {
+				if (d.repos[repoId]) id = recordAiText(d.repos[repoId], textBy('reply', config, selection)).id
+			})
+			return { id, text }
 		} catch (e) {
 			if (e instanceof AppFail) throw e
 			throw new AppFail('ai-unavailable', `No draft: ${e instanceof Error ? e.message : String(e)}`)

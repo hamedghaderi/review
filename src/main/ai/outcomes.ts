@@ -1,6 +1,8 @@
 import { basename } from 'node:path'
 import { findingRoots, findingState } from '../../shared/findings.ts'
 import type {
+	AiTextFeature,
+	AiTextRow,
 	AfterMergeItem,
 	AfterMergeResult,
 	AiCost,
@@ -25,6 +27,7 @@ import { notesKeyOf, type RepoState } from '../store.ts'
 import { noteCovers } from '../../shared/notes.ts'
 
 export const MIN_DECIDED = 10
+const AI_TEXT_ORDER: Array<AiTextFeature> = ['explain', 'conclusion', 'conclusion-answer', 'reply']
 
 const DEFECTS: ReadonlySet<FindingCategory> = new Set([
 	'bug',
@@ -331,6 +334,26 @@ export function summarizeOutcomes(
 		}
 	}
 
+	// The AI's other text (issue #289): by feature and model. Prompt versions and kinds of finding don't apply to it.
+	const aiText = new Map<string, AiTextRow>()
+	for (const s of repos) {
+		if (!s.aiText?.length) continue
+		if (!repoList.some((r) => r.id === s.repoId)) repoList.push({ id: s.repoId, label: repoLabel(s) })
+		for (const t of s.aiText) {
+			const model = { key: `${t.connectionId}\u0000${t.model}`, label: t.model, detail: t.connectionLabel }
+			if (!allModels.has(model.key)) allModels.set(model.key, model)
+			if ((filter.repoId !== null && s.repoId !== filter.repoId) || (filter.model !== null && model.key !== filter.model)) continue
+			if (Date.parse(t.at) < from) continue
+			const key = `${t.feature}\u0000${model.key}`
+			let r = aiText.get(key)
+			if (!r) aiText.set(key, (r = { feature: t.feature, ...model, counts: { made: 0, asDrafted: 0, light: 0, rewrite: 0 } }))
+			r.counts.made++
+			if (t.sent?.fate === 'as-drafted') r.counts.asDrafted++
+			else if (t.sent?.fate === 'light') r.counts.light++
+			else if (t.sent?.fate === 'rewrite') r.counts.rewrite++
+		}
+	}
+
 	const sorted = <R extends OutcomeRow>(map: Map<string, R>): Array<R> =>
 		[...map.values()].filter((r) => r.counts.raised > 0 || r.cost).sort((a, b) => b.counts.raised - a.counts.raised)
 	return {
@@ -348,6 +371,9 @@ export function summarizeOutcomes(
 		minDecided: MIN_DECIDED,
 		afterMerge: afterMerge.sort((a, b) => b.commit.at.localeCompare(a.commit.at)),
 		followedAt,
+		aiText: [...aiText.values()].sort(
+			(a, b) => AI_TEXT_ORDER.indexOf(a.feature) - AI_TEXT_ORDER.indexOf(b.feature) || b.counts.made - a.counts.made,
+		),
 		notes: noteChecks(
 			repos,
 			notes,

@@ -143,6 +143,7 @@ import { findRelated } from './ai/related.ts'
 import { findImporters } from './ai/imports.ts'
 import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
 import { findSymbol, generatedPath, MAX_SYMBOL_HITS, pythonModuleFiles } from './symbols.ts'
+import { markReplySent } from './ai/aiText.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -2165,7 +2166,7 @@ export class ReviewService {
 	 * Drafts your reply in one of the PR's GitHub threads (see AiController.draftReply). The thread is read from GitHub
 	 * again, so the draft answers its newest comment.
 	 */
-	async draftReply(repoId: string, reviewId: string, threadId: string, selection: ModelSelection): Promise<string> {
+	async draftReply(repoId: string, reviewId: string, threadId: string, selection: ModelSelection): Promise<{ id: string; text: string }> {
 		const { ai, access } = this.aiAccess(reviewId)
 		const d = await this.prDiscussion(repoId, reviewId)
 		if (d.status === 'unavailable') throw new AppFail('github-failed', d.reason ?? 'The thread could not be read from GitHub.')
@@ -2181,6 +2182,14 @@ export class ReviewService {
 				})
 			: undefined
 		return ai.draftReply(access, reviewId, thread, d.viewer ?? null, own?.findingId ?? null, selection)
+	}
+
+	/** A drafted reply went out (issue #289): `sent` is the part of the reply that came from the draft `draft`. */
+	async replySent(repoId: string, textId: string, draft: string, sent: string): Promise<void> {
+		await this.store.update((d) => {
+			const repo = d.repos[repoId]
+			if (repo) markReplySent(repo, textId, draft, sent)
+		})
 	}
 
 	/** Drafts the summary of the review you are about to submit with `event` (see AiController.draftSummary). */
