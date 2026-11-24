@@ -42,6 +42,7 @@ import {
 	type AuthorReplyKind,
 	type CommitCheck,
 	type CommitCheckEstimate,
+	type RunBeat,
 	REVIEW_RULES,
 	runMembers,
 } from '../../shared/types.ts'
@@ -176,11 +177,18 @@ export class AiController {
 	private resolveRun: RunConfigSource
 	private concurrency: number
 	private notify: (run: AiRun) => void
+	private notifyBeat: (runId: string, beat: RunBeat) => void
 
-	constructor(store: ReviewStore, resolveRun: RunConfigSource, notify: (run: AiRun) => void, options: { concurrency?: number } = {}) {
+	constructor(
+		store: ReviewStore,
+		resolveRun: RunConfigSource,
+		notify: (run: AiRun) => void,
+		options: { concurrency?: number; onBeat?: (runId: string, beat: RunBeat) => void } = {},
+	) {
 		this.store = store
 		this.resolveRun = resolveRun
 		this.notify = notify
+		this.notifyBeat = options.onBeat ?? (() => {})
 		this.concurrency = options.concurrency ?? 2
 	}
 
@@ -1655,6 +1663,7 @@ export class AiController {
 			},
 			options,
 			(run) => void this.persist(repoId, background ? { ...run, auto: true } : run),
+			this.notifyBeat,
 		)
 		this.active = { handle, repoId, reviewId, connectionIds, background }
 		this.starting = false

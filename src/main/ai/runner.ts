@@ -23,8 +23,11 @@ import {
 	type ReviewerNote,
 	type EarlierLimitations,
 	type ReviewContext,
+	type RunBeat,
+	type RunStage,
 	type Takeover,
 } from '../../shared/types.ts'
+import { createJourney, findingBeat, lookupBeat, verdictTone } from './journey.ts'
 import { addCost } from '../../shared/cost.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import type { LinkedIssue } from '../github.ts'
@@ -215,9 +218,15 @@ export function defaultBackoff(attempt: number, error: ProviderError): number {
 
 /**
  * Runs one AI review. `onUpdate` receives a fresh snapshot after every change; after cancellation no further
- * results are merged, and responses that arrive late are dropped.
+ * results are merged, and responses that arrive late are dropped. `onBeat` receives each step of the run's journey as
+ * it happens (lookups arrive between snapshots); the snapshots carry them all too.
  */
-export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run: AiRun) => void): RunHandle {
+export function startRun(
+	input: RunInput,
+	options: RunnerOptions,
+	onUpdate: (run: AiRun) => void,
+	onBeat: (runId: string, beat: RunBeat) => void = () => {},
+): RunHandle {
 	const { provider } = options
 	const retry = input.retry ?? null
 	const levels = retry ? levelsOf(retry.run) : (options.levels ?? DEFAULT_LEVELS)
@@ -367,6 +376,22 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 	const costBefore = run.cost?.usd ?? 0
 	let overBudget: string | null = null
 	let evidence: EvidenceIndex | null = null // CI messages and test imports that findings are checked against
+	const journey = createJourney((run.journey ??= []), (beat) => onBeat(run.id, beat))
+	const stage = (s: RunStage, text: string): void => journey.add(null, { kind: 'stage', stage: s, text })
+	/** One request's lookups, each told to the journey once it is answered. */
+	const lookupTools = (memberId: string | null, budget: LookupBudget, mcp: boolean): ReviewTools => {
+		const tools = input.tools!(budget, mcp)
+		const label = (name: string): string | null => (external?.has(name) ? external.label(name) : null)
+		return {
+			...tools,
+			async call(name, args, signal) {
+				const result = await tools.call(name, args, signal)
+				const beat = signal.aborted ? null : lookupBeat(name, args, result.error, label)
+				if (beat) journey.add(memberId, beat)
+				return result
+			},
+		}
+	}
 	const emit = (): void => {
 		if (!settled) onUpdate(structuredClone(run))
 	}
@@ -388,6 +413,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		try {
 			const sources = await input.loadSources()
 			if (controller.signal.aborted) return finish(null)
+			stage('sources', `${sources.length} changed file${sources.length === 1 ? '' : 's'} read`)
 			if (input.loadBackground) {
 				const ms = options.backgroundTimeoutMs ?? BACKGROUND_TIMEOUT_MS
 				const late = AbortSignal.timeout(ms)
@@ -397,6 +423,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					const b = await settlesBy(input.loadBackground(signal), signal)
 					for (const n of b.notes) notice(n)
 					discussion = b.discussion
+					const read = [
+						...(b.issues.length ? [`${b.issues.length} linked issue${b.issues.length === 1 ? '' : 's'}`] : []),
+						...(b.discussion?.threads.length
+							? [`${b.discussion.threads.length} conversation thread${b.discussion.threads.length === 1 ? '' : 's'}`]
+							: []),
+						...(b.takeover?.status === 'read' ? [`#${b.takeover.original.number}, which this one takes over`] : []),
+					]
+					if (read.length) stage('background', `Read ${read.join(', ')}`)
 					background = buildBackground({
 						description,
 						context: input.context ?? null,
@@ -581,6 +615,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				if (!w.pkg!.batches.length && options.team)
 					for (const r of w.rules) evaluationOf(r, w).why.push('None of the changed files is a kind this rule applies to.')
 			}
+			const total = run.coverage.batchesTotal
+			stage(
+				'packed',
+				`${total} request${total === 1 ? '' : 's'}${workers.length > 1 ? ` for ${workers.length} reviewers` : ''}${run.coverage.related?.sent ? `, with ${run.coverage.related.sent} related snippet${run.coverage.related.sent === 1 ? '' : 's'}` : ''}`,
+			)
 			emit()
 			// Every member starts now; the run waits only for the ones it waits for.
 			const late = workers.filter((w) => w.late)
@@ -684,12 +723,19 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 				const outcome = await runBatch(batch, w)
 				if (controller.signal.aborted || !open()) return // late result of a cancelled run
 				const prefix = w.role ? `${w.role}: ` : ''
+				const fresh = outcome.ok ? merge(outcome.value, w, batch.index) : []
+				journey.add(w.id, {
+					kind: 'request',
+					index: batch.index,
+					total: pkg.batches.length,
+					findings: fresh.length,
+					error: outcome.ok ? null : outcome.error.message,
+				})
+				for (const f of fresh) journey.add(w.id, findingBeat(f))
 				if (retry) {
-					if (outcome.ok) merge(outcome.value, w, batch.index)
 					settleRetried(batch.index, w, outcome.ok ? null : outcome.error.message)
 					if (!outcome.ok && outcome.error instanceof ProviderError && outcome.error.fatal) w.stopped = true
 				} else if (outcome.ok) {
-					merge(outcome.value, w, batch.index)
 					run.coverage.batchesDone++
 					if (w.member) w.member.requestsDone++
 					setBatchFiles(batch.fileKeys, batch.index, 'reviewed', null, w)
@@ -717,8 +763,11 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 					: 'completed'
 	}
 
-	/** Adds one response to the run. Each member owns its rules, so the same problem from two members is merged, not repeated. */
-	function merge(value: ReturnType<typeof validateBatchOutput>, w: Worker, batchIndex: number): void {
+	/**
+	 * Adds one response to the run. Each member owns its rules, so the same problem from two members is merged, not
+	 * repeated. Returns the new findings it lists (not duplicates, not held back over a limit).
+	 */
+	function merge(value: ReturnType<typeof validateBatchOutput>, w: Worker, batchIndex: number): Array<Finding> {
 		const fresh: Array<Finding> = []
 		// Arriving after the run finished: marked, so a reader who already went through the list can find them.
 		const late = lateOpen && w.late ? { late: true } : {}
@@ -756,6 +805,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const text = w.role ? `${w.role}: ${l}` : l
 			if (!run.limitations.includes(text)) run.limitations.push(text)
 		}
+		return budget.kept
 	}
 
 	type BatchOutcome = { ok: true; value: ReturnType<typeof validateBatchOutput> } | { ok: false; error: Error }
@@ -764,7 +814,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		let reasked = false
 		for (let attempt = 0; ; attempt++) {
 			const budget = lookups ? lookupBudget(batch, w) : null
-			const tools = budget && input.tools ? input.tools(budget, external !== null) : undefined
+			const tools = budget && input.tools ? lookupTools(w.id, budget, external !== null) : undefined
 			const sendImages = images.length > 0 && !w.imagesRejected
 			try {
 				const response = await w.provider.review(
@@ -876,7 +926,14 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 						o.mergedReason = g.reason
 					}
 				}
-				if (groups.length) run.merged = { groups: groups.length, findings: groups.reduce((n, g) => n + g.others.length, 0) }
+				if (groups.length) {
+					const merged = { groups: groups.length, findings: groups.reduce((n, g) => n + g.others.length, 0) }
+					run.merged = merged
+					stage(
+						'grouping',
+						`${merged.findings} finding${merged.findings === 1 ? '' : 's'} grouped under ${groups.length} other${groups.length === 1 ? '' : 's'} as the same problem`,
+					)
+				}
 				emit()
 				return
 			} catch (error) {
@@ -912,12 +969,24 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (!queue.length) return
 		const progress = (run.verification ??= { total: 0, done: 0, failed: 0 })
 		progress.total += queue.length
+		stage('double-check', `Trying to prove ${queue.length} blocking finding${queue.length === 1 ? '' : 's'} wrong`)
 		emit()
 		const next = async (): Promise<void> => {
 			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const result = await verifyOne(item.f, item.w, item.checker)
 				if (controller.signal.aborted || !open()) return
 				item.f.verification = result
+				const raised = findingBeat(item.f)
+				journey.add(item.checker.id, {
+					kind: 'verdict',
+					of: 'finding',
+					title: item.f.title,
+					tone: verdictTone(result.verdict, result.error),
+					reason: result.reason,
+					findingId: item.f.id,
+					path: raised.kind === 'finding' ? raised.path : null,
+					line: item.f.anchor.startLine,
+				})
 				const lowered = reachLowered(item.f, result, levels)
 				if (lowered) {
 					item.f.severity = lowered.severity
@@ -951,12 +1020,23 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (!queue.length) return
 		const progress = (run.verification ??= { total: 0, done: 0, failed: 0 })
 		progress.total += queue.length
+		stage('near-misses', `Challenging ${queue.length} near miss${queue.length === 1 ? '' : 'es'} the reviewer let go`)
 		emit()
 		const next = async (): Promise<void> => {
 			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const check = await checkNearMiss(item.c, item.excerpt, item.facts, item.checker)
 				if (controller.signal.aborted || !open()) return
 				item.c.miss.check = check
+				journey.add(item.checker.id, {
+					kind: 'verdict',
+					of: 'near-miss',
+					title: item.c.miss.note,
+					tone: verdictTone(check.verdict, check.error),
+					reason: check.reason,
+					findingId: check.findingId,
+					path: item.c.miss.fileKey,
+					line: item.c.miss.line,
+				})
 				if (check.error) progress.failed++
 				else progress.done++
 				emit()
@@ -989,12 +1069,23 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		const checks = (run.botChecks ??= [])
 		const progress = (run.verification ??= { total: 0, done: 0, failed: 0 })
 		progress.total += queue.length
+		stage('bot-threads', `Checking ${queue.length} open bot thread${queue.length === 1 ? '' : 's'} against the code`)
 		emit()
 		const next = async (): Promise<void> => {
 			for (let item = queue.shift(); item && !controller.signal.aborted && !overBudget; item = queue.shift()) {
 				const check = await checkBotThread(item.t, item.w)
 				if (controller.signal.aborted || run.status !== 'running') return
 				checks.push(check)
+				journey.add(item.w.id, {
+					kind: 'verdict',
+					of: 'bot-thread',
+					title: `${check.bot ?? 'A bot'}: ${firstLine(item.t.comments[0]?.body ?? '')}`,
+					tone: verdictTone(check.verdict, check.error),
+					reason: check.reason,
+					findingId: null,
+					path: item.t.placed?.fileKey ?? null,
+					line: item.t.placed?.startLine ?? null,
+				})
 				if (check.error) progress.failed++
 				else progress.done++
 				emit()
@@ -1038,7 +1129,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
 			const tools =
 				lookups && input.tools && room >= 2000
-					? input.tools(
+					? lookupTools(
+							w.id,
 							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
 							external !== null,
 						)
@@ -1096,7 +1188,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
 			const tools =
 				lookups && input.tools && room >= 2000
-					? input.tools(
+					? lookupTools(
+							w.id,
 							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
 							external !== null,
 						)
@@ -1181,7 +1274,8 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 			const room = capacityChars(l.contextWindow, outputBudget(l), draft.instructions.length + toolChars) - draft.input.length
 			const tools =
 				lookups && input.tools && room >= 2000
-					? input.tools(
+					? lookupTools(
+							w.id,
 							{ maxCalls: LOOKUPS_BY_RISK.high.maxCalls, maxChars: Math.min(LOOKUPS_BY_RISK.high.maxChars, room) },
 							external !== null,
 						)
@@ -1332,6 +1426,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (!cancelled) run.status = settledStatus(pkg)
 		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
+		stage('finished', `${finishedText(run)}${lateOpen ? ', while the reviewers it did not wait for go on' : ''}`)
 		run.finishedAt = now()
 		settled = !lateOpen
 		onUpdate(structuredClone(run))
@@ -1386,6 +1481,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		if (run.status === 'partial' && status === 'completed') run.status = status
 		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
+		stage('late-finished', `The reviewers it did not wait for are done: ${finishedText(run).toLowerCase()}`)
 		settled = true
 		onUpdate(structuredClone(run))
 		settle(structuredClone(run))
@@ -1425,6 +1521,7 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		run.retrying = null
 		traceHistory()
 		if (evidence && pkg) run.ciUncovered = uncoveredCi(run.findings, evidence)
+		stage('finished', `Retry: ${finishedText(run).toLowerCase()}`)
 		run.finishedAt = now()
 		settled = true
 		onUpdate(structuredClone(run))
@@ -1438,6 +1535,27 @@ export function startRun(input: RunInput, options: RunnerOptions, onUpdate: (run
 		() => settle(structuredClone(run)),
 	)
 	return { run: structuredClone(run), cancel, done, settled: settledLate }
+}
+
+/** How the run ended, for the journey's last waypoint: "Finished · 4 findings, 1 blocking". */
+function finishedText(run: AiRun): string {
+	const how = { running: 'Finished', completed: 'Finished', partial: 'Finished with gaps', failed: 'Failed', cancelled: 'Stopped' }[
+		run.status
+	]
+	const listed = run.findings.filter((f) => !f.heldBack && !f.mergedInto)
+	const blocking = listed.filter((f) => f.severity === 'blocking').length
+	if (!listed.length) return run.status === 'completed' ? `${how} · nothing found` : how
+	return `${how} · ${listed.length} finding${listed.length === 1 ? '' : 's'}${blocking ? `, ${blocking} blocking` : ''}`
+}
+
+/** The first non-empty line of a comment, short enough for one line of the journey. */
+function firstLine(text: string): string {
+	const line =
+		text
+			.split('\n')
+			.find((l) => l.trim())
+			?.trim() ?? ''
+	return line.length > 120 ? `${line.slice(0, 119)}…` : line
 }
 
 /** A team run from before members got their own requests: one shared set, so supplied excerpts name no member. */

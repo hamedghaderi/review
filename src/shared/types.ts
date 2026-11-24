@@ -2030,6 +2030,53 @@ export interface OutcomeSummary {
 	notes: Array<NoteCheck> // your reviewer notes and how each is doing, whatever the period (issue #278)
 }
 
+/** The milestones of a review run, in the order a run passes them (issue #299). */
+export type RunStage =
+	| 'sources' // the changed files were read
+	| 'background' // linked issues and the conversation were read
+	| 'packed' // the requests were packed, one set per reviewer
+	| 'near-misses' // the riskiest near misses are being challenged
+	| 'grouping' // findings are being grouped as duplicates
+	| 'double-check' // blocking findings are being double-checked
+	| 'bot-threads' // open bot threads are being checked against the code
+	| 'finished' // the run finished (the members it waits for are done)
+	| 'late-finished' // the members it did not wait for are done too
+
+/**
+ * Colour of a beat, by the state of the code it found: cleared = fine (green), confirmed = a problem (red), concern =
+ * not disproved or not blocking (amber), unsettled = never decided (grey).
+ */
+export type BeatTone = 'cleared' | 'confirmed' | 'concern' | 'unsettled'
+
+export type RunBeatBody =
+	| { kind: 'stage'; stage: RunStage; text: string }
+	| { kind: 'read'; path: string; version: string; start: number | null; end: number | null }
+	| { kind: 'search'; text: string }
+	| { kind: 'list'; path: string }
+	| { kind: 'tool'; name: string } // an MCP tool, as "server: tool"
+	| { kind: 'request'; index: number; total: number; findings: number; error: string | null } // one review request answered or failed
+	| { kind: 'finding'; findingId: string; title: string; severity: Severity; path: string; line: number | null; tone: BeatTone }
+	| {
+			kind: 'verdict'
+			of: 'finding' | 'near-miss' | 'bot-thread'
+			title: string // what was checked
+			tone: BeatTone
+			reason: string
+			findingId: string | null
+			path: string | null
+			line: number | null
+	  }
+
+/**
+ * One step of a run's journey, shown in the Run tab as it happens and replayed later. Only what the app saw happen:
+ * stages, the lookups it served, answers and verdicts. Never the model's own narration.
+ */
+export type RunBeat = RunBeatBody & {
+	seq: number // 0, 1, 2… in the order the run recorded them
+	at: number // ms since the epoch
+	memberId: string | null // the team member it belongs to; null for the run itself or a single-model run
+}
+
 export interface AiRun {
 	id: string
 	reviewId: string
@@ -2093,6 +2140,7 @@ export interface AiRun {
 	carriedFrom?: CarriedRun | null // an incremental run: the earlier run whose results it carries for unchanged files
 	rechecked?: Array<RecheckedFile> // an incremental run: unchanged files it reviewed again, and why
 	history?: FindingHistory | null // compared with the newest finished run on an earlier snapshot, when there is one
+	journey?: Array<RunBeat> // what happened while it ran, for the Run tab (issue #299); absent on older runs
 }
 
 export type ProviderKind = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'custom' | 'claude-code' | 'codex' | 'fixture'
@@ -2465,6 +2513,7 @@ export const IPC = {
 	aiCancel: 'ai:cancel',
 	aiRetryRules: 'ai:retry-rules',
 	aiRunUpdate: 'ai:run-update',
+	aiRunBeat: 'ai:run-beat',
 	mcpSettings: 'mcp:settings',
 	mcpSettingsChanged: 'mcp:settings-changed',
 	mcpSave: 'mcp:save',
@@ -2700,6 +2749,8 @@ export interface ReviewApi {
 	/** Asks each rule's reviewer again, for those rules only, on the requests of a finished run that did not cover them. */
 	retryAiRules(reviewId: string, runId: string, rules: Array<ReviewRule>): Promise<Result<AiRun>>
 	onAiRunUpdate(handler: (run: AiRun) => void): () => void
+	/** Each step of a running review's journey as it happens (issue #299); the run's updates carry them all too. */
+	onAiRunBeat(handler: (runId: string, beat: RunBeat) => void): () => void
 	/** Asks the model that raised a finding a question about it. The answer is added to the finding's thread. */
 	askFinding(reviewId: string, findingId: string, question: string): Promise<Result<AiRun>>
 	/** Double-checks one finding now, with the model for questions (else the one that raised it); resolves with its run. */

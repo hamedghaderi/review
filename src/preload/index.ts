@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
 	IPC,
 	type AiRun,
+	type RunBeat,
 	type AiSettingsView,
 	type AppUpdate,
 	type GitHubStatus,
@@ -205,6 +206,11 @@ const api: ReviewApi = {
 		const listener = (_e: Electron.IpcRendererEvent, run: AiRun): void => handler(run)
 		ipcRenderer.on(IPC.aiRunUpdate, listener)
 		return () => ipcRenderer.removeListener(IPC.aiRunUpdate, listener)
+	},
+	onAiRunBeat: (handler) => {
+		const listener = (_e: Electron.IpcRendererEvent, runId: string, beat: RunBeat): void => handler(runId, beat)
+		ipcRenderer.on(IPC.aiRunBeat, listener)
+		return () => ipcRenderer.removeListener(IPC.aiRunBeat, listener)
 	},
 	updateStatus: () => ipcRenderer.invoke(IPC.updateStatus),
 	onUpdateAvailable: (handler) => {

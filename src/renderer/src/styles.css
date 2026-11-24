@@ -7001,3 +7001,207 @@ textarea.style-edit {
 .note-warnings details summary {
 	cursor: pointer;
 }
+
+/* The Run drawer under the review (issue #299): what a run did, step by step. */
+body.resizing-y {
+	cursor: row-resize;
+}
+body.resizing-y * {
+	pointer-events: none;
+}
+.run-drawer {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+	min-height: 0;
+	border-top: 1px solid var(--border-strong);
+	background: var(--panel);
+}
+.run-drawer-grip {
+	position: absolute;
+	top: -3px;
+	left: 0;
+	right: 0;
+	height: 6px;
+	cursor: row-resize;
+	z-index: 1;
+}
+.run-drawer-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 32px;
+	padding: 0 8px 0 12px;
+	border-bottom: 1px solid var(--border);
+	flex-shrink: 0;
+}
+.run-drawer-head h2 {
+	margin: 0;
+	font-size: 12px;
+	font-weight: 600;
+}
+.run-drawer-pick {
+	font-size: 12px;
+	max-width: 320px;
+}
+.run-drawer-empty {
+	margin: 0;
+	padding: 16px 12px;
+}
+.run-drawer-handle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+	height: 22px;
+	padding: 0 12px;
+	border: 0;
+	border-top: 1px solid var(--border);
+	background: var(--chrome);
+	color: var(--text-2);
+	font-size: 11px;
+	text-align: left;
+	cursor: pointer;
+}
+.run-drawer-handle:hover {
+	color: var(--text);
+	background: var(--hover);
+}
+.run-drawer-handle kbd {
+	margin-left: auto;
+}
+.run-drawer-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--border-strong);
+}
+.run-drawer-handle.live {
+	color: var(--accent);
+}
+.run-drawer-handle.live .run-drawer-dot {
+	background: var(--accent);
+	animation: run-pulse 1.4s ease-in-out infinite;
+}
+@keyframes run-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent);
+	}
+	50% {
+		box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent);
+	}
+}
+.run-journey {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	margin: 0;
+	padding: 6px 0 10px;
+	list-style: none;
+	font-size: 12px;
+	user-select: text;
+}
+.run-beat {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 2px 12px;
+}
+.run-beat:hover {
+	background: var(--hover);
+}
+.run-glyph {
+	flex: 0 0 14px;
+	text-align: center;
+	color: var(--text-2);
+	font-weight: 600;
+}
+.run-text {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.run-text summary {
+	cursor: pointer;
+	color: var(--text-2);
+}
+.run-text ul {
+	margin: 2px 0 4px;
+	padding-left: 16px;
+	color: var(--text-2);
+	font-family: var(--mono);
+	font-size: 11px;
+}
+.run-beat.is-lookups .run-text {
+	color: var(--text-2);
+}
+.run-beat.is-stage {
+	margin-top: 6px;
+	font-weight: 600;
+}
+.run-beat.is-stage .run-glyph {
+	color: var(--accent);
+}
+.run-time {
+	flex-shrink: 0;
+	color: var(--text-2);
+	font: 10px var(--mono);
+	font-variant-numeric: tabular-nums;
+}
+.run-reason {
+	display: block;
+	color: var(--text-2);
+}
+.run-place {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--accent);
+	font-size: 11px;
+	cursor: pointer;
+}
+.run-place:hover {
+	text-decoration: underline;
+}
+.run-beat.tone-cleared .run-glyph {
+	color: var(--ok);
+}
+.run-beat.tone-confirmed .run-glyph {
+	color: var(--danger);
+}
+.run-beat.tone-concern .run-glyph {
+	color: var(--warn-fg);
+}
+.run-beat.tone-unsettled .run-glyph,
+.run-beat.tone-unsettled .run-text {
+	color: var(--text-2);
+}
+.run-member {
+	flex-shrink: 0;
+	padding: 0 6px;
+	border-radius: 8px;
+	font-size: 10px;
+	line-height: 16px;
+	color: var(--member, var(--text-2));
+	background: color-mix(in srgb, var(--member, var(--text-2)) 14%, transparent);
+}
+.run-member[data-slot='0'] {
+	--member: #7c5cff;
+}
+.run-member[data-slot='1'] {
+	--member: #d9468c;
+}
+.run-member[data-slot='2'] {
+	--member: #c98a00;
+}
+.run-member[data-slot='3'] {
+	--member: #1ea7b8;
+}
+.run-member[data-slot='4'] {
+	--member: #3c9a4a;
+}
+.run-member[data-slot='5'] {
+	--member: #e0612b;
+}
