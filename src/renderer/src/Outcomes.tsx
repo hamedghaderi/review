@@ -3,6 +3,8 @@ import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { CATEGORY_LABEL, LEVEL_META } from '../../shared/findings.ts'
 import { decidedCount, OUTCOME_GROUP_LABEL } from '../../shared/outcomes.ts'
 import type {
+	AiTextFeature,
+	AiTextRow,
 	AfterMergeItem,
 	AiCost,
 	DismissReason,
@@ -266,6 +268,69 @@ function Table({
 	)
 }
 
+const AI_TEXT_LABEL: Record<AiTextFeature, string> = {
+	explain: 'Explain this change',
+	conclusion: 'Conclusion',
+	'conclusion-answer': 'Answers about the conclusion',
+	reply: 'Drafted replies',
+}
+
+/** The AI's text besides findings (issue #289): how much it made, and for drafted replies, what you sent of them. */
+function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltered: boolean }) {
+	if (!rows.length) return null
+	const reply = (r: AiTextRow, n: number) => (r.feature === 'reply' ? n : <span className="muted">—</span>)
+	return (
+		<>
+			<div className="section-title">AI text besides findings</div>
+			<p className="muted small">
+				Explanations, conclusions, answers about the conclusion and drafted replies, by model. For drafted replies: what you sent. A light
+				edit changed a fifth of the draft’s words or fewer; a draft you emptied or never sent counts as not sent.
+				{notFiltered ? ' Prompt version and kind of finding don’t apply to these, so those filters are left out here.' : ''}
+			</p>
+			<table className="level-table usage-table outcomes-table">
+				<thead>
+					<tr>
+						<th>Text</th>
+						<th>Model</th>
+						<th className="num">Made</th>
+						<th className="num" title="Drafted replies you sent without changing a word">
+							Sent as drafted
+						</th>
+						<th className="num" title="Drafted replies sent with a fifth of the words or fewer changed">
+							Light edit
+						</th>
+						<th className="num" title="Drafted replies sent with more than a fifth of the words changed">
+							Rewritten
+						</th>
+						<th className="num" title="Drafted replies never sent, or emptied from the reply box">
+							Not sent
+						</th>
+					</tr>
+				</thead>
+				<tbody>
+					{rows.map((r) => {
+						const c = r.counts
+						return (
+							<tr key={`${r.feature}:${r.key}`}>
+								<td>{AI_TEXT_LABEL[r.feature]}</td>
+								<td className="ellipsis" title={r.detail ? `${r.label} · ${r.detail}` : r.label}>
+									{r.label}
+									{r.detail && <span className="muted small"> · {r.detail}</span>}
+								</td>
+								<td className="num">{c.made}</td>
+								<td className="num">{reply(r, c.asDrafted)}</td>
+								<td className="num">{reply(r, c.light)}</td>
+								<td className="num">{reply(r, c.rewrite)}</td>
+								<td className="num">{reply(r, c.made - c.asDrafted - c.light - c.rewrite)}</td>
+							</tr>
+						)
+					})}
+				</tbody>
+			</table>
+		</>
+	)
+}
+
 /**
  * The Outcomes page: what became of the AI's findings in every repository on this computer, by model, setup and rule.
  * It only reads what the reviews already store, and it never ranks models: the samples are small and not random.
@@ -394,7 +459,10 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 			{!s ? (
 				!error && <p className="muted home-note">Loading…</p>
 			) : s.total.raised === 0 ? (
-				<p className="muted home-note">No findings from AI runs match these filters.</p>
+				<>
+					<p className="muted home-note">No findings from AI runs match these filters.</p>
+					<AiTextTable rows={s.aiText} notFiltered={rest.promptVersion !== null || rest.group !== null} />
+				</>
 			) : (
 				<>
 					<div className="usage-total">
@@ -412,6 +480,7 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 					<Table title="By rule" label="Rule" rows={ruleRows(s.rules)} min={min} />
 					<Table title="By level" label="Level" rows={levelRows(s.levels)} min={min} notWorth />
 					<AfterMergeList items={s.afterMerge} />
+					<AiTextTable rows={s.aiText} notFiltered={rest.promptVersion !== null || rest.group !== null} />
 					<NotesSection notes={s.notes} onOpenNotes={onOpenNotes} />
 					{s.cost === null && <p className="muted small">Cost can’t be split by kind of finding, so it isn’t shown with that filter.</p>}
 				</>

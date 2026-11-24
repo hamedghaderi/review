@@ -2469,8 +2469,11 @@ export function App() {
 														onDraftReply={
 															comparison.pr
 																? async (threadId) => {
-																		const r = await window.review.draftReply(session.repo.id, comparison.id, threadId)
-																		return r.ok ? { text: r.value } : { error: r.error.message }
+																		const repoId = session.repo.id
+																		const r = await window.review.draftReply(repoId, comparison.id, threadId)
+																		if (!r.ok) return { error: r.error.message }
+																		const { id, text } = r.value
+																		return { text, onSent: (sent) => void window.review.aiReplySent(repoId, id, text, sent) }
 																	}
 																: undefined
 														}

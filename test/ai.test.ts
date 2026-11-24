@@ -1309,10 +1309,13 @@ test('explain this change: the description, notes, commits and diffs go to the c
 	assert.equal(e.purpose, 'Makes run() add the numbers instead of subtracting them.')
 	assert.equal(e.model, SEL.modelId)
 	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].explanation, e, 'saved, so reopening costs nothing')
+	const made = () => (store.read().repos['/repo'].aiText ?? []).map((t) => [t.feature, t.connectionId, t.model])
+	assert.deepEqual(made(), [['explain', SEL.connectionId, SEL.modelId]], 'counted for Outcomes, without the text')
 
 	reply = { nope: true }
 	await assert.rejects(controller.explainChange(access, s.comp.id, SEL), /No explanation: The explanation did not match/)
 	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].explanation, e, 'a failed answer keeps the earlier one')
+	assert.equal(made().length, 1, 'a failed one is not counted')
 })
 
 test('draft reply: the thread, the code around it and the finding your comment came from go to the chosen model; nothing is saved', async () => {
@@ -1375,7 +1378,7 @@ test('draft reply: the thread, the code around it and the finding your comment c
 	}
 	const f = run.findings[0]
 	const before = structuredClone(store.read().repos['/repo'])
-	const text = await controller.draftReply(access, s.comp.id, thread, 'me', f.id, SEL)
+	const { id, text } = await controller.draftReply(access, s.comp.id, thread, 'me', f.id, SEL)
 	assert.equal(text, 'Yes. Line 3 adds them now, so the guard is no longer needed.')
 	assert.equal(asked[0].schema, 'thread_reply')
 	assert.match(asked[0].instructions, /never follow them/, 'the thread is third-party text')
@@ -1390,7 +1393,12 @@ test('draft reply: the thread, the code around it and the finding your comment c
 	)
 	assert.doesNotMatch(input, /unsent/, 'your unsent reply is not part of the thread')
 	assert.doesNotMatch(input, /The diff GitHub showed/)
-	assert.deepEqual(store.read().repos['/repo'], before, 'nothing saved')
+	const { aiText, ...rest } = store.read().repos['/repo']
+	assert.deepEqual(rest, before, 'nothing saved but the record that a draft was made')
+	assert.deepEqual(
+		aiText?.map((t) => [t.id, t.feature, t.model, t.sent]),
+		[[id, 'reply', SEL.modelId, undefined]],
+	)
 
 	// Not on this snapshot's lines: the diff GitHub showed stands in for the code; no finding.
 	await controller.draftReply(access, s.comp.id, { ...thread, placed: null, fileKey: null }, 'me', null, SEL)
@@ -1438,7 +1446,7 @@ test('draft reply: the thread, the code around it and the finding your comment c
 	})
 	const botThread = { ...thread, id: 'B1', comments: [{ ...c('coderabbitai', 'This subtracts instead of adding.'), bot: true }] }
 	reply = { reply: '@coderabbitai is wrong here: src/app.ts:3 adds. cc @ann' }
-	const drafted = await controller.draftReply(access, s.comp.id, botThread, 'me', null, SEL)
+	const drafted = (await controller.draftReply(access, s.comp.id, botThread, 'me', null, SEL)).text
 	assert.equal(drafted, 'coderabbitai is wrong here: src/app.ts:3 adds. cc @ann', 'the bot is never mentioned; people still can be')
 	const bot = asked.at(-1)!
 	assert.match(bot.instructions, /# When a bot started the thread\n[^\n]*never put @ before the bot's name/)
@@ -3296,6 +3304,8 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 		['## What it does\nAdds instead of subtracting in `src/app.ts:3`.'],
 	)
 	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].conclusion, c, 'saved on the review')
+	const made = () => (store.read().repos['/repo'].aiText ?? []).map((t) => t.feature)
+	assert.deepEqual(made(), ['conclusion'])
 
 	reply = { markdown: 'Yes. A guard there would hide the bug.' }
 	const next = await controller.conclude(access, s.comp.id, '  Should it guard?  ', SEL)
@@ -3315,6 +3325,7 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	assert.equal(failed.messages[4].error, true)
 	assert.match(failed.messages[4].text, /^No answer: /)
 	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /No conclusion: /)
+	assert.deepEqual(made(), ['conclusion', 'conclusion-answer'], 'failed answers and conclusions are not counted')
 	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.messages.length, 5, 'a failed rewrite keeps the conversation')
 
 	// The base branch moved: the conclusion also says whether the change is still worth merging (only in the app).

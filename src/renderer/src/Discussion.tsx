@@ -369,7 +369,8 @@ function hunkTail(h: string): string {
 }
 
 export type ReplyFn = (threadId: string, body: string, resolve: boolean) => Promise<string | null> // returns why it failed, or null
-export type DraftFn = (threadId: string) => Promise<{ text: string } | { error: string }> // an AI draft of your reply
+// An AI draft of your reply. `onSent` is told what went out of it, for Outcomes (issue #289).
+export type DraftFn = (threadId: string) => Promise<{ text: string; onSent(sent: string): void } | { error: string }>
 
 /**
  * Reply to a GitHub thread and/or resolve it. Needs a token, which is also what tells us the thread's resolved state.
@@ -396,7 +397,9 @@ export function ThreadReplyBox({
 	const [text, setText] = useState('')
 	const [busy, setBusy] = useState(false)
 	const [drafting, setDrafting] = useState(false)
-	const [drafted, setDrafted] = useState(false)
+	// The AI's draft in the box: what you had typed before it, and the draft as it came.
+	const [draftIn, setDraftIn] = useState<{ before: string; text: string; onSent(sent: string): void } | null>(null)
+	const drafted = draftIn !== null
 	const [error, setError] = useState<string | null>(null)
 	const ref = useRef<HTMLTextAreaElement>(null)
 	const mention = useMentionCommand(text, ref, (next) => setText(next))
@@ -416,7 +419,7 @@ export function ThreadReplyBox({
 		}
 		announce('Draft ready in the reply box. Nothing is sent until you press Reply.', 'result')
 		setText((x) => (x.trim() ? `${x.trimEnd()}\n\n${r.text}` : r.text))
-		setDrafted(true)
+		setDraftIn({ before: text.trim(), text: r.text, onSent: r.onSent })
 		requestAnimationFrame(() => ref.current?.focus())
 	}
 	const draftButton = onDraft && (
@@ -453,8 +456,14 @@ export function ThreadReplyBox({
 		const problem = await onReply(t.id, text.trim(), resolve)
 		setBusy(false)
 		if (problem) return setError(problem)
+		if (draftIn) {
+			// Only what came after the text you had typed before the draft is measured against it.
+			const sent = text.trim()
+			const fromDraft = (draftIn.before && sent.startsWith(draftIn.before) ? sent.slice(draftIn.before.length) : sent).trim()
+			if (fromDraft) draftIn.onSent(fromDraft)
+		}
 		setText('')
-		setDrafted(false)
+		setDraftIn(null)
 		setOpen(false)
 	}
 	if (!open)
@@ -483,7 +492,7 @@ export function ThreadReplyBox({
 				placeholder={drafting ? 'Drafting a reply…' : 'Reply on GitHub (⌘↵ to send)'}
 				onChange={(e) => {
 					setText(e.target.value)
-					if (!e.target.value.trim()) setDrafted(false) // emptied: what you type next is yours
+					if (!e.target.value.trim()) setDraftIn(null) // emptied: what you type next is yours, and the draft wasn't sent
 				}}
 				onKeyDown={(e) => {
 					if (mention.onKeyDown(e) || tabKey(e)) return

@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type {
+	AiTextRecord,
 	AiRun,
 	AutoReviewRecord,
 	BrowserState,
@@ -66,6 +67,7 @@ export interface RepoState {
 	seenPrs?: Record<string, string> // PR number → when you last looked at it in the app (the Inbox's "new")
 	merged?: Record<string, MergedPr | null> // PR number → how it merged and its findings since; null: closed without merging
 	followedAt?: string // when merged pull requests were last followed
+	aiText?: Array<AiTextRecord> // the AI's explanations, conclusions and drafted replies, oldest first (issue #289)
 }
 
 /**
