@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { editShare, flagText, markReplySent, MAX_AI_TEXT, recordAiText, replyFate } from '../src/main/ai/aiText.ts'
+import {
+	aiTextOf,
+	citationResult,
+	editShare,
+	flagText,
+	markReplySent,
+	MAX_AI_TEXT,
+	recordAiText,
+	replyFate,
+	storeCitations,
+} from '../src/main/ai/aiText.ts'
+import { findCitations, resolveCitations, type HeadFiles } from '../src/main/ai/rewrite.ts'
 import { summarizeOutcomes } from '../src/main/ai/outcomes.ts'
 import type { RepoState } from '../src/main/store.ts'
 import type { AiTextRecord, ChangeExplanation, OutcomeFilter, Review } from '../src/shared/types.ts'
@@ -68,11 +79,16 @@ test('outcomes: AI text is counted by feature and model, with what became of dra
 	assert.deepEqual(
 		s.aiText.map((r) => [r.feature, r.label, r.detail, r.counts]),
 		[
-			['explain', 'claude-sonnet-5-5', 'Work key', { made: 2, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }],
-			['explain', 'gpt-6', 'Other', { made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }],
-			['conclusion', 'claude-sonnet-5-5', 'Work key', { made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }],
-			['conclusion-answer', 'claude-sonnet-5-5', 'Work key', { made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }],
-			['reply', 'claude-sonnet-5-5', 'Work key', { made: 4, asDrafted: 1, light: 1, rewrite: 1, flagged: 0 }],
+			['explain', 'claude-sonnet-5-5', 'Work key', { made: 2, asDrafted: 0, light: 0, rewrite: 0, flagged: 0, cited: 0, brokenRefs: 0 }],
+			['explain', 'gpt-6', 'Other', { made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0, cited: 0, brokenRefs: 0 }],
+			['conclusion', 'claude-sonnet-5-5', 'Work key', { made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0, cited: 0, brokenRefs: 0 }],
+			[
+				'conclusion-answer',
+				'claude-sonnet-5-5',
+				'Work key',
+				{ made: 1, asDrafted: 0, light: 0, rewrite: 0, flagged: 0, cited: 0, brokenRefs: 0 },
+			],
+			['reply', 'claude-sonnet-5-5', 'Work key', { made: 4, asDrafted: 1, light: 1, rewrite: 1, flagged: 0, cited: 0, brokenRefs: 0 }],
 		],
 	)
 	assert.equal(s.total.raised, 0, 'no findings')
@@ -148,4 +164,57 @@ test('outcomes: flagged texts are counted per row, with the newest notes', () =>
 			['conclusion-answer', 1, 1, ['Wrong file']],
 		],
 	)
+})
+
+test('citations: the text of an explanation or answer is checked; only missing files and lines past the end are broken', async () => {
+	const review = {
+		explanation: {
+			purpose: 'Fixes the total in src/app.ts:3.',
+			changes: [{ what: 'run() adds (src/gone.ts:1)', files: [] }],
+			readingOrder: [{ path: 'src/app.ts', why: 'start at src/app.ts:40' }],
+			questions: ['Is dup.ts:1 still used?'],
+			textId: 'e1',
+		},
+		conclusion: {
+			messages: [
+				{ id: '1', role: 'ai', text: 'See src/app.ts:2.', at: '', textId: 'c1' },
+				{ id: '2', role: 'ai', text: 'No answer: timeout', at: '', textId: 'c2', error: true },
+			],
+		},
+	} as unknown as Review
+	const written = aiTextOf(review, 'e1')!
+	assert.match(written, /src\/app\.ts:3[\s\S]*src\/gone\.ts:1[\s\S]*src\/app\.ts:40[\s\S]*dup\.ts:1/)
+	assert.equal(aiTextOf(review, 'c1'), 'See src/app.ts:2.')
+	assert.equal(aiTextOf(review, 'c2'), null, 'a failed answer has nothing to check')
+	assert.equal(aiTextOf(review, 'nope'), null)
+
+	const files: HeadFiles = {
+		read: async (p) => ({ 'src/app.ts': ['a', 'b', 'c'], 'x/dup.ts': ['a'], 'y/dup.ts': ['a'] })[p] ?? null,
+		paths: async () => ['src/app.ts', 'x/dup.ts', 'y/dup.ts'],
+		changed: [],
+	}
+	const result = citationResult(await resolveCitations(findCitations(written), files), NOW)
+	assert.equal(result.checked, 3, 'the ambiguous dup.ts:1 is left out')
+	assert.deepEqual(
+		result.broken.map((b) => b.ref),
+		['src/gone.ts:1', 'src/app.ts:40'],
+	)
+
+	const r = repo('shop', [])
+	r.aiText = [text('explain', { id: 'e1' })]
+	r.reviews.rv = review
+	storeCitations(r, 'rv', 'e1', result)
+	assert.deepEqual(r.aiText[0].citations, { checked: 3, broken: 2 }, 'counts on the record')
+	assert.deepEqual(r.reviews.rv.explanation!.citations, result, 'the full result on the text, to mark it')
+	assert.equal(r.reviews.rv.conclusion!.messages[0].citations, undefined)
+})
+
+test('outcomes: checked and broken references are added up per row', () => {
+	const shop = repo('shop', [
+		text('conclusion', { citations: { checked: 4, broken: 1 } }),
+		text('conclusion', { citations: { checked: 2, broken: 0 } }),
+		text('conclusion'),
+	])
+	const [row] = summarizeOutcomes([shop], ALL, NOW).aiText
+	assert.deepEqual([row.counts.made, row.counts.cited, row.counts.brokenRefs], [3, 6, 1])
 })

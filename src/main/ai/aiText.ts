@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import type { AiTextFlag, AiTextRecord, ReplyFate } from '../../shared/types.ts'
+import type { AiTextFlag, AiTextRecord, CitationCheckResult, ReplyFate, Review } from '../../shared/types.ts'
 import type { RepoState } from '../store.ts'
+import type { ResolvedCitation } from './rewrite.ts'
 
 /**
  * What the AI writes besides findings (issue #289): one record per explanation, conclusion, answer and drafted reply,
  * so Outcomes can count them by model. Only who made it and when is kept, never the text. For a drafted reply, what
  * became of it: sent as drafted, lightly edited or rewritten; a draft that is never sent stays unmarked. For the rest,
- * whether you said it was wrong.
+ * whether you said it was wrong, and whether the file:line references in it exist at the head commit.
  */
 
 export const MAX_AI_TEXT = 2000 // per repository; the oldest go first
@@ -80,4 +81,30 @@ export function flagText(
 	const review = repo.reviews[reviewId]
 	for (const t of [review?.explanation, ...(review?.conclusion?.messages ?? [])]) if (t?.textId === textId) set(t)
 	return true
+}
+
+/** The words of the review's explanation or conclusion message `textId`, as the citation check reads them; null: none. */
+export function aiTextOf(review: Review, textId: string): string | null {
+	const e = review.explanation
+	if (e?.textId === textId)
+		return [e.purpose, ...e.changes.map((c) => c.what), ...e.readingOrder.map((r) => `${r.path} ${r.why}`), ...e.questions].join('\n')
+	return review.conclusion?.messages.find((m) => m.textId === textId && m.role === 'ai' && !m.error)?.text ?? null
+}
+
+/** What the check found: references that point at no file or past its end are broken; vague or unreadable ones don't count. */
+export function citationResult(resolved: Array<ResolvedCitation>, now = new Date()): CitationCheckResult {
+	const counted = resolved.filter((r) => r.path !== null || r.problem === 'missing' || r.problem === 'past-end')
+	return {
+		at: now.toISOString(),
+		checked: counted.length,
+		broken: counted.flatMap((r) => (r.path === null ? [{ ref: r.citation.ref, reason: r.reason }] : [])),
+	}
+}
+
+/** Keeps a citation check on the text, which marks it, and its counts on the record, which Outcomes adds up. */
+export function storeCitations(repo: RepoState, reviewId: string, textId: string, result: CitationCheckResult): void {
+	const rec = repo.aiText?.find((r) => r.id === textId)
+	if (rec) rec.citations = { checked: result.checked, broken: result.broken.length }
+	const review = repo.reviews[reviewId]
+	for (const t of [review?.explanation, ...(review?.conclusion?.messages ?? [])]) if (t?.textId === textId) t.citations = result
 }

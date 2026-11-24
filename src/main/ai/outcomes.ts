@@ -348,13 +348,22 @@ export function summarizeOutcomes(
 			const key = `${t.feature}\u0000${model.key}`
 			let r = aiText.get(key)
 			if (!r) {
-				r = { feature: t.feature, ...model, counts: { made: 0, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }, notes: [] }
+				r = {
+					feature: t.feature,
+					...model,
+					counts: { made: 0, asDrafted: 0, light: 0, rewrite: 0, flagged: 0, cited: 0, brokenRefs: 0 },
+					notes: [],
+				}
 				aiText.set(key, r)
 			}
 			r.counts.made++
 			if (t.sent?.fate === 'as-drafted') r.counts.asDrafted++
 			else if (t.sent?.fate === 'light') r.counts.light++
 			else if (t.sent?.fate === 'rewrite') r.counts.rewrite++
+			if (t.citations) {
+				r.counts.cited += t.citations.checked
+				r.counts.brokenRefs += t.citations.broken
+			}
 			if (t.flagged) {
 				r.counts.flagged++
 				if (t.flagged.note) flagNotes.set(key, [...(flagNotes.get(key) ?? []), { at: t.flagged.at, note: t.flagged.note }])

@@ -4,6 +4,7 @@ import { AiOrb } from './AiOrb.tsx'
 import { useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 import { FlagWrong } from './FlagWrong.tsx'
+import { CitationNote } from './CitationNote.tsx'
 
 interface Props {
 	explanation: ChangeExplanation | null
@@ -132,6 +133,7 @@ export function ExplainChange({ explanation: e, busy, error, disabled, modelPick
 					{e.omitted.length > 3 ? ` and ${e.omitted.length - 3} more` : ''}); the AI could look them up.
 				</p>
 			)}
+			<CitationNote result={e.citations} />
 			<div className="ask-actions">
 				<span className="muted small">Read from the code, but it can be wrong.</span>
 				<FlagWrong textId={e.textId} flagged={e.flagged} what="explanation" onFlag={onFlag} />

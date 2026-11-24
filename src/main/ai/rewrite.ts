@@ -55,8 +55,12 @@ export interface HeadFiles {
 	changed: ReadonlyArray<string>
 }
 
+// missing: no such file; past-end: the file is shorter than the lines cited; ambiguous: several files end in the path
+// written; unreadable: binary or too big. The first two are wrong; the others only can't be checked.
+export type CitationProblem = 'missing' | 'past-end' | 'ambiguous' | 'unreadable'
+
 export type ResolvedCitation =
-	{ citation: Citation; path: string; lines: Array<string> } | { citation: Citation; path: null; reason: string }
+	{ citation: Citation; path: string; lines: Array<string> } | { citation: Citation; path: null; reason: string; problem: CitationProblem }
 
 /**
  * Opens each reference at the head commit: the path as written, else the one file whose path ends with it (preferring a
@@ -83,6 +87,7 @@ export async function resolveCitations(citations: Array<Citation>, files: HeadFi
 					reason: hits.length
 						? `${hits.length} files at the head commit end in ${citation.path}; give more of its path.`
 						: `There is no ${citation.path} at the head commit.`,
+					problem: hits.length ? 'ambiguous' : 'missing',
 				})
 				continue
 			}
@@ -90,7 +95,7 @@ export async function resolveCitations(citations: Array<Citation>, files: HeadFi
 			lines = await files.read(path)
 		}
 		if (!lines) {
-			out.push({ citation, path: null, reason: `${path} couldn't be read at the head commit.` })
+			out.push({ citation, path: null, reason: `${path} couldn't be read at the head commit.`, problem: 'unreadable' })
 			continue
 		}
 		const past = citation.ranges.find((r) => r.end > lines.length)
@@ -99,6 +104,7 @@ export async function resolveCitations(citations: Array<Citation>, files: HeadFi
 				citation,
 				path: null,
 				reason: `${path} has ${lines.length} lines at the head commit, so line ${past.end} isn't there.`,
+				problem: 'past-end',
 			})
 			continue
 		}

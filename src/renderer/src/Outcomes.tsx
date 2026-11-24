@@ -287,8 +287,8 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 			<div className="section-title">AI text besides findings</div>
 			<p className="muted small">
 				Explanations, conclusions, answers about the conclusion and drafted replies, by model. Flagged wrong counts the ones you said were
-				wrong; one nobody flagged isn’t proven right. For drafted replies: what you sent. A light edit changed a fifth of the draft’s words
-				or fewer; a draft you emptied or never sent counts as not sent.
+				wrong; one nobody flagged isn’t proven right. Broken references point at a file or line that isn’t there. For drafted replies: what
+				you sent. A light edit changed a fifth of the draft’s words or fewer; a draft you emptied or never sent counts as not sent.
 				{notFiltered ? ' Prompt version and kind of finding don’t apply to these, so those filters are left out here.' : ''}
 			</p>
 			<table className="level-table usage-table outcomes-table">
@@ -299,6 +299,12 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 						<th className="num">Made</th>
 						<th className="num" title="You said it was wrong. Hover a count for what you noted.">
 							Flagged wrong
+						</th>
+						<th
+							className="num"
+							title="File:line references that point at no file, or past its end, at the head commit, of those checked. Whether the code says what the text claims isn’t checked."
+						>
+							Broken references
 						</th>
 						<th className="num" title="Drafted replies you sent without changing a word">
 							Sent as drafted
@@ -327,6 +333,15 @@ function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltere
 								<td className="num">{c.made}</td>
 								<td className="num" title={r.notes.length ? r.notes.map((n) => `“${n}”`).join('\n') : undefined}>
 									{r.feature === 'reply' ? <span className="muted">—</span> : c.flagged}
+								</td>
+								<td className="num">
+									{r.feature === 'reply' || !c.cited ? (
+										<span className="muted">—</span>
+									) : (
+										<>
+											{c.brokenRefs} <span className="muted small">of {c.cited}</span>
+										</>
+									)}
 								</td>
 								<td className="num">{reply(r, c.asDrafted)}</td>
 								<td className="num">{reply(r, c.light)}</td>
