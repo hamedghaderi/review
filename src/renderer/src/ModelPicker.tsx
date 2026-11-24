@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { AiSettingsView, ConnectionView, ModelSelection, ModelView } from '../../shared/types.ts'
 import { baseModel, effortOf, listed, withEffort } from './efforts.ts'
 
@@ -68,6 +69,7 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 	const [anchor, setAnchor] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
 	const [collapsed, setCollapsed] = useState(readCollapsed)
 	const ref = useRef<HTMLDivElement>(null)
+	const menu = useRef<HTMLDivElement>(null)
 	const input = useRef<HTMLInputElement>(null)
 
 	const connections = settings?.connections.filter(usable) ?? []
@@ -130,7 +132,8 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 		// Updated lists arrive through the settings-changed event while the picker is open.
 		void window.review.refreshModels()
 		function onDown(e: MouseEvent): void {
-			if (!ref.current?.contains(e.target as Node)) setOpen(false)
+			const t = e.target as Node
+			if (!ref.current?.contains(t) && !menu.current?.contains(t)) setOpen(false)
 		}
 		window.addEventListener('mousedown', onDown)
 		return () => window.removeEventListener('mousedown', onDown)
@@ -213,130 +216,134 @@ export function ModelPicker({ settings, selection, disabled, onSelect, onSelectT
 					▾
 				</span>
 			</button>
-			{open && (
-				<div className="popover picker" style={anchor ?? undefined} onKeyDown={onKey}>
-					<input
-						ref={input}
-						className="search"
-						type="search"
-						placeholder="Search models"
-						value={query}
-						onChange={(e) => {
-							setQuery(e.target.value)
-							setCursor(0)
-						}}
-						aria-label="Search models"
-						aria-controls="model-list"
-					/>
-					<div className="picker-list" role="listbox" id="model-list" aria-label="Models">
-						{onSelectTeam && (
-							<div role="group" aria-label="Review teams">
-								<div className="section-title picker-group">Review teams</div>
-								{teams.map((t) => {
-									index++
-									const i = index
-									const selected = activeTeam?.id === t.id
-									return (
-										<div
-											key={t.id}
-											role="option"
-											aria-selected={selected}
-											className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
-											onMouseEnter={() => setCursor(i)}
-											onClick={() => choose(i)}
-											title={t.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')}
-										>
-											<span className="picker-check" aria-hidden>
-												{selected ? '✓' : ''}
-											</span>
-											<span className="picker-team">
-												<span className="ellipsis">{t.name}</span>
-												<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
-											</span>
-											{t.issues.length ? (
-												<span className="src-tag bad">Needs attention</span>
-											) : (
-												<span className="src-tag team">Team · {t.members.length}</span>
-											)}
-										</div>
-									)
-								})}
-								<div
-									className="picker-item"
-									onClick={() => {
-										setOpen(false)
-										onManage('new')
-									}}
-								>
-									<span className="picker-check" aria-hidden />
-									<span className="muted">+ New review team…</span>
-								</div>
-							</div>
-						)}
-						{groups.length === 0 && <div className="muted small pad">No models match.</div>}
-						{groups.map((g) => (
-							<div key={g.connection.id} role="group" aria-label={g.connection.label}>
-								<button
-									className="section-title section-toggle picker-group"
-									aria-expanded={g.open}
-									disabled={!!query.trim()}
-									onClick={() => fold(g.connection.id)}
-								>
-									<span className={`chev ${g.open ? 'open' : ''}`} aria-hidden>
-										▸
-									</span>
-									<span className="ellipsis">
-										{g.connection.label}
-										{g.connection.label !== g.connection.providerLabel && <span className="muted"> · {g.connection.providerLabel}</span>}
-									</span>
-									<span className="spacer" />
-									<span className="muted">{g.models.length}</span>
-								</button>
-								{g.open &&
-									g.models.map((m) => {
+			{/* In <body>, not here: a sticky or positioned box around the picker (the file-level comment box, issue #285)
+			    makes its own stacking context, and the code after it would paint over the menu. */}
+			{open &&
+				createPortal(
+					<div ref={menu} className="popover picker" style={anchor ?? undefined} onKeyDown={onKey}>
+						<input
+							ref={input}
+							className="search"
+							type="search"
+							placeholder="Search models"
+							value={query}
+							onChange={(e) => {
+								setQuery(e.target.value)
+								setCursor(0)
+							}}
+							aria-label="Search models"
+							aria-controls="model-list"
+						/>
+						<div className="picker-list" role="listbox" id="model-list" aria-label="Models">
+							{onSelectTeam && (
+								<div role="group" aria-label="Review teams">
+									<div className="section-title picker-group">Review teams</div>
+									{teams.map((t) => {
 										index++
 										const i = index
-										const selected = !activeTeam && selection?.connectionId === g.connection.id && selection?.modelId === m.id
+										const selected = activeTeam?.id === t.id
 										return (
 											<div
-												key={m.id}
+												key={t.id}
 												role="option"
 												aria-selected={selected}
 												className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
 												onMouseEnter={() => setCursor(i)}
 												onClick={() => choose(i)}
-												title={sourceTitle(m)}
+												title={t.members.map((m) => `${m.role}: ${m.modelId}`).join('\n')}
 											>
 												<span className="picker-check" aria-hidden>
 													{selected ? '✓' : ''}
 												</span>
-												<span className="ellipsis">{m.label}</span>
-												{m.label !== m.id && <span className="muted mono small ellipsis">{m.id}</span>}
-												<span className="spacer" />
-												<span className={`src-tag ${m.probe ? (m.probe.ok ? 'ok' : 'bad') : m.source}`}>
-													{m.probe && !m.probe.ok ? 'Failed test' : sourceLabel(m)}
+												<span className="picker-team">
+													<span className="ellipsis">{t.name}</span>
+													<span className="muted small ellipsis">{t.members.map((m) => m.role).join(' · ')}</span>
 												</span>
+												{t.issues.length ? (
+													<span className="src-tag bad">Needs attention</span>
+												) : (
+													<span className="src-tag team">Team · {t.members.length}</span>
+												)}
 											</div>
 										)
 									})}
-							</div>
-						))}
-					</div>
-					<div className="popover-actions picker-foot">
-						<span className="muted small">↑↓ to move · Enter to select</span>
-						<span className="spacer" />
-						<button
-							className="btn small ghost picker-manage"
-							onClick={() => {
-								setOpen(false)
-								onManage()
-							}}
-						>
-							Manage providers…
-						</button>
-					</div>
-				</div>
-			)}
+									<div
+										className="picker-item"
+										onClick={() => {
+											setOpen(false)
+											onManage('new')
+										}}
+									>
+										<span className="picker-check" aria-hidden />
+										<span className="muted">+ New review team…</span>
+									</div>
+								</div>
+							)}
+							{groups.length === 0 && <div className="muted small pad">No models match.</div>}
+							{groups.map((g) => (
+								<div key={g.connection.id} role="group" aria-label={g.connection.label}>
+									<button
+										className="section-title section-toggle picker-group"
+										aria-expanded={g.open}
+										disabled={!!query.trim()}
+										onClick={() => fold(g.connection.id)}
+									>
+										<span className={`chev ${g.open ? 'open' : ''}`} aria-hidden>
+											▸
+										</span>
+										<span className="ellipsis">
+											{g.connection.label}
+											{g.connection.label !== g.connection.providerLabel && <span className="muted"> · {g.connection.providerLabel}</span>}
+										</span>
+										<span className="spacer" />
+										<span className="muted">{g.models.length}</span>
+									</button>
+									{g.open &&
+										g.models.map((m) => {
+											index++
+											const i = index
+											const selected = !activeTeam && selection?.connectionId === g.connection.id && selection?.modelId === m.id
+											return (
+												<div
+													key={m.id}
+													role="option"
+													aria-selected={selected}
+													className={`picker-item ${i === cursor ? 'active' : ''} ${selected ? 'selected' : ''}`}
+													onMouseEnter={() => setCursor(i)}
+													onClick={() => choose(i)}
+													title={sourceTitle(m)}
+												>
+													<span className="picker-check" aria-hidden>
+														{selected ? '✓' : ''}
+													</span>
+													<span className="ellipsis">{m.label}</span>
+													{m.label !== m.id && <span className="muted mono small ellipsis">{m.id}</span>}
+													<span className="spacer" />
+													<span className={`src-tag ${m.probe ? (m.probe.ok ? 'ok' : 'bad') : m.source}`}>
+														{m.probe && !m.probe.ok ? 'Failed test' : sourceLabel(m)}
+													</span>
+												</div>
+											)
+										})}
+								</div>
+							))}
+						</div>
+						<div className="popover-actions picker-foot">
+							<span className="muted small">↑↓ to move · Enter to select</span>
+							<span className="spacer" />
+							<button
+								className="btn small ghost picker-manage"
+								onClick={() => {
+									setOpen(false)
+									onManage()
+								}}
+							>
+								Manage providers…
+							</button>
+						</div>
+					</div>,
+					document.body,
+				)}
 		</div>
 	)
 }
