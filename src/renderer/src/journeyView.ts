@@ -26,6 +26,8 @@ export function journeyRows(beats: ReadonlyArray<RunBeat>): Array<JourneyRow> {
 			}
 			continue
 		}
+		// A suspicion that became a finding is told by the finding's own row, and by its suspicion's node.
+		if (b.kind === 'settled' && b.outcome === 'finding') continue
 		if (b.kind === 'stage') open.clear()
 		else open.delete(b.memberId)
 		rows.push({ kind: 'beat', beat: b })
@@ -183,6 +185,23 @@ export function journeyTally(beats: ReadonlyArray<RunBeat>): Record<BeatTone, nu
 	for (const b of beats) {
 		if (b.kind === 'finding') tally[verdicts.get(b.findingId) ?? b.tone]++
 		else if (b.kind === 'verdict' && b.of !== 'finding') tally[b.tone]++
+		else if (b.kind === 'settled' && b.outcome !== 'finding') tally[b.tone]++
 	}
 	return tally
+}
+
+/**
+ * The suspicions so far: what each said, and where it stands now — how the reviewer closed it, or for one that became a
+ * finding, that finding's double-check once it has one. Absent from `state` while still open.
+ */
+export function suspicionStory(beats: ReadonlyArray<RunBeat>): { text: Map<string, string>; state: Map<string, BeatTone> } {
+	const text = new Map<string, string>()
+	const state = new Map<string, BeatTone>()
+	const verdicts = new Map<string, BeatTone>()
+	for (const b of beats) {
+		if (b.kind === 'suspicion') text.set(b.id, b.text)
+		else if (b.kind === 'verdict' && b.of === 'finding' && b.findingId) verdicts.set(b.findingId, b.tone)
+	}
+	for (const b of beats) if (b.kind === 'settled') state.set(b.id, (b.findingId && verdicts.get(b.findingId)) || b.tone)
+	return { text, state }
 }

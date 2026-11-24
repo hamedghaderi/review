@@ -688,6 +688,7 @@ export function reviewLimits(v: unknown): ReviewLimits {
 		lookups: o.lookups === undefined ? true : bool(o.lookups, 'lookups setting'),
 		verify: o.verify === undefined ? true : bool(o.verify, 'double-check setting'),
 		groupDuplicates: o.groupDuplicates === undefined ? false : bool(o.groupDuplicates, 'group duplicates setting'),
+		narrate: o.narrate === undefined ? true : bool(o.narrate, 'narrate setting'),
 	}
 }
 

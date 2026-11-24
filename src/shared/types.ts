@@ -1269,6 +1269,7 @@ export interface Finding {
 	alsoBy?: Array<string> // other team members that reported the same problem
 	raisedBefore?: RaisedBefore | null // since reviewer-2026-10-16.1: a GitHub thread on the PR already raised it
 	underNote?: UnderNote | null // since reviewer-2026-11-23.2: raised although a reviewer note of yours covers it
+	suspicion?: string // the suspicion it settles, as the run's journey names it (issue #299)
 	carried?: CarriedFinding | null // copied from an earlier snapshot's run because its file's diff did not change
 	previous?: PreviousFinding | null // the same finding in the earlier snapshot the run compared with (see FindingHistory)
 	unread?: Array<string> // file references in its text to lines the request that raised it never had, as written
@@ -2056,7 +2057,27 @@ export type RunBeatBody =
 	| { kind: 'list'; path: string }
 	| { kind: 'tool'; name: string } // an MCP tool, as "server: tool"
 	| { kind: 'request'; index: number; total: number; findings: number; error: string | null } // one review request answered or failed
-	| { kind: 'finding'; findingId: string; title: string; severity: Severity; path: string; line: number | null; tone: BeatTone }
+	| {
+			kind: 'finding'
+			findingId: string
+			title: string
+			severity: Severity
+			path: string
+			line: number | null
+			tone: BeatTone
+			suspicionId?: string | null // the suspicion it settles, when the reviewer noted one
+	  }
+	| { kind: 'suspicion'; id: string; text: string; path: string | null; line: number | null } // what a reviewer said it suspects, before it looked
+	| {
+			kind: 'settled' // how the reviewer closed a suspicion that did not become a finding
+			id: string
+			outcome: 'cleared' | 'near-miss' | 'finding' | 'unsettled'
+			tone: BeatTone
+			reason: string
+			path: string | null
+			line: number | null
+			findingId: string | null
+	  }
 	| {
 			kind: 'verdict'
 			of: 'finding' | 'near-miss' | 'bot-thread'
@@ -2100,6 +2121,7 @@ export interface AiRun {
 		relatedCode?: boolean
 		lookups?: boolean
 		verify?: boolean
+		narrate?: boolean // reviewers noted what they suspected and closed each one (issue #299)
 		groupDuplicates?: boolean
 		contextWindow: number
 		outputTokens: number
@@ -2284,6 +2306,7 @@ export interface ReviewLimits {
 	lookups: boolean // let the reviewer read files and search the repository at the reviewed commits while it reviews
 	verify: boolean // double-check each blocking finding with a request that tries to prove it wrong
 	groupDuplicates: boolean // after the review, ask the model which findings are the same problem and fold them (default off)
+	narrate: boolean // reviewers say what they suspect before they look into it, and close each one, for the Run drawer (issue #299)
 }
 
 export interface ModelSelection {

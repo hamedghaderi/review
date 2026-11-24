@@ -145,10 +145,50 @@ export const reviewOutputSchema = z.object({
 		),
 })
 
+/**
+ * A narrating review (issue #299): the reviewer noted what it suspected with note_suspicion while it worked, and the
+ * answer closes each one, as a finding that names it or under "suspicions". Only sent when narration is on, so the
+ * answer of a run without it is unchanged.
+ */
+export const narratedFindingSchema = modelFindingSchema.extend({
+	suspicion_id: z
+		.string()
+		.nullable()
+		.default(null)
+		.describe('The id note_suspicion gave the suspicion this finding settles, e.g. "S1". Null when you noted none for it.'),
+})
+
+export const settledSuspicionSchema = z.object({
+	id: z.string().describe('The id note_suspicion gave it, e.g. "S2".'),
+	outcome: z
+		.enum(['cleared', 'near_miss'])
+		.describe(
+			'"cleared": the code shows it is not a problem. "near_miss": you could not show it either way; it is also under near_misses, or a "question" finding when that level is allowed.',
+		),
+	reason: z.string().describe('One sentence: what settled it, or what you could not see.'),
+	evidence: z
+		.string()
+		.nullable()
+		.default(null)
+		.describe('For "cleared": the path:line of the code that shows it is fine, from code you were given or read. Otherwise null.'),
+})
+
+export const narratedOutputSchema = reviewOutputSchema.extend({
+	findings: z.array(narratedFindingSchema).default([]),
+	suspicions: z
+		.array(settledSuspicionSchema)
+		.default([])
+		.describe('Every suspicion you noted that is not settled by a finding with its suspicion_id. Empty if none.'),
+})
+
 /** The answer with each finding left unchecked, so one malformed finding is rejected on its own instead of failing the rest. */
-export const reviewEnvelopeSchema = reviewOutputSchema.extend({ findings: z.array(z.unknown()).default([]) })
+export const reviewEnvelopeSchema = reviewOutputSchema.extend({
+	findings: z.array(z.unknown()).default([]),
+	suspicions: z.array(z.unknown()).default([]),
+})
 
 export type ModelFinding = z.infer<typeof modelFindingSchema>
+export type NarratedFinding = z.infer<typeof narratedFindingSchema>
 export type ReviewOutput = z.input<typeof reviewOutputSchema> // outdated_docs may be missing from older or partial answers
 
 export const SCHEMA_NAME = 'code_review_findings'
@@ -159,6 +199,7 @@ export const SCHEMA_NAME = 'code_review_findings'
  * required, `additionalProperties: false`).
  */
 export const REVIEW_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(reviewOutputSchema, { target: 'draft-7' }))
+export const NARRATED_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(narratedOutputSchema, { target: 'draft-7' }))
 
 function portable(node: unknown): Record<string, unknown> {
 	if (Array.isArray(node)) return node.map(portable) as unknown as Record<string, unknown>

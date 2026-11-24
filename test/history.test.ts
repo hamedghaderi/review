@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { AiController } from '../src/main/ai/controller.ts'
 import { createFakeProvider, defaultScript } from '../src/main/ai/fake.ts'
-import { VERIFY_SCHEMA_NAME, type ReviewOutput } from '../src/main/ai/schema.ts'
+import { SCHEMA_NAME, VERIFY_SCHEMA_NAME, type ReviewOutput } from '../src/main/ai/schema.ts'
 import type { ProviderRequest } from '../src/main/ai/provider.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { Mapper } from '../src/main/linemap.ts'
@@ -72,7 +72,7 @@ async function setup() {
 				checks.push(req)
 				return { verdict: 'wrong', reason: 'Line 6 of e.ts no longer does it.', level: null, checked: ['e.ts:1-12', 'src/elsewhere.ts:40'] }
 			}
-			if (req.schema) return out
+			if (req.schema && req.schema.name !== SCHEMA_NAME) return out // a review request has the findings schema, or none
 			const review = out as ReviewOutput
 			return { ...review, findings: review.findings.filter((f) => !silent.has(f.file_path)) }
 		},

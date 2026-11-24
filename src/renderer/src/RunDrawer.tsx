@@ -11,6 +11,7 @@ import {
 	lookupText,
 	memberLabel,
 	memberSlot,
+	suspicionStory,
 	TONE_GLYPH,
 	TONE_LABEL,
 	trailLayout,
@@ -107,6 +108,7 @@ export function RunDrawer({
 	const rows = useMemo(() => journeyRows(shown), [shown])
 	const trail = useMemo(() => (run ? trailLayout(run, rows) : { items: [], lanes: 0 }), [run, rows])
 	const tally = useMemo(() => journeyTally(shown), [shown])
+	const story = useMemo(() => suspicionStory(shown), [shown])
 
 	// Steps that arrive while the drawer is open come in with a little motion; what was already there does not.
 	const seen = useRef<{ runId: string | null; seq: number }>({ runId: null, seq: -1 })
@@ -229,6 +231,7 @@ export function RunDrawer({
 								width={width}
 								fresh={rowKey(item.row) > seen.current.seq}
 								tip={item === tip}
+								story={story}
 								onOpen={onOpen}
 							/>
 						) : (
@@ -347,6 +350,7 @@ function Row({
 	width,
 	fresh,
 	tip,
+	story,
 	onOpen,
 }: {
 	run: AiRun
@@ -354,6 +358,7 @@ function Row({
 	width: number
 	fresh: boolean
 	tip: boolean
+	story: ReturnType<typeof suspicionStory>
 	onOpen: (path: string, line: number | null) => void
 }) {
 	const row = item.row
@@ -438,6 +443,31 @@ function Row({
 				</span>,
 				b.tone,
 			)
+		case 'suspicion': {
+			// Open, it is a hollow diamond on the reviewer's strand; once settled, it takes the colour of how it ended.
+			const now = story.state.get(b.id)
+			return li(
+				'suspicion',
+				now ? { kind: 'mark', tone: now, glyph: TONE_GLYPH[now], label: TONE_LABEL[now] } : { kind: 'suspect', label: 'Suspected' },
+				<span className="run-text">
+					Suspects <em>{b.text}</em> {place(b.path, b.line)}
+				</span>,
+			)
+		}
+		case 'settled': {
+			const what = story.text.get(b.id) ?? 'a suspicion'
+			const how = b.outcome === 'cleared' ? 'Cleared' : b.outcome === 'near-miss' ? 'Could not settle' : 'Left open'
+			return li(
+				'settled',
+				{ kind: 'verdict', tone: b.tone, glyph: TONE_GLYPH[b.tone], label: TONE_LABEL[b.tone] },
+				<span className="run-text">
+					{said(b.tone)}
+					{how} <em>{what}</em>
+					<span className="run-reason">{b.reason}</span>
+				</span>,
+				b.tone,
+			)
+		}
 		default:
 			return li('lookups', { kind: 'look' }, <span className="run-text">{lookupText(b)}</span>)
 	}

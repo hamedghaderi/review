@@ -75,5 +75,6 @@ export function findingBeat(f: Finding): RunBeatBody {
 		path: (a.side === 'old' ? a.oldPath : a.newPath) ?? a.fileKey,
 		line: a.startLine,
 		tone: severityTone(f.severity),
+		...(f.suspicion ? { suspicionId: f.suspicion } : {}),
 	}
 }

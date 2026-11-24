@@ -2,7 +2,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { AiRun, BeatTone, RunBeat, RunBeatBody, RunStage } from '../src/shared/types.ts'
-import { journeyRows, journeyTally, lookupSummary, lookupText, trailLayout, withLive } from '../src/renderer/src/journeyView.ts'
+import {
+	journeyRows,
+	journeyTally,
+	lookupSummary,
+	lookupText,
+	suspicionStory,
+	trailLayout,
+	withLive,
+} from '../src/renderer/src/journeyView.ts'
 
 let seq = 0
 const beat = (memberId: string | null, body: RunBeatBody): RunBeat => ({ ...body, seq: seq++, at: 0, memberId }) as RunBeat
@@ -165,4 +173,55 @@ test('run drawer styles: no class or animation the rest of the window already us
 	for (const n of ['fresh', 'live', 'tip']) names.delete(n)
 	const shared = [...names].filter((n) => new RegExp(`(\\.|@keyframes )${n}(?![a-z0-9-])`).test(before))
 	assert.deepEqual(shared, [])
+})
+
+test('suspicions: one that became a finding has no row of its own, and its node takes the double-check once there is one', () => {
+	seq = 0
+	const sus = (id: string) => beat('m1', { kind: 'suspicion', id, text: `suspect ${id}`, path: null, line: null })
+	const settled = (
+		id: string,
+		outcome: 'cleared' | 'near-miss' | 'finding' | 'unsettled',
+		tone: BeatTone,
+		findingId: string | null = null,
+	) => beat('m1', { kind: 'settled', id, outcome, tone, reason: '', path: null, line: null, findingId })
+	const beats = [
+		sus('a'),
+		sus('b'),
+		sus('c'),
+		sus('d'),
+		read('m1', 'x.ts'),
+		request('m1'),
+		beat('m1', {
+			kind: 'finding',
+			findingId: 'f',
+			title: 'f',
+			severity: 'blocking',
+			path: 'x.ts',
+			line: 1,
+			tone: 'pending',
+			suspicionId: 'a',
+		}),
+		settled('a', 'finding', 'pending', 'f'),
+		settled('b', 'cleared', 'cleared'),
+		settled('c', 'near-miss', 'concern'),
+	]
+	assert.ok(!journeyRows(beats).some((r) => r.kind === 'beat' && r.beat.kind === 'settled' && r.beat.outcome === 'finding'))
+	let story = suspicionStory(beats)
+	assert.deepEqual(
+		[...story.state],
+		[
+			['a', 'pending'],
+			['b', 'cleared'],
+			['c', 'concern'],
+		],
+		'"d" is still open',
+	)
+	assert.equal(story.text.get('b'), 'suspect b')
+	const checked = [
+		...beats,
+		beat('m2', { kind: 'verdict', of: 'finding', title: 'f', tone: 'confirmed', reason: '', findingId: 'f', path: null, line: null }),
+	]
+	story = suspicionStory(checked)
+	assert.equal(story.state.get('a'), 'confirmed')
+	assert.deepEqual(journeyTally(checked), { cleared: 1, confirmed: 1, concern: 1, unsettled: 0, pending: 0 })
 })

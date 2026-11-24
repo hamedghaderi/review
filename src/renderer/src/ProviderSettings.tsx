@@ -644,7 +644,8 @@ export function Limits({ settings, run }: { settings: AiSettingsView; run(p: Pro
 		v.relatedCode !== settings.limits.relatedCode ||
 		v.lookups !== settings.limits.lookups ||
 		v.verify !== settings.limits.verify ||
-		v.groupDuplicates !== settings.limits.groupDuplicates
+		v.groupDuplicates !== settings.limits.groupDuplicates ||
+		v.narrate !== settings.limits.narrate
 	return (
 		<div className="limits">
 			<div className="limits-row">
@@ -695,6 +696,21 @@ export function Limits({ settings, run }: { settings: AiSettingsView; run(p: Pro
 					<span>Let the reviewer look things up</span>
 					<span className="muted">
 						The model can open files and search the reviewed commits when it needs more. Slower, uses more tokens.
+					</span>
+				</span>
+			</label>
+			<label className="option">
+				<input
+					type="checkbox"
+					checked={v.narrate && v.lookups}
+					disabled={!v.lookups}
+					onChange={(e) => setV({ ...v, narrate: e.target.checked })}
+				/>
+				<span>
+					<span>Say what the reviewer suspects as it goes</span>
+					<span className="muted">
+						The reviewer notes what it suspects before it looks into it, and says how each one ended, so you can follow it in the Run drawer
+						under the review. A suspicion is never a finding by itself. Needs lookups. Uses a few more tokens.
 					</span>
 				</span>
 			</label>

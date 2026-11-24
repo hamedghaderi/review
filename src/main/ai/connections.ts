@@ -44,6 +44,7 @@ export const DEFAULT_LIMITS: ReviewLimits = {
 	lookups: true,
 	verify: true,
 	groupDuplicates: false,
+	narrate: true,
 }
 export const DEFAULT_LEVEL_SETTINGS: FindingLevelSettings = { enabled: DEFAULT_LEVELS, autoAdd: ['blocking', 'should_fix', 'question'] }
 const REQUEST_TIMEOUT_MS = 180_000

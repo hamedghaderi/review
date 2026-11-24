@@ -24,10 +24,12 @@ import {
 	type EarlierLimitations,
 	type ReviewContext,
 	type RunBeat,
+	type RunBeatBody,
 	type RunStage,
 	type Takeover,
 } from '../../shared/types.ts'
 import { createJourney, findingBeat, lookupBeat, verdictTone } from './journey.ts'
+import { createNotebook, settleSuspicions, SUSPICION_INSTRUCTIONS, SUSPICION_TOOL, type Notebook } from './suspicions.ts'
 import { addCost } from '../../shared/cost.ts'
 import type { PersonaId } from '../../shared/personas.ts'
 import type { LinkedIssue } from '../github.ts'
@@ -59,6 +61,7 @@ import { decisionFacts, earlierFacts } from './decisions.ts'
 import { noteFacts, notesSummary } from './notes.ts'
 import { recheckFacts } from './incremental.ts'
 import { findingTexts, Seen, seenInBatch, unreadRefs, verificationTexts, withUnread } from './citations.ts'
+import { NARRATED_JSON_SCHEMA, SCHEMA_NAME } from './schema.ts'
 import { traceFindings, type Baseline } from './history.ts'
 import { importFacts, importSummary } from './imports.ts'
 import type { FactsResult } from './facts.ts'
@@ -235,6 +238,9 @@ export function startRun(
 	// A retry double-checks the new blocking findings it brings if the original run double-checked its own.
 	const verify = retry ? retry.run.limitsUsed?.verify === true : options.limits.verify !== false
 	const grouping = options.limits.groupDuplicates === true
+	// Reviewers say what they suspect as they go and close each one (issue #299); it rides on the lookups, as a tool.
+	const narrate = lookups && (retry ? retry.run.limitsUsed?.narrate === true : options.limits.narrate !== false)
+	let notebooks = 0
 	// Files an earlier run reviewed with the same diff: listed to the reviewer as such, never sent.
 	const carriedKeys = new Set(
 		(retry ? retry.run.coverage.files : (input.carried?.files ?? [])).filter((f) => f.state === 'carried').map((f) => f.fileKey),
@@ -363,7 +369,12 @@ export function startRun(
 			)
 		}
 		if (external) for (const w of workers) w.instructions = withExternalTools(w.instructions, external.servers)
-		toolChars = lookups ? JSON.stringify(TOOL_DEFINITIONS).length + (external ? JSON.stringify(external.definitions).length : 0) : 0
+		toolChars = lookups
+			? JSON.stringify(TOOL_DEFINITIONS).length +
+				(external ? JSON.stringify(external.definitions).length : 0) +
+				(narrate ? JSON.stringify(SUSPICION_TOOL).length : 0)
+			: 0
+		if (narrate) for (const w of workers) w.instructions += SUSPICION_INSTRUCTIONS
 	}
 	let settled = false
 	// Once the run has finished without the members it does not wait for: they still review, and their answers still count.
@@ -378,13 +389,23 @@ export function startRun(
 	let evidence: EvidenceIndex | null = null // CI messages and test imports that findings are checked against
 	const journey = createJourney((run.journey ??= []), (beat) => onBeat(run.id, beat))
 	const stage = (s: RunStage, text: string): void => journey.add(null, { kind: 'stage', stage: s, text })
-	/** One request's lookups, each told to the journey once it is answered. */
-	const lookupTools = (memberId: string | null, budget: LookupBudget, mcp: boolean): ReviewTools => {
+	/**
+	 * One request's lookups, each told to the journey once it is answered. With a notebook, a review request also gets
+	 * note_suspicion, which the app answers itself: it reads nothing and is not counted against the lookups.
+	 */
+	const lookupTools = (memberId: string | null, budget: LookupBudget, mcp: boolean, notebook: Notebook | null = null): ReviewTools => {
 		const tools = input.tools!(budget, mcp)
 		const label = (name: string): string | null => (external?.has(name) ? external.label(name) : null)
 		return {
 			...tools,
+			definitions: notebook ? [...tools.definitions, SUSPICION_TOOL] : tools.definitions,
 			async call(name, args, signal) {
+				if (notebook && name === SUSPICION_TOOL.name) {
+					const { result, noted } = notebook.note(args)
+					if (noted && !signal.aborted)
+						journey.add(memberId, { kind: 'suspicion', id: noted.key, text: noted.text, path: noted.path, line: noted.line })
+					return result
+				}
 				const result = await tools.call(name, args, signal)
 				const beat = signal.aborted ? null : lookupBeat(name, args, result.error, label)
 				if (beat) journey.add(memberId, beat)
@@ -487,6 +508,7 @@ export function startRun(
 				lookups,
 				verify,
 				groupDuplicates: grouping,
+				narrate,
 				contextWindow: tight.w.provider.limits.contextWindow,
 				outputTokens: tight.outputTokens,
 			}
@@ -732,6 +754,7 @@ export function startRun(
 					error: outcome.ok ? null : outcome.error.message,
 				})
 				for (const f of fresh) journey.add(w.id, findingBeat(f))
+				for (const s of outcome.settle(listedFor)) journey.add(w.id, s)
 				if (retry) {
 					settleRetried(batch.index, w, outcome.ok ? null : outcome.error.message)
 					if (!outcome.ok && outcome.error instanceof ProviderError && outcome.error.fatal) w.stopped = true
@@ -808,20 +831,50 @@ export function startRun(
 		return budget.kept
 	}
 
-	type BatchOutcome = { ok: true; value: ReturnType<typeof validateBatchOutput> } | { ok: false; error: Error }
+	/** The finding the run lists for one a request raised: itself, or the one it was folded into as a duplicate. */
+	function listedFor(f: Finding): Finding | null {
+		return run.findings.find((x) => x.id === f.id) ?? run.findings.find((x) => !x.heldBack && isDuplicate(x, f)) ?? null
+	}
+
+	type BatchOutcome = ({ ok: true; value: ReturnType<typeof validateBatchOutput> } | { ok: false; error: Error }) & {
+		/** How the suspicions noted during the request ended, once its findings are merged (none without narration). */
+		settle: (listed: (f: Finding) => Finding | null) => Array<RunBeatBody>
+	}
 
 	async function runBatch(batch: ContextBatch, w: Worker): Promise<BatchOutcome> {
 		let reasked = false
+		// Suspicions noted in an attempt that was then sent again were never closed; the last attempt's are settled by its answer.
+		const earlier: Array<Notebook> = []
+		const unsent = (why: string) => (): Array<RunBeatBody> =>
+			earlier.flatMap((nb) =>
+				settleSuspicions(
+					nb.noted,
+					null,
+					() => null,
+					() => [],
+					why,
+				),
+			)
+		const failed = (error: Error): BatchOutcome => ({ ok: false, error, settle: unsent(`The request failed: ${error.message}`) })
 		for (let attempt = 0; ; attempt++) {
 			const budget = lookups ? lookupBudget(batch, w) : null
-			const tools = budget && input.tools ? lookupTools(w.id, budget, external !== null) : undefined
+			const notebook = narrate && budget && input.tools ? createNotebook(`r${notebooks++}`) : null
+			if (notebook) earlier.push(notebook)
+			const tools = budget && input.tools ? lookupTools(w.id, budget, external !== null, notebook) : undefined
 			const sendImages = images.length > 0 && !w.imagesRejected
 			try {
 				const response = await w.provider.review(
-					{ instructions: w.instructions, input: buildInput(batch, background.sections), batch, tools, ...(sendImages ? { images } : {}) },
+					{
+						instructions: w.instructions,
+						input: buildInput(batch, background.sections),
+						batch,
+						tools,
+						...(notebook ? { schema: { name: SCHEMA_NAME, json: NARRATED_JSON_SCHEMA } } : {}),
+						...(sendImages ? { images } : {}),
+					},
 					controller.signal,
 				)
-				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
+				if (controller.signal.aborted) return failed(new ProviderError('cancelled', 'Cancelled'))
 				addUsage(response.usage, w)
 				if (response.toolsRejected && run.coverage.lookups) {
 					const why = `${w.role ? `${w.role}: the` : 'The'} endpoint did not accept lookups, so the reviewer could not open files or search: ${response.toolsRejected}`
@@ -839,12 +892,25 @@ export function startRun(
 				const servers = mcpServers(tools?.log.external ?? [])
 				value.findings = value.findings.map((f) => {
 					const checked = withUnread(withKnownMentions(f, background.people), unreadRefs(findingTexts(f), seen))
-					return servers.length ? { ...checked, external: servers } : checked
+					// A finding names its suspicion as the journey does; an id this request never gave out is dropped.
+					const { suspicion, ...rest } = checked
+					const key = suspicion && notebook ? notebook.key(suspicion) : null
+					const named = key ? { ...rest, suspicion: key } : rest
+					return servers.length ? { ...named, external: servers } : named
 				})
-				return { ok: true, value }
+				if (notebook) earlier.pop() // this attempt's own are settled by its answer below
+				const before = unsent('The request was sent again before it answered.')
+				return {
+					ok: true,
+					value,
+					settle: (listed) => [
+						...before(),
+						...(notebook ? settleSuspicions(notebook.noted, value, listed, (texts) => unreadRefs(texts, seen)) : []),
+					],
+				}
 			} catch (error) {
 				const e = asProviderError(error)
-				if (controller.signal.aborted || e.kind === 'cancelled') return { ok: false, error: e }
+				if (controller.signal.aborted || e.kind === 'cancelled') return failed(e)
 				// Many models and gateways refuse images outright; the request is sent again without them, once per reviewer.
 				if (sendImages && (e.kind === 'bad-request' || e.kind === 'model-unavailable' || e.kind === 'unsupported')) {
 					w.imagesRejected = true
@@ -859,9 +925,9 @@ export function startRun(
 					attempt--
 					continue
 				}
-				if (!e.retryAfter(attempt, options.maxAttempts)) return { ok: false, error: e }
+				if (!e.retryAfter(attempt, options.maxAttempts)) return failed(e)
 				await sleep(options.backoffMs(attempt, e), controller.signal)
-				if (controller.signal.aborted) return { ok: false, error: new ProviderError('cancelled', 'Cancelled') }
+				if (controller.signal.aborted) return failed(new ProviderError('cancelled', 'Cancelled'))
 			} finally {
 				if (tools && run.coverage.lookups && !controller.signal.aborted) addLookups(run.coverage.lookups, tools.log)
 			}

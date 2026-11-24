@@ -4,7 +4,7 @@ import type { Background } from './background.ts'
 import { manifestText, type ContextBatch } from './context.ts'
 
 // Bump when the instructions or the output contract change; stored with every run.
-export const PROMPT_VERSION = 'reviewer-2026-11-23.2'
+export const PROMPT_VERSION = 'reviewer-2026-11-24.1'
 
 // The review policy follows the pr-narrative skill's reviewer mode (pre-seed §2, §2c, §2d, §2e). The budgets it
 // states are also enforced in findings.ts, so a model that ignores them cannot exceed them.
