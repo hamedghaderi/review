@@ -690,6 +690,8 @@ export interface ChangeExplanation {
 	omitted: Array<string> // files whose diff was too big to send
 	model: string
 	at: string
+	textId?: string // its AiTextRecord, which Outcomes counts (issue #289); absent on explanations from before
+	flagged?: AiTextFlag // you said it is wrong
 }
 
 /**
@@ -995,6 +997,8 @@ export interface CodeMessage {
 	at: string
 	model?: string | null // AI answers only
 	error?: boolean // the question could not be answered; `text` says why
+	textId?: string // answers about the conclusion: its AiTextRecord, which Outcomes counts (issue #289)
+	flagged?: AiTextFlag // you said it is wrong
 }
 
 /** Questions you asked the AI about lines of code. Private to you; never posted. */
@@ -1949,6 +1953,13 @@ export interface AiTextRecord {
 	connectionLabel: string
 	model: string
 	sent?: { fate: ReplyFate; share: number; at: string } // drafted replies only: how it went out; absent while not sent
+	flagged?: AiTextFlag // explanations, conclusions and answers: you said it is wrong
+}
+
+/** "This is wrong" on an AI text, with what was wrong if you said. No thumbs-up: not flagging it proves nothing. */
+export interface AiTextFlag {
+	at: string
+	note: string | null
 }
 
 /** Drafted replies not sent are made − asDrafted − light − rewrite: never sent, or emptied from the box. */
@@ -1957,6 +1968,13 @@ export interface AiTextCounts {
 	asDrafted: number
 	light: number
 	rewrite: number
+	flagged: number // explanations, conclusions and answers you said are wrong
+}
+
+/** A review's explanation and conclusion after a flag changed, to show in place. */
+export interface FlaggedText {
+	explanation: ChangeExplanation | null
+	conclusion: ChangeConclusion | null
 }
 
 export interface AiTextRow {
@@ -1965,6 +1983,7 @@ export interface AiTextRow {
 	label: string
 	detail: string | null
 	counts: AiTextCounts
+	notes: Array<string> // what you said was wrong, newest first, up to 5
 }
 
 export interface OutcomeRow {
@@ -2390,6 +2409,7 @@ export const IPC = {
 	aiConclude: 'ai:conclude',
 	aiDraftReply: 'ai:draft-reply',
 	aiReplySent: 'ai:reply-sent',
+	aiFlagText: 'ai:flag-text',
 	aiDraftSummary: 'ai:draft-summary',
 	aiRewriteSummary: 'ai:rewrite-summary',
 	agentSetup: 'agent:setup',
@@ -2682,6 +2702,7 @@ export interface ReviewApi {
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<{ id: string; text: string }>>
 	aiReplySent(repoId: string, textId: string, draft: string, sent: string): Promise<Result<void>>
+	flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<Result<FlaggedText>>
 	/** Drafts the summary of the review you are about to submit with `event`, from your comments in it. Nothing is sent. */
 	draftSummary(reviewId: string, event: ReviewEvent): Promise<Result<string>>
 	/**

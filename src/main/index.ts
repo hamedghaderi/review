@@ -78,6 +78,7 @@ import {
 	repoPath,
 	repoPaths,
 	symbolName,
+	flagInput,
 	pyImportRef,
 	connectionId,
 	connectionPatch,
@@ -590,6 +591,9 @@ function registerIpc(): void {
 	})
 	handle(IPC.aiReplySent, (repoId: unknown, textId: unknown, draft: unknown, sent: unknown) =>
 		service.replySent(str(repoId, 'repository'), str(textId, 'draft id', 128), str(draft, 'draft', 100_000), str(sent, 'reply', 100_000)),
+	)
+	handle(IPC.aiFlagText, (reviewId: unknown, textId: unknown, flag: unknown) =>
+		service.flagAiText(comparisonId(reviewId), str(textId, 'text id', 128), flagInput(flag)),
 	)
 	handle(IPC.aiDraftSummary, async (reviewId: unknown, event: unknown) => {
 		const selection = connections.view().questionModel

@@ -68,6 +68,7 @@ import type {
 	SymbolKind,
 	StackedBase,
 	SymbolLookup,
+	FlaggedText,
 	PyImportRef,
 	TargetProbe,
 } from '../shared/types.ts'
@@ -143,7 +144,7 @@ import { findRelated } from './ai/related.ts'
 import { findImporters } from './ai/imports.ts'
 import { MAX_EXAMPLE_CHARS } from './ai/reproduce.ts'
 import { findSymbol, generatedPath, MAX_SYMBOL_HITS, pythonModuleFiles } from './symbols.ts'
-import { markReplySent } from './ai/aiText.ts'
+import { flagText, markReplySent } from './ai/aiText.ts'
 import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
@@ -2190,6 +2191,19 @@ export class ReviewService {
 			const repo = d.repos[repoId]
 			if (repo) markReplySent(repo, textId, draft, sent)
 		})
+	}
+
+	/** "This is wrong" on the review's explanation, conclusion or an answer, or taken back (issue #289). */
+	async flagAiText(reviewId: string, textId: string, flag: { note: string | null } | null): Promise<FlaggedText> {
+		const repoId = this.loaded(reviewId).comparison.repoId
+		let found = false
+		await this.store.update((d) => {
+			const repo = d.repos[repoId]
+			found = !!repo && flagText(repo, reviewId, textId, flag)
+		})
+		if (!found) throw new AppFail('not-found', 'That AI text is no longer recorded.')
+		const r = this.store.read().repos[repoId]?.reviews[reviewId]
+		return structuredClone({ explanation: r?.explanation ?? null, conclusion: r?.conclusion ?? null })
 	}
 
 	/** Drafts the summary of the review you are about to submit with `event` (see AiController.draftSummary). */

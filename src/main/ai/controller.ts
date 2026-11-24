@@ -1019,9 +1019,10 @@ export class AiController {
 			this.onDemandBusy.delete(busy)
 		}
 		await this.store.update((d) => {
+			// Recorded first, so the explanation carries its record's id: "This is wrong" on it is counted there.
+			if (d.repos[repoId]) explanation.textId = recordAiText(d.repos[repoId], textBy('explain', config, selection)).id
 			const r = d.repos[repoId]?.reviews[reviewId]
 			if (r) r.explanation = explanation
-			if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('explain', config, selection))
 		})
 		return structuredClone(explanation)
 	}
@@ -1200,18 +1201,17 @@ export class AiController {
 			if (text === null) {
 				const conclusion: ChangeConclusion = { runId: run.id, messages: [answer], omitted, findingIds: run.findings.map((f) => f.id) }
 				await this.store.update((d) => {
+					if (d.repos[repoId]) answer.textId = recordAiText(d.repos[repoId], textBy('conclusion', config, selection)).id
 					const r = d.repos[repoId]?.reviews[reviewId]
 					if (r) r.conclusion = conclusion
-					if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('conclusion', config, selection))
 				})
 				return structuredClone(conclusion)
 			}
-			const saved = await this.addConclusionMessage(repoId, reviewId, answer)
 			if (!answer.error)
 				await this.store.update((d) => {
-					if (d.repos[repoId]) recordAiText(d.repos[repoId], textBy('conclusion-answer', config, selection))
+					if (d.repos[repoId]) answer.textId = recordAiText(d.repos[repoId], textBy('conclusion-answer', config, selection)).id
 				})
-			return saved
+			return this.addConclusionMessage(repoId, reviewId, answer)
 		} finally {
 			this.onDemandBusy.delete(busy)
 		}

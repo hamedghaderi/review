@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { AiTextRecord, ReplyFate } from '../../shared/types.ts'
+import type { AiTextFlag, AiTextRecord, ReplyFate } from '../../shared/types.ts'
 import type { RepoState } from '../store.ts'
 
 /**
  * What the AI writes besides findings (issue #289): one record per explanation, conclusion, answer and drafted reply,
  * so Outcomes can count them by model. Only who made it and when is kept, never the text. For a drafted reply, what
- * became of it: sent as drafted, lightly edited or rewritten; a draft that is never sent stays unmarked.
+ * became of it: sent as drafted, lightly edited or rewritten; a draft that is never sent stays unmarked. For the rest,
+ * whether you said it was wrong.
  */
 
 export const MAX_AI_TEXT = 2000 // per repository; the oldest go first
@@ -51,5 +52,32 @@ export function markReplySent(repo: RepoState, id: string, draft: string, sent: 
 	if (!rec || rec.feature !== 'reply' || rec.sent) return false
 	const share = editShare(draft, sent)
 	rec.sent = { fate: replyFate(share), share: Math.round(share * 100) / 100, at: now.toISOString() }
+	return true
+}
+
+export const MAX_FLAG_NOTE = 500
+
+/**
+ * "This is wrong" on an explanation, a conclusion or an answer about it, or taken back with `flag` null: on its record,
+ * which Outcomes counts, and on the text in the review, which shows it. A record whose text was replaced since (Explain
+ * again, a new conclusion) can still be flagged; the review just no longer shows it. False when there is no such text.
+ */
+export function flagText(
+	repo: RepoState,
+	reviewId: string,
+	textId: string,
+	flag: { note: string | null } | null,
+	now = new Date(),
+): boolean {
+	const rec = repo.aiText?.find((r) => r.id === textId)
+	if (!rec || rec.feature === 'reply') return false
+	const note = flag?.note?.trim().slice(0, MAX_FLAG_NOTE) || null
+	const set = (t: { flagged?: AiTextFlag }): void => {
+		if (flag) t.flagged = { at: now.toISOString(), note }
+		else delete t.flagged
+	}
+	set(rec)
+	const review = repo.reviews[reviewId]
+	for (const t of [review?.explanation, ...(review?.conclusion?.messages ?? [])]) if (t?.textId === textId) set(t)
 	return true
 }

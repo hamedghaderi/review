@@ -336,6 +336,7 @@ export function summarizeOutcomes(
 
 	// The AI's other text (issue #289): by feature and model. Prompt versions and kinds of finding don't apply to it.
 	const aiText = new Map<string, AiTextRow>()
+	const flagNotes = new Map<string, Array<{ at: string; note: string }>>() // by row key
 	for (const s of repos) {
 		if (!s.aiText?.length) continue
 		if (!repoList.some((r) => r.id === s.repoId)) repoList.push({ id: s.repoId, label: repoLabel(s) })
@@ -346,11 +347,18 @@ export function summarizeOutcomes(
 			if (Date.parse(t.at) < from) continue
 			const key = `${t.feature}\u0000${model.key}`
 			let r = aiText.get(key)
-			if (!r) aiText.set(key, (r = { feature: t.feature, ...model, counts: { made: 0, asDrafted: 0, light: 0, rewrite: 0 } }))
+			if (!r) {
+				r = { feature: t.feature, ...model, counts: { made: 0, asDrafted: 0, light: 0, rewrite: 0, flagged: 0 }, notes: [] }
+				aiText.set(key, r)
+			}
 			r.counts.made++
 			if (t.sent?.fate === 'as-drafted') r.counts.asDrafted++
 			else if (t.sent?.fate === 'light') r.counts.light++
 			else if (t.sent?.fate === 'rewrite') r.counts.rewrite++
+			if (t.flagged) {
+				r.counts.flagged++
+				if (t.flagged.note) flagNotes.set(key, [...(flagNotes.get(key) ?? []), { at: t.flagged.at, note: t.flagged.note }])
+			}
 		}
 	}
 
@@ -371,9 +379,15 @@ export function summarizeOutcomes(
 		minDecided: MIN_DECIDED,
 		afterMerge: afterMerge.sort((a, b) => b.commit.at.localeCompare(a.commit.at)),
 		followedAt,
-		aiText: [...aiText.values()].sort(
-			(a, b) => AI_TEXT_ORDER.indexOf(a.feature) - AI_TEXT_ORDER.indexOf(b.feature) || b.counts.made - a.counts.made,
-		),
+		aiText: [...aiText.entries()]
+			.map(([key, r]) => ({
+				...r,
+				notes: (flagNotes.get(key) ?? [])
+					.sort((a, b) => b.at.localeCompare(a.at))
+					.slice(0, 5)
+					.map((n) => n.note),
+			}))
+			.sort((a, b) => AI_TEXT_ORDER.indexOf(a.feature) - AI_TEXT_ORDER.indexOf(b.feature) || b.counts.made - a.counts.made),
 		notes: noteChecks(
 			repos,
 			notes,

@@ -494,6 +494,14 @@ export function repoPaths(v: unknown): Array<string> {
 	return [...new Set(list.map(repoPath))]
 }
 
+/** "This is wrong" with an optional note, or null to take it back. */
+export function flagInput(v: unknown): { note: string | null } | null {
+	if (v === null) return null
+	const o = obj(v, 'flag')
+	if (o.note !== null && typeof o.note !== 'string') bad('note')
+	return { note: o.note === null ? null : text(o.note, 'note', 2000) }
+}
+
 /** One identifier, as go to definition reads it from the code. */
 export function symbolName(v: unknown): string {
 	const s = str(v, 'name', 200)

@@ -3,6 +3,7 @@ import type { ChangeExplanation } from '../../shared/types.ts'
 import { AiOrb } from './AiOrb.tsx'
 import { useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
+import { FlagWrong } from './FlagWrong.tsx'
 
 interface Props {
 	explanation: ChangeExplanation | null
@@ -13,6 +14,7 @@ interface Props {
 	described: boolean // the change has a description of its own
 	onExplain(): void
 	onOpenPath(path: string): void // opens a changed file
+	onFlag(textId: string, flag: { note: string | null } | null): Promise<string | null>
 }
 
 const SOURCE: Record<ChangeExplanation['source'], { label: string; title: string }> = {
@@ -25,7 +27,7 @@ const SOURCE: Record<ChangeExplanation['source'], { label: string; title: string
  * "Explain this change": what the change is for, what behaves differently and where to start reading, from the model
  * for questions. The text is the model's, shown as plain text; it reads the code but can still be wrong.
  */
-export function ExplainChange({ explanation: e, busy, error, disabled, modelPicker, described, onExplain, onOpenPath }: Props) {
+export function ExplainChange({ explanation: e, busy, error, disabled, modelPicker, described, onExplain, onOpenPath, onFlag }: Props) {
 	useAnnounceWait(busy, 'Reading the change…')
 	useAnnounceNew(
 		e ? [e] : [],
@@ -132,6 +134,7 @@ export function ExplainChange({ explanation: e, busy, error, disabled, modelPick
 			)}
 			<div className="ask-actions">
 				<span className="muted small">Read from the code, but it can be wrong.</span>
+				<FlagWrong textId={e.textId} flagged={e.flagged} what="explanation" onFlag={onFlag} />
 				<span className="spacer" />
 				{modelPicker}
 				{ask('Explain again')}

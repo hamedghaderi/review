@@ -1311,6 +1311,7 @@ test('explain this change: the description, notes, commits and diffs go to the c
 	assert.deepEqual(store.read().repos['/repo'].reviews[s.comp.id].explanation, e, 'saved, so reopening costs nothing')
 	const made = () => (store.read().repos['/repo'].aiText ?? []).map((t) => [t.feature, t.connectionId, t.model])
 	assert.deepEqual(made(), [['explain', SEL.connectionId, SEL.modelId]], 'counted for Outcomes, without the text')
+	assert.equal(e.textId, store.read().repos['/repo'].aiText![0].id, 'the explanation points at its record, to flag it')
 
 	reply = { nope: true }
 	await assert.rejects(controller.explainChange(access, s.comp.id, SEL), /No explanation: The explanation did not match/)
@@ -3326,6 +3327,12 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	assert.match(failed.messages[4].text, /^No answer: /)
 	await assert.rejects(controller.conclude(access, s.comp.id, null, SEL), /No conclusion: /)
 	assert.deepEqual(made(), ['conclusion', 'conclusion-answer'], 'failed answers and conclusions are not counted')
+	const ids = (store.read().repos['/repo'].aiText ?? []).map((t) => t.id)
+	assert.deepEqual(
+		failed.messages.map((m) => m.textId),
+		[ids[0], undefined, ids[1], undefined, undefined],
+		'each conclusion and answer points at its record; questions and failed answers have none',
+	)
 	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.messages.length, 5, 'a failed rewrite keeps the conversation')
 
 	// The base branch moved: the conclusion also says whether the change is still worth merging (only in the app).
