@@ -23,7 +23,7 @@ import type { ContextBatch, ContextExcerpt } from './context.ts'
 import { isProjectDocPath } from './facts.ts'
 import { DEFAULT_LEVELS, residueLevel } from './prompt.ts'
 import type { z } from 'zod'
-import { modelFindingSchema, reviewEnvelopeSchema, type ModelFinding } from './schema.ts'
+import { narratedFindingSchema, reviewEnvelopeSchema, settledSuspicionSchema, type ModelFinding, type NarratedFinding } from './schema.ts'
 
 const TEXT_LIMITS = {
 	title: 200,
@@ -49,6 +49,9 @@ export interface ValidatedBatch {
 	unexplained: Array<{ fileKey: string; why: string }>
 	outdatedDocs: Array<OutdatedDoc>
 	dropped: Array<{ path: string; line: number; what: string }> // checked against the original's files by the runner
+	// How the answer closed the suspicions noted during the request, by the ids note_suspicion gave (issue #299). A finding
+	// that settles one carries its id in `suspicion` until the runner names it for the run.
+	suspicions: Array<{ id: string; outcome: 'cleared' | 'near_miss'; reason: string; evidence: string | null }>
 }
 
 export class InvalidOutputError extends Error {}
@@ -73,9 +76,9 @@ export function validateBatchOutput(
 	const excerpts = new Map(batch.excerpts.map((e) => [e.id, e]))
 	const findings: Array<Finding> = []
 	const rejected: Array<RejectedFinding> = []
-	const items: Array<ModelFinding> = []
+	const items: Array<NarratedFinding> = []
 	for (const raw of parsed.data.findings) {
-		const f = modelFindingSchema.safeParse(raw)
+		const f = narratedFindingSchema.safeParse(raw)
 		if (f.success) items.push(f.data)
 		else rejected.push(reject(raw, `Malformed finding (${issueText(f.error)})`))
 	}
@@ -110,7 +113,13 @@ export function validateBatchOutput(
 			continue
 		}
 		const under = underNote(f, notes)
-		findings.push({ ...result, ...(before ? { raisedBefore: before } : {}), ...(under ? { underNote: under } : {}) })
+		const suspicion = f.suspicion_id?.trim()
+		findings.push({
+			...result,
+			...(before ? { raisedBefore: before } : {}),
+			...(under ? { underNote: under } : {}),
+			...(suspicion ? { suspicion } : {}),
+		})
 	}
 	const limitations = parsed.data.limitations
 		.map((l) => l.trim())
@@ -152,7 +161,19 @@ export function validateBatchOutput(
 		.filter((d) => d.what.trim() && d.original_path.trim() && Number.isInteger(d.original_line) && d.original_line > 0)
 		.slice(0, 10)
 		.map((d) => ({ path: d.original_path.trim(), line: d.original_line, what: clip(d.what.trim(), TEXT_LIMITS.note) }))
-	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs, dropped }
+	const suspicions = parsed.data.suspicions.flatMap((raw) => {
+		const s = settledSuspicionSchema.safeParse(raw)
+		if (!s.success || !s.data.id.trim()) return []
+		return [
+			{
+				id: s.data.id.trim(),
+				outcome: s.data.outcome,
+				reason: clip(s.data.reason.trim(), TEXT_LIMITS.note),
+				evidence: s.data.evidence?.trim() ? clip(s.data.evidence.trim(), 200) : null,
+			},
+		]
+	})
+	return { findings, rejected, limitations, evaluation, unexplained, outdatedDocs, dropped, suspicions: suspicions.slice(0, 20) }
 }
 
 /**

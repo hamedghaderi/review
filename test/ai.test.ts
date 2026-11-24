@@ -11,8 +11,9 @@ import { interpretResponse, mapError } from '../src/main/ai/openai.ts'
 import { buildInput, instructionsFor, PROMPT_VERSION, REVIEWER_INSTRUCTIONS } from '../src/main/ai/prompt.ts'
 import { ProviderError } from '../src/main/ai/provider.ts'
 import { createJourney, lookupBeat, MAX_LOOKUP_BEATS, verdictTone } from '../src/main/ai/journey.ts'
+import { createNotebook, MAX_SUSPICIONS, settleSuspicions } from '../src/main/ai/suspicions.ts'
 import { answeredRequests, defaultBackoff, startRun, type RunInput, type RunnerOptions } from '../src/main/ai/runner.ts'
-import type { ModelFinding, ReviewOutput } from '../src/main/ai/schema.ts'
+import { SCHEMA_NAME, type ModelFinding, type ReviewOutput } from '../src/main/ai/schema.ts'
 import type { RunConfig } from '../src/main/ai/connections.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { aiScope, reviewUpdate } from '../src/main/validate.ts'
@@ -988,7 +989,7 @@ test('policy: the run records what every rule found, near misses, unexplained fi
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Judge the code, not claims about it'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never cite an R block as "excerpt_id"'))
 	assert.ok(REVIEWER_INSTRUCTIONS.includes('Never hand the reader an investigation'))
-	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-23.2')
+	assert.equal(PROMPT_VERSION, 'reviewer-2026-11-24.1')
 })
 
 test('accepted findings become result-first comments with the disproof and collapsed background', async () => {
@@ -2264,7 +2265,8 @@ test('focused passes: one model runs as the four default roles, each on its own 
 	const provider = createFakeProvider({
 		script: (req) => {
 			// Review requests only: grouping duplicates afterwards is one request without an assignment.
-			if (!req.schema) assignments.push(/# Your assignment \(([^)]+)\)/.exec(req.instructions)?.[1] ?? 'none')
+			if (!req.schema || req.schema.name === SCHEMA_NAME)
+				assignments.push(/# Your assignment \(([^)]+)\)/.exec(req.instructions)?.[1] ?? 'none')
 			return defaultScript(req)
 		},
 	})
@@ -2343,7 +2345,8 @@ test('bugs only: one model checks only bug and security, alone or as the passes 
 		const assigned: Array<string> = []
 		const provider = createFakeProvider({
 			script: (req) => {
-				if (!req.schema) assigned.push(/exactly these rules, in this order: ([^.]+)\./.exec(req.instructions)?.[1] ?? 'all')
+				if (!req.schema || req.schema.name === SCHEMA_NAME)
+					assigned.push(/exactly these rules, in this order: ([^.]+)\./.exec(req.instructions)?.[1] ?? 'all')
 				return defaultScript(req)
 			},
 		})
@@ -3749,4 +3752,166 @@ test("journey: a retry continues the run's journey; past the cap, lookups stop b
 	assert.equal(verdictTone('safe'), 'cleared')
 	assert.equal(verdictTone('problem'), 'confirmed')
 	assert.equal(verdictTone('unsure'), 'concern')
+})
+
+function lookupStub() {
+	return (budget: { maxCalls: number; maxChars: number }) => {
+		const log = { calls: 0, chars: 0, refused: 0, paths: [], searches: [], external: [], seen: [] }
+		return {
+			definitions: [{ name: 'read_file', description: '', parameters: {} }],
+			log,
+			exhausted: () => log.calls >= budget.maxCalls,
+			call: async () => {
+				log.calls++
+				return { text: 'ok', error: false }
+			},
+		} as never
+	}
+}
+
+test('suspicions: a reviewer notes what it suspects, and each one ends as a finding, cleared, or not settled', async () => {
+	const s = sources()
+	const asked: Array<{ schema: string | undefined; tools: Array<string>; instructions: string }> = []
+	const provider = createFakeProvider({
+		script: (req, _call, lookups) => {
+			asked.push({ schema: req.schema?.name, tools: req.tools?.definitions.map((d) => d.name) ?? [], instructions: req.instructions })
+			if (!lookups.length)
+				return {
+					tool_calls: [
+						{ name: 'note_suspicion', args: { text: 'add() may now add', path: 'src/app.ts', line: 3 } },
+						{ name: 'note_suspicion', args: { text: 'The deleted check may be needed', path: 'src/gone.ts', line: 2 } },
+						{ name: 'note_suspicion', args: { text: 'Something about logo.png', path: null, line: null } },
+						{ name: 'note_suspicion', args: { text: 'A caller may rely on it', path: null, line: null } },
+						{ name: 'read_file', args: { path: 'src/app.ts', version: 'head', start_line: 1, end_line: 8 } },
+					],
+				}
+			assert.deepEqual(
+				lookups.slice(0, 2).map((l) => l.text),
+				['Noted as S1. Close it in your answer.', 'Noted as S2. Close it in your answer.'],
+			)
+			return {
+				...out([{ ...finding(), suspicion_id: 'S1' } as ModelFinding]),
+				suspicions: [
+					{ id: 'S2', outcome: 'cleared', reason: 'Nothing calls it any more.', evidence: 'src/app.ts:3' },
+					{ id: 'S4', outcome: 'cleared', reason: 'The caller checks first.', evidence: 'src/other.ts:500' },
+					{ id: 'S9', outcome: 'cleared', reason: 'Never noted.', evidence: 'src/app.ts:3' },
+				],
+			}
+		},
+	})
+	const run = await startRun(
+		{
+			reviewId: s.comp.id,
+			comparison: s.comp,
+			scope: { kind: 'all' },
+			loadSources: async () => s.srcs,
+			previousFindings: [],
+			tools: lookupStub(),
+		},
+		options(provider),
+		() => {},
+	).done
+	assert.equal(run.status, 'completed', run.errors.join('; '))
+	assert.equal(run.limitsUsed?.narrate, true)
+	assert.equal(asked[0].schema, SCHEMA_NAME, 'the narrated answer is still the findings answer')
+	assert.ok(asked[0].tools.includes('note_suspicion'))
+	assert.match(asked[0].instructions, /# Saying what you suspect/)
+	assert.equal(run.coverage.lookups?.calls, 1, 'noting a suspicion is not a lookup')
+	const f = run.findings[0]
+	const journey = run.journey!
+	const suspected = journey.flatMap((b) => (b.kind === 'suspicion' ? [b] : []))
+	assert.deepEqual(
+		suspected.map((b) => b.text),
+		['add() may now add', 'The deleted check may be needed', 'Something about logo.png', 'A caller may rely on it'],
+	)
+	assert.equal(f.suspicion, suspected[0].id, 'the finding names its suspicion as the journey does')
+	const raised = journey.find((b) => b.kind === 'finding')
+	assert.equal(raised?.kind === 'finding' && raised.suspicionId, suspected[0].id)
+	const settled = journey.flatMap((b) => (b.kind === 'settled' ? [b] : []))
+	assert.deepEqual(
+		settled.map((b) => [b.id, b.outcome, b.tone, b.findingId]),
+		[
+			[suspected[0].id, 'finding', 'pending', f.id],
+			[suspected[1].id, 'cleared', 'cleared', null],
+			[suspected[2].id, 'unsettled', 'unsettled', null],
+			[suspected[3].id, 'unsettled', 'unsettled', null],
+		],
+	)
+	assert.match(settled[1].reason, /Nothing calls it any more\. \(src\/app\.ts:3\)/)
+	assert.match(settled[2].reason, /Not closed in the answer/)
+	assert.match(settled[3].reason, /citing src\/other\.ts:500, which it never read/, 'a ✓ has to point at code the reviewer had')
+	const at = (kind: string) => journey.findIndex((b) => b.kind === kind)
+	assert.ok(at('suspicion') < at('read') && at('read') < at('request') && at('request') < at('settled'))
+})
+
+test('suspicions: off in the settings, or without lookups, the request is the same as before', async () => {
+	const s = sources()
+	for (const over of [{ narrate: false }, { lookups: false }]) {
+		const asked: Array<{ schema: string | undefined; tools: Array<string>; instructions: string }> = []
+		const provider = createFakeProvider({
+			script: (req) => {
+				asked.push({ schema: req.schema?.name, tools: req.tools?.definitions.map((d) => d.name) ?? [], instructions: req.instructions })
+				return out([finding()])
+			},
+		})
+		const run = await startRun(
+			{
+				reviewId: s.comp.id,
+				comparison: s.comp,
+				scope: { kind: 'all' },
+				loadSources: async () => s.srcs,
+				previousFindings: [],
+				tools: lookupStub(),
+			},
+			options(provider, { limits: { ...LIMITS, ...over } }),
+			() => {},
+		).done
+		assert.equal(run.status, 'completed', run.errors.join('; '))
+		assert.equal(run.limitsUsed?.narrate, false)
+		assert.equal(asked[0].schema, undefined)
+		assert.ok(!asked[0].tools.includes('note_suspicion'))
+		assert.doesNotMatch(asked[0].instructions, /Saying what you suspect/)
+		assert.ok(!run.journey!.some((b) => b.kind === 'suspicion' || b.kind === 'settled'))
+	}
+})
+
+test('suspicions: at most eight a request, and a failed request leaves them not settled', async () => {
+	const nb = createNotebook('r0')
+	for (let i = 0; i < MAX_SUSPICIONS; i++) assert.equal(nb.note({ text: `s${i}`, path: null, line: null }).result.error, false)
+	const ninth = nb.note({ text: 'one more', path: null, line: null })
+	assert.equal(ninth.noted, null)
+	assert.match(ninth.result.text, /the most for one request/)
+	assert.equal(nb.note({ text: '  ', path: null, line: null }).result.error, true)
+	assert.equal(nb.key('S3'), 'r0-S3')
+	assert.equal(nb.key('S99'), null)
+	const failed = settleSuspicions(
+		nb.noted.slice(0, 1),
+		null,
+		() => null,
+		() => [],
+		'The request failed: timeout',
+	)
+	assert.deepEqual(
+		failed.map((b) => [b.outcome, b.reason]),
+		[['unsettled', 'The request failed: timeout']],
+	)
+	const near = settleSuspicions(
+		nb.noted.slice(0, 2),
+		{
+			findings: [],
+			suspicions: [
+				{ id: 'S1', outcome: 'near_miss', reason: 'The writer is not in this repository.', evidence: null },
+				{ id: 'S2', outcome: 'cleared', reason: 'Fine.', evidence: null },
+			],
+		},
+		() => null,
+		() => [],
+	)
+	assert.deepEqual(
+		near.map((b) => [b.outcome, b.tone]),
+		[
+			['near-miss', 'concern'],
+			['unsettled', 'unsettled'], // cleared without pointing at the code
+		],
+	)
 })

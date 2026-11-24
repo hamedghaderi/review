@@ -7198,6 +7198,18 @@ body.resizing-y * {
 	transform: translate(-50%, -50%) rotate(45deg);
 	background: var(--member, var(--text-2));
 }
+/* A suspicion still open: a hollow diamond on the reviewer's strand, until it settles into ✓, ✗, ⚠ or ○. */
+.run-node.node-suspect {
+	width: 9px;
+	height: 9px;
+	border-radius: 1px;
+	transform: translate(-50%, -50%) rotate(45deg);
+	border: 1.5px solid var(--member, var(--text));
+}
+.run-beat.is-suspicion em,
+.run-beat.is-settled em {
+	font-style: italic;
+}
 .run-node.node-fail {
 	width: 9px;
 	height: 9px;
@@ -7334,7 +7346,8 @@ body.resizing-y * {
 .run-beat.fresh .run-node {
 	animation: run-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 120ms both;
 }
-.run-beat.fresh .run-node.node-req {
+.run-beat.fresh .run-node.node-req,
+.run-beat.fresh .run-node.node-suspect {
 	animation-name: run-pop-diamond;
 }
 .run-beat.fresh .run-node.node-verdict::after,
@@ -7349,7 +7362,8 @@ body.resizing-y * {
 .run-beat.tip .run-node {
 	animation: run-breathe 1.6s ease-in-out infinite;
 }
-.run-beat.tip .run-node.node-req {
+.run-beat.tip .run-node.node-req,
+.run-beat.tip .run-node.node-suspect {
 	animation: none;
 }
 @keyframes run-in {

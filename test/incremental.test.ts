@@ -11,6 +11,7 @@ import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
 import { findingRoots, findingState } from '../src/shared/findings.ts'
 import type { AiRun, ReviewerChoice } from '../src/shared/types.ts'
+import { SCHEMA_NAME } from '../src/main/ai/schema.ts'
 
 const SEL = { connectionId: '00000000-0000-4000-8000-000000000000', modelId: 'fixture-v1' }
 const MODEL: ReviewerChoice = { kind: 'model', selection: SEL }
@@ -54,8 +55,8 @@ async function setup(edit: (out: ReturnType<typeof defaultScript>) => ReturnType
 	const inputs: Array<string> = []
 	const provider = createFakeProvider({
 		script: (req) => {
-			if (!req.schema) sent.push(req.batch.excerpts.map((e) => e.file.key))
-			if (!req.schema) inputs.push(req.input)
+			if (!req.schema || req.schema.name === SCHEMA_NAME) sent.push(req.batch.excerpts.map((e) => e.file.key))
+			if (!req.schema || req.schema.name === SCHEMA_NAME) inputs.push(req.input)
 			return edit(defaultScript(req))
 		},
 	})

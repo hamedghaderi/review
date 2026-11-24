@@ -24,6 +24,7 @@ export interface ContextLimits {
 	lookups?: boolean // let the reviewer read files and search the repository while it reviews (default on)
 	verify?: boolean // double-check blocking findings after the review (default on)
 	groupDuplicates?: boolean // fold findings the model says are the same problem (default off)
+	narrate?: boolean // reviewers note what they suspect and close each one, for the Run drawer (default on; needs lookups)
 }
 
 // With related code, changed excerpts fill at most this share of a request; related code fills the rest.
