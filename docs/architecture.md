@@ -115,6 +115,15 @@ How Review is put together: the AI review pipeline, the code layout and how revi
 - Reviews live in `<userData>/review-store.json` (`version: 2`; version 1 files are migrated). AI provider settings are in `ai-settings.json`, encrypted keys in `ai-credentials.json`. If the file can't be read, it is renamed to `review-store.json.unreadable-<ts>` rather than overwritten.
 - Edits autosave after 800 ms, and any pending edits are flushed when the window closes. Clicking the save status in the top bar saves right away. Nothing is sent to GitHub; use "Publish to GitHub…" for that, or turn on automatic review.
 
+## How the AI appears
+
+The AI reviewer has no face, name or character. A person makes every call in Review (approve, post, resolve), and a friendly character makes AI output feel more trustworthy than it is. So:
+
+- **Show the AI as activity only.** That means Review's block mark (`BlockMark.tsx`) while it works, and the plain label "AI reviewer" on what it wrote. No avatar, face, mascot or name. A review persona ("Clean Code" and the rest in `src/shared/personas.ts`) is a way of reviewing, not a character, and is never a person's name.
+- **Describe the work, not a mood.** Status and empty-state copy says what is happening ("Reading the code…", "Checking the commit against its message…"), never "Thinking…", "I'm on it!" or anything about how the AI feels. The same goes for what the screen reader announces.
+- **Text written for the developer stays in the developer's voice.** Drafted replies and rewritten summaries are in the developer's first person, because they post under the developer's name.
+- **"I" is fine inside a finding** when it is about uncertainty: "I couldn't find where this is called" is honest about what the reviewer checked. It is not fine as chatter ("I'd be happy to look at…").
+
 ## Development
 
 `npm run dev` also shows a **Fixture provider** (deterministic sample findings, no network), labelled "Dev". It is hidden in packaged builds.

@@ -79,7 +79,7 @@ Review is free and MIT licensed. If it saves you time, you can [sponsor it on Gi
 
 ## Contributing
 
-Issues and pull requests are welcome. Before opening a PR, run `npm test`, `npm run typecheck` and `npm run format:check`; CI runs the same three. To report a security problem, see [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome. Before opening a PR, run `npm test`, `npm run typecheck` and `npm run format:check`; CI runs the same three. Copy that talks about the AI follows [How the AI appears](docs/architecture.md#how-the-ai-appears). To report a security problem, see [SECURITY.md](SECURITY.md).
 
 ## License
 
