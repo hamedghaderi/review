@@ -3,6 +3,7 @@ import { cyclePane, pane } from './panes.ts'
 import { blockingSummary, findingRoots, lateMembersDone, lateUnread, preparedLine } from '../../shared/findings.ts'
 import { maskLeaks } from '../../shared/leaks.ts'
 import { agentShareDetail, type AgentShare } from '../../shared/agentCommits.ts'
+import { showsMedia, uiFiles } from '../../shared/uiChange.ts'
 import type { SinceReview } from '../../shared/rangeDiff.ts'
 import { SinceReviewBanner } from './SinceReview.tsx'
 import { BackportLabel, BackportList, backportTag } from './Backports.tsx'
@@ -865,7 +866,7 @@ export function App() {
 	}, [discussionFailed, session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// Who approved or reviewed the open pull request, re-read as often as the PR is checked for new commits.
-	const [prReview, setPrReview] = useState<{ id: string; value: PrReviewState | null; author: string | null } | null>(null)
+	const [prReview, setPrReview] = useState<{ id: string; value: PrReviewState | null; author: string | null; body: string } | null>(null)
 	useEffect(() => {
 		if (!session || !comparison?.pr || view !== 'review') return
 		const id = comparison.id
@@ -874,7 +875,7 @@ export function App() {
 		const read = (): void => {
 			void window.review
 				.prDetail(session.repo.id, n)
-				.then((r) => live && r.ok && setPrReview({ id, value: r.value.review, author: r.value.author }))
+				.then((r) => live && r.ok && setPrReview({ id, value: r.value.review, author: r.value.author, body: r.value.body }))
 		}
 		read()
 		const t = window.setInterval(read, 120_000)
@@ -883,6 +884,15 @@ export function App() {
 			window.clearInterval(t)
 		}
 	}, [session?.repo.id, comparison?.id, view]) // eslint-disable-line react-hooks/exhaustive-deps
+	// A pull request that changes the UI with no image or video on it (issue #320). Only once the description and a complete
+	// conversation are in, so a partial read never claims nothing was shown.
+	const uiUnshown = useMemo(() => {
+		const d = discussion?.reviewId === comparison?.id ? discussion?.value : null
+		if (!comparison?.pr || prReview?.id !== comparison.id || d?.status !== 'complete') return null
+		const ui = uiFiles(comparison.files.flatMap((f) => (f.newPath ? [f.newPath] : [])))
+		const said = [prReview.body, ...d.conversation.map((c) => c.body), ...d.reviews.map((r) => r.body)]
+		return ui.length && !showsMedia([...said, ...d.threads.flatMap((t) => t.comments.map((c) => c.body))]) ? ui : null
+	}, [comparison, prReview, discussion])
 
 	// Global shortcuts, as set in Settings › Keymap: settings, Home and Outcomes work from anywhere; quick open, the
 	// repositories and search need one open. A shortcut without ⌘/Ctrl/Alt never fires while typing, except moving
@@ -2121,6 +2131,7 @@ export function App() {
 										<ReviewBadge review={prReview.value} viewer={github?.login ?? null} short />
 									)}
 									{agents?.reviewId === comparison.id && <AgentShareLabel share={agents.value} />}
+									{uiUnshown && <UiUnshownLabel files={uiUnshown} />}
 									{backportsHere && (
 										<BackportLabel backports={backportsHere} open={backportsOpen} onToggle={() => setBackportsOpen((x) => !x)} />
 									)}
@@ -3089,6 +3100,20 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
 				</ul>
 			)}
 		</div>
+	)
+}
+
+/** "Changes the UI · no screenshot", with the UI files in the tooltip. A reminder for you, never a finding. */
+function UiUnshownLabel({ files }: { files: Array<string> }) {
+	const shown = files.slice(0, 12)
+	const more = files.length - shown.length
+	return (
+		<span
+			className="agent-share nowrap"
+			title={`${files.length === 1 ? 'This file changes' : `These ${files.length} files change`} the UI, and no image or video in the description or the conversation shows the result. You could ask for a screenshot.\n\n${shown.join('\n')}${more ? `\n…and ${more} more` : ''}`}
+		>
+			Changes the UI · no screenshot
+		</span>
 	)
 }
 
