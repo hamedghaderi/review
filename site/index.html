@@ -113,7 +113,7 @@
 					<div class="story__glow" aria-hidden="true"><span></span><span></span><span></span></div>
 					<div class="story__text">
 						<p class="story__eyebrow">A review, start to finish</p>
-						<h2 id="story-title">From diff to <span class="grad">published review</span>.</h2>
+						<h2 id="story-title">From a sprawling change to a <span class="grad">published review</span>.</h2>
 						<ol class="story__steps">
 							<li data-n="0" data-num="1">
 								<h3>Open a branch or pull request</h3>
@@ -137,7 +137,7 @@
 
 					<figure
 						class="story__stage"
-						aria-label="A review in progress: a diff of cart.js with your comment, an AI finding, and the pending review on GitHub."
+						aria-label="A review in progress: a change of twelve files, failing checks and open threads narrows to a diff of cart.js with your comment, an AI finding, and the pending review on GitHub."
 					>
 						<div class="mock is-sent" aria-hidden="true">
 							<div class="mock__bar">
@@ -145,6 +145,17 @@
 								<span class="mock__file">cart.js</span>
 								<span class="mock__stat"><b class="add">+4</b> <b class="del">−2</b></span>
 								<span class="mock__pending"><span class="mock__count">2</span> pending on GitHub</span>
+							</div>
+							<div class="mock__arrive">
+								<span style="--x: 6%; --y: 8%; --r: -4deg">checkout.ts <b class="add">+38</b> <b class="del">−12</b></span>
+								<span style="--x: 52%; --y: 4%; --r: 3deg">package-lock.json <b class="add">+1,204</b> <b class="del">−380</b></span>
+								<span class="ci" style="--x: 58%; --y: 22%; --r: -2deg">CI · 3 checks failing</span>
+								<span style="--x: 14%; --y: 27%; --r: 5deg">api/orders.ts <b class="add">+21</b> <b class="del">−9</b></span>
+								<span style="--x: 40%; --y: 40%; --r: -6deg">cart.js <b class="add">+4</b> <b class="del">−2</b></span>
+								<span class="thread" style="--x: 4%; --y: 52%; --r: -3deg">9 threads</span>
+								<span style="--x: 60%; --y: 56%; --r: 4deg">tests/cart.test.js <b class="add">+64</b></span>
+								<span style="--x: 22%; --y: 70%; --r: 2deg">README.md <b class="add">+3</b> <b class="del">−1</b></span>
+								<span style="--x: 54%; --y: 80%; --r: -5deg">+6 more files</span>
 							</div>
 							<div class="mock__code">
 								<div class="ln ctx"><i>1</i><code>export function total(items, discount) {</code></div>
@@ -173,7 +184,18 @@
 								<div class="ln add"><i>6</i><code style="--in: 1">return Math.round(sum)</code></div>
 								<div class="ln ctx"><i>7</i><code>}</code></div>
 							</div>
-							<div class="mock__toast">Published · 2 comments in your pending review. Submit it on GitHub when you're ready.</div>
+							<div class="mock__toast">
+								<svg class="mark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+									<rect class="mark__stem" x="1.5" y="1.5" width="3.6" height="13" rx="0.9" />
+									<path
+										class="mark__bowl"
+										fill-rule="evenodd"
+										d="M6.8 1.5H10a4.05 4.05 0 0 1 0 8.1H6.8ZM6.8 4.3H10a1.25 1.25 0 0 1 0 2.5H6.8Z"
+									/>
+									<path class="mark__leg" d="M6.8 10.5h3.6l4 4h-3.6Z" />
+								</svg>
+								<span>Published · 2 comments in your pending review. Submit it on GitHub when you're ready.</span>
+							</div>
 						</div>
 					</figure>
 				</div>

@@ -30,3 +30,7 @@ The **Open in Review** extension (`extension/`) and the userscript (`site/open-i
 - **Firefox Add-ons**: upload the same zip at [addons.mozilla.org](https://addons.mozilla.org/developers/). The add-on id is set in `browser_specific_settings` in the manifest. Keep it, or Firefox treats the upload as a different add-on.
 
 To try it without a store: Chrome → `chrome://extensions` → **Developer mode** → **Load unpacked** → choose `extension/`. Firefox → `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → choose `extension/manifest.json`.
+
+## Release images and videos
+
+Frame them like the site's story: start from the change as it arrives (many files, failing checks, open threads) and end on what Review narrows it to (the few findings that matter, the rest settled). A before/after pair says more than a cropped screenshot of the new control on its own. Make them on the demo repository, never on real work.
