@@ -18,7 +18,7 @@ const VERDICT_TEXT: Record<'holds' | 'wrong' | 'unsure', { label: string; hint: 
 }
 
 export function FindingThread({ messages, pending, path }: { messages: Array<FindingMessage>; pending: boolean; path: string | null }) {
-	useAnnounceWait(pending, 'Thinking…')
+	useAnnounceWait(pending, 'Reading the code…')
 	useAnnounceNew(
 		messages,
 		(m) => m.id,
@@ -65,7 +65,7 @@ export function FindingThread({ messages, pending, path }: { messages: Array<Fin
 			{pending && messages[messages.length - 1]?.role !== 'you' && <div className="thread-msg you muted">Sending…</div>}
 			{pending && (
 				<div className="thread-msg ai muted">
-					<BlockMark activity="reasoning" size={14} /> Thinking…
+					<BlockMark activity="reasoning" size={14} /> Reading the code…
 				</div>
 			)}
 		</div>

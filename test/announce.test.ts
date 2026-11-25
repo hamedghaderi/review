@@ -69,11 +69,11 @@ test('announce: one region, messages close together said as one, and the setting
 	attachRegion(region)
 	const settle = () => new Promise((r) => setTimeout(r, 200))
 	try {
-		announce('Thinking…', 'progress')
+		announce('Reading the code…', 'progress')
 		assert.equal(region.textContent, '', 'emptied first, so the same words said again are read again')
 		announce('Opus answered: yes.', 'result')
 		await settle()
-		assert.equal(region.textContent, 'Thinking… Opus answered: yes.')
+		assert.equal(region.textContent, 'Reading the code… Opus answered: yes.')
 
 		announce('Opus answered: yes.', 'result')
 		announce('Opus answered: yes.', 'result')
@@ -81,7 +81,7 @@ test('announce: one region, messages close together said as one, and the setting
 		assert.equal(region.textContent, 'Opus answered: yes.', 'the same answer shown in two places is said once')
 
 		store.set(ANNOUNCE_KEY, 'results')
-		announce('Thinking…', 'progress')
+		announce('Reading the code…', 'progress')
 		announce('Opus answered: no.', 'result')
 		await settle()
 		assert.equal(region.textContent, 'Opus answered: no.')
@@ -92,9 +92,9 @@ test('announce: one region, messages close together said as one, and the setting
 		assert.equal(region.textContent, 'Opus answered: no.', 'nothing new is said')
 
 		store.set(ANNOUNCE_KEY, 'something old')
-		announce('Thinking…', 'progress')
+		announce('Reading the code…', 'progress')
 		await settle()
-		assert.equal(region.textContent, 'Thinking…', 'an unknown value means everything')
+		assert.equal(region.textContent, 'Reading the code…', 'an unknown value means everything')
 	} finally {
 		attachRegion(null)
 		delete g.localStorage
