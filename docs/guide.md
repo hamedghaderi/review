@@ -63,6 +63,8 @@ When a closed or merged PR's commits can't be fetched any more, or its recorded 
 
 Each review is pinned to its snapshot. While a review is open, the app checks the target (every 15 s for branches, locally; every 2 min for PRs, through the API) and shows **Update available**. Opening the update starts a new snapshot, and your comments carry over to it (see [Carrying comments forward](#carrying-comments-forward)). Findings and viewed files stay with the old snapshot, which keeps its own comments too and is still reachable from the Snapshot selector or **Recent reviews**. Opening a review never starts an AI review.
 
+When a pull request changes UI files (markup, styles and templates such as `.tsx`, `.vue`, `.css` or `.blade.php`, not tests or stories) and nothing on it shows the result, the review's header says **Changes the UI · no screenshot**. "Nothing" means no image or video in the description, a comment or a review, including ones pasted into GitHub. Hover it for the files. It's a reminder that you may want to ask for a screenshot; it is never posted and never blocks anything. It goes away once an image or video shows up and the conversation is read again (Refresh). It needs the whole conversation, so it stays hidden when GitHub returned only part of it.
+
 ### Opening a pull request from GitHub
 
 On any pull request page on GitHub, put `review-code.dev` in place of `github.com` in the address (`github.com/owner/repo/pull/58` becomes `review-code.dev/owner/repo/pull/58`). The page hands the pull request to the app with a `review-code://open/owner/repo/pull/58` link; your browser may ask once whether to open Review. The same page has a bookmarklet you can drag to your bookmarks bar, which does it in one click on any pull request.
