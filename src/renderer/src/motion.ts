@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 /**
  * Reduced motion (issue #219): follow the system, or reduce or keep motion whatever it says, from Settings ›
  * Accessibility. When motion is reduced the root gets `reduce-motion`, which stops every animation and transition in
- * the stylesheet, the AI orbs hold still and scrolling jumps instead of gliding. Kept on this computer; the other
+ * the stylesheet, the AI mark rests as a plain R and scrolling jumps instead of gliding. Kept on this computer; the other
  * window follows a change through the storage event.
  */
 

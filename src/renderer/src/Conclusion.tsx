@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { ChangeConclusion } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { tabKey } from './tabKey.ts'
 import { ago } from './branches.ts'
@@ -117,7 +117,7 @@ export function Conclusion({
 				<div className="conclusion-body">
 					{busy === 'writing' ? (
 						<p className="muted conclusion-wait">
-							<AiOrb activity="reasoning" size={14} /> Reading the whole change and the findings…
+							<BlockMark activity="reasoning" size={14} /> Reading the whole change and the findings…
 						</p>
 					) : first ? (
 						<>
@@ -198,7 +198,7 @@ export function Conclusion({
 						<>
 							<div className="conclusion-q selectable">{asked}</div>
 							<p className="muted small conclusion-wait">
-								<AiOrb activity="reasoning" size={12} /> Reading the code…
+								<BlockMark activity="reasoning" size={12} /> Reading the code…
 							</p>
 						</>
 					)}

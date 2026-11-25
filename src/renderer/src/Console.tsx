@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { formatCost, formatCostRange } from '../../shared/cost.ts'
 import { findingRoots, findingState, LEVEL_META } from '../../shared/findings.ts'
 import type { AiRun, Finding, Review, ReviewEvent, RunEstimate, RunStage } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { COMMANDS, parseCommand, suggest, type Command } from './consoleCommands.ts'
 import { journeyTally, TONE_GLYPH, TONE_LABEL } from './journeyView.ts'
 import { Markdown } from './Markdown.tsx'
@@ -304,7 +304,7 @@ function BlockBody({
 		case 'answer':
 			return block.pending ? (
 				<p className="console-out muted">
-					<AiOrb activity="reasoning" size={12} /> Reading the change…
+					<BlockMark activity="reasoning" size={12} /> Reading the change…
 				</p>
 			) : block.error ? (
 				<p className="console-out error">{block.error}</p>
@@ -363,7 +363,7 @@ function MiniTrail({ run, onShow }: { run: AiRun; onShow: () => void }) {
 	const tally = journeyTally(beats)
 	return (
 		<div className="console-out console-trail">
-			{run.status === 'running' && <AiOrb activity="working" size={12} label="Running" />}
+			{run.status === 'running' && <BlockMark activity="working" size={12} label="Running" />}
 			<span className="console-stages">
 				{stages.map((s, i) => (
 					<span key={i}>

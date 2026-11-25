@@ -24,3 +24,13 @@ test('the stylesheet sweep lasts as long as the panel keeps it', () => {
 	assert.ok(m, 'the sweep animation is there')
 	assert.equal(Number(m[1]), SWEEP_MS)
 })
+
+test('the mark settles and fades within the sweep', () => {
+	const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+	const fade = /\.cleared-sweep__mark \{[^}]*animation: cleared-mark (\d+)ms/.exec(css)
+	assert.ok(fade, 'the mark fades with the sweep')
+	assert.equal(Number(fade[1]), SWEEP_MS)
+	const settle = /\.block-mark--settle > \* \{[^}]*animation: mark-settle (\d+)ms [^;]*\* (\d+)ms\)/.exec(css)
+	assert.ok(settle, 'the settle animation is there')
+	assert.ok(Number(settle[1]) + 2 * Number(settle[2]) < SWEEP_MS, 'the last block lands before the mark fades')
+})

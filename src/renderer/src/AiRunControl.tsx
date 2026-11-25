@@ -14,7 +14,7 @@ import {
 import { formatCostRange, formatTokenRange } from '../../shared/cost.ts'
 import { RULE_LABEL } from './FindingsPanel.tsx'
 import { sourceTitle } from './ModelPicker.tsx'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { baseModel, effortOf, effortsFor, withEffort } from './efforts.ts'
 import { personaOf, REVIEW_PERSONAS, type PersonaId } from '../../shared/personas.ts'
 
@@ -169,7 +169,7 @@ export function AiRunControl({
 				title={`${activeRun.team ? activeRun.team.name : 'AI review'} running. The Findings tab shows each reviewer's progress.`}
 			>
 				{/* Before the first request the app gathers related code and CI results; then the model reviews. */}
-				<AiOrb activity={c.batchesTotal ? 'reasoning' : 'searching'} size={16} />
+				<BlockMark activity={c.batchesTotal ? 'reasoning' : 'searching'} size={16} />
 				<span className="small nowrap">
 					{checking
 						? `Checking ${checking.done + checking.failed + 1}/${checking.total}`

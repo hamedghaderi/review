@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AiRun, Finding, ReviewerChoice } from '../../shared/types.ts'
 import { LEVEL_META, SEVERITY_ORDER } from '../../shared/findings.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 
 /**
  * The AI runs on a review's commits (one commit at a time, from the walkthrough), by commit SHA. They are kept apart
@@ -99,7 +99,7 @@ export function CommitNotes({
 					</span>
 				) : run?.status === 'running' ? (
 					<>
-						<AiOrb activity="reasoning" size={14} label="AI review running" />
+						<BlockMark activity="reasoning" size={14} label="AI review running" />
 						<span className="small">The AI is reviewing this commit…</span>
 						<button className="btn small ghost" onClick={() => void window.review.cancelAiReview(run.id)}>
 							Stop

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Anchor, CodeQuestion, CommentDraft, DiscussionThread, MyLastReview, ReviewComment } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { SpeakerHeading } from './SpeakerHeading.tsx'
 import {
@@ -352,7 +352,7 @@ export function QuestionCard({ question: q, pending, disabled, modelPicker, onAs
 					))}
 					{pending && (
 						<div className="thread-msg ai muted">
-							<AiOrb activity="reasoning" size={14} /> Reading the code…
+							<BlockMark activity="reasoning" size={14} /> Reading the code…
 						</div>
 					)}
 					{!pending && (

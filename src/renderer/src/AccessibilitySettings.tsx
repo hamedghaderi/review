@@ -14,8 +14,8 @@ const OPTIONS: ReadonlyArray<{ id: AnnounceLevel; label: string; hint: string }>
 
 const MOTION: ReadonlyArray<{ id: MotionPref; label: string; hint: string }> = [
 	{ id: 'system', label: 'Follow the system', hint: 'Reduce motion when macOS, Windows or Linux is set to.' },
-	{ id: 'reduce', label: 'Reduce motion', hint: 'No animations or transitions: spinners and AI orbs hold still.' },
-	{ id: 'full', label: 'Keep motion', hint: 'Animations even when the system asks for less (the AI orbs still follow the system).' },
+	{ id: 'reduce', label: 'Reduce motion', hint: 'No animations or transitions: spinners and the AI mark hold still.' },
+	{ id: 'full', label: 'Keep motion', hint: 'Animations even when the system asks for less.' },
 ]
 
 /**

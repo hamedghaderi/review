@@ -95,7 +95,7 @@ import { byProximity, SymbolPopover, type SymbolPop, type SymbolRequest } from '
 import * as ops from './reviewOps.ts'
 import { Splitter, usePanelWidth } from './Splitter.tsx'
 import { buildTree, flatten } from './tree.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { drawerUsed, rememberDrawerUsed, RunDrawer, RunDrawerHandle, type DrawerTab } from './RunDrawer.tsx'
 import { Console, type ConsoleActions } from './Console.tsx'
 import { playSound } from './sounds.ts'
@@ -2206,7 +2206,7 @@ export function App() {
 															'The AI steps back and says what the change does, whether the approach was a good one, and what to follow up')
 											}
 										>
-											{concludingHere && <AiOrb activity="reasoning" size={12} />} Conclusion
+											{concludingHere && <BlockMark activity="reasoning" size={12} />} Conclusion
 										</button>
 									)}
 									{repo.uncommitted > 0 && (
@@ -2628,7 +2628,7 @@ export function App() {
 												onClick={() => setRightTab('findings')}
 											>
 												Findings <span className="count">{aiRuns[aiRuns.length - 1]?.findings.length ?? 0}</span>
-												{activeRun && <AiOrb activity="reasoning" size={14} label="AI review running" />}
+												{activeRun && <BlockMark activity="reasoning" size={14} label="AI review running" />}
 											</button>
 											<button
 												role="tab"

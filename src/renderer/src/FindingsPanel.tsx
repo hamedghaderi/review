@@ -51,7 +51,7 @@ import { createPortal } from 'react-dom'
 import { publicRepo, screenFinding } from '../../shared/screen.ts'
 import { discussedAt } from './discussed.ts'
 import { AlreadyDiscussed, RaisedBeforeNote } from './Discussion.tsx'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { AskBox, FindingThread } from './FindingAsk.tsx'
 import { EmptyFigure } from './EmptyFigure.tsx'
 import { useStored } from './useStored.ts'
@@ -282,8 +282,8 @@ export function FindingsPanel({
 		return () => window.removeEventListener('keydown', onKey)
 	}, [onOpen, onAccept, onDismiss])
 
-	// One sweep over the panel when you add or dismiss the run's last open finding (cleared.ts). The list underneath has
-	// already moved on; the sweep only marks it. Nothing plays when motion is reduced.
+	// One sweep over the panel, and the mark settling into its R, when you add or dismiss the run's last open finding
+	// (cleared.ts). The list underneath has already moved on; the sweep only marks it. Nothing plays when motion is reduced.
 	const reduced = useReducedMotion()
 	const rootRef = useRef<HTMLDivElement>(null)
 	const tally = useRef<OpenTally | null>(null)
@@ -327,6 +327,9 @@ export function FindingsPanel({
 						style={{ left: sweep.box.left, top: sweep.box.top, width: sweep.box.width, height: sweep.box.height }}
 					>
 						<span />
+						<div className="cleared-sweep__mark">
+							<BlockMark activity="settle" size={40} />
+						</div>
 					</div>,
 					document.body,
 				)}
@@ -570,7 +573,7 @@ function TeamStatus({ run }: { run: AiRun }) {
 			{run.team.members.map((m) => (
 				<div key={m.id} className={`member-line ${m.status}`} title={m.error ?? `${m.connectionLabel} · ${m.model}`}>
 					{m.status === 'running' ? (
-						<AiOrb activity={m.requestsDone + m.requestsFailed > 0 || m.requestsTotal > 0 ? 'working' : 'waiting'} size={14} />
+						<BlockMark activity={m.requestsDone + m.requestsFailed > 0 || m.requestsTotal > 0 ? 'working' : 'waiting'} size={14} />
 					) : (
 						<span className={`member-dot ${m.status}`} aria-hidden />
 					)}
@@ -1230,7 +1233,7 @@ function Checked({ run, onRetry }: { run: AiRun; onRetry: ((rules: Array<ReviewR
 								<details key={rule} className={`check-row ${state}`}>
 									<summary>
 										{state === 'pending' ? (
-											<AiOrb activity="waiting" size={14} />
+											<BlockMark activity="waiting" size={14} />
 										) : (
 											<span className="check-icon" aria-hidden>
 												{state === 'clear' ? '✓' : state === 'found' ? '!' : '–'}

@@ -355,7 +355,7 @@ Each message in an AI conversation has a hidden heading saying who said it ("You
 
 **F6** and **Shift+F6** move focus between the window's panes, left to right: the sidebar, the changed files, the code, then the review panel (or the lists on Home and when browsing). They work while you're typing, so they're also how you get out of an ask box. An open dialog keeps focus inside it. On a Mac, F6 needs fn unless the function keys are set to standard keys, so **Ctrl+`** and **Ctrl+Shift+`** do the same. Change them in **Settings → Keymap**.
 
-The same page has **Motion**: follow the system's reduced-motion setting (the default), reduce motion, or keep it. With motion reduced, animations and transitions stop: spinners hold as a still ring, the AI orbs stand still and panels scroll without gliding. **Keep motion** doesn't restart the AI orbs while the system asks for less.
+The same page has **Motion**: follow the system's reduced-motion setting (the default), reduce motion, or keep it. With motion reduced, animations and transitions stop: spinners hold as a still ring, Review's AI mark rests as a plain R and panels scroll without gliding.
 
 ### Input limits and context windows
 

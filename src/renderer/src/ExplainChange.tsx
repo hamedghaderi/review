@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { ChangeExplanation } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { ago } from './branches.ts'
 import { FlagWrong } from './FlagWrong.tsx'
@@ -47,7 +47,7 @@ export function ExplainChange({ explanation: e, busy, error, disabled, modelPick
 		<button className="btn small" onClick={onExplain} disabled={busy || !!disabled} title={disabled ?? undefined}>
 			{busy ? (
 				<>
-					<AiOrb activity="reasoning" size={12} /> Reading the change…
+					<BlockMark activity="reasoning" size={12} /> Reading the change…
 				</>
 			) : (
 				label
