@@ -1232,11 +1232,19 @@ export function App() {
 	const concludingRef = useRef<string | null>(null)
 	const [conclusionError, setConclusionError] = useState<string | null>(null)
 	const [conclusionOpen, setConclusionOpen] = useState(false)
+	// A conclusion written after a run (issue #313) waits behind a dot on its button instead of covering the open file;
+	// opening it clears the dot. One that lands while it is open is already seen.
+	const [conclusionUnseen, setConclusionUnseen] = useState(false)
+	const conclusionOpenRef = useRef(conclusionOpen)
+	conclusionOpenRef.current = conclusionOpen
 	useEffect(() => {
 		setConclusion(loaded?.review.conclusion ?? null)
 		setConclusionError(null)
 	}, [loaded])
-	useEffect(() => setConclusionOpen(false), [loaded?.review.id])
+	useEffect(() => {
+		setConclusionOpen(false)
+		setConclusionUnseen(false)
+	}, [loaded?.review.id])
 	const lastFinished = [...aiRuns].reverse().find((r) => r.status === 'completed' || r.status === 'partial') ?? null
 	// Your threads from findings the latest run found gone, double-checked (issue #193): offered for resolving, never resolved
 	// for you. Read again when a double-check lands on the run, and after you resolve some.
@@ -1338,6 +1346,7 @@ export function App() {
 	const toggleConclusion = (): void => {
 		if (conclusionOpen) return setConclusionOpen(false)
 		setConclusionOpen(true)
+		setConclusionUnseen(false)
 		if (!conclusion && !concludingHere && !concludeDisabled) void conclude(null)
 	}
 	// The file:line references in the explanation and the conclusion's messages, opened at the head commit once each is
@@ -1633,8 +1642,11 @@ export function App() {
 		if (activeRun || !runId || runId === seen.runId) return
 		concludedRunRef.current = { reviewId, runId }
 		if (!reviewing.autoConclusion || concludeDisabled || conclusion?.runId === runId) return
-		setConclusionOpen(true)
-		void conclude(null)
+		void conclude(null).then((ok) => {
+			if (!ok || comparisonIdRef.current !== reviewId || conclusionOpenRef.current) return
+			setConclusionUnseen(true)
+			announce('Conclusion ready. Open it with the Conclusion button.', 'result')
+		})
 	}, [comparison?.id, lastFinished?.id, activeRun?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 	const stepCommits = reviewing.stepCommits
 	// The walkthrough: commit by commit, file by file, asking before each next commit. It ends when you leave the commits
@@ -2200,13 +2212,21 @@ export function App() {
 											title={
 												conclusionOpen
 													? 'Hide the conclusion and go back to the code'
-													: conclusion || concludingHere
-														? 'Show the AI’s conclusion on the whole change'
-														: (concludeDisabled ??
-															'The AI steps back and says what the change does, whether the approach was a good one, and what to follow up')
+													: conclusionUnseen
+														? 'A new conclusion is ready. Show it'
+														: conclusion || concludingHere
+															? 'Show the AI’s conclusion on the whole change'
+															: (concludeDisabled ??
+																'The AI steps back and says what the change does, whether the approach was a good one, and what to follow up')
 											}
 										>
 											{concludingHere && <BlockMark activity="reasoning" size={12} />} Conclusion
+											{conclusionUnseen && !concludingHere && (
+												<>
+													<span className="dot new" aria-hidden />
+													<span className="sr-only">, new</span>
+												</>
+											)}
 										</button>
 									)}
 									{repo.uncommitted > 0 && (
