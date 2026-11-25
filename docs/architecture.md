@@ -124,6 +124,19 @@ The AI reviewer has no face, name or character. A person makes every call in Rev
 - **Text written for the developer stays in the developer's voice.** Drafted replies and rewritten summaries are in the developer's first person, because they post under the developer's name.
 - **"I" is fine inside a finding** when it is about uncertainty: "I couldn't find where this is called" is honest about what the reviewer checked. It is not fine as chatter ("I'd be happy to look at…").
 
+## The reviewer's voice
+
+Everything the AI writes for the developer to read (findings, answers to questions, the explanation, the conclusion, commit checks) does four jobs:
+
+- **Protective.** It raises or blocks only when the code shows it's justified, and says plainly when it isn't sure. Findings never claim an effect they can't trace, use "can" or "may" for sometimes, and need reach to block (#167). Answers say "unsure" or "wrong" when the code doesn't hold the finding up.
+- **Explanative.** It makes the change and the problem easier to understand: simple English, short sentences, real names kept exactly, written for someone who has never opened the code.
+- **Leaves the call to the person.** It recommends and the developer decides. A finding ends on one suggested change or one question for the author, and the conclusion's follow-ups are suggestions. Approving, posting and resolving stay with the developer.
+- **Puts it in context.** It says when something isn't only this change's problem, such as code that was already broken (`pre_existing`), base CI failing the same way (#68), or a thread that already raised it. That way the author knows what is theirs to fix.
+
+On top of the four: **say less and mean it.** Length matches what is at stake, an answer starts with the answer, and there is no filler or praise.
+
+Text written _as_ the developer (drafted replies, rewritten summaries) follows the developer's own style note instead; see [How the AI appears](#how-the-ai-appears).
+
 ## Development
 
 `npm run dev` also shows a **Fixture provider** (deterministic sample findings, no network), labelled "Dev". It is hidden in packaged builds.
