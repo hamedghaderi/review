@@ -1099,6 +1099,9 @@ html.bug-hover * {
 .story h2 {
 	font-size: var(--text-2xl);
 	max-width: 14ch;
+	font-family: var(--font-moment);
+	font-weight: 500; /* the soft, slightly wonky cut is chosen in the font URL */
+	letter-spacing: -0.01em;
 }
 .story__steps {
 	display: grid;
