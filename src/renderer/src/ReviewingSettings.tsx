@@ -60,9 +60,9 @@ export function ReviewingSettings() {
 					Write the conclusion after each AI review
 					<span className="muted block">
 						When an AI review run finishes on the review you have open, the AI (the model for questions) steps back and writes its
-						conclusion on the whole change, and it opens in place of the code. Close it to go back to the code; the Conclusion button brings
-						it back. The “AI review finished” sound and notification wait until the conclusion is written. Off: it is only written when you
-						click Conclusion.
+						conclusion on the whole change. It doesn’t open over the file you’re reading: the Conclusion button gets a dot until you open
+						it. The “AI review finished” sound and notification wait until the conclusion is written. Off: it is only written when you click
+						Conclusion.
 					</span>
 				</span>
 			</label>

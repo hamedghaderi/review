@@ -4245,6 +4245,11 @@ input.member-role {
 	align-items: center;
 	gap: 4px;
 }
+.conclusion-toggle .dot.new {
+	width: 6px;
+	height: 6px;
+	background: var(--accent);
+}
 .conclusion-toggle.on {
 	color: var(--accent);
 	background: var(--accent-soft);
