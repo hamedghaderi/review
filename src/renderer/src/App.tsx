@@ -1078,7 +1078,9 @@ export function App() {
 		if (!reviewer) return { error: 'Choose a model or a team to review with first.' }
 		await persist()
 		setAiError(null)
-		setRightTab('findings')
+		// Only a review's first run takes you to Findings, so you learn where results go (issue #314). After that you stay
+		// on your tab; the Findings tab shows the run going.
+		if (!aiRuns.length) setRightTab('findings')
 		const choice = reviewer.kind === 'model' ? { ...reviewer, passes, bugsOnly, persona } : reviewer
 		let r = await window.review.startAiReview(comparison.id, scope, choice, overBudget)
 		// A budget was reached after the dialog showed the estimate: ask, as the dialog would have.
