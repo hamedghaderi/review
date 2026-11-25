@@ -10,7 +10,7 @@ import type {
 	RaisedOutcome,
 } from '../../shared/types.ts'
 import { describeLeaks, findLeaks } from '../../shared/leaks.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { announce } from './announce.ts'
 import { ago } from './branches.ts'
 import { asksYou, isNewSince, matchesThread, SINCE_ORDER, sinceMine, type SinceMine, type ThreadFilter } from './discussed.ts'
@@ -435,7 +435,7 @@ export function ThreadReplyBox({
 		>
 			{drafting ? (
 				<>
-					<AiOrb activity="reasoning" size={12} /> Drafting…
+					<BlockMark activity="reasoning" size={12} /> Drafting…
 				</>
 			) : open ? (
 				'Draft with AI'

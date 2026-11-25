@@ -1,7 +1,8 @@
 /**
  * The moment you add or dismiss the last open finding of a run. The findings panel marks it with one sweep of colour
- * across itself, so working through a run's findings ends on something. It is that moment only: a run that arrives with
- * nothing open, switching runs, or a run that is still reporting findings plays nothing.
+ * across itself and Review's mark settling into its R in the middle, so working through a run's findings ends on
+ * something. It is that moment only: a run that arrives with nothing open, switching runs, or a run that is still
+ * reporting findings plays nothing.
  */
 
 export interface OpenTally {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CommitCheck, CommitCheckEstimate, CommitCheckNote, CommitEntry } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { announce, useAnnounceNew, useAnnounceWait } from './announce.ts'
 
 export const VERDICT_LABEL: Record<CommitCheck['verdict'], string> = {
@@ -151,7 +151,7 @@ export function CheckAll({ cc, disabled }: { cc: CommitChecks; disabled: string 
 	if (a.state === 'running')
 		return (
 			<div className="commit-check-all">
-				<AiOrb activity="reasoning" size={14} />
+				<BlockMark activity="reasoning" size={14} />
 				<span>
 					Checking commit {a.done + 1} of {a.shas.length}…
 				</span>
@@ -232,7 +232,7 @@ export function CommitCheckPanel({
 				>
 					{busy ? (
 						<>
-							<AiOrb activity="reasoning" size={12} /> Checking…
+							<BlockMark activity="reasoning" size={12} /> Checking…
 						</>
 					) : check ? (
 						'Check again'

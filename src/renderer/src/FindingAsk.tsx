@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Finding, FindingMessage } from '../../shared/types.ts'
 import { LEVEL_META } from '../../shared/findings.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { scrollBehavior } from './motion.ts'
 import { speakable, speaker, useAnnounceNew, useAnnounceWait } from './announce.ts'
 import { AnswerText } from './CodeText.tsx'
@@ -65,7 +65,7 @@ export function FindingThread({ messages, pending, path }: { messages: Array<Fin
 			{pending && messages[messages.length - 1]?.role !== 'you' && <div className="thread-msg you muted">Sending…</div>}
 			{pending && (
 				<div className="thread-msg ai muted">
-					<AiOrb activity="reasoning" size={14} /> Thinking…
+					<BlockMark activity="reasoning" size={14} /> Thinking…
 				</div>
 			)}
 		</div>

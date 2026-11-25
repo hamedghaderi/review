@@ -17,7 +17,7 @@ import { baseLabel, type HeadChecks } from '../../shared/ci.ts'
 
 const oldCount = (ci: HeadChecks): number => ci.failed.filter((f) => f.atBase === 'fails').length
 import { ago } from './branches.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { announce } from './announce.ts'
 import { EmojiPicker } from './EmojiPicker.tsx'
 import { GifPicker, useGifCommand } from './GifPicker.tsx'
@@ -782,7 +782,7 @@ export function PublishDialog({
 												disabled={rewriting || drafting || !!running}
 												title="Your model for questions rewrites what you selected, or all of it, in fewer words and in your review style, without changing what it says. Each file:line it cites is checked against the head commit. Nothing is sent until you submit."
 											>
-												{rewriting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{rewriting ? <BlockMark activity="reasoning" size={12} /> : <AiMark />}
 												{rewriting ? 'Rewriting…' : 'Rewrite with AI'}
 											</button>
 										)}
@@ -793,7 +793,7 @@ export function PublishDialog({
 												disabled={drafting || !!running}
 												title={`Your model for questions drafts a summary for “${EVENTS.find((e) => e[0] === event)![1]}” from your comments in this review, in your review style when that is on. Nothing is sent until you submit.`}
 											>
-												{drafting ? <AiOrb activity="reasoning" size={12} /> : <AiMark />}
+												{drafting ? <BlockMark activity="reasoning" size={12} /> : <AiMark />}
 												{drafting ? 'Drafting…' : 'Draft with AI'}
 											</button>
 										)}

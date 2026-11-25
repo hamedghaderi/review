@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AiRun, BeatTone, RunBeat } from '../../shared/types.ts'
-import { AiOrb } from './AiOrb.tsx'
+import { BlockMark } from './BlockMark.tsx'
 import { announce } from './announce.ts'
 import { keyLabel } from './keymap.ts'
 import {
@@ -185,7 +185,7 @@ export function RunDrawer({
 				</div>
 				{tab === 'run' && (
 					<>
-						{run?.status === 'running' && <AiOrb activity="working" size={14} label="Running" />}
+						{run?.status === 'running' && <BlockMark activity="working" size={14} label="Running" />}
 						{runs.length > 1 && run && (
 							<select className="run-drawer-pick" value={run.id} onChange={(e) => onRunId(e.target.value)} aria-label="Run">
 								{[...runs].reverse().map((r) => (
