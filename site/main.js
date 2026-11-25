@@ -78,6 +78,7 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
 		const mock = story.querySelector('.mock')
 		const count = story.querySelector('.mock__count')
 		const toast = story.querySelector('.mock__toast')
+		const arrive = story.querySelector('.mock__arrive')
 		const state = you.querySelector('.state')
 		let last = ''
 		const play = () => {
@@ -94,8 +95,10 @@ if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
 				li.classList.toggle('is-on', i === step)
 				li.classList.toggle('is-done', i < step)
 			})
-			// 1: the diff draws in, line by line.
-			const shown = step > 0 ? lines.length : Math.ceil(Math.min(local * 1.6, 1) * lines.length)
+			// 1: the change arrives all at once (files, checks, threads), gathers into the one file that matters, and its
+			// diff draws in, line by line.
+			arrive.classList.toggle('is-in', step === 0 && local < 0.3)
+			const shown = step > 0 ? lines.length : Math.ceil(Math.min(Math.max((local - 0.3) * 2.2, 0), 1) * lines.length)
 			lines.forEach((l, i) => l.classList.toggle('is-in', i < shown))
 			// 2: your comment opens and types itself.
 			you.classList.toggle('is-in', step >= 1)

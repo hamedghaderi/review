@@ -1442,11 +1442,97 @@ html.motion .mock.is-sent .mock__pending {
 	box-shadow: 0 0 24px -4px var(--color-accent);
 }
 .mock__toast.is-in {
-	display: block;
 	animation: rise 600ms var(--ease-out) both;
 }
+.mock__toast {
+	align-items: center;
+	gap: var(--space-sm);
+}
+.mock__toast.is-in,
 html:not(.motion) .mock__toast {
+	display: flex;
+}
+/* Review's mark, the icon's R as three blocks; on publish it settles from scattered into the R */
+.mark {
+	flex-shrink: 0;
+	width: 1.5em;
+	height: 1.5em;
+	overflow: visible;
+	color: var(--color-accent);
+}
+.mark > * {
+	transform-box: fill-box;
+	transform-origin: center;
+}
+.mark__stem {
+	fill-opacity: 0.72;
+}
+html.motion .mock__toast.is-in .mark > * {
+	animation: mark-settle 700ms cubic-bezier(0.2, 0.8, 0.2, 1) calc(300ms + var(--i, 0) * 90ms) both;
+}
+.mark__stem {
+	--from: translate(-5px, 4px) rotate(-90deg);
+}
+.mark__bowl {
+	--i: 1;
+	--from: translate(4px, -5px) rotate(90deg);
+}
+.mark__leg {
+	--i: 2;
+	--from: translate(5px, 5px) rotate(-180deg);
+}
+@keyframes mark-settle {
+	from {
+		transform: var(--from);
+		opacity: 0;
+	}
+	to {
+		transform: none;
+		opacity: 1;
+	}
+}
+
+/* The change as it arrives: files, failing checks and threads scattered over the window, until they gather into cart.js */
+.mock__arrive {
+	display: none;
+}
+html.motion .mock__arrive {
 	display: block;
+	position: absolute;
+	inset: 2.75rem 0 0;
+	z-index: 1;
+	pointer-events: none;
+}
+html.motion .mock__arrive > span {
+	position: absolute;
+	padding: 2px var(--space-sm);
+	border: var(--rule-w) solid oklch(100% 0 0 / 0.1);
+	border-radius: var(--radius-sm);
+	background: oklch(21% 0.018 285 / 0.92);
+	color: var(--color-ink-2);
+	white-space: nowrap;
+	/* Gathered: everything folds into where cart.js sits */
+	left: 40%;
+	top: 40%;
+	opacity: 0;
+	transform: scale(0.4);
+	transition:
+		left 550ms var(--ease-out),
+		top 550ms var(--ease-out),
+		opacity 450ms var(--ease-out),
+		transform 550ms var(--ease-out);
+}
+html.motion .mock__arrive.is-in > span {
+	left: var(--x);
+	top: var(--y);
+	opacity: 1;
+	transform: rotate(var(--r));
+}
+.mock__arrive .ci {
+	color: var(--color-red);
+}
+.mock__arrive .thread {
+	color: var(--color-amber);
 }
 
 /* Narrow screens: the steps stack over the window; while pinned, only the current step shows */
@@ -1502,5 +1588,9 @@ html:not(.motion) .mock__toast {
 	}
 	.mock__stat {
 		display: none;
+	}
+	/* Pulled in so the right-hand chips aren't cut off */
+	html.motion .mock__arrive.is-in > span {
+		left: calc(var(--x) * 0.6);
 	}
 }
