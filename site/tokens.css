@@ -39,6 +39,8 @@
 	--font-display: 'Geist', ui-sans-serif, system-ui, sans-serif;
 	--font-body: 'Geist', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	/* Only for the few moments meant to feel good (issue #310); everything else stays Geist */
+	--font-moment: 'Fraunces', ui-serif, Georgia, serif;
 
 	--text-xs: 0.8125rem;
 	--text-sm: 0.9375rem;
