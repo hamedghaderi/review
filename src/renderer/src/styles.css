@@ -708,6 +708,7 @@ input[type='checkbox'] {
 	flex: 1;
 	overflow: auto;
 	min-height: 0;
+	container-type: inline-size; /* cards in the code size to what's visible, not to the widest line */
 }
 .state {
 	padding: 32px;
@@ -1016,8 +1017,11 @@ input[type='checkbox'] {
 	gap: 6px;
 	position: sticky;
 	left: 0;
-	width: min(100%, 900px);
+	width: min(100%, 100cqw, 900px);
 	max-width: calc(100vw - 40px);
+}
+.inline-items {
+	contain: inline-size; /* its text must not widen the diff, or the card runs past the visible edge */
 }
 .file-items {
 	padding: 8px 12px;
