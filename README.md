@@ -25,7 +25,7 @@
     <a href="docs/guide.md"><strong>User guide</strong></a>
   </p>
   <br />
-  <img src="site/img/review.webp" alt="Review showing a branch diff with a comment on line 14" />
+  <img src="docs/img/hero.webp" alt="Review showing a TypeScript diff with syntax colours, and an AI finding about a discount that can make the total negative, added as a comment under the line" />
 </div>
 
 ## Features
@@ -35,6 +35,19 @@
 - **Comments that stay local.** Nothing goes to GitHub until you publish. Comments land in your pending review, and you submit it.
 - **Bring your own AI, or none.** OpenAI, Anthropic, Gemini, OpenRouter, any OpenAI-compatible endpoint, or a local model in Ollama or LM Studio. Keys are encrypted with your system keychain.
 - **MCP tools.** AI reviewers can call your MCP servers for context the repository doesn't have, like the ticket behind a change.
+- **Findings that are checked, then summed up.** A second pass double-checks blocking findings, and the Conclusion steps back to judge the change as a whole.
+- **What's around the PR.** Stacked PRs, commits that landed on the base since it branched, and other open PRs changing the same files.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/finding.webp" alt="An AI finding marked Should fix, shown as a comment under the code it's about, with Ask AI, Edit and Delete" /><br /><sub><b>Findings in the code.</b> Each one is a comment you can ask about, edit or delete before anything is posted.</sub></td>
+    <td width="50%"><img src="docs/img/markdown.webp" alt="A README rendered in the review, its changed blocks marked in green and a flowchart drawn from Mermaid" /><br /><sub><b>Rendered Markdown.</b> Changed blocks are marked, and Mermaid diagrams are drawn when you ask.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/img/conclusion.webp" alt="The Conclusion: what the change does and whether the approach fits, with file and line links" /><br /><sub><b>A Conclusion on the whole change.</b> What it does, whether the approach fits, and what to fix first.</sub></td>
+    <td width="50%"><img src="docs/img/run.webp" alt="The Run drawer: files read, one request, one finding raised, finished" /><br /><sub><b>Every run, step by step.</b> What the AI read and found, in the Run drawer (⌘J).</sub></td>
+  </tr>
+</table>
 
 ## Install
 
