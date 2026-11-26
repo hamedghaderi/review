@@ -25,7 +25,7 @@
     <a href="docs/guide.md"><strong>User guide</strong></a>
   </p>
   <br />
-  <img src="site/img/review.webp" alt="Review showing a branch diff with a comment on line 14" />
+  <img src="docs/img/hero.webp" alt="Review showing a TypeScript diff with syntax colours, and an AI finding about a discount that can make the total negative, added as a comment under the line" />
 </div>
 
 ## Features
@@ -40,12 +40,12 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="site/img/crop-comment.webp" alt="A comment on line 14 of a diff, saved locally until you publish" /><br /><sub><b>Comment on any line.</b> It stays on your machine until you publish.</sub></td>
-    <td width="50%"><img src="site/img/crop-quickopen.webp" alt="Quick open searching for mcp, listing a recent review and a branch" /><br /><sub><b>⌘P to anything.</b> Branches, pull requests and recent reviews.</sub></td>
+    <td width="50%"><img src="docs/img/finding.webp" alt="An AI finding marked Should fix, shown as a comment under the code it's about, with Ask AI, Edit and Delete" /><br /><sub><b>Findings in the code.</b> Each one is a comment you can ask about, edit or delete before anything is posted.</sub></td>
+    <td width="50%"><img src="docs/img/markdown.webp" alt="A README rendered in the review, its changed blocks marked in green and a flowchart drawn from Mermaid" /><br /><sub><b>Rendered Markdown.</b> Changed blocks are marked, and Mermaid diagrams are drawn when you ask.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="site/img/crop-uses.webp" alt="Uses of hasReply: four matches in two files, each marked changed" /><br /><sub><b>Find uses.</b> ⌘⇧-click a name to see where it's used, and whether that changed.</sub></td>
-    <td width="50%"><img src="site/img/crop-compare.webp" alt="A branch row: the review compares merge-base 999f88f to mcp-tools e945fba, one commit ahead" /><br /><sub><b>Pinned to commits.</b> From the merge base, so a push never moves the diff.</sub></td>
+    <td width="50%"><img src="docs/img/conclusion.webp" alt="The Conclusion: what the change does and whether the approach fits, with file and line links" /><br /><sub><b>A Conclusion on the whole change.</b> What it does, whether the approach fits, and what to fix first.</sub></td>
+    <td width="50%"><img src="docs/img/run.webp" alt="The Run drawer: files read, one request, one finding raised, finished" /><br /><sub><b>Every run, step by step.</b> What the AI read and found, in the Run drawer (⌘J).</sub></td>
   </tr>
 </table>
 
