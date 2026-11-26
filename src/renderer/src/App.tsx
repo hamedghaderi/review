@@ -669,9 +669,9 @@ export function App() {
 	// The pull request's head in a worktree of its own, opened in Settings › Editor's choice.
 	const openInEditor = async (): Promise<void> => {
 		if (!session || !comparison?.pr) return
-		announce('Opening the pull request in your editor', 'result')
 		const r = await window.review.openInEditor(session.repo.id, comparison.id)
 		if (!r.ok) setTabError(r.error.message)
+		else if (r.value) announce('Opened the pull request in your editor', 'result')
 	}
 	const markCommitsSeen = async (pr: HomePr): Promise<void> => {
 		const r = await window.review.markCommitsSeen(pr.repo, pr.number, pr.head!)

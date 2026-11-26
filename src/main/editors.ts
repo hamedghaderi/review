@@ -59,7 +59,7 @@ export function pickEditor(found: Array<FoundEditor>, chosen: string | undefined
 }
 
 export function editorChoice(found: Array<FoundEditor>, chosen: string | undefined): EditorChoice {
-	return { installed: found.map(({ id, label }) => ({ id, label })), chosen: pickEditor(found, chosen)?.id ?? null }
+	return { installed: found.map(({ id, label }) => ({ id, label })), chosen: found.some((e) => e.id === chosen) ? chosen! : null }
 }
 
 /** Opens `folder` in the editor, without waiting for it to close. */

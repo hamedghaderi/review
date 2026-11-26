@@ -399,8 +399,22 @@ function registerIpc(): void {
 		return editorChoice(found, id)
 	})
 	handle(IPC.openInEditor, async (repoId: unknown, reviewId: unknown) => {
-		const editor = pickEditor(await installedEditors(), store.read().editor)
+		const found = await installedEditors()
+		let editor = pickEditor(found, store.read().editor)
 		if (!editor) throw new AppFail('not-found', 'No supported editor was found. Settings › Editor lists the ones Review knows.')
+		// With several installed and none chosen (or the chosen one gone), the click asks once and remembers.
+		if (found.length > 1 && !found.some((e) => e.id === store.read().editor)) {
+			const { response } = await dialog.showMessageBox(win!, {
+				type: 'question',
+				buttons: [...found.map((e) => e.label), 'Cancel'],
+				cancelId: found.length,
+				message: 'Open pull requests in which editor?',
+				detail: 'Review remembers your choice. You can change it in Settings › Editor.',
+			})
+			if (response === found.length) return false
+			editor = found[response]
+			await store.update((d) => void (d.editor = editor!.id))
+		}
 		await launchEditor(editor, await service.prWorktree(str(repoId, 'repository'), comparisonId(reviewId)), process.platform)
 		return true
 	})

@@ -27,7 +27,15 @@ export function EditorSettings() {
 				(choice.installed.length ? (
 					<label className="field">
 						<span>Open pull requests in</span>
-						<select value={choice.chosen ?? ''} onChange={(e) => void pick(e.target.value)}>
+						<select
+							value={choice.chosen ?? (choice.installed.length === 1 ? choice.installed[0].id : '')}
+							onChange={(e) => void pick(e.target.value)}
+						>
+							{!choice.chosen && choice.installed.length > 1 && (
+								<option value="" disabled>
+									Ask on the first click
+								</option>
+							)}
 							{choice.installed.map((e) => (
 								<option key={e.id} value={e.id}>
 									{e.label}

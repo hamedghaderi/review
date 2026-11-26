@@ -534,7 +534,7 @@ export function commitRunKey(target: string, sha: string): string {
 	return `commit:${sha}@${target}`
 }
 
-/** Settings › Editor: the editors found on this computer; `chosen` is null when none is. */
+/** Settings › Editor: the editors found on this computer; `chosen` is null until you pick one that is installed. */
 export interface EditorChoice {
 	installed: Array<{ id: string; label: string }>
 	chosen: string | null
@@ -2659,7 +2659,10 @@ export interface ReviewApi {
 	/** The editors installed and the one "Open in editor" uses (Settings › Editor). */
 	editors(): Promise<Result<EditorChoice>>
 	setEditor(id: string): Promise<Result<EditorChoice>>
-	/** Checks out a pull request review's head in its own worktree, outside your folder, and opens that in your editor. */
+	/**
+	 * Checks out a pull request review's head in its own worktree, outside your folder, and opens that in your editor. The
+	 * first time, with several installed, it asks which one; false when you cancel.
+	 */
 	openInEditor(repoId: string, reviewId: string): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */
 	openKnownRepo(repoId: string): Promise<Result<RepoSession>>
