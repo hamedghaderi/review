@@ -666,6 +666,13 @@ export function App() {
 
 	const [homeInbox, setHomeInbox] = useHomeInbox(true, github?.state)
 	const openFromHome = (pr: HomePr): Promise<boolean> => openPr({ repoId: pr.repoId, repo: pr.repo, number: pr.number })
+	// The pull request's head in a worktree of its own, opened in Settings › Editor's choice.
+	const openInEditor = async (): Promise<void> => {
+		if (!session || !comparison?.pr) return
+		announce('Opening the pull request in your editor', 'result')
+		const r = await window.review.openInEditor(session.repo.id, comparison.id)
+		if (!r.ok) setTabError(r.error.message)
+	}
 	const markCommitsSeen = async (pr: HomePr): Promise<void> => {
 		const r = await window.review.markCommitsSeen(pr.repo, pr.number, pr.head!)
 		if (r.ok) setHomeInbox(r.value)
@@ -2148,6 +2155,15 @@ export function App() {
 									{backportsHere && (
 										<BackportLabel backports={backportsHere} open={backportsOpen} onToggle={() => setBackportsOpen((x) => !x)} />
 									)}
+									{comparison.pr && (
+										<button
+											className="btn small ghost"
+											onClick={() => void openInEditor()}
+											title="Checks out this pull request's latest commit in a folder of its own and opens it in your editor (Settings › Editor). Your own folder is not touched."
+										>
+											Open in editor
+										</button>
+									)}
 									{seenable && (
 										<button
 											className="btn small ghost"
@@ -2935,6 +2951,7 @@ export function App() {
 						}}
 						onOpenSnapshot={(id) => void chooseSnapshot(id)}
 						onFeedback={() => setFeedbackOpen(true)}
+						onOpenInEditor={comparison?.pr ? openInEditor : undefined}
 					/>
 				)}
 				{feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}

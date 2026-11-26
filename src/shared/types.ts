@@ -534,6 +534,12 @@ export function commitRunKey(target: string, sha: string): string {
 	return `commit:${sha}@${target}`
 }
 
+/** Settings › Editor: the editors found on this computer; `chosen` is null when none is. */
+export interface EditorChoice {
+	installed: Array<{ id: string; label: string }>
+	chosen: string | null
+}
+
 /** Settings › Reviewing. Each is off until you turn it on, except autoConclusion. */
 export interface ReviewingPrefs {
 	stepCommits: boolean // a commit picker on pull request and branch reviews, to read one commit at a time
@@ -2445,6 +2451,9 @@ export const IPC = {
 	appClones: 'repo:app-clones',
 	deleteAppClone: 'repo:delete-app-clone',
 	revealAppClone: 'repo:reveal-app-clone',
+	editors: 'editor:list',
+	setEditor: 'editor:set',
+	openInEditor: 'editor:open-pr',
 	reviewChanged: 'review:changed',
 	githubSetRepo: 'gh:repo-set',
 	searchPrs: 'gh:search',
@@ -2647,6 +2656,11 @@ export interface ReviewApi {
 	deleteAppClone(repoId: string): Promise<Result<{ deleted: boolean; tabs: Array<RepoTab> }>>
 	/** Shows one of the app's own clones in the file manager. */
 	revealAppClone(repoId: string): Promise<Result<boolean>>
+	/** The editors installed and the one "Open in editor" uses (Settings › Editor). */
+	editors(): Promise<Result<EditorChoice>>
+	setEditor(id: string): Promise<Result<EditorChoice>>
+	/** Checks out a pull request review's head in its own worktree, outside your folder, and opens that in your editor. */
+	openInEditor(repoId: string, reviewId: string): Promise<Result<boolean>>
 	/** Opens a repository opened before (as listed in the store), without a folder dialog. */
 	openKnownRepo(repoId: string): Promise<Result<RepoSession>>
 	/** Closes a repository's tab. Its reviews stay stored and its review requests keep notifying. Returns the tabs left. */

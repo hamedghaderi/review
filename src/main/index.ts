@@ -1,4 +1,4 @@
-import { mkdir, realpath } from 'node:fs/promises'
+import { access, mkdir, realpath } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -37,7 +37,8 @@ import { checkBudget, hasBudgets, type BudgetCheck } from './ai/budget.ts'
 import { AiController } from './ai/controller.ts'
 import { CredentialService } from './ai/credentials.ts'
 import { McpService } from './ai/mcp.ts'
-import { AppFail, setAppCloneRoots, setManagedClones } from './git.ts'
+import { AppFail, env as gitEnv, setAppCloneRoots, setManagedClones } from './git.ts'
+import { editorChoice, findEditors, launchEditor, pickEditor } from './editors.ts'
 import { watchKey, type HomeInbox } from '../shared/inbox.ts'
 import { ghCli } from './ghcli.ts'
 import { GitHubService } from './github.ts'
@@ -379,6 +380,28 @@ function registerIpc(): void {
 	})
 	handle(IPC.revealAppClone, async (repoId: unknown) => {
 		shell.showItemInFolder((await service.appCloneOf(str(repoId, 'repository'))).root)
+		return true
+	})
+	// Looked for on each call: cheap, and an editor installed while Review runs shows up without a restart.
+	const installedEditors = () =>
+		findEditors(process.platform, homedir(), gitEnv.PATH ?? '', (p) =>
+			access(p).then(
+				() => true,
+				() => false,
+			),
+		)
+	handle(IPC.editors, async () => editorChoice(await installedEditors(), store.read().editor))
+	handle(IPC.setEditor, async (raw: unknown) => {
+		const found = await installedEditors()
+		const id = str(raw, 'editor')
+		if (!found.some((e) => e.id === id)) throw new AppFail('invalid-input', 'That editor is not installed.')
+		await store.update((d) => void (d.editor = id))
+		return editorChoice(found, id)
+	})
+	handle(IPC.openInEditor, async (repoId: unknown, reviewId: unknown) => {
+		const editor = pickEditor(await installedEditors(), store.read().editor)
+		if (!editor) throw new AppFail('not-found', 'No supported editor was found. Settings › Editor lists the ones Review knows.')
+		await launchEditor(editor, await service.prWorktree(str(repoId, 'repository'), comparisonId(reviewId)), process.platform)
 		return true
 	})
 	handle(IPC.homeInbox, async () => service.homeInbox())

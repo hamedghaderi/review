@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { lstat, readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import type {
@@ -92,6 +92,7 @@ import {
 	aheadBehind,
 	commitsSince,
 	AppFail,
+	checkoutWorktree,
 	cloneGitHub,
 	compareBranches,
 	compareCommits,
@@ -1053,6 +1054,22 @@ export class ReviewService {
 	}
 
 	/** One of the app's own clones: its folder, GitHub repository, and whether the folder is still there. */
+	/**
+	 * The pull request's head, checked out in its own worktree in the app's data folder (one per pull request, moved to
+	 * the latest head each time), for opening in an editor. Your own folder and branch are never touched.
+	 */
+	async prWorktree(repoId: string, reviewId: string): Promise<string> {
+		const repo = this.repo(repoId)
+		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
+		const data = this.comparisons.get(reviewId)
+		if (!pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
+		// The folder's name is what the editor's title shows; the hash keeps two clones of one repository apart.
+		const clone = createHash('sha256').update(repo.root).digest('hex').slice(0, 8)
+		const dir = join(this.store.dir, 'worktrees', clone, `${pr.repo.split('/')[1]}-pr-${pr.number}`)
+		await checkoutWorktree(repo.root, dir, data.comparison.headSha)
+		return dir
+	}
+
 	async appCloneOf(repoId: string): Promise<{ root: string; repo: string; missing: boolean }> {
 		const d = this.store.read()
 		const root = d.repos[repoId]?.root ?? repoId

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { devNull } from 'node:os'
 import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { basename, join, sep } from 'node:path'
 import { parseGitHubRemote } from '../shared/prQuery.ts'
@@ -1185,4 +1186,34 @@ export async function grepCommit(
 			return loc?.startsWith(at) && text !== undefined ? [{ path: loc.slice(at.length), line: Number(no), text }] : []
 		})
 	return { hits, truncated: r.truncated, failed: null }
+}
+
+/**
+ * Checks out `sha` (detached) in a worktree of `root` at `dir`, adding the worktree on first use, so an editor can open
+ * a pull request without touching the folder you work in. Moving an existing one never discards your edits there: Git
+ * refuses and says why. Hooks are off, since a hooks path inside the repository would run the pull request's code.
+ * The app's sparse clones give the worktree every file: sparse-checkout is per worktree there, the clone stays sparse.
+ */
+export async function checkoutWorktree(root: string, dir: string, sha: string): Promise<void> {
+	if (!isSha(sha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const opts = { timeoutMs: 600_000, appClone: isManagedClone(root) } // checkout fetches file contents in an app clone
+	const noHooks = ['-c', `core.hooksPath=${devNull}`]
+	const run = async (cwd: string, args: Array<string>, what: string): Promise<void> => {
+		const r = await git(cwd, [...noHooks, ...args], 1024 * 1024, opts)
+		if (r.code !== 0) throw new AppFail('git-failed', `${what}: ${r.stderr.trim() || `exit ${r.code}`}`)
+	}
+	const exists = await stat(join(dir, '.git')).then(
+		() => true,
+		() => false,
+	)
+	if (exists) {
+		await run(dir, ['checkout', '--quiet', '--detach', sha], `Couldn't move ${dir} to the latest commit`)
+		return
+	}
+	await run(root, ['worktree', 'prune'], "Couldn't tidy the repository's worktrees") // forgets one whose folder was deleted
+	await mkdir(join(dir, '..'), { recursive: true })
+	await run(root, ['worktree', 'add', '--quiet', '--detach', '--end-of-options', dir, sha], `Couldn't create ${dir}`)
+	// Only when sparse: disabling it on a full checkout would still turn on extensions.worktreeConfig in your repository.
+	if ((await git(dir, ['config', '--bool', 'core.sparseCheckout'])).stdout.toString().trim() === 'true')
+		await run(dir, ['sparse-checkout', 'disable'], `Couldn't check out every file in ${dir}`)
 }
