@@ -128,7 +128,7 @@ import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
 import { agentShare, type AgentShare } from '../shared/agentCommits.ts'
-import { OVERLAP_MAX_PRS, overlaps } from './overlap.ts'
+import { OVERLAP_CONCLUSION_PRS, OVERLAP_DIFF_CHARS, OVERLAP_MAX_PRS, overlaps } from './overlap.ts'
 import type { SinceReview } from '../shared/rangeDiff.ts'
 import { lineUpCommits } from './sinceReview.ts'
 import { cherryPickedFrom, type Backports } from '../shared/backports.ts'
@@ -613,6 +613,37 @@ export class ReviewService {
 			own,
 			others.map((n) => ({ ...n, paths: files.get(n.number) ?? [] })),
 		)
+	}
+
+	/**
+	 * The overlapping PRs (see overlappingPrs) for the Conclusion: each one's description and its diffs for the shared
+	 * files, the most shared first. Null when none overlap.
+	 */
+	private async overlapFact(repoId: string, reviewId: string, signal?: AbortSignal): Promise<{ title: string; text: string } | null> {
+		const prs = (await this.overlappingPrs(repoId, reviewId))?.slice(0, OVERLAP_CONCLUSION_PRS)
+		if (!prs?.length) return null
+		const repo = this.githubRepoFor(repoId)
+		const gh = this.requireGitHub()
+		const clip = (t: string, max: number): string => (t.length > max ? `${t.slice(0, max)}\n…(cut)` : t)
+		const parts = await Promise.all(
+			prs.map(async (p) => {
+				const [d, files] = await Promise.all([
+					gh.description(repo, p.number, signal).catch(() => null),
+					gh.prPatches(repo, p.number, signal).catch(() => null),
+				])
+				const shared = new Set(p.files)
+				const diffs = (files ?? [])
+					.filter((f) => shared.has(f.filename))
+					.map((f) => `--- ${f.filename}\n${f.patch ?? '(no diff from GitHub: binary or too large)'}`)
+				return [
+					`Pull request #${p.number}: ${p.title}${p.draft ? ' (draft)' : ''}${p.author ? `, by @${p.author}` : ''}`,
+					`Shared files: ${p.files.join(', ')}`,
+					`Its description:\n${clip(d?.body.trim() || '(none)', 2000)}`,
+					files ? `Its diffs for the shared files:\n${clip(diffs.join('\n\n'), OVERLAP_DIFF_CHARS)}` : 'Its diffs could not be read.',
+				].join('\n')
+			}),
+		)
+		return { title: 'Other open pull requests changing the same files', text: parts.join('\n\n') }
 	}
 
 	/**
@@ -2589,6 +2620,7 @@ export class ReviewService {
 						external,
 					),
 				loadDrift: data.comparison.pr ? (used, signal) => this.driftFact(repoId, reviewId, used, signal) : undefined,
+				loadOverlap: data.comparison.pr ? (signal) => this.overlapFact(repoId, reviewId, signal) : undefined,
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
 				commits: () => commitMessages(data.root, data.comparison.baseSha, data.comparison.headSha),
