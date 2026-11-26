@@ -35,6 +35,7 @@ interface Props {
 	onOpenReview(target: ReviewTarget): void
 	onOpenSnapshot(reviewId: string): void
 	onFeedback(): void
+	onOpenInEditor?: () => void // only while a pull request review is open
 }
 
 type CommitsTarget = Extract<ReviewTarget, { kind: 'commits' }>
@@ -56,7 +57,7 @@ interface Action {
 	run(): void
 }
 
-type CommandId = 'feedback' | `appearance:${Appearance}` | `theme:${ThemeId}`
+type CommandId = 'feedback' | 'editor' | `appearance:${Appearance}` | `theme:${ThemeId}`
 
 // App commands, listed after the search results when every typed word is in their label or keywords.
 const COMMANDS: Array<{ id: CommandId; label: string; keywords: string }> = [
@@ -68,9 +69,16 @@ const COMMANDS: Array<{ id: CommandId; label: string; keywords: string }> = [
 	})),
 	...THEMES.map((t) => ({ id: `theme:${t.id}` as const, label: `Theme: ${t.label}`, keywords: 'colour color look appearance' })),
 ]
+// Offered while a pull request review is open.
+const EDITOR_COMMAND = {
+	id: 'editor' as const,
+	label: 'Open pull request in editor',
+	keywords: 'vs code vscode cursor zed ide worktree checkout',
+}
 
-function runCommand(id: CommandId, onFeedback: () => void): void {
+function runCommand(id: CommandId, onFeedback: () => void, onOpenInEditor?: () => void): void {
 	if (id === 'feedback') onFeedback()
+	else if (id === 'editor') onOpenInEditor?.()
 	else if (id.startsWith('appearance:')) void changeTheme({ appearance: id.slice('appearance:'.length) as Appearance })
 	else void changeTheme({ theme: id.slice('theme:'.length) as ThemeId })
 }
@@ -248,11 +256,12 @@ export function QuickOpen(props: Props) {
 				error: prError,
 			})
 		if (scope === 'all' && !exact) {
-			const commands = COMMANDS.filter((c) => words.every((w) => `${c.label} ${c.keywords}`.toLowerCase().includes(w)))
+			const all = props.onOpenInEditor ? [EDITOR_COMMAND, ...COMMANDS] : COMMANDS
+			const commands = all.filter((c) => words.every((w) => `${c.label} ${c.keywords}`.toLowerCase().includes(w)))
 			if (commands.length) out.push({ title: 'Commands', items: commands.map((c) => ({ t: 'command', id: c.id, label: c.label })) })
 		}
 		return out
-	}, [prs, wantPrs, reviews, text, words, scope, filter, exact, repo.branches])
+	}, [prs, wantPrs, reviews, text, words, scope, filter, exact, repo.branches, !!props.onOpenInEditor])
 
 	const items = useMemo(() => sections.flatMap((s) => s.items), [sections])
 	const selected: Item | undefined = items[cursor]
@@ -265,7 +274,8 @@ export function QuickOpen(props: Props) {
 			onClose()
 			fn()
 		}
-		if (it.t === 'command') return [{ label: it.label, keys: '↵', run: close(() => runCommand(it.id, props.onFeedback)) }]
+		if (it.t === 'command')
+			return [{ label: it.label, keys: '↵', run: close(() => runCommand(it.id, props.onFeedback, props.onOpenInEditor)) }]
 		if (it.t === 'pr') {
 			const pr = it.pr
 			const out: Array<Action> = []

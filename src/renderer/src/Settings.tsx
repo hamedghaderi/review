@@ -8,6 +8,7 @@ import { UsageSettings } from './UsageSettings.tsx'
 import { AppearanceSettings } from './AppearanceSettings.tsx'
 import { KeymapSettings } from './KeymapSettings.tsx'
 import { ReviewingSettings } from './ReviewingSettings.tsx'
+import { EditorSettings } from './EditorSettings.tsx'
 import { AccessibilitySettings } from './AccessibilitySettings.tsx'
 import { SoundSettings } from './SoundSettings.tsx'
 import { StyleSettings } from './StyleSettings.tsx'
@@ -118,6 +119,7 @@ export function Settings(props: {
 		() => [
 			{ id: 'appearance', label: 'Appearance', keywords: 'theme light dark colour color' },
 			{ id: 'reviewing', label: 'Reviewing', keywords: 'commits commit by commit step one at a time history message' },
+			{ id: 'editor', label: 'Editor', keywords: 'open in editor vs code vscode cursor zed windsurf sublime jetbrains intellij worktree' },
 			{ id: 'keymap', label: 'Keymap', keywords: 'shortcuts keys keyboard hotkeys bindings' },
 			{ id: 'sounds', label: 'Sounds', keywords: 'sound audio chime alert notification ai answer review finished' },
 			{ id: 'accessibility', label: 'Accessibility', keywords: 'screen reader voiceover announce aloud a11y live motion animation reduce' },
@@ -297,6 +299,7 @@ export function Settings(props: {
 	function body(): ReactNode {
 		if (page === 'appearance') return <AppearanceSettings />
 		if (page === 'reviewing') return <ReviewingSettings />
+		if (page === 'editor') return <EditorSettings />
 		if (page === 'keymap') return <KeymapSettings />
 		if (page === 'sounds') return <SoundSettings githubNotifications={github.notifications.enabled} />
 		if (page === 'accessibility') return <AccessibilitySettings />

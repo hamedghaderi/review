@@ -43,6 +43,7 @@ export interface StoreData {
 	stepCommits?: boolean // Settings › Reviewing: step through a review's commits; absent (off) until turned on
 	offerWalk?: boolean // Settings › Reviewing: offer a walkthrough of the commits when a review opens; absent (off) until turned on
 	autoConclusion?: false // Settings › Reviewing: write the conclusion after each AI review; absent (on) until turned off
+	editor?: string // Settings › Editor: the editor "Open in editor" uses; absent: the first one installed
 	reviewStyle?: ReviewStyle // how you word review comments; absent until you build it
 	stylePrs?: Array<StylePr> // the pull requests you picked to learn your review style from; absent: the recent ones
 	// Your notes for the AI reviewer, by repository: "owner/name" in lower case, else "local:<repo id>" (issue #278).
@@ -191,6 +192,7 @@ export function migrate(raw: unknown): StoreData {
 		...(d.stepCommits === true ? { stepCommits: true } : {}),
 		...(d.offerWalk === true ? { offerWalk: true } : {}),
 		...(d.autoConclusion === false ? { autoConclusion: false as const } : {}),
+		...(typeof d.editor === 'string' ? { editor: d.editor } : {}),
 		...(storedStyle(d.reviewStyle) ? { reviewStyle: storedStyle(d.reviewStyle)! } : {}),
 		...(Array.isArray(d.stylePrs) ? { stylePrs: storedStylePrs(d.stylePrs) } : {}),
 		...(d.reviewerNotes && typeof d.reviewerNotes === 'object' ? { reviewerNotes: storedNotes(d.reviewerNotes) } : {}),
