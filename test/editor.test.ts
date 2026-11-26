@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { checkoutWorktree, setManagedClones } from '../src/main/git.ts'
+import { checkoutWorktree, removeWorktree, setManagedClones } from '../src/main/git.ts'
 import { findEditors, pickEditor } from '../src/main/editors.ts'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
@@ -115,4 +116,46 @@ test('editors are found by app on macOS and by command elsewhere; the chosen one
 	assert.equal(pickEditor(mac, 'cursor')?.id, 'vscode', 'uninstalled: the first one found')
 	assert.equal(pickEditor(mac, undefined)?.id, 'vscode')
 	assert.equal(pickEditor([], 'zed'), null)
+})
+
+test("worktrees of merged or closed pull requests are removed unless you changed something there; deleting the app's clone trashes them", async () => {
+	const repo = tmp()
+	sh(repo, 'init', '-q', '-b', 'main')
+	writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
+	writeFileSync(join(repo, 'a.ts'), 'a\n')
+	sh(repo, 'add', '-A')
+	sh(repo, 'commit', '-qm', 'one')
+	const head = sh(repo, 'rev-parse', 'HEAD')
+
+	const store = ReviewStore.in(tmp())
+	await store.load()
+	const states: Record<number, string> = { 1: 'merged', 2: 'closed', 3: 'open', 4: 'merged', 5: 'merged' }
+	const github = { detail: async (_repo: string, n: number) => (n === 5 ? Promise.reject(new Error('offline')) : { state: states[n] }) }
+	const svc = new ReviewService(store, github as never)
+	const pr = (number: number) => ({ pr: { repo: 'octo/app', number } }) as never
+	await store.update((d) => {
+		d.repos[repo] = { repoId: repo, root: repo, selectedBase: null, activeReviewId: null, reviews: {}, aiRuns: {} }
+		for (const n of [1, 2, 3, 4, 5]) d.repos[repo].reviews[`r${n}`] = pr(n)
+		d.repos[repo].reviews.again = pr(1) // a second snapshot of #1
+	})
+	const parent = join(store.dir, 'worktrees', createHash('sha256').update(repo).digest('hex').slice(0, 8))
+	const dir = (n: number) => join(parent, `app-pr-${n}`)
+	for (const n of [1, 2, 3, 4, 5]) await checkoutWorktree(repo, dir(n), head)
+	mkdirSync(join(dir(1), 'node_modules'))
+	writeFileSync(join(dir(1), 'node_modules', 'x.js'), '') // ignored files don't keep it
+	writeFileSync(join(dir(4), 'notes.md'), 'mine\n') // a new file does
+
+	assert.equal(await svc.sweepWorktrees(), 2)
+	assert.deepEqual(
+		[1, 2, 3, 4, 5].map((n) => existsSync(dir(n))),
+		[false, false, true, true, true],
+		'open, changed and unreadable ones stay',
+	)
+	assert.ok(!sh(repo, 'worktree', 'list').includes('app-pr-1'), 'git forgets them too')
+	assert.equal(await removeWorktree(join(repo, 'missing'), dir(3)), false)
+
+	const trashed: Array<string> = []
+	await store.update((d) => void (d.appClones = { [repo]: { repo: 'octo/app', at: '2026-11-26T00:00:00Z' } }))
+	await new ReviewService(store, null).deleteAppClone(repo, async (p) => void trashed.push(p))
+	assert.deepEqual(trashed, [repo, parent])
 })

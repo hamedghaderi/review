@@ -826,7 +826,10 @@ app.whenReady().then(async () => {
 	github.onChange((s) => {
 		if (win && !win.isDestroyed()) win.webContents.send(IPC.githubStatusChanged, s)
 		// Check review requests as soon as GitHub connects, not only at the next interval.
-		if (s.state === 'connected' && !connected) void watcher?.check()
+		if (s.state === 'connected' && !connected) {
+			void watcher?.check()
+			void service?.sweepWorktrees().catch(() => undefined) // worktrees of merged or closed pull requests
+		}
 		connected = s.state === 'connected'
 	})
 	void github.verify()

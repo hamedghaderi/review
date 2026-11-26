@@ -19,8 +19,9 @@ export function EditorSettings() {
 			<h3>Editor</h3>
 			<p className="muted small">
 				Open in editor, next to a pull request’s branch name, checks out the pull request’s latest commit in a folder of its own and opens
-				it there. The folder you work in and its branch are never touched. Your editor may run things in that folder, such as tasks,
-				extensions or language servers, the same as when you open any repository.
+				it there. The folder you work in and its branch are never touched. Once the pull request is merged or closed, that folder is removed
+				the next time Review connects to GitHub, unless you changed or added something in it. Your editor may run things in that folder,
+				such as tasks, extensions or language servers, the same as when you open any repository.
 			</p>
 			{choice &&
 				(choice.installed.length ? (

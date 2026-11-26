@@ -93,6 +93,7 @@ import {
 	commitsSince,
 	AppFail,
 	checkoutWorktree,
+	removeWorktree,
 	cloneGitHub,
 	compareBranches,
 	compareCommits,
@@ -1042,6 +1043,8 @@ export class ReviewService {
 		if (!d.appClones?.[root]) throw new AppFail('invalid-input', 'That folder was not cloned by the app, so it is not deleted here.')
 		// Already gone (deleted by hand): there is nothing to move, only the app's record of it to forget.
 		if (await exists(root)) await trash(root)
+		// Its worktrees can't work without it; they go to the Trash too, with anything you changed in them.
+		if (await exists(this.worktreesOf(root))) await trash(this.worktreesOf(root))
 		this.repos.delete(repoId)
 		await this.store.update((d) => {
 			delete d.repos[repoId]
@@ -1053,7 +1056,6 @@ export class ReviewService {
 		return this.tabs()
 	}
 
-	/** One of the app's own clones: its folder, GitHub repository, and whether the folder is still there. */
 	/**
 	 * The pull request's head, checked out in its own worktree in the app's data folder (one per pull request, moved to
 	 * the latest head each time), for opening in an editor. Your own folder and branch are never touched.
@@ -1063,13 +1065,36 @@ export class ReviewService {
 		const pr = this.store.read().repos[repoId]?.reviews[reviewId]?.pr
 		const data = this.comparisons.get(reviewId)
 		if (!pr || !data) throw new AppFail('not-found', 'Open this pull request review first.')
-		// The folder's name is what the editor's title shows; the hash keeps two clones of one repository apart.
-		const clone = createHash('sha256').update(repo.root).digest('hex').slice(0, 8)
-		const dir = join(this.store.dir, 'worktrees', clone, `${pr.repo.split('/')[1]}-pr-${pr.number}`)
+		const dir = join(this.worktreesOf(repo.root), `${pr.repo.split('/')[1]}-pr-${pr.number}`)
 		await checkoutWorktree(repo.root, dir, data.comparison.headSha)
 		return dir
 	}
 
+	// A pull request's folder name is what the editor's title shows; the hash keeps two clones of one repository apart.
+	private worktreesOf(root: string): string {
+		return join(this.store.dir, 'worktrees', createHash('sha256').update(root).digest('hex').slice(0, 8))
+	}
+
+	/**
+	 * Removes the worktrees "Open in editor" made for pull requests GitHub now reports merged or closed. One with changes
+	 * or new files in it stays, as does any whose state can't be read. Returns how many were removed.
+	 */
+	async sweepWorktrees(): Promise<number> {
+		if (!this.github) return 0
+		let removed = 0
+		for (const s of Object.values(this.store.read().repos)) {
+			const prs = new Map(Object.values(s.reviews).flatMap((r) => (r.pr ? [[`${r.pr.repo}#${r.pr.number}`, r.pr] as const] : [])))
+			for (const pr of prs.values()) {
+				const dir = join(this.worktreesOf(s.root), `${pr.repo.split('/')[1]}-pr-${pr.number}`)
+				if (!(await exists(dir))) continue
+				const state = (await this.github.detail(pr.repo, pr.number).catch(() => null))?.state
+				if ((state === 'merged' || state === 'closed') && (await removeWorktree(s.root, dir))) removed++
+			}
+		}
+		return removed
+	}
+
+	/** One of the app's own clones: its folder, GitHub repository, and whether the folder is still there. */
 	async appCloneOf(repoId: string): Promise<{ root: string; repo: string; missing: boolean }> {
 		const d = this.store.read()
 		const root = d.repos[repoId]?.root ?? repoId

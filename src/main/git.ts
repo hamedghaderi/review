@@ -1217,3 +1217,9 @@ export async function checkoutWorktree(root: string, dir: string, sha: string): 
 	if ((await git(dir, ['config', '--bool', 'core.sparseCheckout'])).stdout.toString().trim() === 'true')
 		await run(dir, ['sparse-checkout', 'disable'], `Couldn't check out every file in ${dir}`)
 }
+
+/** Removes a worktree made by `checkoutWorktree`, only when nothing in it is changed or new. False when it stays. */
+export async function removeWorktree(root: string, dir: string): Promise<boolean> {
+	const r = await git(root, ['worktree', 'remove', '--end-of-options', dir]).catch(() => null) // the clone may be gone
+	return r?.code === 0
+}
