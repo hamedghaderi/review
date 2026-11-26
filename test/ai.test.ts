@@ -3357,6 +3357,20 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	)
 	assert.match(moved.instructions, /Age alone is never a reason/)
 	assert.ok(moved.input.includes(`# ${drift.title}\n${drift.text}`))
+
+	// Other open PRs change the same files: the conclusion says whether any of it is real overlap (issue #304).
+	assert.doesNotMatch(moved.instructions, /## Other pull requests on the same code/, 'not when nothing overlaps')
+	const overlap = {
+		title: 'Other open pull requests changing the same files',
+		text: 'Pull request #9: Fix add, by @bo\nShared files: src/app.ts\nIts diffs for the shared files:\n--- src/app.ts\n@@ -1 +1 @@\n-a\n+b',
+	}
+	await controller.conclude({ ...access, loadOverlap: async () => overlap }, s.comp.id, null, SEL)
+	const shared = asked.at(-1)!
+	assert.match(shared.instructions, /## What the findings add up to[\s\S]*## Other pull requests on the same code\n[\s\S]*## Follow-ups/)
+	assert.match(shared.instructions, /never present it as a bug here/)
+	assert.ok(shared.input.includes(`# ${overlap.title}\n${overlap.text}`))
+	await controller.conclude({ ...access, loadOverlap: async () => Promise.reject(new Error('offline')) }, s.comp.id, null, SEL)
+	assert.doesNotMatch(asked.at(-1)!.instructions, /## Other pull requests on the same code/, 'a failed read just leaves it out')
 })
 
 test('conclusion: a second request for the same review is turned away while the first runs', async () => {

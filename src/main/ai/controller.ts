@@ -125,6 +125,8 @@ export interface ComparisonAccess {
 	findRelated?(sources: Array<FileSource>, signal: AbortSignal): Promise<RelatedResult>
 	/** What landed on the base branch since the PR branched that touches its files or `used` (see RunInput.loadDrift). */
 	loadDrift?(used: Array<string>, signal: AbortSignal): Promise<ContextFact | null>
+	/** Other open PRs into the same base changing the same files, with their descriptions and diffs (issue #304). */
+	loadOverlap?(signal: AbortSignal): Promise<{ title: string; text: string } | null>
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
 	/** Linked issues and the PR conversation; absent for branch reviews. */
 	loadBackground?: RunInput['loadBackground']
@@ -1162,10 +1164,13 @@ export class AiController {
 			try {
 				const { background, commits, patches } = await this.wholeChange(access)
 				// Read first: it also gives the lookups the base branch's head ("tip").
-				const drift = access.loadDrift ? await access.loadDrift([], AbortSignal.timeout(60_000)).catch(() => null) : null
+				const [drift, overlap] = await Promise.all([
+					access.loadDrift ? access.loadDrift([], AbortSignal.timeout(60_000)).catch(() => null) : null,
+					access.loadOverlap ? access.loadOverlap(AbortSignal.timeout(60_000)).catch(() => null) : null,
+				])
 				const tools = config.limits.lookups !== false && access.tools ? access.tools(CONCLUSION_LOOKUPS) : undefined
 				const l = config.provider.limits
-				const instructions = conclusionInstructions(!!tools, !!drift)
+				const instructions = conclusionInstructions(!!tools, !!drift, !!overlap)
 				const room =
 					capacityChars(l.contextWindow, outputBudget(l), instructions.length + (tools ? JSON.stringify(TOOL_DEFINITIONS).length : 0)) -
 					(tools ? CONCLUSION_LOOKUPS.maxChars : 0)
@@ -1183,6 +1188,7 @@ export class AiController {
 					history,
 					question: text,
 					drift,
+					overlap,
 				})
 				if (text === null) omitted = built.omitted
 				const response = await config.provider.review(built.request, AbortSignal.timeout(300_000))

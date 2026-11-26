@@ -959,6 +959,12 @@ export class GitHubService {
 		return list[0]?.sha ?? null
 	}
 
+	/** A pull request's changed files with their diffs, first page only (100 files). ETag-cached like every GET. */
+	async prPatches(repo: string, number: number, signal?: AbortSignal): Promise<Array<CompareFile>> {
+		checkRepo(repo)
+		return this.get<Array<CompareFile>>(`/repos/${repo}/pulls/${number}/files?per_page=100`, signal)
+	}
+
 	async description(repo: string, number: number, signal?: AbortSignal): Promise<PrDescription> {
 		checkRepo(repo)
 		const fetchedAt = new Date().toISOString()

@@ -3,6 +3,9 @@ import { generatedPath } from './symbols.ts'
 
 /** Other open PRs read for file lists, the most recently updated first; 4 queries at most. */
 export const OVERLAP_MAX_PRS = 100
+/** The overlapping PRs the Conclusion reads, most shared files first, and each one's diffs at most. */
+export const OVERLAP_CONCLUSION_PRS = 3
+export const OVERLAP_DIFF_CHARS = 12_000
 
 /**
  * The other PRs that change any of `own` (issue #304), most shared files first. Lockfiles and generated or vendored
