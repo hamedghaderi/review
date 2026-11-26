@@ -171,6 +171,16 @@ export interface PrGraphNode {
 	collects: boolean // PRs have been merged into its head branch: the PRs on it merge into it, then it merges
 }
 
+/** Another open pull request into the same base changing some of the same files (issue #304). */
+export interface OverlapPr {
+	number: number
+	title: string
+	url: string
+	draft: boolean
+	author: string | null
+	files: Array<string> // the shared files, lockfiles and generated ones left out
+}
+
 export interface PrGraph {
 	nodes: Array<PrGraphNode> // every open pull request, up to `truncated`
 	truncated: boolean // more open pull requests than were read
@@ -2450,6 +2460,7 @@ export const IPC = {
 	baseDrift: 'gh:base-drift',
 	takeoverInfo: 'gh:takeover-info',
 	agentShare: 'gh:agent-share',
+	overlappingPrs: 'gh:overlapping-prs',
 	sinceReview: 'gh:since-review',
 	backports: 'gh:backports',
 	unsquashedFixups: 'gh:unsquashed-fixups',
@@ -2683,6 +2694,7 @@ export interface ReviewApi {
 	takeoverInfo(repoId: string, reviewId: string): Promise<Result<TakeoverInfo | null>>
 	/** How many of the open PR review's commits a coding agent wrote (issue #272); null: none did. */
 	agentShare(repoId: string, reviewId: string): Promise<Result<AgentShare | null>>
+	overlappingPrs(repoId: string, reviewId: string): Promise<Result<Array<OverlapPr> | null>>
 	/** What the author changed since your review on `from` when the branch was force-pushed, commit by commit (issue #274). */
 	sinceReview(repoId: string, reviewId: string, from: string): Promise<Result<SinceReview>>
 	/** A pull request into a branch other than the default one: its commits matched with their originals there (issue #275). */

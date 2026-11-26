@@ -44,6 +44,7 @@ import type {
 	PatchResult,
 	PrDescription,
 	PrDetail,
+	OverlapPr,
 	PrGraph,
 	PrPage,
 	PrQuery,
@@ -127,6 +128,7 @@ import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
 import { Mapper } from './linemap.ts'
 import { hiddenInHunks, type HiddenLine } from '../shared/hiddenChars.ts'
 import { agentShare, type AgentShare } from '../shared/agentCommits.ts'
+import { OVERLAP_MAX_PRS, overlaps } from './overlap.ts'
 import type { SinceReview } from '../shared/rangeDiff.ts'
 import { lineUpCommits } from './sinceReview.ts'
 import { cherryPickedFrom, type Backports } from '../shared/backports.ts'
@@ -585,6 +587,32 @@ export class ReviewService {
 		if (!data?.comparison.pr) throw new AppFail('not-found', 'Open this pull request review first.')
 		const c = data.comparison
 		return agentShare(await commitAuthorship(data.root, c.baseSha, c.headSha))
+	}
+
+	/**
+	 * Other open pull requests into the same base that change some of the same files (issue #304), most shared files
+	 * first. Null when the PR isn't in the mapped repository's open PRs, or there's no GitHub token.
+	 */
+	async overlappingPrs(repoId: string, reviewId: string): Promise<Array<OverlapPr> | null> {
+		this.repo(repoId)
+		const data = this.comparisons.get(reviewId)
+		const pr = data?.comparison.pr
+		if (!pr) throw new AppFail('not-found', 'Open this pull request review first.')
+		const repo = this.githubRepoFor(repoId)
+		if (repo.toLowerCase() !== pr.repo.toLowerCase()) return null
+		const gh = this.requireGitHub()
+		const graph = await gh.openPrGraph(repo)
+		const self = graph?.nodes.find((n) => n.number === pr.number)
+		if (!graph || !self) return null
+		// The graph is newest first, so a busy base keeps the PRs being worked on now.
+		const others = graph.nodes.filter((n) => n.number !== pr.number && n.baseRef === self.baseRef).slice(0, OVERLAP_MAX_PRS)
+		if (!others.length) return []
+		const files = await gh.prFilePaths(repo, others)
+		const own = data.comparison.files.flatMap((f) => [f.newPath, f.oldPath].filter((p): p is string => !!p))
+		return overlaps(
+			own,
+			others.map((n) => ({ ...n, paths: files.get(n.number) ?? [] })),
+		)
 	}
 
 	/**

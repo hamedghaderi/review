@@ -416,6 +416,9 @@ function registerIpc(): void {
 	handle(IPC.baseDrift, (repoId: unknown, reviewId: unknown) => service.baseDrift(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.takeoverInfo, (repoId: unknown, reviewId: unknown) => service.takeoverInfo(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.agentShare, (repoId: unknown, reviewId: unknown) => service.agentShare(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.overlappingPrs, (repoId: unknown, reviewId: unknown) =>
+		service.overlappingPrs(str(repoId, 'repository'), comparisonId(reviewId)),
+	)
 	handle(IPC.unsquashedFixups, (repoId: unknown, reviewId: unknown) =>
 		service.unsquashedFixups(str(repoId, 'repository'), comparisonId(reviewId)),
 	)
