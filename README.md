@@ -35,6 +35,19 @@
 - **Comments that stay local.** Nothing goes to GitHub until you publish. Comments land in your pending review, and you submit it.
 - **Bring your own AI, or none.** OpenAI, Anthropic, Gemini, OpenRouter, any OpenAI-compatible endpoint, or a local model in Ollama or LM Studio. Keys are encrypted with your system keychain.
 - **MCP tools.** AI reviewers can call your MCP servers for context the repository doesn't have, like the ticket behind a change.
+- **Findings that are checked, then summed up.** A second pass double-checks blocking findings, and the Conclusion steps back to judge the change as a whole.
+- **What's around the PR.** Stacked PRs, commits that landed on the base since it branched, and other open PRs changing the same files.
+
+<table>
+  <tr>
+    <td width="50%"><img src="site/img/crop-comment.webp" alt="A comment on line 14 of a diff, saved locally until you publish" /><br /><sub><b>Comment on any line.</b> It stays on your machine until you publish.</sub></td>
+    <td width="50%"><img src="site/img/crop-quickopen.webp" alt="Quick open searching for mcp, listing a recent review and a branch" /><br /><sub><b>⌘P to anything.</b> Branches, pull requests and recent reviews.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="site/img/crop-uses.webp" alt="Uses of hasReply: four matches in two files, each marked changed" /><br /><sub><b>Find uses.</b> ⌘⇧-click a name to see where it's used, and whether that changed.</sub></td>
+    <td width="50%"><img src="site/img/crop-compare.webp" alt="A branch row: the review compares merge-base 999f88f to mcp-tools e945fba, one commit ahead" /><br /><sub><b>Pinned to commits.</b> From the merge base, so a push never moves the diff.</sub></td>
+  </tr>
+</table>
 
 ## Install
 
