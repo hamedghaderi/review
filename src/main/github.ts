@@ -82,6 +82,7 @@ export class GitHubService {
 	private etags = new Map<string, { etag: string; body: unknown }>()
 	private pages = new Map<string, PrPage>()
 	private graphs = new Map<string, { at: number; graph: Promise<PrGraph | null> }>()
+	private prFiles = new Map<string, { updatedAt: string; paths: Array<string> }>() // "owner/repo#12"
 	private listeners = new Set<(s: GitHubStatus) => void>()
 	private verifying: Promise<void> | null = null
 	private cli: CliTokenSource | null
@@ -619,6 +620,46 @@ export class GitHubService {
 			for (const n of nodes) n.collects = !n.crossRepo && collecting.has(n.headRef)
 		}
 		return { nodes, truncated, fetchedAt: new Date().toISOString() }
+	}
+
+	/**
+	 * The changed file paths of these pull requests (issue #304), by number. Each PR is read again only when its
+	 * `updatedAt` moves. A PR GitHub can't return is left out.
+	 * shortcut: only a PR's first 100 files are read; page `files` if overlaps in huge PRs go missing.
+	 */
+	async prFilePaths(
+		repo: string,
+		prs: ReadonlyArray<{ number: number; updatedAt: string }>,
+		signal?: AbortSignal,
+	): Promise<Map<number, Array<string>>> {
+		checkRepo(repo)
+		const key = (n: number): string => `${repo.toLowerCase()}#${n}`
+		const stale = prs.filter((p) => this.prFiles.get(key(p.number))?.updatedAt !== p.updatedAt)
+		const [owner, name] = repo.split('/')
+		for (let i = 0; i < stale.length; i += PR_FILES_BATCH) {
+			const batch = stale.slice(i, i + PR_FILES_BATCH)
+			const vars = batch.map((_, j) => `$n${j}: Int!`).join(', ')
+			const fields = batch.map((_, j) => `p${j}: pullRequest(number: $n${j}) { files(first: 100) { nodes { path } } }`).join('\n')
+			const query = `query($owner: String!, $name: String!, ${vars}) {\n  rateLimit { remaining limit resetAt }\n  repository(owner: $owner, name: $name) {\n${fields}\n  }\n}`
+			const data = await this.graphql<{
+				repository: Record<string, { files: { nodes: Array<{ path: string } | null> } | null } | null> | null
+			}>(
+				query,
+				{ owner, name, ...Object.fromEntries(batch.map((p, j) => [`n${j}`, p.number])) },
+				signal,
+				{ ignore: () => true }, // one PR closed since the graph was read must not hide the rest
+			)
+			batch.forEach((p, j) => {
+				const files = data.repository?.[`p${j}`]?.files
+				if (files) this.prFiles.set(key(p.number), { updatedAt: p.updatedAt, paths: files.nodes.flatMap((f) => (f ? [f.path] : [])) })
+			})
+		}
+		const out = new Map<number, Array<string>>()
+		for (const p of prs) {
+			const hit = this.prFiles.get(key(p.number))
+			if (hit?.updatedAt === p.updatedAt) out.set(p.number, hit.paths)
+		}
+		return out
 	}
 
 	/** Pull requests in `repo` whose head is `owner:branch`, in any state. */
@@ -1779,6 +1820,7 @@ interface GitHubPrefs {
 const GRAPH_TTL_MS = 2 * 60_000
 const COLLECTOR_MAX = 100 // stack parents checked for merged PRs, in one query
 const GRAPH_MAX_PAGES = 10 // 1,000 open pull requests
+const PR_FILES_BATCH = 25 // pull requests per file-list query: 2,500 file nodes at most
 
 const GRAPH_QUERY = `query($owner: String!, $name: String!, $after: String) {
   rateLimit { remaining limit resetAt }

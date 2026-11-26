@@ -95,6 +95,7 @@ const api: ReviewApi = {
 	baseDrift: (repoId, reviewId) => ipcRenderer.invoke(IPC.baseDrift, repoId, reviewId),
 	takeoverInfo: (repoId, reviewId) => ipcRenderer.invoke(IPC.takeoverInfo, repoId, reviewId),
 	agentShare: (repoId, reviewId) => ipcRenderer.invoke(IPC.agentShare, repoId, reviewId),
+	overlappingPrs: (repoId, reviewId) => ipcRenderer.invoke(IPC.overlappingPrs, repoId, reviewId),
 	sinceReview: (repoId, reviewId, from) => ipcRenderer.invoke(IPC.sinceReview, repoId, reviewId, from),
 	backports: (repoId, reviewId) => ipcRenderer.invoke(IPC.backports, repoId, reviewId),
 	unsquashedFixups: (repoId, reviewId) => ipcRenderer.invoke(IPC.unsquashedFixups, repoId, reviewId),

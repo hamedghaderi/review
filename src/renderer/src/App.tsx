@@ -38,6 +38,7 @@ import type {
 	ChangeExplanation,
 	GitHubStatus,
 	MentionUser,
+	OverlapPr,
 	PrReviewState,
 	LinkOpen,
 	LoadedComparison,
@@ -833,6 +834,17 @@ export function App() {
 			if (r.ok && r.value && comparisonIdRef.current === id) setAgents({ reviewId: id, value: r.value })
 		})
 	}, [session?.repo.id, comparison?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Other open PRs into the same base changing the same files (issue #304), once per snapshot; nothing when none do.
+	const [overlap, setOverlap] = useState<{ reviewId: string; value: Array<OverlapPr> } | null>(null)
+	useEffect(() => {
+		setOverlap(null)
+		if (!session || !comparison?.pr || github?.state !== 'connected') return
+		const id = comparison.id
+		void window.review.overlappingPrs(session.repo.id, id).then((r) => {
+			if (r.ok && r.value?.length && comparisonIdRef.current === id) setOverlap({ reviewId: id, value: r.value })
+		})
+	}, [session?.repo.id, comparison?.id, github?.state]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	// A pull request into a branch other than the default one, its commits matched with their originals (issue #275),
 	// once per snapshot; nothing when no commit has an original there.
@@ -2132,6 +2144,7 @@ export function App() {
 									)}
 									{agents?.reviewId === comparison.id && <AgentShareLabel share={agents.value} />}
 									{uiUnshown && <UiUnshownLabel files={uiUnshown} />}
+									{overlap?.reviewId === comparison.id && <OverlapLabel prs={overlap.value} />}
 									{backportsHere && (
 										<BackportLabel backports={backportsHere} open={backportsOpen} onToggle={() => setBackportsOpen((x) => !x)} />
 									)}
@@ -3100,6 +3113,29 @@ function DriftBanner({ drift: d, open, onToggle }: { drift: BaseDrift; open: boo
 				</ul>
 			)}
 		</div>
+	)
+}
+
+/** "Also changing these files: #412, #418", each linking to that PR on GitHub, with the shared files in the tooltip. Never a finding. */
+function OverlapLabel({ prs }: { prs: Array<OverlapPr> }) {
+	const detail = (p: OverlapPr): string => {
+		const shown = p.files.slice(0, 8)
+		const more = p.files.length - shown.length
+		return `#${p.number} ${p.title}${p.draft ? ' (draft)' : ''}${p.author ? ` by @${p.author}` : ''}\n${shown.map((f) => `  ${f}`).join('\n')}${more ? `\n  …and ${more} more` : ''}`
+	}
+	return (
+		<span
+			className="agent-share nowrap"
+			title={`Other open pull requests into the same branch change some of the same files. Lockfiles and generated files aren't counted.\n\n${prs.map(detail).join('\n\n')}`}
+		>
+			Also changing these files:
+			{prs.slice(0, 5).map((p) => (
+				<a key={p.number} className="link" href={p.url} target="_blank" rel="noreferrer" title={`Open on GitHub: ${detail(p)}`}>
+					#{p.number} ↗{p.draft ? ' (draft)' : ''}
+				</a>
+			))}
+			{prs.length > 5 && ` +${prs.length - 5} more`}
+		</span>
 	)
 }
 
