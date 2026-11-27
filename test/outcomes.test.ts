@@ -218,6 +218,38 @@ test('outcomes: double-checks, failing tests and automatic reviews are counted a
 	assert.equal(s.total.accepted, 0)
 })
 
+test('outcomes: the double-check is set against your decision, by the model that checked (issue #332)', () => {
+	const v = (verdict: 'holds' | 'wrong' | 'unsure', model = 'checker', error = false) => ({
+		verdict,
+		reason: '',
+		level: null,
+		checked: [],
+		model,
+		error,
+	})
+	const runs = [
+		run('run1', [
+			finding('f1', { verification: v('holds') }), // accepted: both real
+			finding('f2', { verification: v('holds') }), // dismissed as wrong: too lenient
+			finding('f3', { verification: v('wrong') }), // accepted: too harsh
+			finding('f4', { verification: v('wrong') }), // dismissed as intended: says nothing
+			finding('f5', { verification: v('unsure', 'other') }), // dismissed as wrong
+			finding('f6', { verification: v('holds') }), // undecided
+			finding('f7', { verification: v('wrong', 'checker', true) }), // failed check, accepted
+		]),
+		run('auto', [finding('f8', { verification: v('holds') })], { auto: true }), // only an automatic review's comment
+	]
+	const rev = review('rev1', {
+		comments: [comment('f1'), comment('f3'), comment('f7'), comment('f8')],
+		findingDecisions: { f2: dismissed('wrong'), f4: dismissed('intended'), f5: dismissed('wrong') },
+	})
+	const s = summarizeOutcomes([repo([rev], { rev1: runs })], ALL, NOW)
+	assert.deepEqual(s.judge, [
+		{ model: 'checker', cells: { holds: { real: 1, wrong: 1 }, unsure: { real: 0, wrong: 0 }, wrong: { real: 1, wrong: 0 } } },
+		{ model: 'other', cells: { holds: { real: 0, wrong: 0 }, unsure: { real: 0, wrong: 1 }, wrong: { real: 0, wrong: 0 } } },
+	])
+})
+
 test('outcomes: by level, a problem counts at the level its lead finding was shown at, most severe first', () => {
 	const runs = [
 		run('run1', [

@@ -10,6 +10,7 @@ import type {
 	Finding,
 	FindingCategory,
 	FindingDecision,
+	JudgeRow,
 	NoteCheck,
 	NoteFindingRef,
 	NotePeriod,
@@ -242,6 +243,7 @@ export function summarizeOutcomes(
 	const afterMerge: Array<AfterMergeItem> = []
 	let followedAt: string | null = null
 	let cost: AiCost | null = null
+	const judge = new Map<string, JudgeRow>()
 
 	for (const s of repos) {
 		const runs = Object.values(s.aiRuns)
@@ -312,6 +314,16 @@ export function summarizeOutcomes(
 				if (after === 'changed') c.changedAfterMerge++
 			}
 			add(total)
+			// Only your decision counts as the answer: "probably fixed" and automatic reviews are themselves the AI's call.
+			const yours = state === 'accepted' ? 'real' : typeof state === 'object' && state.dismissed === 'wrong' ? 'wrong' : null
+			if (verified && yours) {
+				let j = judge.get(verified.model)
+				if (!j) {
+					const cell = () => ({ real: 0, wrong: 0 })
+					judge.set(verified.model, (j = { model: verified.model, cells: { holds: cell(), unsure: cell(), wrong: cell() } }))
+				}
+				j.cells[verified.verdict][yours]++
+			}
 			for (const key of new Set(raised.map((r) => r.model.key)))
 				add(row(rows.models, raised.find((r) => r.model.key === key)!.model).counts)
 			for (const key of new Set(raised.map((r) => r.setup.key)))
@@ -407,8 +419,11 @@ export function summarizeOutcomes(
 			mergeOutcomes(repos.filter((r) => filter.repoId === null || r.repoId === filter.repoId)),
 			mergeOutcomes(repos),
 		),
+		judge: [...judge.values()].sort((a, b) => judgeTotal(b) - judgeTotal(a)),
 	}
 }
+
+const judgeTotal = (j: JudgeRow): number => Object.values(j.cells).reduce((n, c) => n + c.real + c.wrong, 0)
 
 /**
  * How each reviewer note is doing (issue #278). A problem is of a note's kind when its lead finding is under the
