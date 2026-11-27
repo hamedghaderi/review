@@ -726,7 +726,9 @@ export interface ChangeConclusion {
 
 /** One deduction from the data merge score (see src/shared/mergeScore.ts). */
 export interface MergeScorePart {
-	points: number // 0 or less
+	key: string // the kind of deduction (see MERGE_KEYS); tuning weighs each kind
+	base: number // what it costs under the starting guesses, 0 or more
+	points: number // what it costs now, 0 or less
 	label: string
 	detail: Array<string> // e.g. the findings' titles or the failed checks' names
 }
@@ -739,6 +741,23 @@ export interface MergeVerdict {
 	why: string // its reasons, in Markdown
 }
 
+/** Whether the merge score's deductions are tuned yet (see tuneWeights in src/shared/mergeScore.ts). */
+export type Tuning =
+	| { state: 'waiting'; settled: number; needed: number } // too few to tune: the starting guesses stand
+	| { state: 'no-signal'; settled: number; needed: number } // the deductions don't tell which needed a fix: the guesses stand
+	| { state: 'tuned'; settled: number; needed: number; factors: Record<string, number> }
+
+/** How the merge score did on settled merged pull requests (issue #328), for Outcomes. Shares are 0–1. */
+export interface MergeScoreOutcomes {
+	settled: number
+	needed: number // needed a blocking or should-fix fix
+	data: number | null // how often the data score ranked the one that needed a fix lower (see ranksRight)
+	both: number // settled pull requests that had an AI score too
+	dataOnBoth: number | null // the same, on those
+	aiOnBoth: number | null
+	tuning: Tuning // across every repository: per repository there are too few
+}
+
 /** The merge score as shown: the data now, and the AI's final score carried onto it when it judged this head. */
 export interface MergeScoreView {
 	data: number
@@ -746,6 +765,7 @@ export interface MergeScoreView {
 	final: number | null // null: no conclusion has judged this head yet
 	verdict: MergeVerdict | null
 	tuned: boolean // the deductions were tuned against merged pull requests' outcomes
+	factors: Record<string, number> // how much each kind counts against its starting guess once tuned; empty before
 	record: TrackRecord | null // how merged pull requests that scored like this did; null: the score isn't known
 }
 
@@ -755,6 +775,7 @@ export interface MergeSeen {
 	data: number
 	final: number | null
 	at: string
+	parts?: Array<{ key: string; base: number }> // its deductions under the starting guesses, to tune them by; absent before tuning
 }
 
 /**
@@ -2119,6 +2140,7 @@ export interface OutcomeSummary {
 	followedAt: string | null // when merged pull requests were last followed; null: never
 	aiText: Array<AiTextRow> // by feature, then model; period, repository and model filters only
 	notes: Array<NoteCheck> // your reviewer notes and how each is doing, whatever the period (issue #278)
+	merge: MergeScoreOutcomes // how the merge score did on merged pull requests; repository filter only (issue #328)
 }
 
 /** The milestones of a review run, in the order a run passes them (issue #299). */

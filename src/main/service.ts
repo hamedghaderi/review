@@ -169,7 +169,16 @@ import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
 import { autoAddFindings, autoMark, findingRoots, findingState } from '../shared/findings.ts'
-import { dataScore, finalScore, MERGE_OUTCOME_DAYS, trackRecord, WEIGHTS_TUNED, worstFix } from '../shared/mergeScore.ts'
+import {
+	dataScore,
+	finalScore,
+	MERGE_OUTCOME_DAYS,
+	mergeOutcomes,
+	trackRecord,
+	tuneWeights,
+	worstFix,
+	type MergeFactors,
+} from '../shared/mergeScore.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
 import {
 	canMarkSeen,
@@ -183,7 +192,7 @@ import {
 	type WatchedPr,
 } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
-import { notesKeyOf, type RepoState, type ReviewStore, type StoreData } from './store.ts'
+import { notesKeyOf, type ReviewStore, type StoreData } from './store.ts'
 import { applyGroups, bucketsToCheck, collectDismissals, draftInputFor, freeDismissals } from './notePatterns.ts'
 
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
@@ -467,7 +476,9 @@ export class ReviewService {
 	async mergeScore(repoId: string, reviewId: string, signal?: AbortSignal): Promise<MergeScoreView> {
 		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
 		if (!stored) throw new AppFail('not-found', 'Open this review first.')
-		const { score, parts } = await this.mergeData(repoId, reviewId, signal)
+		const tuning = tuneWeights(mergeOutcomes(Object.values(this.store.read().repos)))
+		const factors = tuning.state === 'tuned' ? tuning.factors : {}
+		const { score, parts } = await this.mergeData(repoId, reviewId, signal, factors)
 		const v = stored.conclusion?.merge ?? null
 		const verdict = v && v.head === stored.headSha ? v : null
 		const final = verdict ? finalScore(score, verdict) : null
@@ -476,16 +487,26 @@ export class ReviewService {
 		if (!seen || seen.head !== stored.headSha || seen.data !== score || seen.final !== final)
 			await this.store.update((d) => {
 				const r = d.repos[repoId]?.reviews[reviewId]
-				if (r) r.mergeSeen = { head: stored.headSha, data: score, final, at: new Date().toISOString() }
+				if (r)
+					r.mergeSeen = {
+						head: stored.headSha,
+						data: score,
+						final,
+						at: new Date().toISOString(),
+						parts: parts.map((x) => ({ key: x.key, base: x.base })),
+					}
 			})
-		const outcomes = (repos: Array<RepoState>) =>
-			repos.flatMap((r) => Object.values(r.merged ?? {}).flatMap((m) => (m?.outcome ? [m.outcome] : [])))
 		const repos = Object.values(this.store.read().repos)
-		const record = trackRecord(final ?? score, outcomes(repos.filter((r) => r.repoId === repoId)), outcomes(repos))
-		return { data: score, parts, final, verdict, tuned: WEIGHTS_TUNED, record }
+		const record = trackRecord(final ?? score, mergeOutcomes(repos.filter((r) => r.repoId === repoId)), mergeOutcomes(repos))
+		return { data: score, parts, final, verdict, tuned: tuning.state === 'tuned', factors, record }
 	}
 
-	async mergeData(repoId: string, reviewId: string, signal?: AbortSignal): Promise<ReturnType<typeof dataScore>> {
+	/** `factors`: the tuned weights (see tuneWeights); worked out from the store when not given. */
+	async mergeData(repoId: string, reviewId: string, signal?: AbortSignal, factors?: MergeFactors): Promise<ReturnType<typeof dataScore>> {
+		if (!factors) {
+			const tuning = tuneWeights(mergeOutcomes(Object.values(this.store.read().repos)))
+			factors = tuning.state === 'tuned' ? tuning.factors : {}
+		}
 		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
 		if (!stored) throw new AppFail('not-found', 'Open this review first.')
 		const run = this.newestFinished(repoId, reviewId)
@@ -526,7 +547,7 @@ export class ReviewService {
 					)
 				: null,
 		])
-		return dataScore({ findings, ci, others, hidden, drift, risk: changeRisk(run?.coverage.files ?? []) })
+		return dataScore({ findings, ci, others, hidden, drift, risk: changeRisk(run?.coverage.files ?? []) }, factors)
 	}
 
 	private newestFinished(repoId: string, reviewId: string): AiRun | null {

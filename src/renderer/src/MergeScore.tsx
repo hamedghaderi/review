@@ -51,7 +51,11 @@ export function MergeScore({ repoId, reviewId, refresh }: { repoId: string; revi
 				) : (
 					<p className="muted">Nothing deducted.</p>
 				)}
-				{!view.tuned && <p className="muted">The deductions are starting guesses. They aren't tuned against merged pull requests yet.</p>}
+				<p className="muted">
+					{view.tuned
+						? 'Tuned against merged pull requests: each kind counts as much as it predicted fixes. See Outcomes.'
+						: "The deductions are starting guesses. They aren't tuned against merged pull requests yet."}
+				</p>
 			</details>
 		</div>
 	)
