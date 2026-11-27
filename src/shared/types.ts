@@ -720,6 +720,31 @@ export interface ChangeConclusion {
 	messages: Array<CodeMessage> // the conclusion first (Markdown), then your questions and the answers
 	omitted: Array<string> // files whose diff was too big to send with the conclusion; the AI could look them up
 	findingIds?: Array<string> // the run's findings when it was written, so later ones (from a member not waited for) show as unread
+	merge?: MergeVerdict | null // the AI's merge score, written with the conclusion (issue #328); absent on older ones
+}
+
+/** One deduction from the data merge score (see src/shared/mergeScore.ts). */
+export interface MergeScorePart {
+	points: number // 0 or less
+	label: string
+	detail: Array<string> // e.g. the findings' titles or the failed checks' names
+}
+
+/** The AI's final merge score for one head, from the data score it was given and the code. */
+export interface MergeVerdict {
+	head: string
+	data: number // the data score it was given
+	ai: number // its final score
+	why: string // its reasons, in Markdown
+}
+
+/** The merge score as shown: the data now, and the AI's final score carried onto it when it judged this head. */
+export interface MergeScoreView {
+	data: number
+	parts: Array<MergeScorePart>
+	final: number | null // null: no conclusion has judged this head yet
+	verdict: MergeVerdict | null
+	tuned: boolean // the deductions were tuned against merged pull requests' outcomes
 }
 
 /** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */
@@ -2452,6 +2477,7 @@ export const IPC = {
 	deleteAppClone: 'repo:delete-app-clone',
 	revealAppClone: 'repo:reveal-app-clone',
 	editors: 'editor:list',
+	mergeScore: 'ai:merge-score',
 	setEditor: 'editor:set',
 	openInEditor: 'editor:open-pr',
 	reviewChanged: 'review:changed',
@@ -2820,6 +2846,8 @@ export interface ReviewApi {
 	explainChange(reviewId: string): Promise<Result<ChangeExplanation>>
 	// `question` null writes the conclusion (again, replacing the conversation); otherwise asks about it.
 	conclude(reviewId: string, question: string | null): Promise<Result<ChangeConclusion>>
+	/** How safe the pull request is to merge (issue #328): the data score now and the conclusion's AI score for this head. */
+	mergeScore(repoId: string, reviewId: string): Promise<Result<MergeScoreView>>
 	/** Drafts your reply in a GitHub thread with the model for questions. Nothing is posted: the text is for you to edit. */
 	draftReply(repoId: string, reviewId: string, threadId: string): Promise<Result<{ id: string; text: string }>>
 	aiReplySent(repoId: string, textId: string, draft: string, sent: string): Promise<Result<void>>

@@ -72,6 +72,7 @@ import type {
 	ReviewAiTexts,
 	PyImportRef,
 	TargetProbe,
+	MergeScoreView,
 } from '../shared/types.ts'
 import {
 	MAX_REVIEWER_NOTES,
@@ -85,6 +86,7 @@ import {
 	type CommitList,
 	type CommitView,
 	commitRunKey,
+	changeRisk,
 } from '../shared/types.ts'
 import type { CommitCheckInput } from './ai/commitCheck.ts'
 import { exampleCount, MIN_EXAMPLES, newExamplesSince, STYLE_REFRESH_EVERY, styleBasis, styleExamples } from './ai/style.ts'
@@ -160,7 +162,8 @@ import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
-import { autoAddFindings, autoMark, findingRoots } from '../shared/findings.ts'
+import { autoAddFindings, autoMark, findingRoots, findingState } from '../shared/findings.ts'
+import { dataScore, finalScore, WEIGHTS_TUNED } from '../shared/mergeScore.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
 import {
 	canMarkSeen,
@@ -190,7 +193,7 @@ import {
 import { findingBaseline, type Baseline } from './ai/history.ts'
 import { loadFixedPatch } from './fixedPatch.ts'
 import { fixedThread, fixedThreadCandidates, MAX_FIXED_CHECKS } from './fixedThreads.ts'
-import { newestComment } from './autoReview.ts'
+import { newestComment, othersConcerns } from './autoReview.ts'
 import type { ContextFact, FileSource } from './ai/context.ts'
 
 const PATCH_LIMIT = 1024 * 1024 // 1 MB of patch text renders normally
@@ -448,6 +451,64 @@ export class ReviewService {
 				if (r) r.authorReplies = { ...(r.authorReplies ?? {}), ...Object.fromEntries(fresh.map((c) => [c.threadId, c])) }
 			})
 		return out
+	}
+
+	/**
+	 * The merge score as it stands now (issue #328): the data score from the newest finished run's findings, CI, other
+	 * reviewers' threads, hidden characters, base-branch drift and file risk, and the conclusion's AI score when it judged
+	 * this head. Reads GitHub but asks no model: replies in others' threads count as judged only when a judgement was kept.
+	 */
+	async mergeScore(repoId: string, reviewId: string, signal?: AbortSignal): Promise<MergeScoreView> {
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		if (!stored) throw new AppFail('not-found', 'Open this review first.')
+		const { score, parts } = await this.mergeData(repoId, reviewId, signal)
+		const v = stored.conclusion?.merge ?? null
+		const verdict = v && v.head === stored.headSha ? v : null
+		return { data: score, parts, final: verdict ? finalScore(score, verdict) : null, verdict, tuned: WEIGHTS_TUNED }
+	}
+
+	async mergeData(repoId: string, reviewId: string, signal?: AbortSignal): Promise<ReturnType<typeof dataScore>> {
+		const stored = this.store.read().repos[repoId]?.reviews[reviewId]
+		if (!stored) throw new AppFail('not-found', 'Open this review first.')
+		const run = this.newestFinished(repoId, reviewId)
+		const runs = this.store.read().repos[repoId]?.aiRuns[reviewId] ?? []
+		const roots = findingRoots(runs)
+		const byId = new Map(runs.flatMap((r) => r.findings.map((f) => [f.id, f] as const)))
+		const risk = new Map((run?.coverage.files ?? []).map((f) => [f.fileKey, f.risk?.level ?? null]))
+		const findings = (run?.findings ?? [])
+			.filter((f) => !f.mergedInto && !f.heldBack && findingState(stored, roots, f, byId) !== 'dismissed')
+			.filter((f) => !(f.verification?.verdict === 'wrong' && !f.verification.error))
+			.map((f) => ({ title: f.title, severity: f.severity, losesData: !!f.reach?.losesData, fileRisk: risk.get(f.anchor.fileKey) ?? null }))
+		const pr = stored.pr
+		const [ci, others, hidden, drift] = await Promise.all([
+			pr ? this.headChecks(repoId, reviewId).catch(() => null) : undefined,
+			pr
+				? this.prDiscussion(repoId, reviewId).then(
+						(d) => {
+							if (d.status === 'unavailable') return null
+							const o = othersConcerns(d, {
+								viewer: this.github?.status().login ?? null,
+								author: pr.author ?? null,
+								botChecks: run?.botChecks ?? [],
+								replies: stored.authorReplies ?? {},
+							})
+							return { changes: o.changes.length, threads: o.threads.length, bots: o.bots.length }
+						},
+						() => null,
+					)
+				: undefined,
+			this.hiddenChars(reviewId).then(
+				(l) => l.length,
+				() => 0,
+			),
+			pr
+				? this.baseDrift(repoId, reviewId, signal).then(
+						(d) => (d.error ? null : d.touching),
+						() => null,
+					)
+				: null,
+		])
+		return dataScore({ findings, ci, others, hidden, drift, risk: changeRisk(run?.coverage.files ?? []) })
 	}
 
 	private newestFinished(repoId: string, reviewId: string): AiRun | null {
@@ -2663,6 +2724,7 @@ export class ReviewService {
 					),
 				loadDrift: data.comparison.pr ? (used, signal) => this.driftFact(repoId, reviewId, used, signal) : undefined,
 				loadOverlap: data.comparison.pr ? (signal) => this.overlapFact(repoId, reviewId, signal) : undefined,
+				loadMergeData: (signal) => this.mergeData(repoId, reviewId, signal),
 				openExternal: this.mcp ? (signal) => this.mcp!.open(data.root, signal) : undefined,
 				loadBackground: data.comparison.pr ? (signal) => this.prBackground(repoId, reviewId, signal) : undefined,
 				commits: () => commitMessages(data.root, data.comparison.baseSha, data.comparison.headSha),

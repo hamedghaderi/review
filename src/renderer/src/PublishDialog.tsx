@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fixupWarning } from '../../shared/fixups.ts'
+import { MergeScore } from './MergeScore.tsx'
 import { describeLeaks, findLeaks, maskLeaks } from '../../shared/leaks.ts'
 import { describeHiddenChars, type HiddenLine } from '../../shared/hiddenChars.ts'
 import type {
@@ -707,6 +708,7 @@ export function PublishDialog({
 										)}
 									</div>
 								)}
+								<MergeScore repoId={repoId} reviewId={reviewId} refresh={ci?.readAt} />
 								<CiLine ci={ci} error={ciError} approving={event === 'APPROVE'} onRefresh={() => void loadCi()} />
 								{event === 'APPROVE' && hidden.length > 0 && (
 									<p

@@ -3,13 +3,15 @@ import type { ContextBatch, ContextFact } from './context.ts'
 import type { LookupBudget } from './lookup.ts'
 import { overviewInput, type OverviewContext } from './overview.ts'
 import type { ProviderRequest } from './provider.ts'
-import { CONCLUSION_JSON_SCHEMA, CONCLUSION_SCHEMA_NAME, conclusionSchema } from './schema.ts'
+import type { MergeScorePart } from '../../shared/types.ts'
+import { CONCLUSION_JSON_SCHEMA, CONCLUSION_SCHEMA_NAME, conclusionParseSchema } from './schema.ts'
 
 /** The most input one conclusion or follow-up sends, whatever the model's window. */
 export const MAX_CONCLUSION_CHARS = 200_000
 export const MAX_CONCLUSION_QUESTION_CHARS = 4000
 export const MAX_CONCLUSION_MESSAGES = 40
 const MAX_TEXT = 12_000 // per answer
+const MAX_WHY = 1000 // the merge score's reasons
 const MAX_FINDINGS = 40
 const MAX_HISTORY_CHARS = 40_000
 /**
@@ -30,7 +32,13 @@ The input lists other open pull requests into the same branch that change some o
 
 `
 
-export function conclusionInstructions(lookups: boolean, drift = false, overlap = false): string {
+// Only when the app could work out the data merge score (issue #328). The AI decides the final score.
+const MERGE = `## Merge score
+The input gives a data merge score ("Merge score from the data"): 100 less fixed deductions for open findings, CI, other reviewers' concerns, hidden characters, base-branch drift and risky areas. It is exact but blind to the code. You decide the final score, 0 to 100, in the \`merge\` field: how safe it is to merge this change as it is now. Start from the data score and move it only for what you saw in the code that the data gets wrong or misses, e.g. a finding that is far worse or far milder than its level, a risky change no finding covers, or a deduction that does not apply. Do not count CI, threads or drift again: the data already does, and it is kept up to date after you answer. If you see no reason to move it, give the data score. In \`why\`, give the reason for the difference in one to three short sentences, pointing to path:line. Do not repeat the score in the Markdown.
+
+`
+
+export function conclusionInstructions(lookups: boolean, drift = false, overlap = false, merge = false): string {
 	return `A developer has reviewed a code change with an AI reviewer. Its findings each point at one place in the code. Now step back and give your conclusion on the change as a whole, the way an experienced colleague would after reading all of it. Then answer the developer's follow-up questions about it.
 
 The conclusion is Markdown with these sections, in this order, with these headings:
@@ -44,7 +52,7 @@ Was this a good way to solve the problem? Name at most three other ways to build
 ## What the findings add up to
 Only when several findings share one cause, or one change of approach would remove them: say which ones and why. Otherwise say in one sentence that they are separate problems, or that there were none. Do not repeat findings one by one; the developer has read them. Never bring back a dismissed finding.
 
-${drift ? STILL_WORTH : ''}${overlap ? OVERLAP : ''}## Follow-ups
+${drift ? STILL_WORTH : ''}${overlap ? OVERLAP : ''}${merge ? MERGE : ''}## Follow-ups
 Two short lists, "Before merging" and "Later" (only what deserves its own change). Each item says what to do and why, in one or two sentences, with the file and line when you know them. Leave out an empty list. If both are empty, write "Nothing to follow up."
 
 Rules for the conclusion and every answer:
@@ -70,6 +78,7 @@ export interface ConclusionContext extends Omit<OverviewContext, 'closing'> {
 	question: string | null // a follow-up; null asks for the conclusion
 	drift?: ContextFact | null // what landed on the base branch since the pull request branched (issue #165)
 	overlap?: { title: string; text: string } | null // other open PRs changing the same files (issue #304)
+	merge?: { score: number; parts: Array<MergeScorePart> } | null // the data merge score (issue #328); new conclusions only
 }
 
 export function buildConclusionRequest(c: ConclusionContext): { request: ProviderRequest; omitted: Array<string> } {
@@ -77,7 +86,7 @@ export function buildConclusionRequest(c: ConclusionContext): { request: Provide
 	const { input, omitted } = overviewInput({ ...c, maxChars: Math.max(0, c.maxChars - closing.length), closing })
 	return {
 		request: {
-			instructions: conclusionInstructions(!!c.tools, !!c.drift, !!c.overlap),
+			instructions: conclusionInstructions(!!c.tools, !!c.drift, !!c.overlap, !!c.merge && c.question === null),
 			input,
 			batch: EMPTY_BATCH,
 			schema: { name: CONCLUSION_SCHEMA_NAME, json: CONCLUSION_JSON_SCHEMA },
@@ -88,7 +97,7 @@ export function buildConclusionRequest(c: ConclusionContext): { request: Provide
 }
 
 /** The findings, the earlier explanation, the conversation, then what to do: write the conclusion or answer. */
-export function closingText({ run, decisions, explanation, history, question, drift, overlap }: ConclusionContext): string {
+export function closingText({ run, decisions, explanation, history, question, drift, overlap, merge }: ConclusionContext): string {
 	const out: Array<string> = []
 	if (explanation) out.push('# What an earlier explanation said the change is for', explanation.purpose, '')
 	if (drift) out.push(`# ${drift.title}`, drift.text, '')
@@ -115,6 +124,12 @@ export function closingText({ run, decisions, explanation, history, question, dr
 	out.push('')
 	const earlier = recent(history.filter((m) => !m.error))
 	if (question === null) {
+		if (merge) {
+			out.push(`# Merge score from the data: ${merge.score}/100`)
+			if (!merge.parts.length) out.push('Nothing deducted.')
+			for (const p of merge.parts) out.push(`- ${p.points}: ${p.label}${p.detail.length ? ` (${p.detail.slice(0, 5).join('; ')})` : ''}`)
+			out.push('')
+		}
 		out.push('# Write your conclusion')
 	} else {
 		out.push('# Your conclusion and the conversation so far')
@@ -146,11 +161,17 @@ function recent(messages: Array<CodeMessage>): Array<CodeMessage> {
 	return [first, ...kept]
 }
 
-/** Validates the model's Markdown; throws with a readable reason when it does not match. */
-export function parseConclusion(output: unknown): string {
-	const parsed = conclusionSchema.safeParse(output)
+/**
+ * Validates the model's Markdown, and its merge score when it gave one (rounded into 0–100; none when not a number);
+ * throws with a readable reason when the Markdown does not match.
+ */
+export function parseConclusion(output: unknown): { text: string; merge: { score: number; why: string } | null } {
+	const parsed = conclusionParseSchema.safeParse(output)
 	if (!parsed.success) throw new Error(`The answer did not match the expected format: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
 	const text = parsed.data.markdown.trim()
 	if (!text) throw new Error('The answer was empty.')
-	return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text
+	const m = parsed.data.merge
+	const merge =
+		m && Number.isFinite(m.score) ? { score: Math.max(0, Math.min(100, Math.round(m.score))), why: m.why.trim().slice(0, MAX_WHY) } : null
+	return { text: text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1)}…` : text, merge }
 }

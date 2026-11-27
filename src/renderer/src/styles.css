@@ -7744,3 +7744,24 @@ body.resizing-y * {
 .console-hint.ai .mono {
 	color: var(--accent);
 }
+
+/* Merge score (issue #328) */
+.merge-score {
+	margin: 0 0 12px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+.merge-score p {
+	margin: 0;
+}
+.merge-score .merge-score-why {
+	margin-top: 4px;
+}
+.merge-score details {
+	margin-top: 6px;
+}
+.merge-score-parts {
+	margin: 4px 0;
+	padding-left: 18px;
+}

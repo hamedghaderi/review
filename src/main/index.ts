@@ -473,6 +473,7 @@ function registerIpc(): void {
 		service.prDescription(str(repoId, 'repository'), comparisonId(reviewId)),
 	)
 	handle(IPC.headChecks, (repoId: unknown, reviewId: unknown) => service.headChecks(str(repoId, 'repository'), comparisonId(reviewId)))
+	handle(IPC.mergeScore, (repoId: unknown, reviewId: unknown) => service.mergeScore(str(repoId, 'repository'), comparisonId(reviewId)))
 	handle(IPC.prDescriptionPreview, (repoId: unknown, reviewId: unknown, text: unknown) =>
 		service.previewDescription(str(repoId, 'repository'), comparisonId(reviewId), prDescriptionText(text)),
 	)
