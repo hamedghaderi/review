@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { recordText } from '../../shared/mergeScore.ts'
 import type { MergeScoreView } from '../../shared/types.ts'
 
 /**
@@ -35,6 +36,7 @@ export function MergeScore({ repoId, reviewId, refresh }: { repoId: string; revi
 				</span>
 			</p>
 			{v && v.why && <p className="merge-score-why selectable">{v.why}</p>}
+			{view.record && <p className="merge-score-record muted">{recordText(view.record)}</p>}
 			<details>
 				<summary>How the data score is made</summary>
 				{view.parts.length ? (

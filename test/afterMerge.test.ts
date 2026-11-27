@@ -4,11 +4,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { followAfterMerge, type FollowTarget } from '../src/main/afterMerge.ts'
+import { addedRanges, followAfterMerge, type FollowTarget } from '../src/main/afterMerge.ts'
 import type { GitHubService } from '../src/main/github.ts'
 import { ReviewService } from '../src/main/service.ts'
 import { ReviewStore } from '../src/main/store.ts'
-import type { AiRun, Finding, PrDetail, Review } from '../src/shared/types.ts'
+import type { MergeFixInput } from '../src/main/ai/mergeFix.ts'
+import { worstFix } from '../src/shared/mergeScore.ts'
+import type { AiRun, Finding, FixLevel, PrDetail, Review } from '../src/shared/types.ts'
 
 function lines(n: number, edit: Record<number, string> = {}, top: Array<string> = []): string {
 	return [...top, ...Array.from({ length: n }, (_, i) => edit[i + 1] ?? `l${i + 1}`)].join('\n') + '\n'
@@ -160,4 +162,124 @@ test('following merged pull requests: settled findings are kept, untouched ones 
 	// Done: nothing is asked again.
 	await svc.followMerged(null, new Date('2027-04-01T00:00:00Z'))
 	assert.equal(asked.length, 2)
+})
+
+test('added ranges: the lines a pull request added or changed on its head, by file; deletions alone add nothing', async () => {
+	const w = world()
+	w.run('checkout', '-q', 'topic')
+	const head = w.commit({ 'f.txt': lines(10, { 5: 'L5', 8: 'L8' }, ['top']), 'g.txt': null, 'h.txt': 'h1\nh2\n' }, 'more')
+	assert.deepEqual(
+		(await addedRanges(w.dir, w.run('rev-parse', 'main~1'), head)).map((t) => t.id),
+		['f.txt:1-1', 'f.txt:6-6', 'f.txt:9-9', 'h.txt:1-2'],
+	)
+})
+
+test('merge score track record: the head that merged is followed 30 days on its own lines, and each change is judged once', async () => {
+	const w = world()
+	const fix = w.commit({ 'f.txt': lines(10, { 5: 'fixed' }) }, 'Handle the empty case')
+	const tip = fix
+	const mergedAt = '2026-10-01T00:00:00Z'
+	const detail = { state: 'merged', mergedAt, mergeCommit: w.merge, baseRef: 'main', headSha: w.head, title: PR.title } as PrDetail
+	const gh = {
+		status: () => ({ state: 'connected', login: 'me' }),
+		detail: async () => detail,
+		branchTipAt: async () => tip,
+	} as unknown as GitHubService
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'after-store-')))
+	await store.load()
+	const seen = { head: w.head, data: 82, final: 74, at: mergedAt }
+	await store.update((d) => {
+		d.repos.r = {
+			repoId: 'r',
+			root: w.dir,
+			selectedBase: null,
+			activeReviewId: null,
+			reviews: {
+				rev: {
+					id: 'rev',
+					repoId: 'r',
+					baseSha: w.run('rev-parse', 'topic~1'),
+					headSha: w.head,
+					updatedAt: mergedAt,
+					pr: { ...PR },
+					mergeSeen: seen,
+				} as unknown as Review,
+			},
+			aiRuns: {}, // no findings: a clean review counts too
+		}
+	})
+	const svc = new ReviewService(store, gh)
+	const asked: Array<MergeFixInput> = []
+	let answer: { level: FixLevel; why: string } | null = null
+	const judge = async (_repo: string, input: MergeFixInput) => (asked.push(input), answer)
+
+	// No model yet: the change waits, not judged.
+	await svc.followMerged(null, new Date('2026-10-20T00:00:00Z'), judge)
+	let o = store.read().repos.r.merged!['7']!.outcome!
+	assert.deepEqual(o.score, seen, 'held against the score seen before it merged')
+	assert.equal(o.done, false)
+	assert.equal(o.lines['f.txt:5-5'].commit?.sha, fix)
+	assert.deepEqual(
+		o.fixes.map((f) => [f.sha, f.level]),
+		[[fix, null]],
+	)
+	assert.equal(asked.length, 1)
+	assert.match(asked[0].prDiff, /\+L5/, "the pull request's diff for that file")
+	assert.match(asked[0].commit.diff, /\+fixed/)
+	assert.match(asked[0].commit.message, /Handle the empty case/)
+
+	// The window passes and a model answers: settled.
+	answer = { level: 'should_fix', why: 'Line 5 broke on empty input.' }
+	await svc.followMerged(null, new Date('2026-11-15T00:00:00Z'), judge)
+	o = store.read().repos.r.merged!['7']!.outcome!
+	assert.equal(o.done, true)
+	assert.deepEqual(o.fixes[0].level, 'should_fix')
+	assert.equal(worstFix(o), 'should_fix')
+	assert.equal(asked.length, 2)
+
+	// Settled, though the 90-day finding window hasn't passed: the outcome isn't judged again.
+	await svc.followMerged(null, new Date('2026-11-20T00:00:00Z'), judge)
+	assert.equal(asked.length, 2)
+})
+
+test('merge score track record: a score seen on an earlier head is not held against what merged', async () => {
+	const w = world()
+	const detail = {
+		state: 'merged',
+		mergedAt: '2026-10-01T00:00:00Z',
+		mergeCommit: w.merge,
+		baseRef: 'main',
+		headSha: w.head,
+		title: PR.title,
+	} as PrDetail
+	const gh = {
+		status: () => ({ state: 'connected', login: 'me' }),
+		detail: async () => detail,
+		branchTipAt: async () => w.merge,
+	} as unknown as GitHubService
+	const store = ReviewStore.in(mkdtempSync(join(tmpdir(), 'after-store-')))
+	await store.load()
+	const old = w.run('rev-parse', 'topic~1') // an earlier head, before the change
+	await store.update((d) => {
+		d.repos.r = {
+			repoId: 'r',
+			root: w.dir,
+			selectedBase: null,
+			activeReviewId: null,
+			reviews: {
+				rev: {
+					id: 'rev',
+					repoId: 'r',
+					baseSha: old,
+					headSha: old,
+					updatedAt: '2026-10-01T00:00:00Z',
+					pr: { ...PR },
+					mergeSeen: { head: old, data: 90, final: null, at: '' },
+				} as unknown as Review,
+			},
+			aiRuns: {},
+		}
+	})
+	await new ReviewService(store, gh).followMerged(null, new Date('2026-11-15T00:00:00Z'))
+	assert.equal(store.read().repos.r.merged!['7']!.outcome, null)
 })

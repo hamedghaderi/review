@@ -73,6 +73,10 @@ import type {
 	PyImportRef,
 	TargetProbe,
 	MergeScoreView,
+	MergeOutcome,
+	MergeFix,
+	MergedPr,
+	FixLevel,
 } from '../shared/types.ts'
 import {
 	MAX_REVIEWER_NOTES,
@@ -126,6 +130,7 @@ import {
 	changesOf,
 	sharedCommits,
 	shortRef,
+	git,
 	type ComparisonData,
 } from './git.ts'
 import { findTakeover, takeoverFact, uncreditedAuthors } from './takeover.ts'
@@ -156,14 +161,15 @@ import { issueRefs } from './ai/background.ts'
 import { ContextImages, isImageType } from './contextImages.ts'
 import { loadFacts } from './ai/facts.ts'
 import { noteChecks, summarizeOutcomes } from './ai/outcomes.ts'
-import { AFTER_MERGE_DAYS, followAfterMerge, type FollowTarget } from './afterMerge.ts'
+import { addedRanges, AFTER_MERGE_DAYS, followAfterMerge, type FollowTarget, type MergedRef } from './afterMerge.ts'
+import type { MergeFixInput } from './ai/mergeFix.ts'
 import { createReviewTools } from './ai/lookup.ts'
 import type { McpService } from './ai/mcp.ts'
 import type { AiController, ComparisonAccess } from './ai/controller.ts'
 import { CI_FAILED, CI_PASSED, tallyChecks, type HeadChecks } from '../shared/ci.ts'
 import { readBaseChecks, type BaseChecks } from './baseCi.ts'
 import { autoAddFindings, autoMark, findingRoots, findingState } from '../shared/findings.ts'
-import { dataScore, finalScore, WEIGHTS_TUNED } from '../shared/mergeScore.ts'
+import { dataScore, finalScore, MERGE_OUTCOME_DAYS, trackRecord, WEIGHTS_TUNED, worstFix } from '../shared/mergeScore.ts'
 import { publicRepo, screenFinding } from '../shared/screen.ts'
 import {
 	canMarkSeen,
@@ -177,7 +183,7 @@ import {
 	type WatchedPr,
 } from '../shared/inbox.ts'
 import type { MyReview } from '../shared/prStack.ts'
-import { notesKeyOf, type ReviewStore, type StoreData } from './store.ts'
+import { notesKeyOf, type RepoState, type ReviewStore, type StoreData } from './store.ts'
 import { applyGroups, bucketsToCheck, collectDismissals, draftInputFor, freeDismissals } from './notePatterns.ts'
 
 import { aiStartScope, anchor, reviewUpdate } from './validate.ts'
@@ -464,7 +470,19 @@ export class ReviewService {
 		const { score, parts } = await this.mergeData(repoId, reviewId, signal)
 		const v = stored.conclusion?.merge ?? null
 		const verdict = v && v.head === stored.headSha ? v : null
-		return { data: score, parts, final: verdict ? finalScore(score, verdict) : null, verdict, tuned: WEIGHTS_TUNED }
+		const final = verdict ? finalScore(score, verdict) : null
+		// The score you saw last for this head is the one its outcome is held against once it merges.
+		const seen = stored.mergeSeen
+		if (!seen || seen.head !== stored.headSha || seen.data !== score || seen.final !== final)
+			await this.store.update((d) => {
+				const r = d.repos[repoId]?.reviews[reviewId]
+				if (r) r.mergeSeen = { head: stored.headSha, data: score, final, at: new Date().toISOString() }
+			})
+		const outcomes = (repos: Array<RepoState>) =>
+			repos.flatMap((r) => Object.values(r.merged ?? {}).flatMap((m) => (m?.outcome ? [m.outcome] : [])))
+		const repos = Object.values(this.store.read().repos)
+		const record = trackRecord(final ?? score, outcomes(repos.filter((r) => r.repoId === repoId)), outcomes(repos))
+		return { data: score, parts, final, verdict, tuned: WEIGHTS_TUNED, record }
 	}
 
 	async mergeData(repoId: string, reviewId: string, signal?: AbortSignal): Promise<ReturnType<typeof dataScore>> {
@@ -1762,10 +1780,18 @@ export class ReviewService {
 	/**
 	 * Follows the findings of every reviewed pull request that merged past the merge, for Outcomes (see afterMerge.ts):
 	 * one GitHub read per pull request not settled yet, its merge commit and the base branch's commit at the window's end
-	 * fetched by id, and the lines followed in Git. Nothing is checked out or run, and no model is asked. One pull
-	 * request that can't be read doesn't stop the others; it is named in `problems`.
+	 * fetched by id, and the lines followed in Git. Nothing is checked out or run. One pull request that can't be read
+	 * doesn't stop the others; it is named in `problems`.
+	 *
+	 * A pull request whose merge score was seen (issue #328) also has its own added lines followed for 30 days, and each
+	 * commit that changed them is put to `judge` (the model for questions): was it a fix, and how serious. Without a
+	 * judge, or when one can't answer, the commit waits unjudged and is asked about next time.
 	 */
-	async followMerged(repoId: string | null, now = new Date()): Promise<{ followed: number; problems: Array<string> }> {
+	async followMerged(
+		repoId: string | null,
+		now = new Date(),
+		judge?: (repoId: string, input: MergeFixInput) => Promise<{ level: FixLevel; why: string } | null>,
+	): Promise<{ followed: number; problems: Array<string> }> {
 		const gh = this.requireGitHub()
 		const problems: Array<string> = []
 		let followed = 0
@@ -1773,14 +1799,15 @@ export class ReviewService {
 			if (repoId !== null && s.repoId !== repoId) continue
 			const byPr = new Map<string, Array<Review>>() // "owner/name#N" → its reviewed snapshots that have findings
 			for (const r of Object.values(s.reviews)) {
-				if (!r.pr || !s.aiRuns[r.id]?.some((x) => !x.fixture && x.findings.length)) continue
+				if (!r.pr || (!r.mergeSeen && !s.aiRuns[r.id]?.some((x) => !x.fixture && x.findings.length))) continue
 				const key = `${r.pr.repo}#${r.pr.number}`
 				byPr.set(key, [...(byPr.get(key) ?? []), r])
 			}
 			for (const reviews of byPr.values()) {
 				const { repo, number } = reviews[0].pr!
 				const known = s.merged?.[String(number)]
-				if (known === null || known?.done) continue
+				const outcomeSettled = known?.outcome === null || (!!known?.outcome && worstFix(known.outcome) !== null)
+				if (known === null || (known?.done && known.outcome !== undefined && outcomeSettled)) continue
 				try {
 					const d = await gh.detail(repo, number)
 					if (d.state === 'closed') {
@@ -1811,7 +1838,14 @@ export class ReviewService {
 					}
 					const pr = { repo, number, title: d.title, mergeCommit: d.mergeCommit }
 					const results = await followAfterMerge(s.root, review.headSha, pr, tip, targets)
-					const merged = {
+					// Only the head that merged: a score seen on an earlier head says nothing about what merged.
+					const outcome =
+						review.headSha === d.headSha
+							? await this.followOutcome(s.root, review, pr, d.mergedAt, d.baseRef, known?.outcome, now, (input) =>
+									judge ? judge(s.repoId, input) : Promise.resolve(null),
+								)
+							: null
+					const merged: MergedPr = {
 						repo,
 						title: d.title,
 						mergeCommit: d.mergeCommit,
@@ -1820,6 +1854,7 @@ export class ReviewService {
 						until,
 						done: now.getTime() >= ends,
 						findings: { ...settled, ...Object.fromEntries(results) },
+						outcome,
 					}
 					await this.store.update((x) => void ((x.repos[s.repoId].merged ??= {})[String(number)] = merged))
 					followed += results.size
@@ -1830,6 +1865,74 @@ export class ReviewService {
 			await this.store.update((x) => void (x.repos[s.repoId].followedAt = now.toISOString()))
 		}
 		return { followed, problems }
+	}
+
+	/**
+	 * A merged pull request's own lines over the 30 days after it merged, against the merge score seen for the head that
+	 * merged (issue #328). Null when no score was seen for that head. Lines that changed are settled; untouched ones are
+	 * followed again until the window passes. Each new commit that changed them is judged; unjudged ones are asked again.
+	 */
+	private async followOutcome(
+		root: string,
+		review: Review,
+		pr: MergedRef,
+		mergedAt: string,
+		baseRef: string,
+		known: MergeOutcome | null | undefined,
+		now: Date,
+		judge: (input: MergeFixInput) => Promise<{ level: FixLevel; why: string } | null>,
+	): Promise<MergeOutcome | null> {
+		const seen = review.mergeSeen?.head === review.headSha ? review.mergeSeen : null
+		if (!seen) return null
+		let outcome: MergeOutcome = known ?? { score: seen, until: mergedAt, done: false, lines: {}, fixes: [] }
+		if (!outcome.done) {
+			const ends = Date.parse(mergedAt) + MERGE_OUTCOME_DAYS * 86_400_000
+			const until = new Date(Math.min(now.getTime(), ends)).toISOString()
+			const tip = await this.requireGitHub().branchTipAt(pr.repo, baseRef, until)
+			if (!tip) throw new AppFail('github-failed', `GitHub lists no commit on ${baseRef} by ${until}.`)
+			const info = this.repos.get(review.repoId) ?? (await readRepo(root))
+			await ensureCommits(root, fetchRemote(info, [pr.repo]), [review.baseSha, tip])
+			const settled = Object.fromEntries(Object.entries(outcome.lines).filter(([, r]) => r.state !== 'untouched'))
+			const targets = (await addedRanges(root, review.baseSha, review.headSha)).filter((t) => !settled[t.id])
+			const lines = { ...settled, ...Object.fromEntries(await followAfterMerge(root, review.headSha, pr, tip, targets)) }
+			const fixes = [...outcome.fixes]
+			for (const r of Object.values(lines))
+				if (r.commit && (r.state === 'changed' || r.state === 'reverted') && !fixes.some((f) => f.sha === r.commit!.sha))
+					fixes.push({ ...r.commit, reverted: r.state === 'reverted', level: r.state === 'reverted' ? 'blocking' : null, why: null })
+			outcome = { ...outcome, until, done: now.getTime() >= ends, lines, fixes }
+		}
+		const fixes: Array<MergeFix> = []
+		for (const f of outcome.fixes) {
+			if (f.level !== null) {
+				fixes.push(f)
+				continue
+			}
+			const paths = [
+				...new Set(
+					Object.entries(outcome.lines)
+						.filter(([, r]) => r.commit?.sha === f.sha)
+						.map(([id]) => id.slice(0, id.lastIndexOf(':'))),
+				),
+			]
+			const diff = async (args: Array<string>): Promise<string> => {
+				const r = await git(root, args, 4 * 1024 * 1024)
+				return r.code === 0 ? r.stdout.toString('utf8') : ''
+			}
+			const [prDiff, message, commitDiff] = await Promise.all([
+				diff(['diff', '--no-color', '--no-ext-diff', review.baseSha, review.headSha, '--', ...paths]),
+				diff(['show', '-s', '--format=%B', f.sha]),
+				diff(['show', '--no-color', '--no-ext-diff', '--format=', f.sha]),
+			])
+			const days = Math.max(0, Math.round((Date.parse(f.at) - Date.parse(mergedAt)) / 86_400_000))
+			const j = await judge({
+				pr: { repo: pr.repo, number: pr.number, title: pr.title },
+				prDiff,
+				commit: { sha: f.sha, message, diff: commitDiff },
+				days,
+			})
+			fixes.push(j ? { ...f, level: j.level, why: j.why } : f)
+		}
+		return { ...outcome, fixes }
 	}
 
 	homeInbox(): HomeInbox {

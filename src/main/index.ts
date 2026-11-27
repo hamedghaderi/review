@@ -1,4 +1,5 @@
 import { access, mkdir, realpath } from 'node:fs/promises'
+import type { MergeFixInput } from './ai/mergeFix.ts'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -109,6 +110,8 @@ const lateMembers = new Map<string, Array<string>>() // finished runs whose memb
 let service: ReviewService
 let store: ReviewStore
 let ai: AiController
+/** Whether a commit after a merge fixed something, and how serious (issue #328), with the model for questions. */
+const judgeMergeFix = (repoId: string, input: MergeFixInput) => ai.judgeMergeFix(repoId, input, connections.view().questionModel)
 let connections: ConnectionService
 let credentials: CredentialService
 let mcp: McpService
@@ -723,7 +726,9 @@ function registerIpc(): void {
 	handle(IPC.aiUsage, async (by: unknown) => usage.summary(usagePeriod(by)))
 	handle(IPC.aiBudget, async () => budgetView())
 	handle(IPC.aiOutcomes, async (filter: unknown) => service.outcomes(outcomeFilter(filter)))
-	handle(IPC.aiFollowMerged, (repoId: unknown) => service.followMerged(repoId === null ? null : str(repoId, 'repository', 512)))
+	handle(IPC.aiFollowMerged, (repoId: unknown) =>
+		service.followMerged(repoId === null ? null : str(repoId, 'repository', 512), new Date(), judgeMergeFix),
+	)
 	handle(IPC.aiSetBudgets, async (b: unknown) => {
 		await connections.setBudgets(budgetSettings(b))
 		// A higher cap can let paused automatic reviews go ahead.
@@ -1003,6 +1008,12 @@ app.whenReady().then(async () => {
 			)
 		},
 	})
+	// Merged pull requests are followed once a day, so the merge score's track record fills without anyone asking (issue #328).
+	const followDaily = () => {
+		if (github.status().state === 'connected') void service.followMerged(null, new Date(), judgeMergeFix).catch(() => {})
+	}
+	setTimeout(followDaily, 10 * 60_000).unref()
+	setInterval(followDaily, 24 * 60 * 60_000).unref()
 	// Reviews a budget paused go ahead once a new day or month frees it.
 	autoReviewer.resumePaused()
 	setInterval(() => autoReviewer.resumePaused(), 15 * 60_000).unref()
