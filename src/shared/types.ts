@@ -673,6 +673,7 @@ export interface Review {
 	findingDecisions: Record<string, FindingDecision> // keyed by finding id
 	// The PR author's replies in other reviewers' threads, as judged for an automatic approval, by thread id (issue #195).
 	authorReplies?: Record<string, AuthorReplyCheck> // written by the main process only
+	mergeSeen?: MergeSeen // the merge score last shown (issue #328); main process only
 	publication?: Publication // GitHub reviews this snapshot's comments were published to; written by the main process only
 	carriedOrigins?: Array<string> // CarriedFrom.originId of every comment carried in, even if deleted since; main process only
 	context?: ReviewContext // what you tell the AI reviewer; absent until you add some
@@ -745,6 +746,52 @@ export interface MergeScoreView {
 	final: number | null // null: no conclusion has judged this head yet
 	verdict: MergeVerdict | null
 	tuned: boolean // the deductions were tuned against merged pull requests' outcomes
+	record: TrackRecord | null // how merged pull requests that scored like this did; null: the score isn't known
+}
+
+/** The score shown for a head before it merged: the last one worked out (issue #328). */
+export interface MergeSeen {
+	head: string
+	data: number
+	final: number | null
+	at: string
+}
+
+/**
+ * How serious the problem was that a later commit fixed in a merged pull request's lines, on the finding scale: "minor"
+ * covers what the reviewer calls nit, suggestion and the like. "not-a-fix": a refactor, a new feature, or a fix for
+ * something the pull request didn't bring in.
+ */
+export type FixLevel = 'blocking' | 'should_fix' | 'minor' | 'not-a-fix'
+
+/** A commit that changed a merged pull request's lines within the window. */
+export interface MergeFix {
+	sha: string
+	subject: string
+	at: string
+	reverted: boolean // it reverts the pull request: blocking, no model asked
+	level: FixLevel | null // null: not judged yet (no model for questions, a budget, a failure); asked again next time
+	why: string | null
+}
+
+/** What became of a merged pull request's own lines in the 30 days after it merged, against the score it had. */
+export interface MergeOutcome {
+	score: MergeSeen
+	until: string // followed up to here
+	done: boolean // the window has passed
+	lines: Record<string, AfterMergeResult> // its added lines, by "path:start-end" on its head
+	fixes: Array<MergeFix>
+}
+
+/** Merged pull requests that scored in the same band, and what they needed (issue #328). */
+export interface TrackRecord {
+	band: [number, number] // scores from–to
+	scope: 'repo' | 'all' // this repository's, or every repository's while this one has too few
+	followed: number // settled: the window passed and every change in it was judged
+	blocking: number // the worst fix they needed
+	shouldFix: number
+	minorOnly: number
+	range: [number, number] | null // likely share needing a blocking or should-fix fix, 0–1; null below MIN_TRACK_RECORD
 }
 
 /** An image you gave the reviewer. The bytes live in the app's image folder under `id` (their SHA-256), not in the store. */
@@ -1969,6 +2016,8 @@ export interface MergedPr {
 	until: string // the end of the window followed so far: the check's time, or the end of the window once it has passed
 	done: boolean // the window has passed: nothing left to follow
 	findings: Record<string, AfterMergeResult> // by finding id, on the snapshot that was followed
+	// Its own lines against the merge score (issue #328); null: no score was seen for the head that merged; absent: not looked yet.
+	outcome?: MergeOutcome | null
 }
 
 /** A finding whose lines changed after its pull request merged, for the list under the Outcomes tables. */

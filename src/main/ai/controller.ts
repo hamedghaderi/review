@@ -6,6 +6,7 @@ import {
 	type AiRun,
 	type ChangeConclusion,
 	type MergeScorePart,
+	type FixLevel,
 	type MergeVerdict,
 	type ChangeExplanation,
 	type AiScope,
@@ -48,6 +49,7 @@ import {
 	REVIEW_RULES,
 	runMembers,
 } from '../../shared/types.ts'
+import { buildMergeFixRequest, parseMergeFix, type MergeFixInput } from './mergeFix.ts'
 import {
 	buildCommitCheckRequest,
 	COMMIT_CHECK_INSTRUCTIONS,
@@ -1523,6 +1525,27 @@ export class AiController {
 			return { ...parseAuthorReply(response.output), model }
 		} catch (e) {
 			return { kind: null, reason: `Not checked: ${e instanceof Error ? e.message : String(e)}`, model }
+		}
+	}
+
+	/**
+	 * Whether a commit after a merge fixed a problem the pull request brought in, and how serious (issue #328), with the
+	 * model for questions. Null when it can't be asked now (no model, a budget, a failure): it's asked again next time.
+	 */
+	async judgeMergeFix(
+		repoId: string,
+		input: MergeFixInput,
+		selection: ModelSelection | null,
+	): Promise<{ level: FixLevel; why: string } | null> {
+		if (!selection) return null
+		const label = this.models?.label(selection.connectionId) ?? selection.connectionId
+		if (this.budget?.check([{ id: selection.connectionId, label }]).over.length) return null
+		try {
+			const config = await this.configFor(selection, 'question', repoId)
+			const response = await config.provider.review(buildMergeFixRequest(input), AbortSignal.timeout(120_000))
+			return parseMergeFix(response.output)
+		} catch {
+			return null
 		}
 	}
 

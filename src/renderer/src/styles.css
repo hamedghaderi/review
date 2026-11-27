@@ -7755,7 +7755,8 @@ body.resizing-y * {
 .merge-score p {
 	margin: 0;
 }
-.merge-score .merge-score-why {
+.merge-score .merge-score-why,
+.merge-score .merge-score-record {
 	margin-top: 4px;
 }
 .merge-score details {

@@ -118,3 +118,27 @@ async function changedBy(root: string, sha: string, pr: MergedRef): Promise<Afte
 		subject.startsWith(`Revert "${pr.title}"`)
 	return { state: reverts ? 'reverted' : 'changed', commit: { sha, subject, at }, reason: null }
 }
+
+const MAX_ADDED_RANGES = 300 // per pull request: enough to tell, cheap enough to follow
+
+/**
+ * The lines a pull request added or changed, as ranges on its head, to follow past the merge for the merge score's
+ * track record (issue #328). Ids are "path:start-end". Quoted (unusual) paths and binary files are left out.
+ */
+export async function addedRanges(root: string, base: string, head: string): Promise<Array<FollowTarget>> {
+	if (![base, head].every(isSha)) throw new AppFail('invalid-input', 'Invalid commit id.')
+	const r = await git(root, ['-c', 'core.quotePath=false', 'diff', '-U0', '--no-color', '--no-ext-diff', base, head], 32 * 1024 * 1024)
+	if (r.code !== 0) throw new AppFail('git-failed', `git diff failed: ${r.stderr.trim()}`)
+	const out: Array<FollowTarget> = []
+	let path: string | null = null
+	for (const line of r.stdout.toString('utf8').split('\n')) {
+		if (line.startsWith('+++ ')) path = line.startsWith('+++ b/') ? line.slice(6) : null
+		const m = path && /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line)
+		if (!m || m[2] === '0') continue
+		const start = Number(m[1])
+		const end = start + (m[2] === undefined ? 1 : Number(m[2])) - 1
+		out.push({ id: `${path}:${start}-${end}`, path: path!, start, end })
+		if (out.length >= MAX_ADDED_RANGES) break
+	}
+	return out
+}

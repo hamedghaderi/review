@@ -348,6 +348,18 @@ export const authorReplySchema = z.object({
 export const AUTHOR_REPLY_SCHEMA_NAME = 'author_reply'
 export const AUTHOR_REPLY_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(authorReplySchema, { target: 'draft-7' }))
 
+/** Whether a later commit fixed a problem a merged pull request brought in, and how serious it was (issue #328). */
+export const mergeFixSchema = z.object({
+	level: z
+		.enum(['blocking', 'should_fix', 'minor', 'not-a-fix'])
+		.describe(
+			'"blocking": the problem broke what the pull request was for or a path callers commonly use, was a security problem, or lost, corrupted or leaked data. "should_fix": a real problem, but on a rare path or with limited harm. "minor": no effect on what the code does, or close to none. "not-a-fix": a refactor, a new feature, or a fix for something the pull request did not bring in.',
+		),
+	why: z.string().describe('One or two sentences: what the problem was and why it is that level, naming the file.'),
+})
+export const MERGE_FIX_SCHEMA_NAME = 'merge_fix'
+export const MERGE_FIX_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(mergeFixSchema, { target: 'draft-7' }))
+
 /** The double-check of one blocking finding. */
 export const verifySchema = z.object({
 	verdict: z

@@ -1,5 +1,5 @@
 import type { HeadChecks } from './ci.ts'
-import type { MergeScorePart, RiskLevel, Severity } from './types.ts'
+import type { FixLevel, MergeOutcome, MergeScorePart, RiskLevel, Severity, TrackRecord } from './types.ts'
 
 /**
  * How safe a pull request is to merge (issue #328), from the data alone: 100 less fixed deductions, each one listed. The
@@ -123,4 +123,86 @@ export function dataScore(i: MergeInput): { score: number; parts: Array<MergeSco
  */
 export function finalScore(dataNow: number, verdict: { data: number; ai: number }): number {
 	return Math.max(0, Math.min(100, Math.round(dataNow + verdict.ai - verdict.data)))
+}
+
+/** How long a merged pull request's lines are followed for the track record. */
+export const MERGE_OUTCOME_DAYS = 30
+/** Below this many settled pull requests in a band, the track record gives counts only, no share. */
+export const MIN_TRACK_RECORD = 10
+
+const RANK: Record<FixLevel, number> = { blocking: 0, should_fix: 1, minor: 2, 'not-a-fix': 3 }
+
+/**
+ * The most serious fix a merged pull request needed: "none" when nothing in its window was a fix; null while it isn't
+ * settled (the window hasn't passed, or a change in it hasn't been judged).
+ */
+export function worstFix(o: MergeOutcome): FixLevel | 'none' | null {
+	if (!o.done) return null
+	let worst: FixLevel | null = null
+	for (const f of o.fixes) {
+		const level = f.reverted ? 'blocking' : f.level
+		if (!level) return null
+		if (!worst || RANK[level] < RANK[worst]) worst = level
+	}
+	return !worst || worst === 'not-a-fix' ? 'none' : worst
+}
+
+/** Scores in tens: 0–9, 10–19 … 90–100. */
+export function bandOf(score: number): [number, number] {
+	const lo = Math.min(90, Math.floor(score / 10) * 10)
+	return [lo, lo === 90 ? 100 : lo + 9]
+}
+
+/** Wilson score interval, 95%: where the true share likely is, given k of n. Narrows as n grows. */
+export function wilson(k: number, n: number): [number, number] {
+	if (!n) return [0, 1]
+	const z = 1.96
+	const p = k / n
+	const d = 1 + (z * z) / n
+	const mid = (p + (z * z) / (2 * n)) / d
+	const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d
+	return [Math.max(0, mid - half), Math.min(1, mid + half)]
+}
+
+/**
+ * How merged pull requests that scored in `score`'s band did: this repository's, or every repository's while this
+ * one has fewer than MIN_TRACK_RECORD settled in the band. Each is banded by the score it showed: the AI's when there was one.
+ */
+export function trackRecord(score: number, here: Array<MergeOutcome>, everywhere: Array<MergeOutcome>): TrackRecord {
+	const band = bandOf(score)
+	const settled = (list: Array<MergeOutcome>) =>
+		list.flatMap((o) => {
+			const s = o.score.final ?? o.score.data
+			const w = worstFix(o)
+			return w && s >= band[0] && s <= band[1] ? [w] : []
+		})
+	const mine = settled(here)
+	const all = mine.length < MIN_TRACK_RECORD ? settled(everywhere) : mine
+	const use = all.length > mine.length ? all : mine
+	const count = (l: FixLevel) => use.filter((w) => w === l).length
+	const blocking = count('blocking')
+	const shouldFix = count('should_fix')
+	return {
+		band,
+		scope: use === mine ? 'repo' : 'all',
+		followed: use.length,
+		blocking,
+		shouldFix,
+		minorOnly: count('minor'),
+		range: use.length >= MIN_TRACK_RECORD ? wilson(blocking + shouldFix, use.length) : null,
+	}
+}
+
+const pct = (x: number) => `${Math.round(x * 100)}%`
+
+/** "Of 31 merged pull requests here that scored 70–79, 3 needed a fix (10%, likely 3–25%): 1 blocking, 2 should fix." */
+export function recordText(r: TrackRecord): string {
+	const where = r.scope === 'repo' ? 'here' : 'in all your repositories'
+	const band = `${r.band[0]}–${r.band[1]}`
+	if (!r.range)
+		return `No track record for scores of ${band} yet: ${r.followed} of ${MIN_TRACK_RECORD} merged pull requests ${where} followed for 30 days.`
+	const needed = r.blocking + r.shouldFix
+	const kinds = [r.blocking ? `${r.blocking} blocking` : null, r.shouldFix ? `${r.shouldFix} should fix` : null].filter(Boolean).join(', ')
+	const minor = r.minorOnly ? ` ${r.minorOnly} more needed only minor fixes.` : ''
+	return `Of ${r.followed} merged pull requests ${where} that scored ${band}, ${needed} needed a fix within 30 days (${pct(needed / r.followed)}, likely ${pct(r.range[0])}–${pct(r.range[1])})${kinds ? `: ${kinds}` : ''}.${minor}`
 }
