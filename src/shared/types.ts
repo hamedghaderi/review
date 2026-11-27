@@ -2122,6 +2122,15 @@ export interface OutcomeRow {
 	cost: AiCost | null // what its runs cost; null with a group filter, which can't split cost
 }
 
+/**
+ * The double-check's newest verdict against what you decided (issue #332), by the model that checked. Real: you accepted
+ * it. Wrong: you dismissed it as wrong. Other dismissals, undecided findings and automatic reviews' comments say neither.
+ */
+export interface JudgeRow {
+	model: string // the model that checked
+	cells: Record<FindingVerification['verdict'], { real: number; wrong: number }>
+}
+
 /** The Outcomes page: from every repository's reviews and runs on this computer. */
 export interface OutcomeSummary {
 	filter: OutcomeFilter
@@ -2141,6 +2150,7 @@ export interface OutcomeSummary {
 	aiText: Array<AiTextRow> // by feature, then model; period, repository and model filters only
 	notes: Array<NoteCheck> // your reviewer notes and how each is doing, whatever the period (issue #278)
 	merge: MergeScoreOutcomes // how the merge score did on merged pull requests; repository filter only (issue #328)
+	judge: Array<JudgeRow> // the double-check against your decisions, most counted first (issue #332)
 }
 
 /** The milestones of a review run, in the order a run passes them (issue #299). */

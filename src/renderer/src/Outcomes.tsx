@@ -12,6 +12,7 @@ import type {
 	DismissReason,
 	NoteCheck,
 	FindingCategory,
+	JudgeRow,
 	OutcomeCounts,
 	OutcomeFilter,
 	OutcomeGroup,
@@ -346,6 +347,80 @@ function MergeScoreSection({ m }: { m: MergeScoreOutcomes }) {
 	)
 }
 
+/**
+ * The double-check against your decisions (issue #332): where it called a finding real or wrong and you said otherwise.
+ * Agreement leaves "unsure" out and needs `min` counted, like the other rates.
+ */
+function JudgeSection({ rows, min }: { rows: Array<JudgeRow>; min: number }) {
+	if (!rows.length) return null
+	const all: JudgeRow = {
+		model: 'All checkers',
+		cells: { holds: { real: 0, wrong: 0 }, unsure: { real: 0, wrong: 0 }, wrong: { real: 0, wrong: 0 } },
+	}
+	for (const r of rows)
+		for (const v of ['holds', 'unsure', 'wrong'] as const) {
+			all.cells[v].real += r.cells[v].real
+			all.cells[v].wrong += r.cells[v].wrong
+		}
+	const line = (r: JudgeRow, total = false) => {
+		const c = r.cells
+		const agreed = c.holds.real + c.wrong.wrong
+		const judged = agreed + c.holds.wrong + c.wrong.real
+		return (
+			<tr key={r.model}>
+				<td className="ellipsis" title={r.model}>
+					{total ? <b>{r.model}</b> : r.model}
+				</td>
+				<td className="num">{c.holds.real}</td>
+				<td className="num">{c.holds.wrong}</td>
+				<td className="num">{c.wrong.real}</td>
+				<td className="num">{c.wrong.wrong}</td>
+				<td className="num" title={`${c.unsure.real} you accepted, ${c.unsure.wrong} you dismissed as wrong`}>
+					{c.unsure.real + c.unsure.wrong}
+				</td>
+				<td className="num">{judged >= min ? pct(agreed, judged) : <span className="muted">—</span>}</td>
+			</tr>
+		)
+	}
+	return (
+		<>
+			<div className="section-title">Double-check against you</div>
+			<p className="muted small">
+				Double-checked findings you decided, by the model that checked. Real: you made a comment from it. Wrong: you dismissed it as wrong.
+				Other dismissals, undecided findings and automatic reviews’ comments are left out, since they don’t say whether the problem was
+				real. Agreement leaves “unsure” out and is shown from {min}.
+			</p>
+			<table className="level-table usage-table outcomes-table">
+				<thead>
+					<tr>
+						<th>Checker</th>
+						<th className="num" title="The check said it holds, and you accepted it">
+							Both real
+						</th>
+						<th className="num" title="The check said it holds, and you dismissed it as wrong: the check let it through">
+							Too lenient
+						</th>
+						<th className="num" title="The check said likely wrong, and you accepted it: the check would have dropped a real one">
+							Too harsh
+						</th>
+						<th className="num" title="The check said likely wrong, and you dismissed it as wrong">
+							Both wrong
+						</th>
+						<th className="num" title="The check couldn’t tell">
+							Unsure
+						</th>
+						<th className="num">Agreement</th>
+					</tr>
+				</thead>
+				<tbody>
+					{rows.map((r) => line(r))}
+					{rows.length > 1 && line(all, true)}
+				</tbody>
+			</table>
+		</>
+	)
+}
+
 function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltered: boolean }) {
 	if (!rows.length) return null
 	const reply = (r: AiTextRow, n: number) => (r.feature === 'reply' ? n : <span className="muted">—</span>)
@@ -572,6 +647,7 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 					<Table title="Defects and design" label="Kind" rows={groupRows(s.groups)} min={min} />
 					<Table title="By rule" label="Rule" rows={ruleRows(s.rules)} min={min} />
 					<Table title="By level" label="Level" rows={levelRows(s.levels)} min={min} notWorth />
+					<JudgeSection rows={s.judge} min={min} />
 					<AfterMergeList items={s.afterMerge} />
 					<AiTextTable rows={s.aiText} notFiltered={rest.promptVersion !== null || rest.group !== null} />
 					<MergeScoreSection m={s.merge} />
