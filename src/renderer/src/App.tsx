@@ -108,6 +108,7 @@ import { Outcomes } from './Outcomes.tsx'
 import { Sidebar } from './Sidebar.tsx'
 import { MentionProvider, type Mentions } from './Mention.tsx'
 import { Conclusion } from './Conclusion.tsx'
+import { MergeScore } from './MergeScore.tsx'
 import { ExplainChange } from './ExplainChange.tsx'
 import { EmptyFigure } from './EmptyFigure.tsx'
 import { WhatsNew } from './WhatsNew.tsx'
@@ -2599,6 +2600,7 @@ export function App() {
 														stale={!!conclusion && !!lastFinished && conclusion.runId !== lastFinished.id}
 														late={unreadLate}
 														modelPicker={askModelPicker}
+														score={<MergeScore repoId={comparison.repoId} reviewId={comparison.id} refresh={conclusion?.messages[0]?.id} />}
 														paths={changedPaths}
 														onOpenPath={openPath}
 														onWrite={() => void conclude(null)}

@@ -20,6 +20,7 @@ interface Props {
 	stale: boolean // a newer run finished after this conclusion was written
 	late: number // findings a member the run didn't wait for raised after this conclusion was written
 	modelPicker: ReactNode
+	score: ReactNode // the merge score, under the conclusion's heading (issue #328)
 	paths: ReadonlySet<string> // the changed files' paths, which open from the text
 	onOpenPath(path: string): void
 	onWrite(): void
@@ -42,6 +43,7 @@ export function Conclusion({
 	stale,
 	late,
 	modelPicker,
+	score,
 	paths,
 	onOpenPath,
 	onWrite,
@@ -136,6 +138,7 @@ export function Conclusion({
 								<p className="error-text selectable">{first.text}</p>
 							) : (
 								<>
+									{score}
 									<Markdown text={first.text} paths={paths} onOpenPath={onOpenPath} broken={first.citations?.broken} />
 									<CitationNote result={first.citations} />
 									<div className="conclusion-flag">

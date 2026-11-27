@@ -235,9 +235,18 @@ export const EXPLAIN_SCHEMA_NAME = 'code_answer'
 export const EXPLAIN_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(explainSchema, { target: 'draft-7' }))
 
 /** The conclusion on a whole change, or an answer in the conversation about it. */
+const mergeVerdictSchema = z.object({
+	score: z.number().describe('Your final merge score, 0 to 100: how safe it is to merge as it is.'),
+	why: z.string().describe('Why, in one to three short sentences: what you saw in the code that the data score does or does not capture.'),
+})
 export const conclusionSchema = z.object({
 	markdown: z.string().describe('The conclusion, or the answer to the follow-up question, in Markdown.'),
+	merge: mergeVerdictSchema
+		.nullable()
+		.describe('The conclusion only, when it was given a data merge score: your final score. Null in answers.'),
 })
+// Parsed leniently: a model that leaves `merge` out, or gets it wrong, still gives a conclusion, only without a score.
+export const conclusionParseSchema = conclusionSchema.extend({ merge: mergeVerdictSchema.nullable().catch(null) })
 export const CONCLUSION_SCHEMA_NAME = 'change_conclusion'
 export const CONCLUSION_JSON_SCHEMA: Record<string, unknown> = portable(z.toJSONSchema(conclusionSchema, { target: 'draft-7' }))
 

@@ -3371,6 +3371,33 @@ test('conclusion: needs a finished run, reads the change and its findings, keeps
 	assert.ok(shared.input.includes(`# ${overlap.title}\n${overlap.text}`))
 	await controller.conclude({ ...access, loadOverlap: async () => Promise.reject(new Error('offline')) }, s.comp.id, null, SEL)
 	assert.doesNotMatch(asked.at(-1)!.instructions, /## Other pull requests on the same code/, 'a failed read just leaves it out')
+
+	// The merge score (issue #328): the AI is given the data score and its deductions, and decides the final score.
+	assert.doesNotMatch(asked.at(-1)!.instructions, /## Merge score/, 'not without a data score')
+	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.merge, null)
+	const merge = { score: 70, parts: [{ points: -30, label: '1 blocking finding', detail: ['Subtracts instead of adds'] }] }
+	reply = { markdown: '## What it does\nAdds.', merge: { score: 55.4, why: 'The blocking finding breaks every total (`src/app.ts:3`).' } }
+	const scored = await controller.conclude({ ...access, loadMergeData: async () => merge }, s.comp.id, null, SEL)
+	assert.match(asked.at(-1)!.instructions, /## Merge score\n[\s\S]*You decide the final score/)
+	assert.match(
+		asked.at(-1)!.input,
+		/# Merge score from the data: 70\/100\n- -30: 1 blocking finding \(Subtracts instead of adds\)\n\n# Write your conclusion$/,
+	)
+	assert.deepEqual(scored.merge, {
+		head: s.comp.headSha,
+		data: 70,
+		ai: 55,
+		why: 'The blocking finding breaks every total (`src/app.ts:3`).',
+	})
+	reply = { markdown: 'Because of line 3.', merge: null }
+	await controller.conclude({ ...access, loadMergeData: async () => merge }, s.comp.id, 'Why so low?', SEL)
+	assert.doesNotMatch(asked.at(-1)!.input, /Merge score from the data/, 'answers are not asked for a score')
+	assert.equal(store.read().repos['/repo'].reviews[s.comp.id].conclusion?.merge?.ai, 55, 'an answer keeps the score')
+	for (const r of [{ markdown: 'Fine.' }, { markdown: 'Fine.', merge: { score: 'high', why: '' } }]) {
+		reply = r
+		const none = await controller.conclude({ ...access, loadMergeData: async () => merge }, s.comp.id, null, SEL)
+		assert.deepEqual([none.messages[0].text, none.merge], ['Fine.', null], 'a missing or broken score still gives a conclusion')
+	}
 })
 
 test('conclusion: a second request for the same review is turned away while the first runs', async () => {

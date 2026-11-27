@@ -5,6 +5,8 @@ import {
 	DEFAULT_TEAM_ROLES,
 	type AiRun,
 	type ChangeConclusion,
+	type MergeScorePart,
+	type MergeVerdict,
 	type ChangeExplanation,
 	type AiScope,
 	type Anchor,
@@ -127,6 +129,8 @@ export interface ComparisonAccess {
 	loadDrift?(used: Array<string>, signal: AbortSignal): Promise<ContextFact | null>
 	/** Other open PRs into the same base changing the same files, with their descriptions and diffs (issue #304). */
 	loadOverlap?(signal: AbortSignal): Promise<{ title: string; text: string } | null>
+	/** The data merge score the conclusion's AI score starts from (issue #328). */
+	loadMergeData?(signal: AbortSignal): Promise<{ score: number; parts: Array<MergeScorePart> }>
 	loadFacts?(sources: Array<FileSource>, signal: AbortSignal): Promise<FactsResult>
 	/** Linked issues and the PR conversation; absent for branch reviews. */
 	loadBackground?: RunInput['loadBackground']
@@ -1161,16 +1165,18 @@ export class AiController {
 				await this.addConclusionMessage(repoId, reviewId, { id: randomUUID(), role: 'you', text, at: new Date().toISOString() })
 			let answer: CodeMessage
 			let omitted = earlier?.omitted ?? []
+			let verdict: MergeVerdict | null = null
 			try {
 				const { background, commits, patches } = await this.wholeChange(access)
 				// Read first: it also gives the lookups the base branch's head ("tip").
-				const [drift, overlap] = await Promise.all([
+				const [drift, overlap, merge] = await Promise.all([
 					access.loadDrift ? access.loadDrift([], AbortSignal.timeout(60_000)).catch(() => null) : null,
 					access.loadOverlap ? access.loadOverlap(AbortSignal.timeout(60_000)).catch(() => null) : null,
+					text === null && access.loadMergeData ? access.loadMergeData(AbortSignal.timeout(60_000)).catch(() => null) : null,
 				])
 				const tools = config.limits.lookups !== false && access.tools ? access.tools(CONCLUSION_LOOKUPS) : undefined
 				const l = config.provider.limits
-				const instructions = conclusionInstructions(!!tools, !!drift, !!overlap)
+				const instructions = conclusionInstructions(!!tools, !!drift, !!overlap, !!merge)
 				const room =
 					capacityChars(l.contextWindow, outputBudget(l), instructions.length + (tools ? JSON.stringify(TOOL_DEFINITIONS).length : 0)) -
 					(tools ? CONCLUSION_LOOKUPS.maxChars : 0)
@@ -1189,13 +1195,17 @@ export class AiController {
 					question: text,
 					drift,
 					overlap,
+					merge,
 				})
 				if (text === null) omitted = built.omitted
 				const response = await config.provider.review(built.request, AbortSignal.timeout(300_000))
+				const parsed = parseConclusion(response.output)
+				verdict =
+					merge && parsed.merge ? { head: comparison.headSha, data: merge.score, ai: parsed.merge.score, why: parsed.merge.why } : null
 				answer = {
 					id: randomUUID(),
 					role: 'ai',
-					text: parseConclusion(response.output),
+					text: parsed.text,
 					at: new Date().toISOString(),
 					model: selection.modelId,
 				}
@@ -1213,7 +1223,13 @@ export class AiController {
 				}
 			}
 			if (text === null) {
-				const conclusion: ChangeConclusion = { runId: run.id, messages: [answer], omitted, findingIds: run.findings.map((f) => f.id) }
+				const conclusion: ChangeConclusion = {
+					runId: run.id,
+					messages: [answer],
+					omitted,
+					findingIds: run.findings.map((f) => f.id),
+					merge: verdict,
+				}
 				await this.store.update((d) => {
 					if (d.repos[repoId]) answer.textId = recordAiText(d.repos[repoId], textBy('conclusion', config, selection)).id
 					const r = d.repos[repoId]?.reviews[reviewId]
