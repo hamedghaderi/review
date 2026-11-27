@@ -25,6 +25,7 @@ import type {
 import { FINDING_LEVELS } from '../../shared/types.ts'
 import { notesKeyOf, type RepoState } from '../store.ts'
 import { noteCovers } from '../../shared/notes.ts'
+import { mergeOutcomes, mergeScoreOutcomes } from '../../shared/mergeScore.ts'
 
 export const MIN_DECIDED = 10
 const AI_TEXT_ORDER: Array<AiTextFeature> = ['explain', 'conclusion', 'conclusion-answer', 'reply']
@@ -401,6 +402,10 @@ export function summarizeOutcomes(
 			repos,
 			notes,
 			filter.repoId === null ? null : notesKeyOf(repos.find((r) => r.repoId === filter.repoId) ?? { repoId: filter.repoId }),
+		),
+		merge: mergeScoreOutcomes(
+			mergeOutcomes(repos.filter((r) => filter.repoId === null || r.repoId === filter.repoId)),
+			mergeOutcomes(repos),
 		),
 	}
 }

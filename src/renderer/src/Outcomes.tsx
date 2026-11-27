@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { costCaveat, formatCost } from '../../shared/cost.ts'
 import { CATEGORY_LABEL, LEVEL_META } from '../../shared/findings.ts'
 import { decidedCount, OUTCOME_GROUP_LABEL } from '../../shared/outcomes.ts'
+import { MERGE_KEYS, MIN_TRACK_RECORD, TUNE_MIN, TUNE_MIN_NEEDED } from '../../shared/mergeScore.ts'
 import type {
+	MergeScoreOutcomes,
 	AiTextFeature,
 	AiTextRow,
 	AfterMergeItem,
@@ -279,6 +281,71 @@ const AI_TEXT_LABEL: Record<AiTextFeature, string> = {
  * The AI's text besides findings (issue #289): how much it made, how much of it you said was wrong, and for drafted
  * replies, what you sent of them. A count of flags, never an accuracy rate: a text nobody flagged isn't shown right.
  */
+/**
+ * How the merge score did once pull requests merged (issue #328): how often the data score and the AI's score put a pull
+ * request that needed a fix below one that didn't, and whether the deductions are tuned yet.
+ */
+function MergeScoreSection({ m }: { m: MergeScoreOutcomes }) {
+	const t = m.tuning
+	const ranked = (x: number | null) => (x === null ? 'not enough yet' : pct(x, 1))
+	return (
+		<>
+			<div className="section-title">Merge score</div>
+			<p className="muted small">
+				Merged pull requests whose score you saw, once their 30 days have passed and every later change to their lines was judged. Needed a
+				fix: a blocking or should-fix one. “Ranked right” is how often the score put a pull request that needed a fix lower than one that
+				didn’t: 50% is a coin toss, 100% never wrong. Needs {MIN_TRACK_RECORD} pull requests and at least one of each.
+			</p>
+			{m.settled === 0 ? (
+				<p className="muted small">None settled yet.</p>
+			) : (
+				<table className="level-table usage-table outcomes-table">
+					<thead>
+						<tr>
+							<th>Score</th>
+							<th className="num">Pull requests</th>
+							<th className="num">Ranked right</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td>Data, all settled</td>
+							<td className="num">{m.settled}</td>
+							<td className="num">{ranked(m.data)}</td>
+						</tr>
+						<tr>
+							<td>Data, where the AI scored too</td>
+							<td className="num">{m.both}</td>
+							<td className="num">{ranked(m.dataOnBoth)}</td>
+						</tr>
+						<tr>
+							<td>AI’s final score</td>
+							<td className="num">{m.both}</td>
+							<td className="num">{ranked(m.aiOnBoth)}</td>
+						</tr>
+					</tbody>
+				</table>
+			)}
+			<p className="muted small">
+				{t.state === 'waiting'
+					? `The deductions are starting guesses. They’re tuned once ${TUNE_MIN} pull requests across your repositories have settled with at least ${TUNE_MIN_NEEDED} needing a fix: ${t.settled} settled so far, ${t.needed} needed a fix.`
+					: t.state === 'no-signal'
+						? `The deductions don’t yet tell which of the ${t.settled} settled pull requests needed a fix, so the starting guesses stand.`
+						: `Tuned on ${t.settled} settled pull requests (${t.needed} needed a fix). Each kind of deduction now counts this many times its starting guess:`}
+			</p>
+			{t.state === 'tuned' && (
+				<ul className="small">
+					{Object.entries(t.factors).map(([k, f]) => (
+						<li key={k}>
+							{MERGE_KEYS[k] ?? k}: {f}×
+						</li>
+					))}
+				</ul>
+			)}
+		</>
+	)
+}
+
 function AiTextTable({ rows, notFiltered }: { rows: Array<AiTextRow>; notFiltered: boolean }) {
 	if (!rows.length) return null
 	const reply = (r: AiTextRow, n: number) => (r.feature === 'reply' ? n : <span className="muted">—</span>)
@@ -473,7 +540,7 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 						className="btn small"
 						onClick={() => void follow()}
 						disabled={following}
-						title={`For reviewed pull requests that merged: whether a later commit on the base branch changed each finding's lines, up to 90 days after the merge. Reads GitHub and Git only; no model is asked.`}
+						title={`For reviewed pull requests that merged: whether a later commit on the base branch changed each finding's lines, up to 90 days after the merge. Reads GitHub and Git. Pull requests whose merge score you saw also have their own lines followed for 30 days, and each later change is judged by the model for questions.`}
 					>
 						{following ? 'Following…' : 'Follow merged pull requests'}
 					</button>
@@ -487,6 +554,7 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 				<>
 					<p className="muted home-note">No findings from AI runs match these filters.</p>
 					<AiTextTable rows={s.aiText} notFiltered={rest.promptVersion !== null || rest.group !== null} />
+					<MergeScoreSection m={s.merge} />
 				</>
 			) : (
 				<>
@@ -506,6 +574,7 @@ export function Outcomes({ onOpenNotes }: { onOpenNotes(): void }) {
 					<Table title="By level" label="Level" rows={levelRows(s.levels)} min={min} notWorth />
 					<AfterMergeList items={s.afterMerge} />
 					<AiTextTable rows={s.aiText} notFiltered={rest.promptVersion !== null || rest.group !== null} />
+					<MergeScoreSection m={s.merge} />
 					<NotesSection notes={s.notes} onOpenNotes={onOpenNotes} />
 					{s.cost === null && <p className="muted small">Cost can’t be split by kind of finding, so it isn’t shown with that filter.</p>}
 				</>
